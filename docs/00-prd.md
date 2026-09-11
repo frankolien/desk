@@ -10,10 +10,26 @@ relying party and the write-up, so it changes before the 17th or not at all.
 Two reasons, and both have to hold or the project is not worth the weeks.
 
 **The bounty.** Agora's **Best Mobile Trading App on Monad**, 10,000 USD, a single
-prize, sitting under Monad Metropolis track 1. The brief names three ingredients and
-judges on implementation quality, user experience, and creative use of the three
-together. Metropolis runs 1 September to 13 October 2026. This is the second of two
-entries; the first is Olien on Monad, which is the primary.
+prize, in the Onchain Finance and Trading track of Monad Metropolis. The deadline is
+**14 October 2026 at 04:59 GMT+1**. This is the second of two entries; the first is
+Olien on Monad, which is the primary.
+
+The brief, quoted so that nothing is argued from memory:
+
+> To be eligible, a team must build a mobile application that authenticates users via
+> Mera (Monad's passkey authentication), holds and displays a stablecoin balance in
+> AUSD, and executes trades through Perpl.
+
+Judged on implementation quality, user experience, and "creative use of the three
+integrations together, not just technical completeness". The deliverable is "a working
+demo showing a user logging in via passkey, funding or viewing an AUSD balance, and
+placing at least one trade on Perpl".
+
+Three things follow from that wording and are worth stating plainly. The bar for Mera
+is **authenticating via Mera**, not shipping a particular package, which is what lets
+this be a native app. Displaying the AUSD balance is an eligibility requirement, not a
+nicety, so the Fund screen is not optional. And the judging line says in its own words
+that completeness is the floor rather than the prize.
 
 **The product.** Perpetuals on a phone are still operated like crypto. To trade you
 install a wallet, write down twelve words, fund it with a gas token you did not want,
@@ -201,7 +217,7 @@ money. If the answer is no, the reason why is the next piece of work.
 | Risk | What happens | What we do |
 |---|---|---|
 | iOS returns no PRF output | The native story collapses | Probe on a real phone before the 17th. Fallback is React Native with Mera directly, which keeps everything but the word native. |
-| No testnet AUSD | Nothing can be demonstrated | Ask in the hackathon channel on day one. This is the only unknown that blocks the demo. |
+| ~~No testnet AUSD~~ | Closed 11 September | Agora runs a faucet on Monad testnet holding 670,000 AUSD. Verified on chain, details in the technical spec. |
 | Perpl testnet is unstable near the deadline | The recording cannot be made | Record a working run as soon as one exists, then re-record only if there is time. |
 | The calendar collides with Olien on Monad | Both entries suffer | Olien wins every collision. Desk's cut line is written into the technical spec. |
 | Perpl changes its API mid-build | The client breaks | Every message shape is pinned to a test, so a change fails loudly in a test rather than quietly in a demo. |
@@ -210,7 +226,8 @@ money. If the answer is no, the reason why is the next piece of work.
 
 - The name.
 - One market or several at launch. Decide after reading `pub/context`.
-- Testnet or mainnet for the submission. Testnet unless real AUSD is trivial, because
-  a demo that spends the founder's money gets recorded once.
+- Testnet for the submission, now that the faucet is confirmed. Mainnet only if
+  something forces it, because a demo that spends the founder's money gets recorded
+  once.
 - Whether the treasury stretch is worth the last week, decided on 1 October against
   the state of Olien on Monad.

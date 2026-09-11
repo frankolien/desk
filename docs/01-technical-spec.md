@@ -16,9 +16,22 @@ and pinned to Mera's own vector. Face ID and the passkey ceremony are first clas
 rather than bridged, and this is a bounty judged on user experience. And the app
 reuses a working iOS codebase, which is most of the schedule's slack.
 
+The brief allows it. It asks for an app that "authenticates users via Mera", not for a
+particular package, and Mera's own documentation says a native app can reuse passkeys
+created with the library through the platform WebAuthn APIs. Mera is a WebAuthn PRF
+ceremony, which is Apple's API on iOS 18, plus a short public derivation rule, which is
+the next section. Neither part needs JavaScript.
+
+The one residual risk is a reader who looks for the package rather than the behaviour,
+and it is closed by demonstration rather than by argument: the page at
+`recourse-arc.vercel.app/spike/passkey` runs Mera's real library at the same relying
+party, so the same passkey can be shown deriving the same address in both. That
+comparison goes in the write-up and in the video.
+
 The fallback, if the PRF probe fails on a real device, is React Native with Mera's
-library directly. That decision is owed before 17 September and is the only thing that
-can change this section.
+library directly, which the library supports through its `react-native-passkey` peer
+dependency. That decision is owed before 17 September and is the only thing that can
+change this section.
 
 ## Chains and addresses
 
@@ -32,10 +45,42 @@ can change this section.
 | Perpl API | `https://testnet.perpl.xyz/api` | `https://app.perpl.xyz/api` |
 | Trading socket | `wss://testnet.perpl.xyz/ws/v1/trading` | `wss://app.perpl.xyz/ws/v1/trading` |
 | BTC perpetual | 16 | 1 |
+| Agora AUSD faucet | `0xd236c18D274E54FAccC3dd9DDA4b27965a73ee6C` | none |
 
-AUSD has six decimals. Market ids, price decimals and size decimals come from
-`GET /api/v1/pub/context` rather than from this table, which exists so a reader knows
-what to expect, not so the app can hardcode it.
+Read off Monad testnet on 11 September rather than taken from a page: chain id 10143,
+AUSD has code, answers `AUSD` and six decimals, the Exchange is a proxy pointing at
+`0xbcbd3701ed0bde8acbb727f0d92a8b85a169adbb`, and the faucet has code.
+
+Market ids, price decimals and size decimals come from `GET /api/v1/pub/context`
+rather than from this table, which exists so a reader knows what to expect, not so
+the app can hardcode it.
+
+### Testnet AUSD
+
+Agora runs faucet contracts that mint to any address on request, and one is deployed
+to Monad testnet at the address above. `requestFunds(address)` simulates clean from a
+fresh address, and the contract holds 670,000 AUSD, so it is not an empty faucet. The
+documented payout is 10,000 AUSD per call; confirm the figure on the first real run.
+
+The caller needs MON for gas first, from Monad's own faucet. So the Fund screen's
+testnet path is two faucets and then the desk, which is worth building as one guided
+sequence rather than three links.
+
+### A note on AUSD's extensions
+
+AUSD implements EIP-712, ERC-2612 permit, ERC-3009 transfer with authorization, and
+ERC-1271. Two of those are opportunities rather than commitments, and both are written
+down here so they are not rediscovered in week three.
+
+ERC-2612 would remove the approve transaction from the opening sequence, but only if
+Perpl's Exchange exposes a permit-aware entry point. Check the ABI before promising it.
+
+ERC-3009 is the interesting one: a signed authorization lets somebody else pay the gas
+that moves the collateral. With a relayer, the phone would not need MON at all, which
+would delete the one wart in the Fund screen. That is real infrastructure and it is
+below the cut line for version one, but it is the obvious version two and it is the
+same mechanism the Recourse cheque uses, so the code to build it already exists next
+door.
 
 ## Keys
 
@@ -247,7 +292,7 @@ mornings and every collision.
 | 22 to 25 Sept | Market, ticket, Position, close |
 | 26 to 30 Sept | Withdraw, the session screen, the second device demo, design pass |
 | 1 to 8 Oct | The treasury stretch if Olien on Monad is finished, otherwise polish and a TestFlight build |
-| 9 to 12 Oct | Record, write up, submit both entries |
+| 9 to 12 Oct | Record, write up, submit both entries, well ahead of the 14 October 04:59 GMT+1 deadline |
 
 **The cut line, in the order things get cut:** the treasury stretch goes first. Then
 withdraw becomes a contract call shown from a script in the video rather than a screen.
@@ -256,13 +301,14 @@ cannot open a desk and place an order is not an entry.
 
 ## Blocking unknowns
 
-Both owed before 17 September, both cheap, and neither blocks the Perpl client, which
-can be written and vector tested without a funded account.
+One left, owed before 17 September, and it does not block the Perpl client, which can
+be written and vector tested without a funded account.
 
-1. **PRF on a real device.** The probe screen in Recourse registers a passkey, asserts
-   twice, and prints the derived accounts. The page at
-   `recourse-arc.vercel.app/spike/passkey` does the same through Mera's own library at
-   the same relying party. Matching addresses means the design stands.
-2. **Testnet AUSD.** Enrolment needs an exchange account and an exchange account needs
-   collateral. Perpl's docs do not say where testnet AUSD comes from. Ask in the
-   hackathon channel rather than hunting for it.
+**PRF on a real device.** The probe screen in Recourse registers a passkey, asserts
+twice, and prints the derived accounts. The page at
+`recourse-arc.vercel.app/spike/passkey` does the same through Mera's own library at the
+same relying party. Matching addresses means the design stands, and the same comparison
+is the evidence that answers anyone asking whether a native app really uses Mera.
+
+**Closed on 11 September: testnet AUSD.** Agora's faucet is on Monad testnet, funded,
+and its `requestFunds` call simulates clean. See the chains section above.

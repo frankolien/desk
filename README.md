@@ -30,10 +30,11 @@ Trading App on Monad bounty. Native Swift and SwiftUI, iOS 18 and up.
 ## Status
 
 Specified, not started. Code begins 17 September 2026, after Arc mainnet week on the
-sibling project.
+sibling project. The bounty closes 14 October 2026 at 04:59 GMT+1.
 
-Two unknowns are owed before then and are written up at the end of the technical spec:
-whether iOS returns PRF output on a real device, and where testnet AUSD comes from.
+One unknown is owed before then: whether iOS returns PRF output on a real device. The
+other, where testnet AUSD comes from, was closed on 11 September by finding Agora's
+faucet deployed and funded on Monad testnet.
 
 ## Its sibling
 
