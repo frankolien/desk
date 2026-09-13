@@ -239,6 +239,70 @@ final class AppModel {
         }
     }
 
+    // MARK: - Withdrawing
+
+    private(set) var withdrawal: Withdrawal = .idle
+
+    enum Withdrawal: Equatable {
+        case idle
+        case sending
+        case sent(String)
+        case failed(String)
+
+        var isBusy: Bool { self == .sending }
+    }
+
+    /// Moves collateral back out of the exchange to the derived address.
+    ///
+    /// Signed by the wallet key and never by the API key — the trading key exists so that
+    /// a trading session cannot move money, and a withdrawal that the session could sign
+    /// would delete that distinction. So this is a fresh Face ID prompt, which is exactly
+    /// where one is earned.
+    func withdraw(_ amount: Money) async {
+        guard !withdrawal.isBusy else { return }
+        withdrawal = .sending
+        do {
+            let rest = PerplREST(configuration: try .testnet())
+            let context = try await rest.context()
+            let addresses = try ExchangeAddresses(context: context)
+            guard let minimum = context.instances.first?.minWithdraw, amount >= minimum else {
+                withdrawal = .failed(
+                    "Perpl's smallest withdrawal is "
+                        + "\(context.instances.first?.minWithdraw?.display() ?? "—") AUSD.")
+                return
+            }
+
+            let rpc = MonadRPC(configuration: try .testnet())
+            let sender = TransactionSender(rpc: rpc)
+            let hash = try await passkey.withKeys { wallet, _ in
+                let signed = try await sender.send(
+                    to: addresses.exchange,
+                    data: try Calldata.withdrawCollateral(amount: amount),
+                    from: wallet)
+                // Waited for rather than assumed: a send returns a hash, and a hash is
+                // not a receipt. Reporting success on the hash would tell the user their
+                // money had moved while the transaction could still revert.
+                _ = try await sender.wait(for: signed)
+                return signed.hashHex
+            }
+            withdrawal = .sent(hash)
+            await refreshBalances()
+        } catch {
+            withdrawal = .failed(Self.withdrawSentence(for: error))
+        }
+    }
+
+    func clearWithdrawal() { withdrawal = .idle }
+
+    static func withdrawSentence(for error: any Error) -> String {
+        switch error {
+        case let failure as PasskeyFailure:
+            return failure.sentence
+        default:
+            return "The withdrawal could not be sent. Your collateral has not moved."
+        }
+    }
+
     func endSession() async {
         await session.end()
         sessionRemaining = .zero

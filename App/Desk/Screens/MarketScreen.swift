@@ -13,6 +13,7 @@ struct MarketScreen: View {
     @State private var query = ""
     @State private var showsBTC = false
     @State private var showsPosition = false
+    @State private var showsWithdraw = false
 
     var body: some View {
         NavigationStack {
@@ -39,28 +40,26 @@ struct MarketScreen: View {
                 PerpDetailScreen(model: model, market: market, session: session)
                     .toolbar(.hidden, for: .tabBar)
             }
+            .sheet(isPresented: $showsWithdraw) {
+                WithdrawSheet(model: model) { showsWithdraw = false }
+                    .presentationDetents([.large])
+            }
+            .sheet(isPresented: $showsPosition) {
+                PositionScreen(model: model, isStale: market.freshness.freezesDigits)
+            }
         }
     }
 
+    /// A title and nothing else.
+    ///
+    /// There was a search button here, directly above the search field. A second entry
+    /// point to a control already on screen is furniture — it costs a tap target, it
+    /// implies a second behaviour that does not exist, and its absence is not missed.
     private var header: some View {
-        ZStack {
-            Text("Perpetuals")
-                .font(.system(size: 17, weight: .bold, design: .rounded))
-                .foregroundStyle(DeskColor.nightText.color)
-
-            HStack {
-                Spacer()
-                Button { } label: {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(DeskColor.nightText.color)
-                        .frame(width: 42, height: 42)
-                }
-                .buttonStyle(.plain)
-                .perpGlass(interactive: true, in: Circle())
-            }
-        }
-        .frame(height: 42)
+        Text("Perpetuals")
+            .font(.system(size: 17, weight: .bold, design: .rounded))
+            .foregroundStyle(DeskColor.nightText.color)
+            .frame(height: 42)
     }
 
     private var searchField: some View {
@@ -96,7 +95,7 @@ struct MarketScreen: View {
 
             Spacer()
 
-            Button { } label: {
+            Button { showsWithdraw = true } label: {
                 Image(systemName: "minus")
                     .font(.system(size: 15, weight: .bold))
                     .frame(width: 38, height: 38)
@@ -285,13 +284,7 @@ private struct PerpDetailScreen: View {
 
             Spacer()
 
-            Button { } label: {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 17, weight: .semibold))
-                    .frame(width: 42, height: 42)
-            }
-            .buttonStyle(.plain)
-            .perpGlass(interactive: true, in: Circle())
+
         }
         .foregroundStyle(DeskColor.nightText.color)
     }

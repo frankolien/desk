@@ -14,6 +14,7 @@ import SwiftUI
 /// wallets create the account from the landing screen itself.
 struct WelcomeScreen: View {
     let model: AppModel
+    @State private var showsExplainer = false
 
     private let features: [(symbol: String, title: String)] = [
         ("faceid", "Face ID Sign-In"),
@@ -91,7 +92,7 @@ struct WelcomeScreen: View {
                     .padding(.horizontal, contentInset)
                     .padding(.top, compact ? 26 : 30)
 
-                    Button("What is a perpetual?") {}
+                    Button("What is a perpetual?") { showsExplainer = true }
                         .font(.system(size: 16, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.58))
                         .frame(maxWidth: .infinity)
@@ -106,5 +107,10 @@ struct WelcomeScreen: View {
         }
         .ignoresSafeArea()
         .animation(.snappy, value: model.signInProblem)
+        // Offered, never forced. A pre-roll tutorial measurably makes tasks feel harder,
+        // so this is a link a curious person pulls rather than a wall everyone climbs.
+        .sheet(isPresented: $showsExplainer) {
+            PerpetualExplainer { showsExplainer = false }
+        }
     }
 }

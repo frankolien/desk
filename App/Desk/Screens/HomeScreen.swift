@@ -41,8 +41,7 @@ struct HomeScreen: View {
                     topBar
                     balance.padding(.top, 54)
                     actions.padding(.top, 42)
-                    filterPill.padding(.top, 22)
-                    accountRows.padding(.top, 16)
+                    accountRows.padding(.top, 24)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
@@ -142,25 +141,6 @@ struct HomeScreen: View {
                            isEnabled: !isEmpty, action: onTrade)
             HomeActionTile(symbol: "ellipsis", title: "More") { showsMore = true }
         }
-    }
-
-    private var filterPill: some View {
-        Button { } label: {
-            HStack(spacing: 7) {
-                Image(systemName: "globe")
-                Text("Desk assets")
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-            }
-            .font(.system(size: 12, weight: .bold, design: .rounded))
-            .foregroundStyle(DeskColor.nightText.color)
-            .padding(.horizontal, 12)
-            .frame(height: 34)
-        }
-        .buttonStyle(.plain)
-        .homeGlass(interactive: true, in: Capsule())
-        .accessibilityLabel("Desk assets")
     }
 
     // MARK: Rows
