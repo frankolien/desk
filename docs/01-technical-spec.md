@@ -9,7 +9,9 @@ and the script disagree, the script is right until proven otherwise.
 
 ## Platform
 
-Native Swift and SwiftUI, iOS 18 minimum, because the WebAuthn PRF extension needs it.
+Native Swift and SwiftUI, **iOS 18.4 minimum**. The WebAuthn PRF extension arrives in
+iOS 18.0, but 18.0 to 18.3 return wrong PRF values over hybrid transports, which for a
+wallet means a different address. See `docs/02-system-design.md`.
 
 Not React Native, for three reasons. The Mera derivation is already written in Swift
 and pinned to Mera's own vector. Face ID and the passkey ceremony are first class
@@ -30,8 +32,8 @@ comparison goes in the write-up and in the video.
 
 The fallback, if the PRF probe fails on a real device, is React Native with Mera's
 library directly, which the library supports through its `react-native-passkey` peer
-dependency. That decision is owed before 17 September and is the only thing that can
-change this section.
+dependency. That decision is owed on day one, 12 September, and is the only thing
+that can change this section.
 
 ## Chains and addresses
 
@@ -138,31 +140,13 @@ What the keychain holds, both non-secrets:
 ## Modules
 
 ```
-Core/Auth
-  PasskeyAccounts.swift      derivation, ported and already pinned
-  PasskeyCeremony.swift      ASAuthorization wrapper, create and assert with PRF
-  SigningSession.swift       holds, expires, zeroes
-
-Core/Chain
-  MonadRPC.swift             JSON-RPC transport
-  EIP712.swift               domain separator, struct hash, typed data digest
-  ERC20.swift                balanceOf, allowance, approve
-  Exchange.swift             createAccount, depositCollateral, getAccountByAddr, withdraw
-  TransactionSender.swift    nonce, fees, sign, send raw, await receipt
-
-Core/Perpl
-  PerplCanonical.swift       the canonical strings and their signatures
-  PerplREST.swift            signed GET and POST
-  PerplEnrolment.swift       payload then enroll
-  PerplSocket.swift          sign in, subscribe, order, cancel, reconnect
-  PerplModels.swift          message shapes, market context, order and position
-
-Core/Domain
-  DeskStore.swift            the observable state the screens read
-  SnapshotCache.swift        last good answer per account, ported
+The module map lives in `02-system-design.md` and supersedes what stood here. This
+sketch described folders inside one app target, in Recourse's vocabulary, before any
+code existed; the code is a local Swift package with six library targets and
+compiler-enforced boundaries between them.
 
 Features
-  SignIn/  Fund/  Market/  Position/  Account/
+  SignIn/  Fund/  Market/  Position/  Account/     still to build, in the app target
 
 DesignSystem
   Colour, type, amount keypad, all ported
@@ -180,7 +164,8 @@ REST      chain_id \n METHOD \n target \n ts \n nonce \n sha256(body) as lowerca
 Socket    chain_id \n trading-ws-signin \n ts \n nonce
 ```
 
-`target` is the path with its query. `ts` is unix time. `nonce` is fresh per request.
+`target` is the path with its query. `ts` is unix time in **milliseconds**. `nonce` is
+fresh per request.
 For an empty body the hash is sha256 of zero bytes. The socket sign-in is message type
 29 and must complete before any other message is accepted.
 
@@ -220,8 +205,8 @@ screen that uses it is written, so a change in Perpl's API fails in a test rathe
 in a demo.
 
 The exact shapes of cancel, position updates and fills were not reached by the spike.
-They are the first thing to establish on the 17th, by capturing real traffic from the
-Node script against a funded account.
+They are the first thing to establish, by capturing real traffic from the Node script
+against a funded account.
 
 ### The exchange account
 
@@ -282,33 +267,30 @@ being up.
 
 ## Build order
 
-Four weeks, shared with Olien on Monad, which is the primary entry. Olien takes the
-mornings and every collision.
-
-| Dates | Desk |
-|---|---|
-| 17 to 18 Sept | Repo, project, derivation verified on a real device, `PerplCanonical` and `PerplREST` with vectors pinned, real traffic captured for the socket |
-| 19 to 21 Sept | Sign in, Fund, the opening sequence, enrolment, one real order sent from the phone |
-| 22 to 25 Sept | Market, ticket, Position, close |
-| 26 to 30 Sept | Withdraw, the session screen, the second device demo, design pass |
-| 1 to 8 Oct | The treasury stretch if Olien on Monad is finished, otherwise polish and a TestFlight build |
-| 9 to 12 Oct | Record, write up, submit both entries, well ahead of the 14 October 04:59 GMT+1 deadline |
-
-**The cut line, in the order things get cut:** the treasury stretch goes first. Then
-withdraw becomes a contract call shown from a script in the video rather than a screen.
-Then the depth view. Market, Position and Fund ship no matter what, because an app that
-cannot open a desk and place an order is not an entry.
+Moved. The schedule, the phase-by-phase definition of done, the cut line and the risk
+register all live in [`docs/05-milestones.md`](05-milestones.md), which is written
+against a 12 September start and a thirty-two day run.
 
 ## Blocking unknowns
 
-One left, owed before 17 September, and it does not block the Perpl client, which can
-be written and vector tested without a funded account.
+None left. Both closed, and what remains is verification rather than discovery.
 
-**PRF on a real device.** The probe screen in Recourse registers a passkey, asserts
-twice, and prints the derived accounts. The page at
-`recourse-arc.vercel.app/spike/passkey` does the same through Mera's own library at the
-same relying party. Matching addresses means the design stands, and the same comparison
-is the evidence that answers anyone asking whether a native app really uses Mera.
+**Closed on 12 September: PRF on a real device.** Native PRF is confirmed against
+Apple's own SDK — `ASAuthorizationPublicKeyCredentialPRFAssertionInput` and its
+registration counterpart, from iOS 18.0, outputs arriving as a `CryptoKit`
+`SymmetricKey`. WebKit itself reads PRF through the same properties, so anything Safari
+can do here a native app can do, with the salt passed through unchanged. The probe
+screen in Recourse and the page at `recourse-arc.vercel.app/spike/passkey` remain the
+comparison that answers anyone asking whether a native app really uses Mera, and that
+comparison belongs in the write-up and the video.
+
+Two caveats carried into `02-system-design.md` rather than left here: the deployment
+target is **18.4**, not 18.0, because earlier point releases return wrong values; and
+there is an open Apple bug where a synced passkey can return different PRF output on
+different devices, which is why sign-in checks the derived address against the last one
+it saw.
 
 **Closed on 11 September: testnet AUSD.** Agora's faucet is on Monad testnet, funded,
-and its `requestFunds` call simulates clean. See the chains section above.
+and its `requestFunds` call simulates clean. See the chains section above. Its payout is
+10,000 AUSD, its sixty-second cooldown is global rather than per address, and it holds
+about sixty-four claims' worth — details in `05-milestones.md`.

@@ -3,7 +3,7 @@
 A perpetuals trading app for Monad where the trading key is your face.
 
 Written 11 September 2026. Working name; it appears in the bundle id, the passkey
-relying party and the write-up, so it changes before the 17th or not at all.
+relying party and the write-up, so it changes in the first days or not at all.
 
 ## Why this exists
 
@@ -11,8 +11,8 @@ Two reasons, and both have to hold or the project is not worth the weeks.
 
 **The bounty.** Agora's **Best Mobile Trading App on Monad**, 10,000 USD, a single
 prize, in the Onchain Finance and Trading track of Monad Metropolis. The deadline is
-**14 October 2026 at 04:59 GMT+1**. This is the second of two entries; the first is
-Olien on Monad, which is the primary.
+**14 October 2026 at 04:59 GMT+1**. This is one of two entries, alongside Olien on
+Monad. The two run in parallel; neither is now behind the other.
 
 The brief, quoted so that nothing is argued from memory:
 
@@ -124,7 +124,8 @@ Done when:
 ### 2. Fund
 
 Shows the MON balance and the AUSD balance for the derived address, with one line each
-saying what they are for: MON pays for two contract calls ever, AUSD is the money. A
+saying what they are for: MON pays for three setup transactions and nothing after
+that, because trading itself is gasless. AUSD is the money. A
 copy button, a QR, and a faucet link on testnet.
 
 When AUSD is present and no exchange account exists, one button opens the desk. Behind
@@ -193,6 +194,66 @@ sub-accounts, limit order management beyond place and cancel, notifications, an
 Android build, a web build, fiat on-ramp, referral or builder fees, and any market
 beyond the picker described above.
 
+## The adjacent bounties
+
+Checked against the live Metropolis page on **13 September 2026**, because the brief in
+the section above was transcribed on the 11th and the bounty list had not been read in
+full. The $10,000 is confirmed, and it is not the only thing Desk is standing in front
+of.
+
+| Sponsor | Bounty | Prize | Where Desk stands |
+|---|---|---|---|
+| Agora | Best Mobile Trading App on Monad | $10,000 | The target. The whole build. |
+| Perpl | Best use of Perpl's API | $5,000 | Already earned by the work in `DeskPerpl`: canonical signing strings, the authenticated socket, the pinned frame vectors. Nothing further to build. |
+| Monad Foundation | Mera: One Passkey, Many Keys | $2,500 | Literally what `PasskeyAccounts` does — one PRF output, a secp256k1 wallet key and an Ed25519 trading key, on two derivation paths. Nothing further to build. |
+| Monad Foundation | Best Mera-Powered UX on Monad | $2,500 | The thesis of the app. Contested by every other Mera entry, so this one is won on the onboarding, not on the cryptography. |
+| — | Onchain Finance & Trading track | $30,000 / 3 teams | Desk's track. |
+| — | Grand champion | $25,000 | Across all four tracks. |
+
+Perpl also offers **$3,000 for a Best Analytics / Risk Tool**. Desk computes liquidation
+distance, price impact and fee before the confirm, which is risk *disclosure* rather than
+a risk tool; treat it as out of reach unless a position-risk screen is built, and it is
+below the cut line if it competes with anything above.
+
+### The bounties we are not chasing, and why
+
+Decided 13 September against the full list of twenty-one, so it is not reopened in
+October. Three of these are not merely out of scope — they are **incompatible**.
+
+| Bounty | Prize | Verdict |
+|---|---|---|
+| Privy | $5,000 | **Incompatible.** Embedded-wallet auth. Desk's claim is that no layer holds a key. Adding it deletes the Mera bounties and the differentiator. |
+| Dynamic | $5,000 | **Incompatible**, same reason. |
+| MetaMask, Agent Wallet Plugin | $2,500 | **Incompatible.** Presumes a managed wallet. |
+| Kuru, ×2 | $10,000 | Different exchange, spot orderbook. Violates principle 5. |
+| Nansen, Chainlink CRE, Envio, Cleanverse | $11,000 | Different product. |
+| Hunyuan / KIMI / Qwen credits | credits | No AI surface in Desk. |
+| Aurora Intents, any-chain liquidity | $5,000 | Real, but a whole funding feature. Below the cut line; revisit only if 29 Sept – 5 Oct is genuinely slack. |
+| Alchemy | $1,000 credits | **Open.** May be a config change if Alchemy serves Monad testnet — check once, take it if it is ten minutes, drop it otherwise. |
+
+The judging line rewards "creative use of the three integrations together, not just
+technical completeness". An app carrying eight SDKs scores worse on that sentence, not
+better. Every bounty above is declined in service of the four we can win.
+
+**The operational consequence: submit to all four.** They are separate bounty entries on
+one project, and the extra work is submission text, not code. The three beyond Agora's
+are already satisfied by code that exists — so the only way to lose them is to not enter.
+
+**Dates, confirmed.** Submission closes **13 October**, judging runs 14–27 October,
+winners announced **3 November**. This agrees with the 04:59 GMT+1 on the 14th used
+throughout `05-milestones.md` — that is 23:59 US Eastern on the 13th — so the schedule
+does not move.
+
+**Submission deliverables, as the page words them:** a working product, a public
+profile, a demo, a brief write-up, and a code link. New work must be done inside the
+six-week window, which began 1 September.
+
+One caveat on sourcing: the per-bounty detail pages live on `hackathon.monad.xyz`, which
+refused connections from here on 13 September. The names, sponsors and amounts above come
+from Monad's own Metropolis page; the **eligibility sentence quoted in "Why this exists"
+has not been re-verified against the live bounty page**, and should be before the
+write-up is finalised.
+
 ## What winning looks like
 
 The bounty names three criteria, so the success criteria map to them.
@@ -216,11 +277,14 @@ money. If the answer is no, the reason why is the next piece of work.
 
 | Risk | What happens | What we do |
 |---|---|---|
-| iOS returns no PRF output | The native story collapses | Probe on a real phone before the 17th. Fallback is React Native with Mera directly, which keeps everything but the word native. |
+| ~~iOS returns no PRF output~~ | Closed 12 September | Native PRF confirmed against Apple's SDK from iOS 18.0; ship-gated at 18.4. The React Native fallback is no longer needed. |
+| A synced passkey returns different PRF on a second device | The recovery demo fails, and a real user sees a funded account as empty | An open Apple bug with no fix. The app compares the derived address against the last one it saw before showing a balance, and the recovery claim is stated honestly rather than absolutely. |
 | ~~No testnet AUSD~~ | Closed 11 September | Agora runs a faucet on Monad testnet holding 670,000 AUSD. Verified on chain, details in the technical spec. |
 | Perpl testnet is unstable near the deadline | The recording cannot be made | Record a working run as soon as one exists, then re-record only if there is time. |
-| The calendar collides with Olien on Monad | Both entries suffer | Olien wins every collision. Desk's cut line is written into the technical spec. |
+| The calendar collides with Olien on Monad | Both entries suffer | Neither entry automatically wins now that they run in parallel; a collision is decided on the day against the cut line in `05-milestones.md`. |
 | Perpl changes its API mid-build | The client breaks | Every message shape is pinned to a test, so a change fails loudly in a test rather than quietly in a demo. |
+| Perpl geo-blocks where the demo is recorded | There is no live run to record, and a judge in a blocked country cannot open the app at all | `pub/context` carries `geo_block`, and on 13 September it reads BY, CU, GB, IR, KP, RU, SY, UA, US. The gateway decides, so this is checked against the recording location before any part of the schedule depends on a live trade. |
+| Perpl turns enrolment off | Nobody can sign in, and the failure looks like a bug in our signing | `features.apiKeysEnabled` is read at sign-in and said out loud. It reads `on` as of 13 September. |
 
 ## Open decisions
 
