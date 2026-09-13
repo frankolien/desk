@@ -6,6 +6,12 @@ import Foundation
 /// Behind a protocol so every screen can be built and run before the relying party
 /// exists — the real implementation needs an associated domain, which needs a paid
 /// developer account and a domain that serves an association file without redirecting.
+///
+/// Main-actor isolated because the real ceremony presents system UI and needs a window to
+/// present it from. Making that explicit here rather than at the conformance keeps the
+/// stubs honest: anything standing in for this has to be usable from where the real one
+/// is, or it is not a stand-in.
+@MainActor
 protocol PasskeyService: Sendable {
     var lastSeenAddress: EthereumAddress? { get }
     func deriveAccounts() async throws -> DerivedAccounts

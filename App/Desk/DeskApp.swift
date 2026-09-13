@@ -1,18 +1,40 @@
+import DeskAuth
 import SwiftUI
 
 @main
 struct DeskApp: App {
     @State private var model = AppModel(passkey: DeskApp.passkeyService)
 
-    /// There is no real ceremony yet — it needs an associated domain, which needs the
-    /// relying party. Until then a release build has nothing to sign in with, and that is
-    /// the correct failure: better a build that cannot sign in than one that signs
-    /// everybody in as the same person.
+    /// The relying party every passkey binds to, permanently.
+    ///
+    /// Read from the Info.plist rather than written here, so the entitlement, the
+    /// association file and the ceremony all take the same string from one place — a
+    /// mismatch between them only shows up on hardware, never in a build.
+    ///
+    /// Absent until the domain is chosen. That it is optional is deliberate: an empty
+    /// string would be a relying party, and a wrong relying party is unrecoverable.
+    static var relyingParty: RelyingParty? {
+        guard let text = Bundle.main.object(forInfoDictionaryKey: "DeskRelyingParty") as? String,
+              !text.isEmpty
+        else { return nil }
+        return try? RelyingParty(text)
+    }
+
+    /// The real ceremony once a relying party exists, and an honest failure until then.
+    ///
+    /// A release build with no relying party cannot sign in, and that is the correct
+    /// failure: better a build that refuses than one that signs everybody in as the same
+    /// person. The debug stub is compiled out of release entirely, because a fixed PRF
+    /// output derives a fixed key and a shipped fallback to it would hand every user the
+    /// same wallet.
     static var passkeyService: any PasskeyService {
+        if let relyingParty {
+            return PasskeyCeremony(relyingParty: relyingParty)
+        }
         #if DEBUG
-        StubPasskeyService()
+        return StubPasskeyService()
         #else
-        UnavailablePasskeyService()
+        return UnavailablePasskeyService()
         #endif
     }
     @Environment(\.scenePhase) private var phase
