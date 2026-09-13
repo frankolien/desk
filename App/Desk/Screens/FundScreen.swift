@@ -1,3 +1,4 @@
+import DeskFlow
 import DeskUI
 import SwiftUI
 
@@ -79,6 +80,45 @@ struct FundScreen: View {
                         }
                     }
                     .padding(.top, 30)
+
+                    // A failed opening has to say what happened and what it cost. The
+                    // sequence is resumable, so the reassurance is the true part: a
+                    // second attempt skips whatever already succeeded rather than paying
+                    // for the approval twice.
+                    if let problem = model.openingProblem {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(DeskColor.action.color)
+                            Text(problem)
+                                .font(.system(size: 14, weight: .medium, design: .rounded))
+                                .foregroundStyle(DeskColor.nightText.color.opacity(0.88))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(14)
+                        .background(DeskColor.action.color.opacity(0.1),
+                                    in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(DeskColor.action.color.opacity(0.3), lineWidth: 0.5))
+                        .padding(.top, 16)
+                        .transition(.opacity)
+                    }
+
+                    // Which of the four contract steps is running, named rather than
+                    // spun. "Registering your key" is a different wait from "approving
+                    // collateral", and on a chain each of them costs real time.
+                    if let step = model.openingStep {
+                        HStack(spacing: 9) {
+                            ProgressView().controlSize(.small).tint(DeskColor.action.color)
+                            Text(Self.stepSentence(step))
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .foregroundStyle(DeskColor.nightMuted.color)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 16)
+                        .transition(.opacity)
+                    }
 
                     Text("Testnet only · No real funds")
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
@@ -180,6 +220,17 @@ struct FundScreen: View {
     private var stepsDone: Int { step.rawValue }
     private var progress: CGFloat { CGFloat(stepsDone) / CGFloat(Step.allCases.count) }
 
+    /// The venue's four steps, in the words a person waiting on them needs.
+    static func stepSentence(_ progress: OpeningSequence.Progress) -> String {
+        let name = switch progress.step {
+        case .approve: "Approving your collateral"
+        case .createAccount: "Creating your account on Perpl"
+        case .allowOrderForwarding: "Switching on gasless orders"
+        case .enrol: "Registering your trading key"
+        }
+        return progress.outcome == .alreadySatisfied ? "\(name) — already done" : "\(name)…"
+    }
+
     private func state(of entry: Step) -> SetupStepCard.State {
         if entry.rawValue < step.rawValue { return .done }
         return entry == step ? .active : .waiting
@@ -189,7 +240,12 @@ struct FundScreen: View {
         switch entry {
         case .passkey: break
         case .mon, .ausd: step = Step(rawValue: entry.rawValue + 1) ?? .desk
-        case .desk: Task { await model.openDesk() }
+        case .desk:
+            // The whole wallet balance, not a figure typed here. The opening deposit is
+            // collateral the user can withdraw again, and asking someone to choose a
+            // number before they have traded once is a question with no information
+            // behind it. The sequence refuses anything under the venue's own minimum.
+            Task { await model.openDesk(depositing: model.walletAUSD.value ?? .zero) }
         }
     }
 }

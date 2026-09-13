@@ -50,6 +50,12 @@ final class AppModel {
     private(set) var openPosition: PerplPosition?
 
     private(set) var sessionRemaining: Duration = .zero
+    /// Why the last attempt to open a desk stopped, if it did.
+    private(set) var openingProblem: String?
+    /// Which of the four steps is running, for the Fund screen to render.
+    private(set) var openingStep: OpeningSequence.Progress?
+    /// Handed the enrolled key the moment one exists.
+    let trading = TradingSession()
     /// Shown once, ever, the first time leverage is reached.
     var hasSeenLeverageExplainer = false
     private let session = SigningSession()
@@ -165,13 +171,72 @@ final class AppModel {
         }
     }
 
-    func openDesk() async {
+    /// Opens the desk for real: approve, create the account, allow forwarding, enrol.
+    ///
+    /// The whole sequence runs inside one borrowed wallet key, so it is one Face ID
+    /// prompt rather than four. The key is scoped to the closure and never returned,
+    /// which is the only reason it is safe to hold a secp256k1 key across four
+    /// transactions at all.
+    ///
+    /// Resumable by construction: each step checks whether it is already satisfied before
+    /// spending anything, so a sequence interrupted after the approval picks up at the
+    /// account rather than paying for the approval twice.
+    func openDesk(depositing deposit: Money) async {
         isWorking = true
+        openingProblem = nil
         defer { isWorking = false }
-        // The real four-step sequence lives in DeskFlow and needs a funded address; this
-        // is the screen's side of it.
-        try? await Task.sleep(for: .seconds(1))
-        stage = .trading
+        do {
+            let rest = PerplREST(configuration: try .testnet())
+            let context = try await rest.context()
+            let addresses = try ExchangeAddresses(context: context)
+            let rpc = MonadRPC(configuration: try .testnet())
+            let sequence = OpeningSequence(
+                rpc: rpc,
+                sender: TransactionSender(rpc: rpc),
+                enrolment: Enrolment(rest: rest, chainID: context.chain.chainID),
+                addresses: addresses)
+
+            let apiKey = try await passkey.withKeys { [weak self] wallet, trading in
+                try await sequence.open(
+                    wallet: wallet,
+                    trading: trading,
+                    deposit: deposit,
+                    label: "Desk on iPhone",
+                    report: { progress in
+                        Task { @MainActor in self?.openingStep = progress }
+                    })
+            }
+
+            // The key exists only now. Handing it to the session is what turns the
+            // ticket's confirm button from a sentence into an order.
+            if let market = context.market(id: 16) {
+                trading.adopt(apiKey: apiKey, session: session, market: market)
+                if let head = context.chain.gas?.headBlock { trading.noteHeadBlock(head) }
+                try await trading.connect(lastForwarded: 0)
+            }
+            stage = .trading
+            await refreshBalances()
+        } catch {
+            openingProblem = Self.openingSentence(for: error)
+        }
+    }
+
+    /// The sentence a failed opening shows. Never the underlying error's text: a
+    /// transport error can carry a URL and a URL can carry a key.
+    static func openingSentence(for error: any Error) -> String {
+        switch error {
+        case OpeningSequence.Failure.belowMinimum(let deposit, let minimum):
+            return "Perpl needs at least \(minimum.display()) AUSD to open a desk, and "
+                + "this would deposit \(deposit.display())."
+        case OpeningSequence.Failure.insufficientCollateral(let held, let needed):
+            return "This wallet holds \(held.display()) AUSD and the deposit needs "
+                + "\(needed.display()). Claim more from the faucet first."
+        case let failure as PasskeyFailure:
+            return failure.sentence
+        default:
+            return "Your desk could not be opened. Nothing was deposited that you cannot "
+                + "recover — try again, and the steps already done will be skipped."
+        }
     }
 
     func endSession() async {

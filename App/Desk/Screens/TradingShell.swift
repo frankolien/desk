@@ -8,9 +8,10 @@ struct TradingShell: View {
     let model: AppModel
 
     @State private var market = MarketModel()
-    /// One per signed-in app, not one per sheet: an order outlives the ticket that
-    /// sent it, and a session rebuilt on every presentation would lose the answer.
-    @State private var session = TradingSession()
+    /// The model's session, never one of our own. `openDesk` hands the enrolled key to
+    /// `model.trading`, so a session created here would be a different object and the
+    /// ticket would talk to one that had never been given a key.
+    private var session: TradingSession { model.trading }
     @State private var tab: Destination
     @State private var showsAccount = false
 

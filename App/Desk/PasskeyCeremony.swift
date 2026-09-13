@@ -69,6 +69,23 @@ final class PasskeyCeremony: NSObject, PasskeyService {
         return DerivedAccounts(address: address, trading: trading, hasDesk: false)
     }
 
+    func withKeys<T: Sendable>(
+        _ body: @Sendable (WalletKey, TradingKey) async throws -> T
+    ) async throws -> T {
+        guard ProcessInfo.processInfo.isOperatingSystemAtLeast(Self.minimumSystemVersion) else {
+            throw PasskeyFailure.prfUnsupported
+        }
+        var prf = try await assertExisting()
+        defer { prf.resetBytes(in: 0..<prf.count) }
+        guard prf.count == 32 else { throw PasskeyFailure.prfReturnedNothing }
+
+        // Derived, used, and gone. Neither key leaves this scope and neither is
+        // returned, so there is no version of this call that leaves one lying around.
+        return try await body(
+            try PasskeyAccounts.deriveWalletKey(prfOutput: prf),
+            try PasskeyAccounts.deriveTradingKey(prfOutput: prf))
+    }
+
     // MARK: - The two ceremonies
 
     private func assertExisting() async throws -> Data {

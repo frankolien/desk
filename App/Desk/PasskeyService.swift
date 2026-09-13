@@ -15,6 +15,21 @@ import Foundation
 protocol PasskeyService: Sendable {
     var lastSeenAddress: EthereumAddress? { get }
     func deriveAccounts() async throws -> DerivedAccounts
+
+    /// Borrows both keys for exactly one piece of work.
+    ///
+    /// Scoped rather than returned, because the secp256k1 key is the one that can move
+    /// collateral and nothing may hold it. Both come from a single ceremony, so opening a
+    /// desk is one Face ID prompt rather than four — and the trading key is passed
+    /// alongside rather than taken out of `SigningSession`, which deliberately has no way
+    /// to hand its key out.
+    ///
+    /// A fresh ceremony per call is the right trade here: this key signs approvals,
+    /// deposits and withdrawals, which happen a handful of times in the life of an
+    /// account and are exactly where a prompt feels earned.
+    func withKeys<T: Sendable>(
+        _ body: @Sendable (WalletKey, TradingKey) async throws -> T
+    ) async throws -> T
 }
 
 struct DerivedAccounts: Sendable {
@@ -44,6 +59,16 @@ struct StubPasskeyService: PasskeyService {
             trading: try PasskeyAccounts.deriveTradingKey(prfOutput: pretendPRF),
             hasDesk: false)
     }
+
+    func withKeys<T: Sendable>(
+        _ body: @Sendable (WalletKey, TradingKey) async throws -> T
+    ) async throws -> T {
+        var prf = Data(repeating: 0x2A, count: 32)
+        defer { prf.resetBytes(in: 0..<prf.count) }
+        return try await body(
+            try PasskeyAccounts.deriveWalletKey(prfOutput: prf),
+            try PasskeyAccounts.deriveTradingKey(prfOutput: prf))
+    }
 }
 #endif
 
@@ -53,6 +78,12 @@ struct UnavailablePasskeyService: PasskeyService {
     var lastSeenAddress: EthereumAddress? { nil }
 
     func deriveAccounts() async throws -> DerivedAccounts {
+        throw PasskeyFailure.relyingPartyNotAssociated(try RelyingParty("desk.invalid"))
+    }
+
+    func withKeys<T: Sendable>(
+        _ body: @Sendable (WalletKey, TradingKey) async throws -> T
+    ) async throws -> T {
         throw PasskeyFailure.relyingPartyNotAssociated(try RelyingParty("desk.invalid"))
     }
 }
