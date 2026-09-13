@@ -101,18 +101,45 @@ Both are the screens most likely to be wrong and least likely to be looked at.
 6. **App icon.** Still the default white square.
 7. Glass chips everywhere, and one radius geometry throughout.
 
-## Four bounties, not one
+## Where it stands, 13 September
 
-Checked against Monad's live Metropolis page on 13 September. Desk already satisfies
-**four** separate bounties, and three of them need no further code:
+**Every blocker in `05-milestones.md` is closed.** Paid Apple membership confirmed,
+individual account is fine on the internal TestFlight path, and the relying party is
+live at **`desk-trading.vercel.app`** — verified serving its association file directly,
+no redirect. `tools/check-relying-party.sh` with no arguments checks the domain *and*
+compares the two copies of it in the repository.
 
-- **Agora, Best Mobile Trading App on Monad — $10,000.** The target.
-- **Perpl, Best use of Perpl's API — $5,000.** Earned by `DeskPerpl` as it stands.
-- **Mera: One Passkey, Many Keys — $2,500.** Earned by `PasskeyAccounts` as it stands.
-- **Best Mera-Powered UX on Monad — $2,500.** Won or lost on the onboarding.
+**The chain runs end to end in code:** passkey → wallet key → approve → account →
+enrol → socket → order. `PasskeyCeremony` is the real AuthenticationServices flow,
+balances and positions come off the chain and the venue, the ticket sends through
+`OrderDesk`, and `openDesk` runs the real four-step sequence.
 
-**Enter all four.** The extra cost is submission text. Full table, dates and sourcing
-caveats in `00-prd.md` § "The adjacent bounties".
+**Nothing in the app is invented any more.** Eleven controls did nothing this morning
+and now none do. The fabricated market table and wallet list are gone. Every figure on
+every screen either comes from the venue or renders `--`.
+
+### What is left
+
+1. **A physical iPhone on 18.4+.** The ceremony cannot run in a simulator. This is the
+   only thing between the repository and a real Face ID sign-in.
+2. **A funded testnet address.** Agora's faucet was at 600,000 AUSD on 13 September,
+   down from 640,000 two days before — about sixty claims.
+3. **The Perpl builder id**, for enrolment.
+4. **The ticket's remaining design pass** — percentage slider above the keypad, leverage
+   as a header chip, insufficient-margin explanation.
+5. **App-layer tests.** DeskKit has 383; the app target has none, and both instances of
+   the order-association race lived in app code. The fix that scales is moving logic
+   down — `OrderProgress` is the pattern — rather than adding a UI test target.
+
+### Two traps worth not rediscovering
+
+**`INFOPLIST_KEY_<custom>` silently does nothing.** Xcode injects only keys it
+recognises. The setting appears in `-showBuildSettings` and the value is simply absent
+from the built plist. A missing relying party falls back to the debug stub, which would
+have signed every user in as the same person.
+
+**Vercel's Deployment Protection answers 302 to an SSO page.** That is exactly the
+redirect Apple refuses and a browser follows silently. It defaults to on.
 
 ## Decisions already made, with their reasons
 
