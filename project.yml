@@ -52,6 +52,10 @@ targets:
         # Without this entitlement the ceremony fails on device with no useful message,
         # because the association is checked by the system rather than by the app.
         com.apple.developer.associated-domains:
+          # No `?mode=developer`. Apple's CDN already serves this domain's association
+          # file — checked directly at app-site-association.cdn-apple.com — so the
+          # developer bypass would only add a requirement (a Settings toggle) without
+          # fixing anything, and it must not ship.
           - webcredentials:desk-trading.vercel.app
     settings:
       base:

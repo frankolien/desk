@@ -54,6 +54,10 @@ final class PasskeyCeremony: NSObject, PasskeyService {
         do {
             prf = try await assertExisting()
         } catch PasskeyFailure.noCredentialFound {
+            // The assertion found nothing to offer, so make one. Any other failure from
+            // the assertion is a real failure and is not retried as a creation — doing
+            // that turns "the domain is not associated" into "no passkey yet", which
+            // sends the user looking for a problem on their phone.
             prf = try await createNew()
         }
         // The bytes exist for exactly as long as the two derivations take.
@@ -99,7 +103,7 @@ final class PasskeyCeremony: NSObject, PasskeyService {
             .init(saltInput1: PasskeyAccounts.prfSalt, saltInput2: nil),
             perCredentialInputValues: nil)
         // Never a passkey the platform would have to guess at, and never a password.
-        return try await perform(request)
+        return try await perform(request, isAssertion: true)
     }
 
     private func createNew() async throws -> Data {
@@ -115,14 +119,14 @@ final class PasskeyCeremony: NSObject, PasskeyService {
         // Registration only asks whether PRF is available for this credential; it does
         // not return key material, so the key still comes from an assertion afterwards.
         request.prf = .checkForSupport
-        return try await perform(request)
+        return try await perform(request, isAssertion: false)
     }
 
     /// Runs one request and pulls the PRF output out of whichever kind of result comes
     /// back.
-    private func perform(_ request: ASAuthorizationRequest) async throws -> Data {
+    private func perform(_ request: ASAuthorizationRequest, isAssertion: Bool) async throws -> Data {
         let controller = ASAuthorizationController(authorizationRequests: [request])
-        let delegate = CeremonyDelegate()
+        let delegate = CeremonyDelegate(isAssertion: isAssertion)
         controller.delegate = delegate
         controller.presentationContextProvider = self
 
@@ -175,6 +179,9 @@ extension PasskeyCeremony: ASAuthorizationControllerPresentationContextProviding
 /// Bridges the delegate callbacks to one continuation, resumed exactly once.
 private final class CeremonyDelegate: NSObject, ASAuthorizationControllerDelegate {
     var continuation: CheckedContinuation<ASAuthorization, any Error>?
+    private let isAssertion: Bool
+
+    init(isAssertion: Bool) { self.isAssertion = isAssertion }
 
     func authorizationController(
         controller: ASAuthorizationController,
@@ -188,7 +195,7 @@ private final class CeremonyDelegate: NSObject, ASAuthorizationControllerDelegat
         controller: ASAuthorizationController,
         didCompleteWithError error: any Error
     ) {
-        continuation?.resume(throwing: Self.translate(error))
+        continuation?.resume(throwing: Self.translate(error, isAssertion: isAssertion))
         continuation = nil
     }
 
@@ -198,15 +205,43 @@ private final class CeremonyDelegate: NSObject, ASAuthorizationControllerDelegat
     /// sheet and when there was no credential to offer them. The two are indistinguishable
     /// by code, which is why the flow treats a cancelled assertion as "try creating one"
     /// rather than as a refusal.
-    private static func translate(_ error: any Error) -> any Error {
+    /// The platform's error codes, kept distinguishable.
+    ///
+    /// The first version mapped `.canceled`, `.notHandled` and `.failed` all to
+    /// `noCredentialFound`, which made every possible failure — a domain that is not
+    /// associated, a provisioning profile without the capability, a network the device
+    /// could not reach Apple's CDN over — present as "no passkey on this device yet".
+    /// That is the one message guaranteed to send someone hunting in the wrong place, and
+    /// it hid a real setup failure behind a sentence about their phone.
+    ///
+    /// Only `.canceled` now means "there was nothing to offer", because iOS returns it
+    /// both when the user dismisses the sheet and when no credential matched. `.failed`
+    /// on an assertion almost always means the association has not taken.
+    private static func translate(_ error: any Error, isAssertion: Bool) -> any Error {
         guard let authorization = error as? ASAuthorizationError else {
-            return PasskeyFailure.platformRefused("Face ID could not finish. Try again.")
+            let underlying = error as NSError
+            return PasskeyFailure.platformRefused(
+                "Face ID could not finish (\(underlying.domain) \(underlying.code)).")
         }
-        return switch authorization.code {
-        case .canceled: PasskeyFailure.noCredentialFound
-        case .notHandled, .failed: PasskeyFailure.noCredentialFound
-        case .invalidResponse: PasskeyFailure.prfReturnedNothing
-        default: PasskeyFailure.platformRefused("Face ID could not finish. Try again.")
+        switch authorization.code {
+        case .canceled:
+            return PasskeyFailure.noCredentialFound
+        case .invalidResponse:
+            return PasskeyFailure.prfReturnedNothing
+        case .failed, .notHandled:
+            // The message names the likely cause and what to check, because this is a
+            // setup failure and the user cannot fix it by trying again.
+            return PasskeyFailure.platformRefused(
+                isAssertion
+                    ? "This device will not use a passkey for Desk yet. The site "
+                        + "association has probably not taken — check the domain serves "
+                        + "its file, and that Associated Domains Development is on in "
+                        + "Settings › Developer. (code \(authorization.code.rawValue))"
+                    : "The passkey could not be created. The app's domain association has "
+                        + "probably not taken yet. (code \(authorization.code.rawValue))")
+        default:
+            return PasskeyFailure.platformRefused(
+                "Face ID could not finish (code \(authorization.code.rawValue)).")
         }
     }
 }

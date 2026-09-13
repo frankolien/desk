@@ -22,8 +22,10 @@ domain="${1:-}"
 if [[ -z "$domain" ]]; then
   swift_value=$(grep -oE 'relyingPartyIdentifier = "[^"]+"' "$root/App/Desk/DeskApp.swift" \
     | head -1 | sed -E 's/.*"([^"]+)"/\1/')
+  # `?mode=developer` is a fetch instruction to the device, not part of the relying
+  # party, so it is stripped before comparing and before checking the domain.
   entitlement_value=$(grep -oE 'webcredentials:[^ ]+' "$root/project.yml" \
-    | head -1 | sed -E 's/webcredentials://')
+    | head -1 | sed -E 's/webcredentials://' | sed -E 's/\?.*$//')
 
   if [[ -z "$swift_value" || -z "$entitlement_value" ]]; then
     echo "FAIL  no relying party set yet. The app cannot create a passkey." >&2

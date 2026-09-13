@@ -35,6 +35,18 @@ struct DeskApp: App {
     /// output derives a fixed key and a shipped fallback to it would hand every user the
     /// same wallet.
     static var passkeyService: any PasskeyService {
+        // A simulator has no Secure Enclave and no real biometric, so the PRF output it
+        // would produce is not the one a device produces — the whole point of the
+        // derivation is that those bytes are the wallet. Development on a simulator
+        // therefore keeps the stub, and every build on real hardware runs the real
+        // ceremony.
+        //
+        // This regressed once: adopting the relying party made the ceremony the path on
+        // every build, and the simulator then reported "no passkey on this device yet"
+        // for a sign-in that could never have worked there.
+        #if targetEnvironment(simulator) && DEBUG
+        return StubPasskeyService()
+        #else
         if let relyingParty {
             return PasskeyCeremony(relyingParty: relyingParty)
         }
@@ -42,6 +54,7 @@ struct DeskApp: App {
         return StubPasskeyService()
         #else
         return UnavailablePasskeyService()
+        #endif
         #endif
     }
     @Environment(\.scenePhase) private var phase
