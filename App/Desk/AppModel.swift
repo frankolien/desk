@@ -1,4 +1,5 @@
 import DeskAuth
+import DeskChain
 import DeskFlow
 import DeskMoney
 import DeskPerpl
@@ -22,11 +23,20 @@ final class AppModel {
     private(set) var signInProblem: String?
     private(set) var isWorking = false
 
-    /// Collateral held at the exchange.
+    /// Collateral held at the exchange, backing positions.
+    ///
+    /// Unlike the two below, this does not come from the chain. It arrives on the
+    /// authenticated socket with the account snapshot, so it stays unavailable — `--`,
+    /// not `0.00` — until a real session exists. Showing a zero here would tell a funded
+    /// user their collateral is gone.
     private(set) var collateral = LastGood<Money>()
-    /// What the wallet holds before a desk exists.
+    /// AUSD in the wallet: what can still be deposited. Read from the chain.
     private(set) var walletAUSD = LastGood<Money>()
-    private(set) var walletMON = LastGood<Money>()
+    /// MON, for gas. Eighteen decimals, so deliberately not `Money`.
+    private(set) var walletMON = LastGood<NativeAmount>()
+    /// Whether a Perpl account exists for this address, read from the chain rather than
+    /// assumed from having signed in.
+    private(set) var hasDesk = LastGood<Bool>()
 
     private(set) var sessionRemaining: Duration = .zero
     /// Shown once, ever, the first time leverage is reached.
@@ -34,6 +44,10 @@ final class AppModel {
     private let session = SigningSession()
     private let passkey: any PasskeyService
     private var ticker: Task<Void, Never>?
+    private var balancePoller: Task<Void, Never>?
+    /// Built once, on the first refresh: it needs the venue's context to learn which
+    /// contracts to read, and that is one network call rather than a constant.
+    private var balances: BalanceReader?
 
     init(passkey: any PasskeyService) {
         self.passkey = passkey
@@ -57,12 +71,16 @@ final class AppModel {
                 walletAUSD.record(.zero)
                 walletMON.record(.zero)
                 collateral.record(.zero)
+                hasDesk.record(false)
                 sessionRemaining = .seconds(596)
             } else if stage != .welcome {
                 address = try? PasskeyAccounts.deriveAddress(prfOutput: Data(repeating: 0x2A, count: 32))
                 walletAUSD.record(Money(text: "10000") ?? .zero)
-                walletMON.record(Money(text: "0.19") ?? .zero)
+                // 0.19 MON, written at its own eighteen-decimal scale rather than
+                // borrowed from AUSD's six.
+                walletMON.record(NativeAmount(raw: 190_000_000_000_000_000) ?? .zero)
                 collateral.record(Money(text: "1282.18") ?? .zero)
+                hasDesk.record(true)
                 sessionRemaining = .seconds(552)
             }
         }
@@ -109,10 +127,7 @@ final class AppModel {
             await session.open(keys.trading)
             startTicking()
             stage = keys.hasDesk ? .trading : .needsDesk
-            // Placeholder figures until the chain reads are wired to a funded address.
-            walletAUSD.record(Money(text: "10000") ?? .zero)
-            walletMON.record(Money(text: "0.19") ?? .zero)
-            collateral.record(Money(text: "1240") ?? .zero)
+            startPollingBalances()
         } catch let failure as PasskeyFailure {
             signInProblem = failure.sentence
         } catch {
@@ -136,11 +151,74 @@ final class AppModel {
         address = nil
         ticker?.cancel()
         ticker = nil
+        balancePoller?.cancel()
+        balancePoller = nil
     }
 
     func enterBackground() async {
         await session.enterBackground()
         sessionRemaining = .zero
+    }
+
+    // MARK: - Balances
+
+    /// Polls the chain for what this address holds.
+    ///
+    /// Deliberately not tied to a screen. Home, Fund and Account all read these figures,
+    /// and a poller owned by a view restarts on every navigation — which is both wasteful
+    /// and visible, because the balance flickers back to unavailable each time.
+    ///
+    /// Backoff comes from `LastGood.retryDelay()`, so a node that is down is retried
+    /// slower rather than hammered, and a recovered node is picked up on the next tick.
+    private func startPollingBalances() {
+        balancePoller?.cancel()
+        balancePoller = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await refreshBalances()
+                let delay = walletAUSD.retryDelay()
+                try? await Task.sleep(for: delay == .zero ? .seconds(12) : delay)
+            }
+        }
+    }
+
+    func refreshBalances() async {
+        guard let address else { return }
+        do {
+            let reader = try await balanceReader()
+            let snapshot = await reader.read(for: address)
+            // Each field lands on its own. A failed AUSD read must not disturb a good MON
+            // one, which is the whole reason the snapshot carries three outcomes rather
+            // than throwing once.
+            record(snapshot.walletAUSD, into: &walletAUSD)
+            record(snapshot.gas, into: &walletMON)
+            record(snapshot.hasDesk, into: &hasDesk)
+        } catch {
+            let reason = "Could not reach the exchange to find out which contracts to read."
+            walletAUSD.recordFailure(reason)
+            walletMON.recordFailure(reason)
+            hasDesk.recordFailure(reason)
+        }
+    }
+
+    private func record<Value>(_ read: BalanceReader.Read<Value>, into slot: inout LastGood<Value>) {
+        switch read {
+        case .ok(let value): slot.record(value)
+        case .failed(let reason): slot.recordFailure(reason)
+        }
+    }
+
+    /// The venue says which contracts back it, so the addresses are fetched rather than
+    /// compiled in. Built once and kept: the answer does not change within a session, and
+    /// a context call before every balance poll would triple the traffic.
+    private func balanceReader() async throws -> BalanceReader {
+        if let balances { return balances }
+        let rest = PerplREST(configuration: try .testnet())
+        let reader = BalanceReader(
+            rpc: MonadRPC(configuration: try .testnet()),
+            addresses: try ExchangeAddresses(context: await rest.context()))
+        balances = reader
+        return reader
     }
 
     private func startTicking() {

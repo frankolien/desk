@@ -42,8 +42,12 @@ struct SignalsScreen: View {
                 .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 112)
             }
             .background(Color(.systemBackground)).toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(item: $selectedSignal) { signal in
-                SignalTokenDetail(signal: signal).toolbar(.hidden, for: .tabBar)
+            .sheet(item: $selectedSignal) { signal in
+                SignalTokenDetail(signal: signal)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+                    .presentationCornerRadius(38)
+                    .presentationBackground(Color(.secondarySystemBackground))
             }
         }
     }
@@ -112,11 +116,10 @@ private struct SignalTokenDetail: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            Color.black.ignoresSafeArea()
+            Color(.secondarySystemBackground).ignoresSafeArea()
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Capsule().fill(.tertiary).frame(width: 36, height: 5).frame(maxWidth: .infinity).padding(.top, 8)
-                    tokenHeader.padding(.top, 20)
+                    tokenHeader.padding(.top, 30)
                     priceSummary.padding(.top, 18)
                     SignalCandleChart().frame(height: 320).padding(.top, 18)
                     rangeSelector.padding(.top, 12)
@@ -127,8 +130,6 @@ private struct SignalTokenDetail: View {
                 .padding(.horizontal, 16).padding(.bottom, 120)
             }
             .background(Color(.secondarySystemBackground))
-            .clipShape(UnevenRoundedRectangle(topLeadingRadius: 38, topTrailingRadius: 38))
-            .padding(.top, 46).ignoresSafeArea()
         }
         .safeAreaInset(edge: .bottom) { actionBar.padding(.horizontal, 28).padding(.bottom, 8) }
         .toolbar(.hidden, for: .navigationBar)

@@ -16,6 +16,15 @@ public struct ExchangeAddresses: Sendable, Hashable {
         case addressMalformed(String)
     }
 
+    /// The addresses directly. The context-derived initialiser below is what production
+    /// uses; this one exists so a test — and a future configuration file — can name the
+    /// three without standing up a whole venue context.
+    public init(collateralToken: EthereumAddress, exchange: EthereumAddress, minimumToOpen: Money) {
+        self.collateralToken = collateralToken
+        self.exchange = exchange
+        self.minimumToOpen = minimumToOpen
+    }
+
     public init(context: PerplContext) throws {
         guard let token = context.collateralToken else { throw Failure.collateralTokenMissing }
         guard let instance = context.instances.first else { throw Failure.instanceMissing }
@@ -102,7 +111,7 @@ public actor OpeningSequence {
         guard deposit.raw >= addresses.minimumToOpen.raw else {
             throw Failure.belowMinimum(deposit: deposit, minimum: addresses.minimumToOpen)
         }
-        let held = try await collateralBalance(of: wallet.address)
+        let held = try await walletAUSD(of: wallet.address)
         guard held.raw >= deposit.raw else {
             throw Failure.insufficientCollateral(held: held, needed: deposit)
         }
@@ -147,13 +156,18 @@ public actor OpeningSequence {
         let result = try await rpc.callContract(
             to: addresses.collateralToken,
             data: try Calldata.allowance(owner: owner, spender: addresses.exchange))
-        return Self.money(result)
+        return ABIMoney.decode(result)
     }
 
-    public func collateralBalance(of owner: EthereumAddress) async throws -> Money {
+    /// The wallet's own AUSD. Named for what it reads: `balanceOf` on the collateral
+    /// token is the balance in the wallet, and collateral held *at the exchange* is a
+    /// different figure that only the authenticated account snapshot carries. The old
+    /// name said "collateral" and the distinction is the difference between money you can
+    /// deposit and money already backing a position.
+    public func walletAUSD(of owner: EthereumAddress) async throws -> Money {
         let result = try await rpc.callContract(
             to: addresses.collateralToken, data: try Calldata.balanceOf(owner))
-        return Self.money(result)
+        return ABIMoney.decode(result)
     }
 
     /// `getAccountByAddr` reverts rather than returning zero when no account exists, so
@@ -184,18 +198,7 @@ public actor OpeningSequence {
         report(Progress(step: step, outcome: .finished))
     }
 
-    /// A balance or an allowance: one uint256 word, at the collateral's scale.
-    ///
-    /// A number this app cannot hold is clamped rather than wrapped. An allowance is
-    /// routinely set to the uint256 maximum, and wrapping that would show a tiny number
-    /// and send an approval the user did not need.
-    static func money(_ word: Data) -> Money {
-        guard !word.isEmpty else { return .zero }
-        let high = word.count > 8 ? word.prefix(word.count - 8) : Data()
-        let value = word.suffix(8).reduce(UInt64(0)) { $0 << 8 | UInt64($1) }
-        guard high.allSatisfy({ $0 == 0 }), value <= UInt64(Money.maxRaw),
-              let money = Money(raw: Int64(value))
-        else { return Money(raw: Money.maxRaw) ?? .zero }
-        return money
-    }
+    /// Kept as a name the tests already reach for; the decoder itself now lives in
+    /// `ABIMoney` so `BalanceReader` cannot drift from it.
+    static func money(_ word: Data) -> Money { ABIMoney.decode(word) }
 }

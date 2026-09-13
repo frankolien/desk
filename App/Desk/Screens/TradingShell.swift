@@ -33,10 +33,7 @@ struct TradingShell: View {
             }
 
             Tab("Watchlist", systemImage: "bookmark.fill", value: .watchlist) {
-                ShellEmptyState(
-                    symbol: "bookmark.fill",
-                    title: "Watchlist",
-                    message: "Markets you save will appear here.")
+                WatchlistScreen()
             }
 
             Tab("Signals", systemImage: "antenna.radiowaves.left.and.right", value: .signals) {
@@ -48,10 +45,7 @@ struct TradingShell: View {
             }
 
             Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
-                ShellEmptyState(
-                    symbol: "magnifyingglass",
-                    title: "Search",
-                    message: "Find a perpetual market.")
+                MarketSearchScreen()
             }
         }
         .tint(.white)
@@ -61,27 +55,5 @@ struct TradingShell: View {
         }
         .task { market.start() }
         .onDisappear(perform: market.stop)
-    }
-}
-
-private struct ShellEmptyState: View {
-    let symbol: String
-    let title: String
-    let message: String
-
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            VStack(spacing: 12) {
-                Image(systemName: symbol)
-                    .font(.system(size: 28, weight: .medium))
-                Text(title)
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                Text(message)
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-            }
-            .foregroundStyle(DeskColor.nightText.color)
-        }
     }
 }
