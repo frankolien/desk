@@ -15,6 +15,7 @@ import SwiftUI
 struct WelcomeScreen: View {
     let model: AppModel
     @State private var showsExplainer = false
+    @State private var showsCreateWarning = false
 
     private let features: [(symbol: String, title: String)] = [
         ("faceid", "Face ID Sign-In"),
@@ -92,6 +93,21 @@ struct WelcomeScreen: View {
                     .padding(.horizontal, contentInset)
                     .padding(.top, compact ? 26 : 30)
 
+                    // Present on a device with no account and absent once one exists.
+                    // Secondary to Face ID on purpose: a device without its own passkey
+                    // most often has one synced from another, and sign-in is the right
+                    // first attempt. Creating is behind a confirmation because it makes a
+                    // wallet — the version of this screen that reached creation by
+                    // dismissing a sheet could strand somebody's funds.
+                    if model.mayOfferCreate {
+                        Button("New here? Create an account") { showsCreateWarning = true }
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundStyle(DeskColor.action.color)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 20)
+                            .transition(.opacity)
+                    }
+
                     Button("What is a perpetual?") { showsExplainer = true }
                         .font(.system(size: 16, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.58))
@@ -112,5 +128,20 @@ struct WelcomeScreen: View {
         .sheet(isPresented: $showsExplainer) {
             PerpetualExplainer { showsExplainer = false }
         }
+        // One confirmation, and it states the irreversible part rather than asking "are
+        // you sure". A new passkey is a new wallet; the old one keeps its money.
+        .confirmationDialog(
+            "Create a new account?",
+            isPresented: $showsCreateWarning,
+            titleVisibility: .visible
+        ) {
+            Button("Create new account") { Task { await model.createAccount() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This makes a brand new wallet. If you already have a Desk account on "
+                 + "another device, sign in with that passkey instead — a new one cannot "
+                 + "reach the old account's funds.")
+        }
+        .animation(.snappy, value: model.mayOfferCreate)
     }
 }

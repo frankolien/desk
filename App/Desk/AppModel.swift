@@ -144,12 +144,37 @@ final class AppModel {
         UIPasteboard.general.string = address.checksummed
     }
 
+    /// Whether the welcome screen should offer to create a passkey.
+    ///
+    /// True exactly when this device has never derived an address. It cannot be inferred
+    /// from a failed sign-in: iOS reports a dismissed sheet and "no credential matched"
+    /// with the same `.canceled` code, so waiting for a distinguishable failure would
+    /// leave a genuinely new user with no way in at all.
+    ///
+    /// So the offer is present from the start on a fresh device and absent once an
+    /// account exists here — which is the case that matters, because creating a second
+    /// passkey makes a second wallet and strands the first. Sign-in stays the primary
+    /// action, since a passkey synced from another device is the commoner reason for a
+    /// device to have none of its own.
+    var mayOfferCreate: Bool { passkey.lastSeenAddress == nil }
+
     func signIn() async {
+        await authenticate(creating: false)
+    }
+
+    /// Reached only from an explicit "create a new account" choice.
+    func createAccount() async {
+        await authenticate(creating: true)
+    }
+
+    private func authenticate(creating: Bool) async {
         isWorking = true
         signInProblem = nil
         defer { isWorking = false }
         do {
-            let keys = try await passkey.deriveAccounts()
+            let keys = creating
+                ? try await passkey.createAccounts()
+                : try await passkey.deriveAccounts()
             // The address guard runs before any balance is shown: Apple's synced-passkey
             // bug derives a different address on a second device, and rendering that
             // account's zero would read as theft.
@@ -164,6 +189,10 @@ final class AppModel {
             startTicking()
             stage = keys.hasDesk ? .trading : .needsDesk
             startPollingBalances()
+        } catch PasskeyFailure.cancelledByUser {
+            // A dismissed sheet is not a failure and not a reason to offer anything. It
+            // used to run a registration, which is how a mis-tap became a second wallet.
+            signInProblem = nil
         } catch let failure as PasskeyFailure {
             signInProblem = failure.sentence
         } catch {

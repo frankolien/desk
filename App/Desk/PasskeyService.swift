@@ -14,7 +14,15 @@ import Foundation
 @MainActor
 protocol PasskeyService: Sendable {
     var lastSeenAddress: EthereumAddress? { get }
+
+    /// Signs in with an existing passkey. Never creates one — creating is
+    /// `createAccounts()`, and the separation is load-bearing: a passkey created by
+    /// accident is a different wallet, and the funded one becomes unreachable.
     func deriveAccounts() async throws -> DerivedAccounts
+
+    /// Creates a passkey and the wallet derived from it. Only ever from an explicit
+    /// choice by the user.
+    func createAccounts() async throws -> DerivedAccounts
 
     /// Borrows both keys for exactly one piece of work.
     ///
@@ -60,6 +68,8 @@ struct StubPasskeyService: PasskeyService {
             hasDesk: false)
     }
 
+    func createAccounts() async throws -> DerivedAccounts { try await deriveAccounts() }
+
     func withKeys<T: Sendable>(
         _ body: @Sendable (WalletKey, TradingKey) async throws -> T
     ) async throws -> T {
@@ -78,6 +88,10 @@ struct UnavailablePasskeyService: PasskeyService {
     var lastSeenAddress: EthereumAddress? { nil }
 
     func deriveAccounts() async throws -> DerivedAccounts {
+        throw PasskeyFailure.relyingPartyNotAssociated(try RelyingParty("desk.invalid"))
+    }
+
+    func createAccounts() async throws -> DerivedAccounts {
         throw PasskeyFailure.relyingPartyNotAssociated(try RelyingParty("desk.invalid"))
     }
 

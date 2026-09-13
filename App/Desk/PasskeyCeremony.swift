@@ -45,24 +45,51 @@ final class PasskeyCeremony: NSObject, PasskeyService {
 
     var lastSeenAddress: EthereumAddress? { store.address }
 
+    /// Signs in with an existing passkey. **Never creates one.**
+    ///
+    /// This used to fall through to registration when the assertion came back empty, and
+    /// that was a way to lose someone's money. iOS returns `.canceled` both when no
+    /// credential matched *and* when the user dismissed the sheet — the two are
+    /// indistinguishable by code — so a mis-tapped dismissal ran a registration, Mera
+    /// minted a fresh user handle, and the new passkey derived a different address. To
+    /// the user their funded account had simply vanished, and there is no way back from
+    /// it.
+    ///
+    /// Creating a credential is now `createAccounts()`, reached only by a person choosing
+    /// it. Cancellation is cancellation.
     func deriveAccounts() async throws -> DerivedAccounts {
+        try requireSupportedSystem()
+        return try await derive(from: try await assertExisting())
+    }
+
+    /// Creates a passkey, and with it a new wallet.
+    ///
+    /// Only ever called from an explicit choice, and it refuses outright if this device
+    /// has already derived an address. A second passkey for the same relying party is a
+    /// second wallet: the first one keeps the funds and nothing in the app can reach them
+    /// again. Refusing is the only safe answer, and it is a refusal rather than a warning
+    /// because a warning is something people tap through.
+    func createAccounts() async throws -> DerivedAccounts {
+        try requireSupportedSystem()
+        if let existing = store.address {
+            throw PasskeyFailure.platformRefused(
+                "This device already has a Desk account (\(Self.short(existing))). Creating "
+                    + "a second passkey would make a different wallet and leave that one "
+                    + "unreachable. Use Face ID to sign in instead.")
+        }
+        return try await derive(from: try await createNew())
+    }
+
+    private func requireSupportedSystem() throws {
         guard ProcessInfo.processInfo.isOperatingSystemAtLeast(Self.minimumSystemVersion) else {
             throw PasskeyFailure.prfUnsupported
         }
+    }
 
-        var prf: Data
-        do {
-            prf = try await assertExisting()
-        } catch PasskeyFailure.noCredentialFound {
-            // The assertion found nothing to offer, so make one. Any other failure from
-            // the assertion is a real failure and is not retried as a creation — doing
-            // that turns "the domain is not associated" into "no passkey yet", which
-            // sends the user looking for a problem on their phone.
-            prf = try await createNew()
-        }
+    private func derive(from output: Data) async throws -> DerivedAccounts {
+        var prf = output
         // The bytes exist for exactly as long as the two derivations take.
         defer { prf.resetBytes(in: 0..<prf.count) }
-
         guard prf.count == 32 else { throw PasskeyFailure.prfReturnedNothing }
 
         let address = try PasskeyAccounts.deriveAddress(prfOutput: prf)
@@ -71,6 +98,11 @@ final class PasskeyCeremony: NSObject, PasskeyService {
         // `hasDesk` is a fact about the chain, not about the passkey. It is read by
         // `BalanceReader` after sign-in rather than guessed here.
         return DerivedAccounts(address: address, trading: trading, hasDesk: false)
+    }
+
+    static func short(_ address: EthereumAddress) -> String {
+        let text = address.checksummed
+        return text.prefix(6) + "…" + text.suffix(4)
     }
 
     func withKeys<T: Sendable>(
@@ -149,7 +181,9 @@ final class PasskeyCeremony: NSObject, PasskeyService {
             // user would fund an address they could never reach again.
             guard registration.prf?.isSupported == true else { throw PasskeyFailure.prfUnsupported }
             // Registration confirms support but returns no key material, so the key comes
-            // from an assertion against the credential just made.
+            // from an assertion against the credential just made. Safe to call here and
+            // only here: a credential certainly exists, because it was created a moment
+            // ago by this same call.
             return try await assertExisting()
         default:
             throw PasskeyFailure.platformRefused("That credential can't be used with Desk.")
@@ -225,7 +259,10 @@ private final class CeremonyDelegate: NSObject, ASAuthorizationControllerDelegat
         }
         switch authorization.code {
         case .canceled:
-            return PasskeyFailure.noCredentialFound
+            // iOS returns this both for a dismissed sheet and for no matching credential,
+            // and nothing distinguishes them. Treated as a cancellation, because the other
+            // reading led to silently creating a second wallet.
+            return PasskeyFailure.cancelledByUser
         case .invalidResponse:
             return PasskeyFailure.prfReturnedNothing
         case .failed, .notHandled:
