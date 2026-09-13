@@ -41,6 +41,18 @@ targets:
         product: DeskFlow
       - package: DeskKit
         product: DeskUI
+    entitlements:
+      path: App/Desk/Desk.entitlements
+      properties:
+        # Must match `DeskApp.relyingPartyIdentifier` exactly. Two copies of one string,
+        # because iOS cannot read its own entitlement at run time and a custom
+        # INFOPLIST_KEY silently never reaches the built plist. `tools/check-relying-party.sh`
+        # with no arguments compares them and then checks the domain itself.
+        #
+        # Without this entitlement the ceremony fails on device with no useful message,
+        # because the association is checked by the system rather than by the app.
+        com.apple.developer.associated-domains:
+          - webcredentials:desk-trade-giftstacks-projects.vercel.app
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
@@ -54,12 +66,3 @@ targets:
         # in thirty-one days an untested one is a liability rather than a feature.
         INFOPLIST_KEY_UIUserInterfaceStyle: Dark
         INFOPLIST_KEY_NSFaceIDUsageDescription: Desk derives your trading key from your face. Nothing is stored.
-        # The relying party every passkey binds to, permanently. One string, read by the
-        # ceremony at run time and used to build the Associated Domains entitlement, so
-        # the two cannot drift — a mismatch between them only appears on hardware.
-        #
-        # Empty until the domain is chosen, and empty is the honest state: an app with a
-        # placeholder here would create passkeys bound to a domain nobody owns, and a
-        # passkey cannot be moved to another relying party afterwards. Set it once, then
-        # run tools/check-relying-party.sh against it before the first passkey exists.
-        INFOPLIST_KEY_DeskRelyingParty: ""

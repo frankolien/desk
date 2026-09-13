@@ -6,13 +6,37 @@
 # the association file directly, over HTTPS, and will not follow a redirect — which is
 # the requirement that fails quietly, because the file loads perfectly well in a browser.
 #
-#   tools/check-relying-party.sh desk.trade
+# With no argument it reads the domain out of the repository and first checks the one
+# thing no remote fetch can: that the Swift constant and the entitlement agree. They are
+# two copies of one string — iOS cannot read its own entitlement at run time, and a custom
+# INFOPLIST_KEY never reaches the built plist — so something has to compare them, and a
+# mismatch is invisible until a device refuses to create a passkey.
+#
+#   tools/check-relying-party.sh              # the repo's own domain, both copies
+#   tools/check-relying-party.sh desk.trade   # a candidate, before adopting it
 set -uo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 domain="${1:-}"
 if [[ -z "$domain" ]]; then
-  echo "usage: $0 <domain>   e.g. $0 desk.trade" >&2
-  exit 2
+  swift_value=$(grep -oE 'relyingPartyIdentifier = "[^"]+"' "$root/App/Desk/DeskApp.swift" \
+    | head -1 | sed -E 's/.*"([^"]+)"/\1/')
+  entitlement_value=$(grep -oE 'webcredentials:[^ ]+' "$root/project.yml" \
+    | head -1 | sed -E 's/webcredentials://')
+
+  if [[ -z "$swift_value" || -z "$entitlement_value" ]]; then
+    echo "FAIL  no relying party set yet. The app cannot create a passkey." >&2
+    exit 1
+  fi
+  if [[ "$swift_value" != "$entitlement_value" ]]; then
+    echo "FAIL  the two copies disagree, and this fails only on hardware:" >&2
+    echo "        DeskApp.swift   $swift_value" >&2
+    echo "        entitlement     $entitlement_value" >&2
+    exit 1
+  fi
+  echo "  ok    Swift constant and entitlement agree: $swift_value"
+  domain="$swift_value"
 fi
 if [[ "$domain" == *"://"* || "$domain" == *"/"* ]]; then
   echo "FAIL  a relying party is a bare domain: no scheme, no path" >&2

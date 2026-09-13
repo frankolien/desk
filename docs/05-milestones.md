@@ -38,7 +38,12 @@ longer than the slack in this schedule.
    WebKit itself reads PRF the same way — so this is verification rather than discovery,
    but it is cheap and it closes the argument.
 
-One decision is owed alongside them: **what is Desk's relying party?** Passkeys bind to
+**Settled 13 September: `desk-trade-giftstacks-projects.vercel.app`.** A Vercel
+subdomain rather than a bought domain, because the decision was blocking everything and
+on testnet the permanence costs a re-enrolment rather than money. Buy a domain before any
+real launch; until then this is the relying party and it does not change again.
+
+The original question, kept for the reasoning: **what is Desk's relying party?** Passkeys bind to
 it permanently, an associated-domains file must be served from it with no redirect, and
 the acceptance test compares against Mera's library at the same domain. Borrowing
 Recourse's domain is the cheap answer; a Desk domain is the honest one. Decide before
@@ -98,7 +103,7 @@ history, notifications, TP/SL, an Android or web build, a relayer.
 |---|---|---|
 | ~~Apple Developer account is individual, not org~~ | Closed 13 September | It is individual, and internal TestFlight has no review step, so 5.1.1(ix) does not apply on this path. Re-enrolling as an organisation is a post-bounty task and must not be started inside the thirty-two days |
 | ~~Apple Developer membership is not paid~~ | Closed 13 September | Paid membership confirmed. Associated Domains is available and the ceremony is unblocked |
-| The relying party is still not chosen | Every passkey binds to it permanently, so nothing real can be built until it exists | **The only remaining blocker.** Run `tools/check-relying-party.sh` against the candidate before committing — Apple does not follow redirects and a browser does, so a file that looks right by hand can still fail on device |
+| ~~The relying party is still not chosen~~ | Closed 13 September | `desk-trade-giftstacks-projects.vercel.app`, live and verified. Deployment Protection had to be switched off first: it answered 302 to an SSO page, which is exactly the redirect Apple refuses and a browser follows silently |
 | ~~iOS returns no PRF output~~ | Closed 12 September | Native PRF confirmed from iOS 18.0 against the SDK headers. Ship-gated at **18.4**, because 18.0 to 18.3 return wrong values |
 | Synced passkey returns different PRF on a second device | The recovery demo fails, and a real user sees a funded account as empty | Open Apple bug, no fix. Mitigations: the address guard, both demo devices on iOS 26, and the recovery claim stated honestly rather than absolutely |
 | ~~No testnet AUSD~~ | Closed 11 September | Agora's faucet. But see the next row |

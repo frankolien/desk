@@ -7,17 +7,24 @@ struct DeskApp: App {
 
     /// The relying party every passkey binds to, permanently.
     ///
-    /// Read from the Info.plist rather than written here, so the entitlement, the
-    /// association file and the ceremony all take the same string from one place — a
-    /// mismatch between them only shows up on hardware, never in a build.
+    /// It is a constant here and a `webcredentials:` entry in `Desk.entitlements`, and the
+    /// two must be identical. That is two copies of one string, which is a thing worth
+    /// being unhappy about — but the alternatives are worse. Reading the entitlement at
+    /// run time is macOS-only; `SecTaskCopyValueForEntitlement` is not in the iOS SDK. And
+    /// an `INFOPLIST_KEY_DeskRelyingParty` build setting silently does not work: Xcode
+    /// injects `INFOPLIST_KEY_*` only for keys it recognises, so a custom one vanishes
+    /// from the built plist with no warning — which, since a missing value falls back to
+    /// the debug stub, would have signed every user in as the same person.
     ///
-    /// Absent until the domain is chosen. That it is optional is deliberate: an empty
-    /// string would be a relying party, and a wrong relying party is unrecoverable.
+    /// So the copies stay, and `tools/check-relying-party.sh` compares them. Run it before
+    /// shipping; a mismatch fails only on hardware, because the association is checked by
+    /// the system rather than by the app.
+    static let relyingPartyIdentifier = "desk-trade-giftstacks-projects.vercel.app"
+
     static var relyingParty: RelyingParty? {
-        guard let text = Bundle.main.object(forInfoDictionaryKey: "DeskRelyingParty") as? String,
-              !text.isEmpty
-        else { return nil }
-        return try? RelyingParty(text)
+        // `RelyingParty` refuses the shapes that fail on a device rather than at build
+        // time — a scheme, a path, a port, a trailing dot, a bare label.
+        try? RelyingParty(relyingPartyIdentifier)
     }
 
     /// The real ceremony once a relying party exists, and an honest failure until then.
