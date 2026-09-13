@@ -1,6 +1,86 @@
+# Desk
+#
+# Two rules behind this list. Build products are never committed, because they are
+# reproducible from source and they make diffs unreadable. And anything that could
+# carry a secret is ignored by pattern rather than by memory, because the one time
+# someone forgets is the time it matters.
+
+# --- macOS -------------------------------------------------------------------
 .DS_Store
-node_modules/
-*.xcodeproj/xcuserdata/
-build/
+._*
+.Spotlight-V100
+.Trashes
+
+# --- Swift Package Manager ---------------------------------------------------
+.build/
+.swiftpm/
+Packages/
+*.resolved.bak
+# Package.resolved is deliberately NOT ignored. It pins the exact dependency
+# revisions the app was built and tested against, which is part of the build being
+# reproducible rather than approximately repeatable.
+
+# --- Xcode -------------------------------------------------------------------
 DerivedData/
+build/
+.dist/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.app
+
+# The Xcode project is generated from project.yml by XcodeGen, so the generator
+# input is the source of truth and the output is a build product. Regenerate with
+# `xcodegen generate` rather than editing the project and committing it.
+*.xcodeproj/
+*.xcworkspace/
+
+# --- Signing and secrets -----------------------------------------------------
+# None of these should ever exist in the working tree, which is exactly why they
+# are listed: an ignore rule costs nothing and a leaked key costs the account.
 .env
+.env.*
+*.p8
+*.p12
+*.pem
+*.key
+*.cer
+*.certSigningRequest
+*.mobileprovision
+*.provisionprofile
+secrets.json
+secrets.*.json
+**/Secrets.swift
+
+# Anything that could hold a private key, a mnemonic, or a funded testnet wallet.
+*.keystore
+*.wallet
+mnemonic.txt
+privatekey*
+*.pk
+
+# --- Node, for the reference scripts ----------------------------------------
+node_modules/
+npm-debug.log*
+.npm/
+
+# --- Local noise -------------------------------------------------------------
+*.log
+.scratch/
+scratch/
+
+# Swift intermediates, when a compile is invoked outside `swift build` and drops its
+# working files wherever it was run rather than under .build/.
+*.d
+*.dia
+*.swiftdeps
+*.swiftmodule
+*.swiftsourceinfo
+*.swiftdoc

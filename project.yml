@@ -1,0 +1,56 @@
+# XcodeGen is the source of truth; Desk.xcodeproj is generated and git-ignored.
+#   xcodegen generate && open Desk.xcodeproj
+name: Desk
+options:
+  bundleIdPrefix: com.opia
+  deploymentTarget:
+    iOS: "18.4"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    DEVELOPMENT_TEAM: WH43PPJBR7
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+
+packages:
+  DeskKit:
+    path: DeskKit
+
+targets:
+  Desk:
+    type: application
+    platform: iOS
+    sources:
+      - path: App/Desk
+    dependencies:
+      - package: DeskKit
+        product: DeskMoney
+      - package: DeskKit
+        product: DeskAuth
+      - package: DeskKit
+        product: DeskNet
+      - package: DeskKit
+        product: DeskChain
+      - package: DeskKit
+        product: DeskPerpl
+      - package: DeskKit
+        product: DeskFlow
+      - package: DeskKit
+        product: DeskUI
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.opia.desk
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        # Dark only. A trading app on a near-black ground has no light mode to test, and
+        # in thirty-one days an untested one is a liability rather than a feature.
+        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        INFOPLIST_KEY_NSFaceIDUsageDescription: Desk derives your trading key from your face. Nothing is stored.
