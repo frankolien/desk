@@ -12,12 +12,18 @@ so this schedule assumes full days rather than afternoons.
 Three items, ordered by lead time rather than by importance. The first has a lead time
 longer than the slack in this schedule.
 
-1. **Check the Apple Developer account type.** App Store Guideline 5.1.1(ix) requires
-   apps in highly regulated fields — and "crypto exchanges" joined that list on 13
-   November 2025 — to be submitted by a legal entity rather than an individual. If the
-   account is individual rather than organization, re-enrolling reportedly takes two to
-   four weeks against a thirty-two day deadline. This is the only item that can quietly
-   make demo day impossible, and it is fifteen minutes to check.
+1. ~~**Check the Apple Developer account type.**~~ **Checked 13 September: it is an
+   individual account, and that is fine.** Guideline 5.1.1(ix) — which added "crypto
+   exchanges" on 13 November 2025 and requires a legal entity — is applied at App Store
+   review, and the path here is **internal TestFlight, which has no review step**. So the
+   two-to-four week re-enrolment is a problem for shipping publicly after the bounty, not
+   a problem for the bounty. Do not start it now; it would consume the schedule to solve
+   something nothing depends on.
+
+   **What replaced it as the real gate: the membership must be *paid*.** Associated
+   Domains is not available on a free account, and without Associated Domains there is no
+   `webcredentials:` entitlement, no passkey, no Face ID, and therefore no app. Confirm
+   the $99 is active before anything else.
 
 2. **Claim testnet AUSD now, and again tomorrow.** Agora's faucet holds 640,000 AUSD
    and is not a minter — about sixty-four claims remain, and it held 670,000 two days
@@ -91,7 +97,8 @@ history, notifications, TP/SL, an Android or web build, a relayer.
 
 | Risk | What happens | What we do |
 |---|---|---|
-| Apple Developer account is individual, not org | No TestFlight build on demo day | **Check today.** Two-to-four week lead time |
+| ~~Apple Developer account is individual, not org~~ | Closed 13 September | It is individual, and internal TestFlight has no review step, so 5.1.1(ix) does not apply on this path. Re-enrolling as an organisation is a post-bounty task and must not be started inside the thirty-two days |
+| Apple Developer membership is not paid | No Associated Domains, so no passkey, so no app at all | The one account question that still matters. Confirm the membership is active before the ceremony is written |
 | ~~iOS returns no PRF output~~ | Closed 12 September | Native PRF confirmed from iOS 18.0 against the SDK headers. Ship-gated at **18.4**, because 18.0 to 18.3 return wrong values |
 | Synced passkey returns different PRF on a second device | The recovery demo fails, and a real user sees a funded account as empty | Open Apple bug, no fix. Mitigations: the address guard, both demo devices on iOS 26, and the recovery claim stated honestly rather than absolutely |
 | ~~No testnet AUSD~~ | Closed 11 September | Agora's faucet. But see the next row |
