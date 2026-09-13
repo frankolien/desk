@@ -38,6 +38,7 @@ final class PasskeyCeremony: NSObject, PasskeyService {
     private let store: LastSeenAddressStore
 
     init(relyingParty: RelyingParty, displayName: String = "Desk", store: LastSeenAddressStore = .standard) {
+        Self.domainHint = relyingParty.identifier
         self.relyingParty = relyingParty
         self.displayName = displayName
         self.store = store
@@ -99,6 +100,10 @@ final class PasskeyCeremony: NSObject, PasskeyService {
         // `BalanceReader` after sign-in rather than guessed here.
         return DerivedAccounts(address: address, trading: trading, hasDesk: false)
     }
+
+    /// Named in the failure text so the sentence points at something checkable rather
+    /// than at a generic setup problem. Set once at launch from the configured party.
+    nonisolated(unsafe) static var domainHint = "its relying party"
 
     static func short(_ address: EthereumAddress) -> String {
         let text = address.checksummed
@@ -268,14 +273,17 @@ private final class CeremonyDelegate: NSObject, ASAuthorizationControllerDelegat
         case .failed, .notHandled:
             // The message names the likely cause and what to check, because this is a
             // setup failure and the user cannot fix it by trying again.
-            return PasskeyFailure.platformRefused(
-                isAssertion
-                    ? "This device will not use a passkey for Desk yet. The site "
-                        + "association has probably not taken — check the domain serves "
-                        + "its file, and that Associated Domains Development is on in "
-                        + "Settings › Developer. (code \(authorization.code.rawValue))"
-                    : "The passkey could not be created. The app's domain association has "
-                        + "probably not taken yet. (code \(authorization.code.rawValue))")
+            let code = authorization.code.rawValue
+            let lead = isAssertion
+                ? "iOS would not use a passkey for Desk."
+                : "The passkey could not be created."
+            // Written as one literal rather than concatenated: a multi-line `+` starting
+            // with an interpolated string makes Swift reach for the AttributedString
+            // overload and fail with an error about nothing to do with the problem.
+            let cause = """
+                The app is not associated with \(PasskeyCeremony.domainHint) yet. Associated Domains                 has to be enabled on the App ID itself, not only in the entitlements file.
+                """
+            return PasskeyFailure.platformRefused("\(lead) \(cause) (code \(code))")
         default:
             return PasskeyFailure.platformRefused(
                 "Face ID could not finish (code \(authorization.code.rawValue)).")
