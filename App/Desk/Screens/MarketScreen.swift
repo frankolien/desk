@@ -8,6 +8,7 @@ import SwiftUI
 struct MarketScreen: View {
     let model: AppModel
     let market: MarketModel
+    let session: TradingSession
 
     @State private var query = ""
     @State private var showsBTC = false
@@ -35,7 +36,7 @@ struct MarketScreen: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showsBTC) {
-                PerpDetailScreen(model: model, market: market)
+                PerpDetailScreen(model: model, market: market, session: session)
                     .toolbar(.hidden, for: .tabBar)
             }
         }
@@ -218,6 +219,9 @@ struct MarketScreen: View {
 private struct PerpDetailScreen: View {
     let model: AppModel
     let market: MarketModel
+    /// Handed down rather than rebuilt: an order outlives the sheet that sent it, and a
+    /// session created per presentation would lose the answer.
+    let session: TradingSession
 
     @Environment(\.dismiss) private var dismiss
     @State private var ticket: Direction?
@@ -249,7 +253,12 @@ private struct PerpDetailScreen: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .sheet(item: $ticket) { side in
-            TicketSheet(side: side, market: market.market, mark: market.mark.value) { ticket = nil }
+            TicketSheet(
+                side: side, market: market.market, mark: market.mark.value, session: session
+            ) {
+                session.clear()
+                ticket = nil
+            }
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }

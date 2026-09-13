@@ -126,6 +126,41 @@ public actor OrderDesk {
         return frameID
     }
 
+    /// One reader over the socket, applying every frame to the tracker and reporting
+    /// which order moved.
+    ///
+    /// The venue refuses a second frame stream and splitting the first is worse than
+    /// sharing it, so the single read lives in here rather than in a caller. Callers get
+    /// phase changes; anything else on the socket is applied and not re-broadcast.
+    ///
+    /// Ends when the socket ends. A closed socket is not an error to swallow — the caller
+    /// has to know the session is gone, which is why the stream finishes rather than
+    /// quietly stopping.
+    public func observe() -> AsyncStream<(frameID: Int64, phase: OrderPhase)> {
+        AsyncStream { continuation in
+            let task = Task {
+                do {
+                    for try await frame in try await socket.frames() {
+                        // `mt: 21` carries the forwarding flag, which decides whether an
+                        // order can be sent at all. Read here because this is the only
+                        // reader.
+                        if let account = try? frame.decode(PerplAccount.self), frame.kind == nil {
+                            noteForwarding(account.allowsForwarding)
+                        }
+                        guard let moved = await apply(frame),
+                              let phase = await phase(of: moved) else { continue }
+                        continuation.yield((moved, phase))
+                    }
+                } catch {
+                    // Falls through to finish: the socket closing is the event, and the
+                    // close code has already been mapped by the socket itself.
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     public func phase(of frameID: Int64) async -> OrderPhase? {
         await tracker.phase(of: frameID)
     }

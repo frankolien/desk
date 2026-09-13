@@ -10,27 +10,13 @@ struct TicketSheet: View {
     let side: Direction
     let market: Market?
     let mark: Price?
+    /// Injected rather than built here: the ticket does not own a socket and must not
+    /// decide whether an order can be sent. It asks, and is answered in a sentence.
+    let session: TradingSession
     let onDismiss: () -> Void
 
     @State private var amount = ""
     @State private var leverage = 1
-    @State private var submission = Submission.idle
-
-    /// What the ticket knows about the order it sent.
-    ///
-    /// `forwarded` is its own state and not a spinner labelled "done", because `mt: 3`
-    /// with `code: 0` means the gateway accepted the order for forwarding — not that it
-    /// reached the book and not that it filled. Only `mt: 24` settles anything. Collapsing
-    /// the two would tell someone they hold a position they may not.
-    enum Submission: Equatable {
-        case idle
-        case sending
-        case forwarded
-        case filled
-        case failed(String)
-
-        var isBusy: Bool { self == .sending || self == .forwarded }
-    }
 
     private var quote: OrderQuote? {
         guard let market, let mark, let money = Money(text: amount.isEmpty ? "0" : amount),
@@ -125,7 +111,7 @@ struct TicketSheet: View {
 
             Spacer(minLength: 8)
 
-            if case .failed(let reason) = submission {
+            if case .rejected(let reason) = session.progress {
                 // Above the control rather than in an alert: an alert is dismissed and
                 // forgotten, and the reason is the thing the user has to act on.
                 HStack(alignment: .top, spacing: 8) {
@@ -146,7 +132,7 @@ struct TicketSheet: View {
                     ? "Enter order size"
                     : "Hold to \(side.word().lowercased()) \(amount) AUSD · \(leverage)×",
                 tint: side == .up ? DeskColor.rise : DeskColor.fall,
-                isEnabled: quote != nil && !submission.isBusy
+                isEnabled: quote != nil && session.progress?.isBusy != true
             ) {
                 Task { await submit() }
             }
@@ -154,8 +140,8 @@ struct TicketSheet: View {
             // The one place the venue's own vocabulary is worth showing, because
             // "forwarded" is a real state a user can be stuck in and a spinner is not an
             // explanation.
-            if submission.isBusy {
-                Text(submission == .sending ? "Sending to Perpl…" : "Forwarded — waiting for the book")
+            if session.progress?.isBusy == true {
+                Text(session.progress == .sending ? "Sending to Perpl…" : "Forwarded — waiting for the book")
                     .font(DeskType.caption)
                     .foregroundStyle(DeskColor.nightMuted.color)
                     .frame(maxWidth: .infinity)
@@ -167,43 +153,22 @@ struct TicketSheet: View {
         .background(DeskColor.night.color)
     }
 
-    /// Sends the order, or explains precisely why it cannot be sent.
+    /// Builds the draft and hands it to the session.
     ///
-    /// Every failure here is a sentence naming what the user can do about it. There is no
-    /// enrolled key until the desk has been opened, and "not enrolled" is a state of the
-    /// account rather than a fault — so it reads as an instruction, not an error.
+    /// There is no branch here for "not enrolled". Whether an order can be signed is the
+    /// session's answer, arrived at through the same call the real path takes, so the day
+    /// a key exists nothing in this file changes.
     private func submit() async {
-        guard let quote else { return }
-        withAnimation(.snappy) { submission = .sending }
-        do {
-            try await send(quote)
-        } catch {
-            Haptics.failure()
-            withAnimation(.snappy) { submission = .failed(Self.sentence(for: error)) }
-        }
-    }
-
-    private func send(_ quote: OrderQuote) async throws {
-        // The authenticated socket needs an enrolled API key, which needs a desk opened
-        // on a funded address. Until that exists this is the honest answer rather than a
-        // fake confirmation — the one thing a trading app must never do is tell someone
-        // an order went through when nothing left the phone.
-        throw OrderDesk.Failure.notEnrolled
-    }
-
-    static func sentence(for error: any Error) -> String {
-        switch error {
-        case OrderDesk.Failure.notEnrolled:
-            return "Your desk is not enrolled with Perpl yet, so no order can be signed. "
-                + "Finish opening your desk first."
-        case OrderDesk.Failure.forwardingNotAllowed:
-            return "Perpl will not accept orders on this account until order forwarding "
-                + "is switched on, which is the last step of opening your desk."
-        case OrderDesk.Failure.notConnected:
-            return "Not connected to Perpl. Nothing was sent."
-        default:
-            return "The order could not be sent. Nothing left your phone."
-        }
+        guard let market, let quote else { return }
+        let draft = OrderDesk.Draft(
+            side: side == .up ? .long : .short,
+            size: quote.size,
+            leverageHundredths: leverage * 100,
+            // The venue's own cap, not a number chosen here. A market order is a
+            // marketable limit bounded by slippage, so this is the only thing standing
+            // between a thin book and a fill at any price.
+            slippageBps: min(50, market.maxMarketSlippageBps))
+        await session.place(draft)
     }
 
     private func liquidationText(_ quote: OrderQuote) -> String {

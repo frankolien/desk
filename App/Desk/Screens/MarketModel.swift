@@ -20,6 +20,10 @@ final class MarketModel {
     /// Marks this device has actually seen, oldest first. The venue publishes no candle
     /// endpoint, so this is the only honest series available.
     private(set) var history: [Double] = []
+    /// The block the venue last reported, carried on the same context call the price
+    /// comes from. Every order's deadline is computed against it, so a stale one produces
+    /// an order that expires on arrival.
+    private(set) var headBlock: Int64 = 0
 
     private static let historyLimit = 90
 
@@ -121,6 +125,7 @@ final class MarketModel {
             }
             self.market = market
             symbol = market.symbol
+            if let head = context.chain.gas?.headBlock { headBlock = max(headBlock, head) }
             mark.record(price, serverTimestampMilliseconds: market.state.observedAt.timestampMilliseconds)
             record(market: market, price: price)
             isLoadingFirstValue = false

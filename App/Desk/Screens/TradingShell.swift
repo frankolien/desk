@@ -8,6 +8,9 @@ struct TradingShell: View {
     let model: AppModel
 
     @State private var market = MarketModel()
+    /// One per signed-in app, not one per sheet: an order outlives the ticket that
+    /// sent it, and a session rebuilt on every presentation would lose the answer.
+    @State private var session = TradingSession()
     @State private var tab: Destination
     @State private var showsAccount = false
 
@@ -41,7 +44,7 @@ struct TradingShell: View {
             }
 
             Tab("Perps", systemImage: "infinity", value: .perps) {
-                MarketScreen(model: model, market: market)
+                MarketScreen(model: model, market: market, session: session)
             }
 
             Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
@@ -54,6 +57,9 @@ struct TradingShell: View {
                 .presentationBackground(.black)
         }
         .task { market.start() }
+        // The head block arrives on the same context call the price does, and every
+        // order's deadline is computed against it.
+        .onChange(of: market.headBlock) { _, block in session.noteHeadBlock(block) }
         .onDisappear(perform: market.stop)
     }
 }
