@@ -52,7 +52,7 @@ targets:
         # Without this entitlement the ceremony fails on device with no useful message,
         # because the association is checked by the system rather than by the app.
         com.apple.developer.associated-domains:
-          - webcredentials:desk-trade-giftstacks-projects.vercel.app
+          - webcredentials:desk-trading.vercel.app
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

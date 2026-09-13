@@ -4,7 +4,7 @@
 <dict>
 	<key>com.apple.developer.associated-domains</key>
 	<array>
-		<string>webcredentials:desk-trade-giftstacks-projects.vercel.app</string>
+		<string>webcredentials:desk-trading.vercel.app</string>
 	</array>
 </dict>
 </plist>
