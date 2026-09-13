@@ -24,6 +24,15 @@ final class MarketModel {
     /// comes from. Every order's deadline is computed against it, so a stale one produces
     /// an order that expires on arrival.
     private(set) var headBlock: Int64 = 0
+    /// Every market the venue lists, from the same context call. Kept so Watchlist and
+    /// Search can show real instruments at real prices rather than a table of invented
+    /// ones — the venue publishes seven, and none of them needed making up.
+    private(set) var allMarkets: [Market] = []
+
+    /// The one market Desk trades. A deliberate scope decision rather than a limitation
+    /// of the code — `OrderBuilder` takes the market as a parameter — and the discovery
+    /// screens say so rather than hiding the other six.
+    static let tradableMarketID: UInt32 = 16
 
     private static let historyLimit = 90
 
@@ -126,6 +135,7 @@ final class MarketModel {
             self.market = market
             symbol = market.symbol
             if let head = context.chain.gas?.headBlock { headBlock = max(headBlock, head) }
+            allMarkets = context.markets.filter(\.config.isOpen)
             mark.record(price, serverTimestampMilliseconds: market.state.observedAt.timestampMilliseconds)
             record(market: market, price: price)
             isLoadingFirstValue = false

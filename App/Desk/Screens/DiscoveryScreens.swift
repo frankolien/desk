@@ -1,172 +1,290 @@
+import DeskMoney
+import DeskPerpl
 import DeskUI
 import SwiftUI
 
+/// Watchlist and Search, over the markets the venue actually lists.
+///
+/// Both screens previously rendered a hard-coded table: five instruments with typed-in
+/// prices, invented percentage changes, and a wallet list carrying figures like
+/// "+$3.43M" and "186 trades" belonging to nobody. Two of the five markets do not exist
+/// on Perpl at all, and the leverage cap shown for Bitcoin was 40× against a real ceiling
+/// of 15×. In an app whose whole argument is that it never shows a number it cannot
+/// stand behind, that was the most dishonest surface in it.
+///
+/// Nothing needed inventing. The context call the price already makes lists every open
+/// market with its own mark and its own margin fractions, so these render seven real
+/// instruments at real prices — and say plainly which of them can be traded here.
+///
+/// The wallet list is gone rather than rebuilt. It needed account identities, and Perpl's
+/// public feed carries none; the same reason `SignalsScreen` reads the market rather than
+/// the crowd.
+
+// MARK: - Watchlist
+
 struct WatchlistScreen: View {
-    @State private var selection = WatchlistFilter.watchlist
+    let market: MarketModel
+    /// Saved locally. A watchlist is the user's own note about markets, it never needs to
+    /// leave the phone, and the list is short enough that defaults are the right home.
+    @AppStorage("desk.watchlist") private var savedIDs = ""
+
+    private var saved: Set<UInt32> {
+        Set(savedIDs.split(separator: ",").compactMap { UInt32($0) })
+    }
+
+    private var rows: [Market] {
+        market.allMarkets.filter { saved.contains($0.id) }
+    }
 
     var body: some View {
-        NavigationStack {
+        ZStack {
+            DeskBackground()
+
             ScrollView(showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    Picker("List", selection: $selection) {
-                        ForEach(WatchlistFilter.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 220)
-                    .frame(maxWidth: .infinity)
-                    .padding(.bottom, 30)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Watchlist")
+                        .font(.system(size: 30, weight: .heavy, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .padding(.top, 10)
 
-                    Text(selection.rawValue)
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                        .padding(.bottom, 8)
-                    Text(selection == .watchlist ? "Markets you saved." : "Wallets whose trades appear in Signals.")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.bottom, 26)
+                    Text(rows.isEmpty
+                         ? "Markets you save from Search appear here."
+                         : "\(rows.count) market\(rows.count == 1 ? "" : "s") saved.")
+                        .font(DeskType.caption)
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .padding(.top, 6)
 
-                    if selection == .watchlist {
-                        ForEach(DiscoveryMarket.watchlist) { MarketDiscoveryRow(market: $0, showsBookmark: true) }
+                    if rows.isEmpty {
+                        empty.padding(.top, 40)
                     } else {
-                        ForEach(TrackedWallet.samples) { TrackedWalletRow(wallet: $0) }
+                        VStack(spacing: 10) {
+                            ForEach(rows, id: \.id) { entry in
+                                MarketRow(
+                                    market: entry,
+                                    isTradable: entry.id == MarketModel.tradableMarketID,
+                                    isSaved: true) { toggle(entry.id) }
+                            }
+                        }
+                        .padding(.top, 20)
                     }
                 }
-                .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 112)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 130)
             }
-            .background(Color.black).toolbar(.hidden, for: .navigationBar)
         }
+    }
+
+    /// Nothing saved is not an error, and it is not an empty void either — it names the
+    /// one action that fills it.
+    private var empty: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "bookmark")
+                .font(.system(size: 34, weight: .medium))
+                .foregroundStyle(DeskColor.nightMuted.color)
+            Text("Nothing saved yet")
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundStyle(DeskColor.nightText.color)
+            Text("Open Search and tap the bookmark on any market.")
+                .font(DeskType.caption)
+                .foregroundStyle(DeskColor.nightMuted.color)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 30)
+    }
+
+    private func toggle(_ id: UInt32) {
+        var next = saved
+        if next.contains(id) { next.remove(id) } else { next.insert(id) }
+        // Sorted so the stored string is stable: an unordered set would rewrite the
+        // defaults value on every toggle even when the membership had not changed.
+        savedIDs = next.sorted().map(String.init).joined(separator: ",")
     }
 }
 
-private enum WatchlistFilter: String, CaseIterable, Identifiable {
-    case watchlist = "Watchlist", wallets = "Wallets"
-    var id: Self { self }
-}
+// MARK: - Search
 
 struct MarketSearchScreen: View {
+    let market: MarketModel
     @State private var query = ""
-    private var results: [DiscoveryMarket] {
-        query.isEmpty ? DiscoveryMarket.all : DiscoveryMarket.all.filter { "\($0.symbol) \($0.name)".localizedCaseInsensitiveContains(query) }
+    @AppStorage("desk.watchlist") private var savedIDs = ""
+
+    private var saved: Set<UInt32> {
+        Set(savedIDs.split(separator: ",").compactMap { UInt32($0) })
+    }
+
+    private var results: [Market] {
+        guard !query.isEmpty else { return market.allMarkets }
+        return market.allMarkets.filter {
+            $0.symbol.localizedCaseInsensitiveContains(query)
+        }
     }
 
     var body: some View {
-        NavigationStack {
+        ZStack {
+            DeskBackground()
+
             ScrollView(showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
                     Text("Search")
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                        .padding(.bottom, 18)
+                        .font(.system(size: 30, weight: .heavy, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .padding(.top, 10)
 
-                    HStack(spacing: 10) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Search markets, tokens or wallets", text: $query)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        if !query.isEmpty {
-                            Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                    field.padding(.top, 16)
+
+                    if market.allMarkets.isEmpty {
+                        // Still loading the context. Skeletons rather than "no results",
+                        // which would be a claim about the venue.
+                        VStack(alignment: .leading, spacing: 14) {
+                            ForEach(0..<4, id: \.self) { SkeletonRow(widthFraction: 0.8 - Double($0) * 0.1) }
                         }
-                    }
-                    .font(.system(size: 15, weight: .medium))
-                    .padding(.horizontal, 14).frame(height: 46)
-                    .discoveryGlass(interactive: true, in: Capsule())
-                    .padding(.bottom, 28)
-
-                    Text(query.isEmpty ? "TRENDING" : "RESULTS")
-                        .font(.system(size: 11, weight: .bold, design: .rounded)).tracking(0.8).foregroundStyle(.secondary)
-                        .padding(.bottom, 10)
-
-                    if results.isEmpty {
-                        ContentUnavailableView.search(text: query).frame(maxWidth: .infinity, minHeight: 300)
+                        .padding(.top, 28)
+                    } else if results.isEmpty {
+                        Text("No market matches “\(query)”.")
+                            .font(DeskType.caption)
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                            .padding(.top, 28)
                     } else {
-                        ForEach(results) { MarketDiscoveryRow(market: $0, showsBookmark: false) }
+                        VStack(spacing: 10) {
+                            ForEach(results, id: \.id) { entry in
+                                MarketRow(
+                                    market: entry,
+                                    isTradable: entry.id == MarketModel.tradableMarketID,
+                                    isSaved: saved.contains(entry.id)) { toggle(entry.id) }
+                            }
+                        }
+                        .padding(.top, 20)
                     }
+
+                    // The scope decision, stated where it is felt rather than hidden.
+                    Text("Desk trades Bitcoin only for now. The rest are listed because "
+                         + "Perpl lists them, and their prices here are real.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color.opacity(0.8))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 24)
                 }
-                .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 112)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 130)
             }
-            .background(Color.black).toolbar(.hidden, for: .navigationBar)
         }
+    }
+
+    private var field: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(DeskColor.nightMuted.color)
+            TextField("", text: $query, prompt: Text("Search markets")
+                .foregroundStyle(DeskColor.nightMuted.color))
+                .font(.system(size: 16, weight: .medium, design: .rounded))
+                .foregroundStyle(DeskColor.nightText.color)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.characters)
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 13)
+        .background(DeskColor.nightChip.color.opacity(0.6), in: Capsule())
+        .overlay(Capsule().stroke(DeskColor.nightLine.color, lineWidth: 0.5))
+    }
+
+    private func toggle(_ id: UInt32) {
+        var next = saved
+        if next.contains(id) { next.remove(id) } else { next.insert(id) }
+        // Sorted so the stored string is stable: an unordered set would rewrite the
+        // defaults value on every toggle even when the membership had not changed.
+        savedIDs = next.sorted().map(String.init).joined(separator: ",")
     }
 }
 
-private struct DiscoveryMarket: Identifiable {
-    let id: String
-    let symbol: String
-    let name: String
-    let price: String
-    let change: String
-    let maxLeverage: String
-    let glyph: String
-    let tint: Color
-    var isUp: Bool { change.hasPrefix("+") }
+// MARK: - One market
 
-    static let all = [
-        DiscoveryMarket(id: "btc", symbol: "BTC", name: "Bitcoin", price: "$77,354.50", change: "+0.19%", maxLeverage: "MAX 40×", glyph: "₿", tint: Color(red: 0.97, green: 0.58, blue: 0.10)),
-        DiscoveryMarket(id: "eth", symbol: "ETH", name: "Ethereum", price: "$2,508.35", change: "−0.74%", maxLeverage: "MAX 25×", glyph: "◆", tint: .white),
-        DiscoveryMarket(id: "hype", symbol: "HYPE", name: "Hyperliquid", price: "$78.30", change: "+0.38%", maxLeverage: "MAX 10×", glyph: "H", tint: Color(red: 0.36, green: 0.77, blue: 0.68)),
-        DiscoveryMarket(id: "sol", symbol: "SOL", name: "Solana", price: "$101.20", change: "−0.78%", maxLeverage: "MAX 20×", glyph: "S", tint: Color(red: 0.40, green: 0.82, blue: 0.72)),
-        DiscoveryMarket(id: "xrp", symbol: "XRP", name: "XRP", price: "$1.36", change: "−0.79%", maxLeverage: "MAX 20×", glyph: "X", tint: .white)
-    ]
-    static let watchlist = Array(all.prefix(4))
-}
+/// A market as the venue reports it: its own price, its own leverage ceiling.
+///
+/// The leverage figure comes from `initialMarginFraction`, which the venue encodes as a
+/// divisor in hundredths — 1500 is 15×, not 15%. The hard-coded version of this screen
+/// claimed 40× for Bitcoin, which is not a number Perpl would accept.
+private struct MarketRow: View {
+    let market: Market
+    let isTradable: Bool
+    let isSaved: Bool
+    let onToggle: () -> Void
 
-private struct MarketDiscoveryRow: View {
-    let market: DiscoveryMarket
-    let showsBookmark: Bool
+    private var price: String {
+        market.price(market.state.markRaw)
+            .map { "$" + $0.display(fractionDigits: market.config.priceDecimals) }
+            ?? Unavailable.text
+    }
+
     var body: some View {
-        Button { } label: {
-            HStack(spacing: 12) {
-                Group {
-                    if market.id == "btc" { AssetMark.bitcoin(size: 42) }
-                    else { AssetMark(glyph: market.glyph, tint: market.tint, size: 42) }
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(market.symbol).font(.system(size: 17, weight: .bold, design: .rounded))
-                    HStack(spacing: 5) {
-                        Text(market.name)
-                        Text(market.maxLeverage).padding(.horizontal, 6).padding(.vertical, 2)
-                            .overlay(Capsule().stroke(Color.white.opacity(0.14)))
-                    }.font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(market.price).font(.system(size: 16, weight: .bold, design: .rounded)).monospacedDigit()
-                    Text(market.change).font(.system(size: 13, weight: .bold, design: .rounded)).monospacedDigit()
-                        .foregroundStyle(market.isUp ? DeskColor.rise.color : DeskColor.fall.color)
-                }
-                if showsBookmark { Image(systemName: "bookmark.fill").font(.system(size: 12)).foregroundStyle(.secondary) }
+        HStack(spacing: 13) {
+            if market.symbol == "BTC" {
+                AssetMark.bitcoin(size: 38)
+            } else {
+                AssetMark(glyph: String(market.symbol.prefix(1)),
+                          tint: Self.tint(for: market.symbol), size: 38)
             }
-            .padding(.vertical, 13).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain).overlay(alignment: .bottom) { Divider() }
-    }
-}
 
-private struct TrackedWallet: Identifiable {
-    let id: Int, name: String, address: String, pnl: String, trades: String
-    static let samples = [
-        TrackedWallet(id: 1, name: "Fqoj", address: "Fqoj…Maiv", pnl: "+$8,421.10", trades: "42 trades"),
-        TrackedWallet(id: 2, name: "Mitch", address: "4Be9…3ha7t", pnl: "+$3.43M", trades: "186 trades"),
-        TrackedWallet(id: 3, name: "Perp Desk", address: "7ttJ…v9iQs", pnl: "+$22,018", trades: "91 trades")
-    ]
-}
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 7) {
+                    Text(market.symbol)
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
 
-private struct TrackedWalletRow: View {
-    let wallet: TrackedWallet
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "person.crop.circle.fill").font(.system(size: 38)).foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(wallet.name).font(.system(size: 16, weight: .bold))
-                Text("\(wallet.address) · \(wallet.trades)").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                    Text("MAX \(market.config.maxLeverage)×")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .overlay(Capsule().stroke(DeskColor.nightLine.color, lineWidth: 0.7))
+                }
+
+                // Said plainly rather than implied by a disabled row. A market listed but
+                // not tradable here is a fact about Desk, not about the market.
+                Text(isTradable ? "Tradable on Desk" : "View only")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(isTradable
+                                     ? DeskColor.rise.color
+                                     : DeskColor.nightMuted.color)
             }
-            Spacer()
-            Text(wallet.pnl).font(.system(size: 14, weight: .bold)).foregroundStyle(DeskColor.rise.color).monospacedDigit()
-        }
-        .padding(.vertical, 14).overlay(alignment: .bottom) { Divider() }
-    }
-}
 
-private extension View {
-    @ViewBuilder func discoveryGlass<S: Shape>(interactive: Bool = false, in shape: S) -> some View {
-        if #available(iOS 26.0, *) { glassEffect(.regular.interactive(interactive), in: shape) }
-        else { background(.ultraThinMaterial, in: shape) }
+            Spacer(minLength: 8)
+
+            Text(price)
+                .font(.system(size: 15, weight: .bold).monospacedDigit())
+                .foregroundStyle(DeskColor.nightText.color)
+                .contentTransition(.numericText())
+
+            Button(action: onToggle) {
+                Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isSaved ? DeskColor.action.color : DeskColor.nightMuted.color)
+                    .frame(width: 34, height: 34)
+            }
+            .accessibilityLabel(isSaved ? "Remove \(market.symbol) from watchlist"
+                                        : "Save \(market.symbol) to watchlist")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(DeskColor.nightChip.color.opacity(0.5),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(DeskColor.nightLine.color, lineWidth: 0.5))
+    }
+
+    /// A colour per symbol so rows are told apart before they are read. Derived from the
+    /// symbol rather than kept in a table, so a market the venue adds still gets one.
+    static func tint(for symbol: String) -> Color {
+        let seed = AddressAvatar.seed(for: symbol)
+        return Color(hue: seed.primary / 360, saturation: 0.55, brightness: 0.85)
     }
 }

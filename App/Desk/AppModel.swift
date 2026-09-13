@@ -76,7 +76,7 @@ final class AppModel {
            index + 1 < ProcessInfo.processInfo.arguments.count {
             let name = ProcessInfo.processInfo.arguments[index + 1]
             stage = switch name {
-            case "market", "signals", "signal-detail", "empty": .trading
+            case "market", "signals", "signal-detail", "empty", "watchlist", "search": .trading
             case "fund": .needsDesk
             default: .welcome
             }

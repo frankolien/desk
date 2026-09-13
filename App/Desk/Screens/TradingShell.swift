@@ -21,8 +21,26 @@ struct TradingShell: View {
 
     init(model: AppModel) {
         self.model = model
+        _tab = State(initialValue: Self.startingTab())
+    }
+
+    /// Which tab a debug launch opens on.
+    ///
+    /// `-stage <name>` already decides whether the app is signed in; this reads the same
+    /// argument to pick a destination, so every tab can be captured and reviewed without
+    /// tapping — which is the only way to look at them in a simulator, and the reason the
+    /// fabricated Watchlist survived as long as it did.
+    ///
+    /// Debug only. A release build always opens on Home.
+    private static func startingTab() -> Destination {
+        #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        _tab = State(initialValue: arguments.contains("signals") || arguments.contains("signal-detail") ? .signals : arguments.contains("market") ? .perps : .home)
+        if arguments.contains("signals") || arguments.contains("signal-detail") { return .signals }
+        if arguments.contains("watchlist") { return .watchlist }
+        if arguments.contains("search") { return .search }
+        if arguments.contains("market") || arguments.contains("empty") { return .perps }
+        #endif
+        return .home
     }
 
     var body: some View {
@@ -37,7 +55,7 @@ struct TradingShell: View {
             }
 
             Tab("Watchlist", systemImage: "bookmark.fill", value: .watchlist) {
-                WatchlistScreen()
+                WatchlistScreen(market: market)
             }
 
             Tab("Signals", systemImage: "antenna.radiowaves.left.and.right", value: .signals) {
@@ -49,7 +67,7 @@ struct TradingShell: View {
             }
 
             Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
-                MarketSearchScreen()
+                MarketSearchScreen(market: market)
             }
         }
         .tint(.white)
