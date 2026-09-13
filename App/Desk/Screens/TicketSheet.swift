@@ -111,7 +111,7 @@ struct TicketSheet: View {
 
             Spacer(minLength: 8)
 
-            if case .rejected(let reason) = session.progress {
+            if session.hasFailed, let reason = session.statusText {
                 // Above the control rather than in an alert: an alert is dismissed and
                 // forgotten, and the reason is the thing the user has to act on.
                 HStack(alignment: .top, spacing: 8) {
@@ -132,7 +132,7 @@ struct TicketSheet: View {
                     ? "Enter order size"
                     : "Hold to \(side.word().lowercased()) \(amount) AUSD · \(leverage)×",
                 tint: side == .up ? DeskColor.rise : DeskColor.fall,
-                isEnabled: quote != nil && session.progress?.isBusy != true
+                isEnabled: quote != nil && !session.isBusy
             ) {
                 Task { await submit() }
             }
@@ -140,8 +140,8 @@ struct TicketSheet: View {
             // The one place the venue's own vocabulary is worth showing, because
             // "forwarded" is a real state a user can be stuck in and a spinner is not an
             // explanation.
-            if session.progress?.isBusy == true {
-                Text(session.progress == .sending ? "Sending to Perpl…" : "Forwarded — waiting for the book")
+            if session.isBusy, let status = session.statusText {
+                Text(status)
                     .font(DeskType.caption)
                     .foregroundStyle(DeskColor.nightMuted.color)
                     .frame(maxWidth: .infinity)

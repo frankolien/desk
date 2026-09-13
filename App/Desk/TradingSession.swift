@@ -19,20 +19,40 @@ import Observation
 @MainActor
 @Observable
 final class TradingSession {
-    /// Where an order is, as the ticket needs to render it.
-    enum Progress: Equatable {
-        case sending
-        /// `mt: 3`, `code: 0`. The gateway has it; the book does not. Its own state,
-        /// because collapsing it into "done" tells someone they hold a position they may
-        /// not.
-        case forwarded
-        case filled
-        case rejected(String)
+    /// The order's state machine lives in `DeskFlow` and is tested there. This type
+    /// turns its outcomes into sentences and nothing else — the association window, the
+    /// replay and the terminal rule are not re-implemented here, because they were once
+    /// and that is how the race got in.
+    private(set) var order = OrderProgress()
 
-        var isBusy: Bool { self == .sending || self == .forwarded }
+    /// The sentence the ticket shows, or nothing while there is no order.
+    var statusText: String? {
+        switch order.outcome {
+        case nil: nil
+        case .sending: "Sending to Perpl…"
+        case .forwarded: "Forwarded — waiting for the book"
+        case .settled: "Filled"
+        case .expired: "The order expired before it reached the book. Nothing was filled."
+        case .abandoned:
+            "The connection to Perpl dropped before the order settled. "
+                + "Check your position before sending another."
+        case .rejected(let code, let subReason):
+            localProblem ?? Self.reason(code: code, subReason: subReason)
+        }
     }
 
-    private(set) var progress: Progress?
+    var isBusy: Bool { order.outcome?.isBusy == true }
+    var hasFailed: Bool {
+        switch order.outcome {
+        case .rejected, .expired, .abandoned: true
+        default: false
+        }
+    }
+
+    /// A failure raised before the order ever reached the desk — no enrolled key, no
+    /// connection — which has no venue code behind it and needs its own sentence.
+    private var localProblem: String?
+
     /// The block the venue most recently reported. An order's deadline is computed
     /// against it, so a stale one produces an order that expires on arrival.
     private(set) var headBlock: Int64 = 0
@@ -41,6 +61,14 @@ final class TradingSession {
     private var credentials: PerplCredentials?
     private var watching: Task<Void, Never>?
     private var frameID: Int64?
+    /// Updates that arrived before the order they belong to had a frame id here.
+    ///
+    /// The window is real: `desk.place` tracks the order and sends it, and the gateway can
+    /// answer while that call is still unwinding — so `observe` can yield a forwarded or
+    /// even settled update before `place` has returned the id to compare against. Without
+    /// somewhere to put those, the answer is dropped and the ticket waits forever on an
+    /// order that already filled.
+    private var unassociated: [(id: Int64, phase: OrderPhase)] = []
 
     /// Called once a desk has been opened and enrolled. Until then there is nothing to
     /// connect with, which is a state rather than a fault.
@@ -74,46 +102,43 @@ final class TradingSession {
 
     /// Sends the order, or explains why it cannot be sent.
     ///
-    /// Every failure is a sentence naming what the user can do next. Nothing here reports
-    /// success on anything short of `mt: 24`.
+    /// The association window is closed in both directions: anything the watcher held
+    /// while the id was unknown is replayed by `associate`, and the tracker — which is the
+    /// authority and never walks a terminal phase backwards — is asked directly in case an
+    /// update landed with no watcher tick left to carry it.
     func place(_ draft: OrderDesk.Draft) async {
-        progress = .sending
+        localProblem = nil
+        order.begin()
         do {
             guard let desk else { throw OrderDesk.Failure.notEnrolled }
-            frameID = try await desk.place(draft, headBlock: headBlock)
+            let id = try await desk.place(draft, headBlock: headBlock)
+            order.associate(id)
+            if let current = await desk.phase(of: id) { order.apply(id: id, phase: current) }
+            if order.outcome == .settled { Haptics.success() }
         } catch {
             Haptics.failure()
-            progress = .rejected(Self.sentence(for: error))
+            localProblem = Self.sentence(for: error)
+            order.failLocally()
         }
     }
 
-    func clear() { progress = nil; frameID = nil }
+    func clear() {
+        order.reset()
+        localProblem = nil
+    }
 
     private func record(_ id: Int64, _ phase: OrderPhase) {
-        guard id == frameID else { return }
-        switch phase {
-        case .sent:
-            progress = .sending
-        case .forwarded:
-            progress = .forwarded
-        case .rejected(let code, let subReason):
-            Haptics.failure()
-            progress = .rejected(Self.reason(code: code, subReason: subReason))
-        case .settled:
-            Haptics.success()
-            progress = .filled
-        case .expired:
-            progress = .rejected(
-                "The order expired before it reached the book. Nothing was filled.")
+        let before = order.outcome
+        order.apply(id: id, phase: phase)
+        guard order.outcome != before else { return }
+        switch order.outcome {
+        case .settled: Haptics.success()
+        case .rejected, .expired: Haptics.failure()
+        default: break
         }
     }
 
-    private func socketEnded() {
-        guard progress?.isBusy == true else { return }
-        progress = .rejected(
-            "The connection to Perpl dropped before the order settled. "
-                + "Check your position before sending another.")
-    }
+    private func socketEnded() { order.connectionLost() }
 
     /// The venue's sub-reason codes, as sentences.
     ///
