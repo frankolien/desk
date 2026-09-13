@@ -1,3 +1,4 @@
+import DeskPerpl
 import DeskUI
 import SwiftUI
 
@@ -18,6 +19,17 @@ struct HomeScreen: View {
 
     private var isEmpty: Bool {
         model.collateral.value.map(\.isZero) ?? true
+    }
+
+    /// Derived here, at the point of display, so every figure in the row descends from the
+    /// one mark that was current when it was drawn. Held on the model instead, PnL and
+    /// mark could come from two ticks a frame apart and disagree on screen.
+    private var position: PositionFigures? {
+        guard let held = model.openPosition,
+              let mark = market.mark.value,
+              let config = market.market?.config
+        else { return nil }
+        return PositionFigures(position: held, market: config, mark: mark)
     }
 
     var body: some View {
@@ -164,13 +176,21 @@ struct HomeScreen: View {
                 tint: DeskColor.action,
                 action: onFund)
 
+            // Profit first. A position row that leads with size answers a question
+            // nobody opens the app to ask.
             HomeAssetRow(
                 mark: { MonochromeSymbolMark(symbol: "chart.xyaxis.line") },
-                title: "Open positions",
-                subtitle: "Perpl testnet",
-                value: "None",
-                change: "Ready",
-                tint: DeskColor.nightMuted,
+                title: position.map { "\($0.side == .long ? "Long" : "Short") \(market.symbol) · \($0.leverageHundredths / 100)×" }
+                    ?? "Open positions",
+                subtitle: positionSubtitle,
+                value: position.map { figures in
+                    hidesBalance
+                        ? "•••••"
+                        : (figures.unrealisedPnL.isNegative ? "" : "+")
+                            + figures.unrealisedPnL.display() + " AUSD"
+                } ?? "None",
+                change: position.map { Self.percent($0.returnOnMarginMicros) + " on margin" } ?? "Ready",
+                tint: position.map { $0.isProfit ? DeskColor.rise : DeskColor.fall } ?? DeskColor.nightMuted,
                 action: onTrade)
 
             HomeAssetRow(
@@ -184,6 +204,26 @@ struct HomeScreen: View {
 
             sessionRow
         }
+    }
+
+    /// Liquidation distance rather than size, because distance is the figure that
+    /// changes and the one that can end the position. `--` when the price is not yet
+    /// known: a distance computed from no mark would be a claim.
+    private var positionSubtitle: String {
+        guard let position else { return "Perpl testnet" }
+        guard let distance = position.liquidationDistanceMicros else {
+            return "Liquidation \(Unavailable.text)"
+        }
+        return distance == 0
+            ? "At liquidation"
+            : "Liquidation \(Self.percent(distance, signed: false)) away"
+    }
+
+    /// Micros to a percentage, truncated. A gain is never rounded up into one it is not.
+    static func percent(_ micros: Int, signed: Bool = true) -> String {
+        let sign = micros < 0 ? Direction.minus : (signed ? "+" : "")
+        let magnitude = abs(micros)
+        return "\(sign)\(magnitude / 10_000).\(String(format: "%02d", (magnitude % 10_000) / 100))%"
     }
 
     private var sessionRow: some View {

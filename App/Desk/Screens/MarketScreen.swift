@@ -11,6 +11,7 @@ struct MarketScreen: View {
 
     @State private var query = ""
     @State private var showsBTC = false
+    @State private var showsPosition = false
 
     var body: some View {
         NavigationStack {
@@ -116,29 +117,56 @@ struct MarketScreen: View {
         .perpGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
+    /// Derived at the point of display so that the header total, the PnL and the
+    /// liquidation distance all descend from the one mark current when the screen drew.
+    private var position: PositionFigures? {
+        guard let held = model.openPosition,
+              let mark = market.mark.value,
+              let config = market.market?.config
+        else { return nil }
+        return PositionFigures(position: held, market: config, mark: mark)
+    }
+
     private var positions: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Open Positions")
                 .font(.system(size: 17, weight: .bold, design: .rounded))
                 .foregroundStyle(DeskColor.nightMuted.color)
-            Text("$0.00")
+
+            // The header total is unrealised PnL, not notional. Notional is the number
+            // that looks impressive and answers nothing; this is the one a person came
+            // to see.
+            Text(position.map { figures in
+                (figures.unrealisedPnL.isNegative ? "" : "+") + "$" + figures.unrealisedPnL.display()
+            } ?? "$0.00")
                 .font(.system(size: 28, weight: .bold, design: .rounded).monospacedDigit())
-                .foregroundStyle(DeskColor.nightText.color)
+                .foregroundStyle((position.map { $0.isProfit ? DeskColor.rise : DeskColor.fall }
+                                  ?? DeskColor.nightText).color)
+                .contentTransition(.numericText())
+                .animation(.snappy(duration: 0.25), value: position?.unrealisedPnL.raw)
                 .padding(.top, 3)
 
-            VStack(spacing: 10) {
-                Image(systemName: "infinity")
-                    .font(.system(size: 42, weight: .semibold))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-                Text("No Open Positions")
-                    .font(.system(size: 21, weight: .bold, design: .rounded))
-                    .foregroundStyle(DeskColor.nightText.color)
-                Text("Choose a market below to open one")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
+            if let position {
+                OpenPositionCard(
+                    figures: position,
+                    symbol: market.symbol,
+                    isStale: market.freshness.freezesDigits) { showsPosition = true }
+                    .padding(.top, 16)
+            } else {
+                VStack(spacing: 10) {
+                    Image(systemName: "infinity")
+                        .font(.system(size: 42, weight: .semibold))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                    Text("No Open Positions")
+                        .font(.system(size: 21, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                    Text("Choose a market below to open one")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 190)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 190)
         }
     }
 

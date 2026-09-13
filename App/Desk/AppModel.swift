@@ -37,6 +37,17 @@ final class AppModel {
     /// Whether a Perpl account exists for this address, read from the chain rather than
     /// assumed from having signed in.
     private(set) var hasDesk = LastGood<Bool>()
+    /// The open position, exactly as the venue reports it.
+    ///
+    /// Kept raw rather than as derived figures, because the figures need a mark and the
+    /// mark belongs to the market model. Deriving them at the point of display means
+    /// every figure on the screen descends from the one tick that was current when it was
+    /// drawn, rather than from two ticks a frame apart.
+    ///
+    /// It arrives on the authenticated socket as `mt: 26` then `mt: 27`, so it stays nil
+    /// until a real session exists. Nil is rendered as "no position", which is correct
+    /// while there is no way to have one.
+    private(set) var openPosition: PerplPosition?
 
     private(set) var sessionRemaining: Duration = .zero
     /// Shown once, ever, the first time leverage is reached.
@@ -81,11 +92,30 @@ final class AppModel {
                 walletMON.record(NativeAmount(raw: 190_000_000_000_000_000) ?? .zero)
                 collateral.record(Money(text: "1282.18") ?? .zero)
                 hasDesk.record(true)
+                openPosition = Self.reviewPosition
                 sessionRemaining = .seconds(552)
             }
         }
         #endif
     }
+
+    #if DEBUG
+    /// A position shaped exactly as `mt: 26` sends one, so the position UI can be drawn
+    /// and reviewed before the authenticated socket exists. Decoded from JSON rather than
+    /// built field by field, because a fixture that skips the decoder proves nothing
+    /// about the decoder.
+    ///
+    /// A long of 1.00000 BTC entered at 77,000.0 against 5,000 AUSD, which is roughly 15x
+    /// — near the ceiling, so the liquidation figure on screen is a real one and close
+    /// enough to matter.
+    static let reviewPosition: PerplPosition? = {
+        let body = Data(#"""
+        {"mkt":16,"acc":42,"pid":"7","sd":1,"c":"5000000000","ep":770000,"epr":21845,
+         "s":100000,"lv":1500,"efs":"0","xfs":"0","fee":"3850000","st":1}
+        """#.utf8)
+        return try? JSONDecoder().decode(PerplPosition.self, from: body)
+    }()
+    #endif
 
     var sessionFraction: Double {
         let total = Double(SigningSession.defaultLifetime.components.seconds)

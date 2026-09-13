@@ -77,6 +77,56 @@ public enum Margin {
         return Money(raw: fitted)
     }
 
+    /// Unrealised profit with the venue's sub-tick entry residue applied.
+    ///
+    /// Perpl reports entry as a whole price plus `epr`, a Q16 fraction of one tick, so
+    /// the true entry is `entry + residue / 65_536`. Ignoring the residue is the obvious
+    /// shortcut and the wrong one: it does not average out, it biases every position in
+    /// the same direction by up to one tick, and a bias that always leans one way reads
+    /// to a user as the app being wrong rather than as rounding.
+    ///
+    /// Computed by multiplying through by 65,536 so the division happens once, at the
+    /// end, in `Int128`. Truncating toward zero keeps the figure conservative: a profit
+    /// is never rounded up and a loss is never rounded away.
+    public static func unrealisedPnL(
+        entry: Price,
+        residueQ16: Int,
+        mark: Price,
+        size: Size,
+        side: Side
+    ) -> Money? {
+        guard entry.decimals == mark.decimals, size.raw >= 0 else { return nil }
+
+        // The gap, in sixty-five-thousand-five-hundred-and-thirty-sixths of a tick.
+        let scaledGap: Int128 = side == .long
+            ? (Int128(mark.raw) - Int128(entry.raw)) * 65_536 - Int128(residueQ16)
+            : (Int128(entry.raw) - Int128(mark.raw)) * 65_536 + Int128(residueQ16)
+
+        let (product, overflowed) = scaledGap.multipliedReportingOverflow(by: Int128(size.raw))
+        guard !overflowed else { return nil }
+
+        // Back to the collateral's scale: divide by 65,536 and by 10^(pd + sd - 6).
+        let exponent = Int(entry.decimals) + Int(size.decimals) - Int(Money.decimals)
+        var divisor = Int128(65_536)
+        if exponent > 0 {
+            guard let factor = Pow10.value(exponent) else { return nil }
+            let (widened, tooBig) = divisor.multipliedReportingOverflow(by: factor)
+            guard !tooBig else { return nil }
+            divisor = widened
+        } else if exponent < 0 {
+            guard let factor = Pow10.value(-exponent) else { return nil }
+            let (widened, tooBig) = product.multipliedReportingOverflow(by: factor)
+            guard !tooBig else { return nil }
+            let raw = divide(widened, by: divisor, rounding: .towardZero)
+            guard let fitted = Int64(exactly: raw) else { return nil }
+            return Money(raw: fitted)
+        }
+
+        let raw = divide(product, by: divisor, rounding: .towardZero)
+        guard let fitted = Int64(exactly: raw) else { return nil }
+        return Money(raw: fitted)
+    }
+
     /// Unrealised profit, against the mark rather than the last trade.
     public static func unrealisedPnL(
         entry: Price,
