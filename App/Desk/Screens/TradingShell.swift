@@ -41,7 +41,7 @@ struct TradingShell: View {
             }
 
             Tab("Signals", systemImage: "antenna.radiowaves.left.and.right", value: .signals) {
-                SignalsScreen()
+                SignalsScreen(market: market)
             }
 
             Tab("Perps", systemImage: "infinity", value: .perps) {
