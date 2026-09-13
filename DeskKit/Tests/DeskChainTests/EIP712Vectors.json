@@ -1,0 +1,300 @@
+[
+ {
+  "label": "uint8 at its ceiling",
+  "encodeType": "A(uint8 x)",
+  "types": {
+   "A": [
+    {
+     "type": "uint8",
+     "name": "x"
+    }
+   ]
+  },
+  "message": {
+   "x": "255"
+  },
+  "structHash": "0x35b09c22410e89611055eb9c1780dd340fab4817fdf9da44802522050bb26a12",
+  "rejected": null
+ },
+ {
+  "label": "uint8 over its ceiling",
+  "encodeType": "A(uint8 x)",
+  "types": {
+   "A": [
+    {
+     "type": "uint8",
+     "name": "x"
+    }
+   ]
+  },
+  "message": {
+   "x": "256"
+  },
+  "structHash": null,
+  "rejected": "IntegerOutOfRangeError"
+ },
+ {
+  "label": "uint64 at its ceiling",
+  "encodeType": "A(uint64 x)",
+  "types": {
+   "A": [
+    {
+     "type": "uint64",
+     "name": "x"
+    }
+   ]
+  },
+  "message": {
+   "x": "18446744073709551615"
+  },
+  "structHash": "0x53da59428e97a062e977f61fedc245085cbad443eef32dda1b1167fa02ef0583",
+  "rejected": null
+ },
+ {
+  "label": "int256 minus one",
+  "encodeType": "A(int256 x)",
+  "types": {
+   "A": [
+    {
+     "type": "int256",
+     "name": "x"
+    }
+   ]
+  },
+  "message": {
+   "x": "-1"
+  },
+  "structHash": "0x674d1637d5ee03c7f9d9468056de066d4476a83e4cb76643255acdb23464143d",
+  "rejected": null
+ },
+ {
+  "label": "int128 negative",
+  "encodeType": "A(int128 x)",
+  "types": {
+   "A": [
+    {
+     "type": "int128",
+     "name": "x"
+    }
+   ]
+  },
+  "message": {
+   "x": "-12345"
+  },
+  "structHash": "0x812d6f613f7438d84912004eb7f5c3515b6bbce953b75a9713fdfca4c76c12f5",
+  "rejected": null
+ },
+ {
+  "label": "int128 at its floor",
+  "encodeType": "A(int128 x)",
+  "types": {
+   "A": [
+    {
+     "type": "int128",
+     "name": "x"
+    }
+   ]
+  },
+  "message": {
+   "x": "-170141183460469231731687303715884105728"
+  },
+  "structHash": "0x395de10a41f5489205a6069afe0c4e4afac7c79549e598b3de4f27aa609bd794",
+  "rejected": null
+ },
+ {
+  "label": "int128 at its ceiling",
+  "encodeType": "A(int128 x)",
+  "types": {
+   "A": [
+    {
+     "type": "int128",
+     "name": "x"
+    }
+   ]
+  },
+  "message": {
+   "x": "170141183460469231731687303715884105727"
+  },
+  "structHash": "0x0285202a5fc7b190d5f2ad196a39570e254b80d6cb4da8aef6b6c4a63f3ac9b7",
+  "rejected": null
+ },
+ {
+  "label": "int128 under its floor",
+  "encodeType": "A(int128 x)",
+  "types": {
+   "A": [
+    {
+     "type": "int128",
+     "name": "x"
+    }
+   ]
+  },
+  "message": {
+   "x": "-170141183460469231731687303715884105729"
+  },
+  "structHash": null,
+  "rejected": "IntegerOutOfRangeError"
+ },
+ {
+  "label": "bytes4",
+  "encodeType": "A(bytes4 x)",
+  "types": {
+   "A": [
+    {
+     "type": "bytes4",
+     "name": "x"
+    }
+   ]
+  },
+  "message": {
+   "x": "0xdeadbeef"
+  },
+  "structHash": "0xc7c5e6318f0049ce05dfeebfe2d8563b5cbe693090fec12d04318f776192ed27",
+  "rejected": null
+ },
+ {
+  "label": "bytes8",
+  "encodeType": "A(bytes8 x)",
+  "types": {
+   "A": [
+    {
+     "type": "bytes8",
+     "name": "x"
+    }
+   ]
+  },
+  "message": {
+   "x": "0x0011223344556677"
+  },
+  "structHash": "0xc075b1ff9d9082830554e05c0a2754d16ec507ecd04e460d5f7e100cdafa4fdb",
+  "rejected": null
+ },
+ {
+  "label": "bytes32",
+  "encodeType": "A(bytes32 x)",
+  "types": {
+   "A": [
+    {
+     "type": "bytes32",
+     "name": "x"
+    }
+   ]
+  },
+  "message": {
+   "x": "0x1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "structHash": "0x65c6deadb098247b7b36bf84261b7a4afb07cc23c7dec07f175d78b803d9fff8",
+  "rejected": null
+ },
+ {
+  "label": "nested array",
+  "encodeType": "A(uint256[2][2] xs)",
+  "types": {
+   "A": [
+    {
+     "type": "uint256[2][2]",
+     "name": "xs"
+    }
+   ]
+  },
+  "message": {
+   "xs": [
+    [
+     "1",
+     "2"
+    ],
+    [
+     "3",
+     "4"
+    ]
+   ]
+  },
+  "structHash": "0x4c05b42a19d10b1ecc4bd0dc05ca6b7e23bd76348ff7080227ba6ad6ab09f803",
+  "rejected": null
+ },
+ {
+  "label": "zero padded hex",
+  "encodeType": "A(uint256 x)",
+  "types": {
+   "A": [
+    {
+     "type": "uint256",
+     "name": "x"
+    }
+   ]
+  },
+  "message": {
+   "x": "1"
+  },
+  "structHash": "0x882e94cab90ef8c3d9eb615d7f6e1ce82d8d690ea41200f0f0f4ef192b135692",
+  "rejected": null
+ },
+ {
+  "label": "empty bytes",
+  "encodeType": "A(bytes b)",
+  "types": {
+   "A": [
+    {
+     "type": "bytes",
+     "name": "b"
+    }
+   ]
+  },
+  "message": {
+   "b": "0x"
+  },
+  "structHash": "0x1c7518db28565cdc05938db9b2e3b96a7dcacd3511e3dfa5fb8c82ddc778d112",
+  "rejected": null
+ },
+ {
+  "label": "even bytes",
+  "encodeType": "A(bytes b)",
+  "types": {
+   "A": [
+    {
+     "type": "bytes",
+     "name": "b"
+    }
+   ]
+  },
+  "message": {
+   "b": "0xabcd"
+  },
+  "structHash": "0x80b5ecfa5b6b471dc76fc8bc901d6faaef24b5bc8a9dda7a2e980f501aa88074",
+  "rejected": null
+ },
+ {
+  "label": "unicode string",
+  "encodeType": "A(string s)",
+  "types": {
+   "A": [
+    {
+     "type": "string",
+     "name": "s"
+    }
+   ]
+  },
+  "message": {
+   "s": "héllo 🚀 ünïcode"
+  },
+  "structHash": "0xf15be85e7da9777232145393f777a1f73edc820c3c4dbe5efcecc3ee0c114980",
+  "rejected": null
+ },
+ {
+  "label": "bool",
+  "encodeType": "A(bool b)",
+  "types": {
+   "A": [
+    {
+     "type": "bool",
+     "name": "b"
+    }
+   ]
+  },
+  "message": {
+   "b": true
+  },
+  "structHash": "0xe84741317df08a5ffd7ff6309cd9b40ab5f982d4d4124be8dfe5020ed5fdc1d1",
+  "rejected": null
+ }
+]
