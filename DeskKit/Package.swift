@@ -91,7 +91,10 @@ let package = Package(
         .testTarget(
             name: "DeskFlowTests",
             dependencies: ["DeskFlow", "DeskNet"],
-            resources: [.process("EnrolmentPayload.json")],
+            // The venue context is shared with DeskPerplTests rather than hand-built:
+            // an order is validated against the real market's decimals and margin
+            // fractions, and a market invented for a test proves nothing about those.
+            resources: [.process("EnrolmentPayload.json"), .process("Context-testnet.json")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]
