@@ -11,9 +11,10 @@ struct MarketScreen: View {
     let session: TradingSession
 
     @State private var query = ""
-    @State private var showsBTC = false
+    @State private var showsMarket = false
     @State private var showsPosition = false
     @State private var showsWithdraw = false
+    @State private var showsFunding = false
 
     var body: some View {
         NavigationStack {
@@ -36,7 +37,7 @@ struct MarketScreen: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(isPresented: $showsBTC) {
+            .navigationDestination(isPresented: $showsMarket) {
                 PerpDetailScreen(model: model, market: market, session: session)
                     .toolbar(.hidden, for: .tabBar)
             }
@@ -47,6 +48,7 @@ struct MarketScreen: View {
             .sheet(isPresented: $showsPosition) {
                 PositionScreen(model: model, isStale: market.freshness.freezesDigits)
             }
+            .sheet(isPresented: $showsFunding) { AddFundsSheet(model: model) }
         }
     }
 
@@ -79,10 +81,7 @@ struct MarketScreen: View {
 
     private var collateralCard: some View {
         HStack(spacing: 14) {
-            Text("A")
-                .font(.system(size: 24, weight: .heavy, design: .rounded))
-                .foregroundStyle(DeskColor.nightText.color)
-                .frame(width: 38, height: 38)
+            TokenLogo(asset: .ausd, size: 38)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text("Available")
@@ -103,7 +102,7 @@ struct MarketScreen: View {
             .buttonStyle(.plain)
             .perpGlass(interactive: true, in: Circle())
 
-            Button { model.advance(to: .needsDesk) } label: {
+            Button { showsFunding = true } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 17, weight: .bold))
                     .frame(width: 38, height: 38)
@@ -177,15 +176,23 @@ struct MarketScreen: View {
                 .tracking(0.9)
                 .foregroundStyle(DeskColor.nightMuted.color)
 
-            if query.isEmpty || "btc bitcoin".contains(query.lowercased()) {
-                Button { showsBTC = true } label: {
+            let visible = market.allMarkets.filter { item in
+                query.isEmpty || item.symbol.localizedCaseInsensitiveContains(query)
+            }
+            if !visible.isEmpty {
+                ForEach(visible, id: \.id) { item in
+                Button {
+                    market.select(item)
+                    Task { await session.selectMarket(item) }
+                    showsMarket = true
+                } label: {
                     HStack(spacing: 12) {
-                        AssetMark.bitcoin(size: 42)
+                        MarketTokenLogo(symbol: item.symbol, size: 42)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(market.symbol)
+                            Text(item.symbol)
                                 .font(.system(size: 18, weight: .bold, design: .rounded))
                                 .foregroundStyle(DeskColor.nightText.color)
-                            Text("MAX 15×")
+                            Text("MAX \(item.config.maxLeverage)×")
                                 .font(.system(size: 11, weight: .bold, design: .rounded))
                                 .foregroundStyle(DeskColor.nightMuted.color)
                                 .padding(.horizontal, 8)
@@ -194,17 +201,21 @@ struct MarketScreen: View {
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 4) {
-                            Text(market.markText == "—" ? "—" : "$" + market.markText)
+                            let price = market.markText(for: item)
+                            Text(price == "—" ? "—" : "$" + price)
                                 .font(.system(size: 18, weight: .bold, design: .rounded).monospacedDigit())
                                 .foregroundStyle(DeskColor.nightText.color)
-                            Text(market.changePercentText ?? "—")
+                            let change = market.changePercent(for: item)
+                            Text(change.map { String(format: "%+.2f%%", $0) } ?? "—")
                                 .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
-                                .foregroundStyle(market.trend.color)
+                                .foregroundStyle((change ?? 0) >= 0 ? DeskColor.rise.color : DeskColor.fall.color)
                         }
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .padding(.vertical, 4)
+                }
             } else {
                 Text("No supported market found")
                     .font(.system(size: 14, weight: .medium, design: .rounded))
@@ -215,7 +226,7 @@ struct MarketScreen: View {
     }
 }
 
-private struct PerpDetailScreen: View {
+struct PerpDetailScreen: View {
     let model: AppModel
     let market: MarketModel
     /// Handed down rather than rebuilt: an order outlives the sheet that sent it, and a
@@ -291,7 +302,7 @@ private struct PerpDetailScreen: View {
 
     private var priceBlock: some View {
         VStack(alignment: .leading, spacing: 8) {
-            AssetMark.bitcoin(size: 42)
+            MarketTokenLogo(symbol: market.symbol, size: 42)
             Text(market.symbol)
                 .font(.system(size: 19, weight: .bold, design: .rounded))
                 .foregroundStyle(DeskColor.nightMuted.color)
@@ -313,9 +324,8 @@ private struct PerpDetailScreen: View {
     }
 
     @ViewBuilder private var chart: some View {
-        let line = Sparkline(values: market.history, tint: market.trend)
-        if line.hasEnoughPoints {
-            line
+        if !market.candles.isEmpty, let config = market.market?.config {
+            CandlestickChart(candles: market.candles, priceDecimals: Int(config.priceDecimals))
                 .frame(height: 250)
                 .overlay(alignment: .bottom) { Divider().overlay(Color.white.opacity(0.12)) }
         } else {
@@ -330,14 +340,19 @@ private struct PerpDetailScreen: View {
 
     private var ranges: some View {
         HStack {
-            ForEach(["1m", "3m", "5m", "15m", "30m"], id: \.self) { range in
-                Text(range).foregroundStyle(DeskColor.nightMuted.color).frame(maxWidth: .infinity)
+            ForEach([(60, "1m"), (180, "3m"), (300, "5m"),
+                     (900, "15m"), (1_800, "30m"), (3_600, "1H")], id: \.0) { seconds, label in
+                Button { market.selectCandleInterval(seconds) } label: {
+                    Text(label)
+                        .foregroundStyle(market.candleIntervalSeconds == seconds
+                                         ? DeskColor.nightText.color : DeskColor.nightMuted.color)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .modifier(RangeSelectionGlass(selected: market.candleIntervalSeconds == seconds))
             }
-            Text("Live")
-                .foregroundStyle(DeskColor.nightText.color)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .perpGlass(in: Capsule())
         }
         .font(.system(size: 13, weight: .bold, design: .rounded))
     }
@@ -348,8 +363,8 @@ private struct PerpDetailScreen: View {
                 .font(.system(size: 11, weight: .bold, design: .rounded))
                 .tracking(0.9)
                 .foregroundStyle(DeskColor.nightMuted.color)
-            ValueRow(label: "Market", value: "BTC-PERP")
-            ValueRow(label: "Maximum leverage", value: "15×")
+            ValueRow(label: "Market", value: "\(market.symbol)-PERP")
+            ValueRow(label: "Maximum leverage", value: "\(market.market?.config.maxLeverage ?? 0)×")
             ValueRow(label: "Data", value: market.freshness == .live ? "Live" : "Last known")
         }
         .padding(16)
@@ -371,8 +386,78 @@ private struct PerpDetailScreen: View {
     }
 }
 
+private struct RangeSelectionGlass: ViewModifier {
+    let selected: Bool
+    func body(content: Content) -> some View {
+        if selected { content.perpGlass(in: Capsule()) } else { content }
+    }
+}
+
 extension Direction: @retroactive Identifiable {
     public var id: String { rawValue }
+}
+
+/// OHLC candles built only from marks this device actually observed. Until a historical
+/// candle endpoint is available, no invented highs or lows are shown.
+private struct CandlestickChart: View {
+    let candles: [MarketModel.Candle]
+    let priceDecimals: Int
+
+    var body: some View {
+        Canvas { context, size in
+            let samples = Array(candles.suffix(25))
+            guard samples.count > 1,
+                  let lowRaw = samples.map(\.l).min(),
+                  let highRaw = samples.map(\.h).max() else { return }
+            let scale = pow(10.0, Double(priceDecimals))
+            let low = Double(lowRaw) / scale, high = Double(highRaw) / scale
+            let spread = max(high - low, high * 0.0001)
+            let plotWidth = size.width - 62
+            let priceHeight = size.height * 0.76
+            let volumeTop = size.height * 0.80
+            let xStep = plotWidth / CGFloat(samples.count)
+            func y(_ raw: UInt64) -> CGFloat {
+                let value = Double(raw) / scale
+                return priceHeight * CGFloat(1 - (value - low) / spread) * 0.90 + 7
+            }
+            for row in 0...3 {
+                let y = priceHeight * CGFloat(row) / 3
+                var grid = Path(); grid.move(to: CGPoint(x: 0, y: y)); grid.addLine(to: CGPoint(x: plotWidth, y: y))
+                context.stroke(grid, with: .color(.white.opacity(0.07)), style: StrokeStyle(lineWidth: 0.6, dash: [3, 5]))
+                let price = high - spread * Double(row) / 3
+                context.draw(Text(Self.axis(price)).font(.system(size: 10, weight: .semibold)).foregroundStyle(.gray),
+                             at: CGPoint(x: plotWidth + 31, y: y + 6))
+            }
+            let maxVolume = samples.compactMap { Double($0.v) }.max() ?? 1
+            for (index, candle) in samples.enumerated() {
+                let rising = candle.c >= candle.o
+                let color = rising ? Color.green : Color.red
+                let x = (CGFloat(index) + 0.5) * xStep
+                let top = min(y(candle.o), y(candle.c)), bottom = max(y(candle.o), y(candle.c))
+                var wick = Path(); wick.move(to: CGPoint(x: x, y: y(candle.h))); wick.addLine(to: CGPoint(x: x, y: y(candle.l)))
+                context.stroke(wick, with: .color(color), lineWidth: 1)
+                let body = CGRect(x: x - max(2, xStep * 0.28), y: top,
+                                  width: max(4, xStep * 0.56), height: max(2, bottom - top))
+                context.fill(Path(roundedRect: body, cornerRadius: 2), with: .color(color))
+                let volume = (Double(candle.v) ?? 0) / maxVolume
+                let volumeRect = CGRect(x: x - xStep * 0.30,
+                                        y: size.height - 2 - CGFloat(volume) * (size.height - volumeTop),
+                                        width: xStep * 0.60,
+                                        height: CGFloat(volume) * (size.height - volumeTop))
+                context.fill(Path(roundedRect: volumeRect, cornerRadius: 2),
+                             with: .color(.white.opacity(0.15)))
+            }
+            if let last = samples.last {
+                let currentY = y(last.c)
+                var line = Path(); line.move(to: CGPoint(x: 0, y: currentY)); line.addLine(to: CGPoint(x: plotWidth, y: currentY))
+                context.stroke(line, with: .color((last.c >= last.o ? Color.green : .red).opacity(0.55)), lineWidth: 0.8)
+            }
+        }
+    }
+
+    private static func axis(_ value: Double) -> String {
+        value >= 1_000 ? String(format: "%.2fK", value / 1_000) : String(format: "%.2f", value)
+    }
 }
 
 private extension View {

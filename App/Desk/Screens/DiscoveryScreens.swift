@@ -60,9 +60,11 @@ struct WatchlistScreen: View {
                         VStack(spacing: 10) {
                             ForEach(rows, id: \.id) { entry in
                                 MarketRow(
+                                    model: market,
                                     market: entry,
-                                    isTradable: entry.id == MarketModel.tradableMarketID,
-                                    isSaved: true) { toggle(entry.id) }
+                                    isSaved: true,
+                                    onOpen: {},
+                                    onToggle: { toggle(entry.id) })
                             }
                         }
                         .padding(.top, 20)
@@ -105,8 +107,11 @@ struct WatchlistScreen: View {
 // MARK: - Search
 
 struct MarketSearchScreen: View {
+    let model: AppModel
     let market: MarketModel
+    let session: TradingSession
     @State private var query = ""
+    @State private var showsMarket = false
     @AppStorage("desk.watchlist") private var savedIDs = ""
 
     private var saved: Set<UInt32> {
@@ -121,17 +126,48 @@ struct MarketSearchScreen: View {
     }
 
     var body: some View {
-        ZStack {
-            DeskBackground()
+        NavigationStack {
+            ZStack {
+                DeskBackground()
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Search")
-                        .font(.system(size: 30, weight: .heavy, design: .rounded))
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
+                        .frame(maxWidth: .infinity)
                         .padding(.top, 10)
 
-                    field.padding(.top, 16)
+                    Text("Perp Cards")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .padding(.top, 32)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(Array(market.allMarkets.prefix(4)), id: \.id) { entry in
+                                Button { open(entry) } label: {
+                                    SearchMarketCard(model: market, market: entry)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .contentMargins(.horizontal, 0)
+                    .padding(.top, 12)
+
+                    HStack {
+                        Text("All Perpl Markets")
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                        Spacer()
+                        Text("\(market.allMarkets.count) live")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                    }
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .padding(.top, 30)
+
+                    field.padding(.top, 12)
 
                     if market.allMarkets.isEmpty {
                         // Still loading the context. Skeletons rather than "no results",
@@ -149,17 +185,18 @@ struct MarketSearchScreen: View {
                         VStack(spacing: 10) {
                             ForEach(results, id: \.id) { entry in
                                 MarketRow(
+                                    model: market,
                                     market: entry,
-                                    isTradable: entry.id == MarketModel.tradableMarketID,
-                                    isSaved: saved.contains(entry.id)) { toggle(entry.id) }
+                                    isSaved: saved.contains(entry.id),
+                                    onOpen: { open(entry) },
+                                    onToggle: { toggle(entry.id) })
                             }
                         }
                         .padding(.top, 20)
                     }
 
-                    // The scope decision, stated where it is felt rather than hidden.
-                    Text("Desk trades Bitcoin only for now. The rest are listed because "
-                         + "Perpl lists them, and their prices here are real.")
+                    Text("Perpl testnet currently exposes these seven perpetual markets. "
+                         + "Discovery tokens from other networks are separate from tradeable Perpl contracts.")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color.opacity(0.8))
                         .fixedSize(horizontal: false, vertical: true)
@@ -167,6 +204,12 @@ struct MarketSearchScreen: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 130)
+            }
+            }
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(isPresented: $showsMarket) {
+                PerpDetailScreen(model: model, market: market, session: session)
+                    .toolbar(.hidden, for: .tabBar)
             }
         }
     }
@@ -203,6 +246,12 @@ struct MarketSearchScreen: View {
         // defaults value on every toggle even when the membership had not changed.
         savedIDs = next.sorted().map(String.init).joined(separator: ",")
     }
+
+    private func open(_ entry: Market) {
+        market.select(entry)
+        Task { await session.selectMarket(entry) }
+        showsMarket = true
+    }
 }
 
 // MARK: - One market
@@ -213,25 +262,22 @@ struct MarketSearchScreen: View {
 /// divisor in hundredths — 1500 is 15×, not 15%. The hard-coded version of this screen
 /// claimed 40× for Bitcoin, which is not a number Perpl would accept.
 private struct MarketRow: View {
+    let model: MarketModel
     let market: Market
-    let isTradable: Bool
     let isSaved: Bool
+    let onOpen: () -> Void
     let onToggle: () -> Void
 
     private var price: String {
-        market.price(market.state.markRaw)
-            .map { "$" + $0.display(fractionDigits: market.config.priceDecimals) }
-            ?? Unavailable.text
+        let value = model.markText(for: market)
+        return value == "—" ? value : "$" + value
     }
 
     var body: some View {
-        HStack(spacing: 13) {
-            if market.symbol == "BTC" {
-                AssetMark.bitcoin(size: 38)
-            } else {
-                AssetMark(glyph: String(market.symbol.prefix(1)),
-                          tint: Self.tint(for: market.symbol), size: 38)
-            }
+        HStack(spacing: 8) {
+            Button(action: onOpen) {
+                HStack(spacing: 13) {
+                    MarketTokenLogo(symbol: market.symbol, size: 38)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 7) {
@@ -247,21 +293,21 @@ private struct MarketRow: View {
                         .overlay(Capsule().stroke(DeskColor.nightLine.color, lineWidth: 0.7))
                 }
 
-                // Said plainly rather than implied by a disabled row. A market listed but
-                // not tradable here is a fact about Desk, not about the market.
-                Text(isTradable ? "Tradable on Desk" : "View only")
+                Text("Tradeable on Perpl")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(isTradable
-                                     ? DeskColor.rise.color
-                                     : DeskColor.nightMuted.color)
+                    .foregroundStyle(DeskColor.rise.color)
             }
 
-            Spacer(minLength: 8)
+                    Spacer(minLength: 8)
 
-            Text(price)
-                .font(.system(size: 15, weight: .bold).monospacedDigit())
-                .foregroundStyle(DeskColor.nightText.color)
-                .contentTransition(.numericText())
+                    Text(price)
+                        .font(.system(size: 15, weight: .bold).monospacedDigit())
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .contentTransition(.numericText())
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
 
             Button(action: onToggle) {
                 Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
@@ -286,5 +332,51 @@ private struct MarketRow: View {
     static func tint(for symbol: String) -> Color {
         let seed = AddressAvatar.seed(for: symbol)
         return Color(hue: seed.primary / 360, saturation: 0.55, brightness: 0.85)
+    }
+}
+
+private struct SearchMarketCard: View {
+    let model: MarketModel
+    let market: Market
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                MarketTokenLogo(symbol: market.symbol, size: 44)
+                Spacer()
+                if let change = model.changePercent(for: market) {
+                    Text(String(format: "%+.2f%%", change))
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(change >= 0 ? DeskColor.rise.color : DeskColor.fall.color)
+                }
+            }
+            Spacer()
+            Text(market.symbol)
+                .font(.system(size: 21, weight: .bold, design: .rounded))
+            HStack {
+                let price = model.markText(for: market)
+                Text(price == "—" ? price : "$" + price)
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .lineLimit(1).minimumScaleFactor(0.72)
+                Spacer()
+                Text("MAX \(market.config.maxLeverage)×")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .padding(.horizontal, 7).padding(.vertical, 4)
+                    .overlay(Capsule().stroke(Color.white.opacity(0.16)))
+            }
+            .font(.system(size: 12, weight: .semibold, design: .rounded))
+        }
+        .foregroundStyle(DeskColor.nightText.color)
+        .padding(16)
+        .frame(width: 188, height: 190)
+        .perpSearchGlass(in: RoundedRectangle(cornerRadius: 25, style: .continuous))
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func perpSearchGlass<S: Shape>(in shape: S) -> some View {
+        if #available(iOS 26.0, *) { glassEffect(.regular, in: shape) }
+        else { background(.ultraThinMaterial, in: shape) }
     }
 }

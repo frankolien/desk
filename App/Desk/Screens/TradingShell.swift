@@ -14,6 +14,7 @@ struct TradingShell: View {
     private var session: TradingSession { model.trading }
     @State private var tab: Destination
     @State private var showsAccount = false
+    @State private var showsFunding = false
 
     enum Destination: Hashable {
         case home, watchlist, signals, perps, search
@@ -50,7 +51,7 @@ struct TradingShell: View {
                     model: model,
                     market: market,
                     onTrade: { tab = .perps },
-                    onFund: { model.advance(to: .needsDesk) },
+                    onFund: { showsFunding = true },
                     onAccount: { showsAccount = true })
             }
 
@@ -67,7 +68,7 @@ struct TradingShell: View {
             }
 
             Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
-                MarketSearchScreen(market: market)
+                MarketSearchScreen(model: model, market: market, session: session)
             }
         }
         .tint(.white)
@@ -75,6 +76,7 @@ struct TradingShell: View {
             AccountScreen(model: model)
                 .presentationBackground(.black)
         }
+        .sheet(isPresented: $showsFunding) { AddFundsSheet(model: model) }
         .task { market.start() }
         // The head block arrives on the same context call the price does, and every
         // order's deadline is computed against it.

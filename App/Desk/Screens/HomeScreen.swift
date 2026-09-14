@@ -14,7 +14,7 @@ struct HomeScreen: View {
     @State private var showsMore = false
 
     private var collateralText: String {
-        model.collateral.value?.display() ?? Unavailable.text
+        (model.collateral.value ?? model.walletAUSD.value)?.display() ?? Unavailable.text
     }
 
     private var isEmpty: Bool {
@@ -148,7 +148,7 @@ struct HomeScreen: View {
     private var accountRows: some View {
         VStack(spacing: 8) {
             HomeAssetRow(
-                mark: { MonochromeAssetMark(glyph: "A") },
+                mark: { TokenLogo(asset: .ausd, size: 38) },
                 title: "AUSD collateral",
                 subtitle: "Available to trade",
                 value: hidesBalance ? "•••••" : "$" + collateralText,
@@ -174,7 +174,7 @@ struct HomeScreen: View {
                 action: onTrade)
 
             HomeAssetRow(
-                mark: { AssetMark.bitcoin(size: 38) },
+                mark: { TokenLogo(asset: .bitcoin, size: 38) },
                 title: "Bitcoin perpetual",
                 subtitle: "\(market.symbol)-PERP",
                 value: market.markText == "—" ? "—" : "$" + market.markText,
