@@ -52,6 +52,8 @@ final class AppModel {
     private(set) var sessionRemaining: Duration = .zero
     /// Why the last attempt to open a desk stopped, if it did.
     private(set) var openingProblem: String?
+    /// A setup failure that happened before the exchange-opening sequence.
+    private(set) var fundingProblem: String?
     /// Which of the four steps is running, for the Fund screen to render.
     private(set) var openingStep: OpeningSequence.Progress?
     /// Handed the enrolled key the moment one exists.
@@ -60,6 +62,7 @@ final class AppModel {
     var hasSeenLeverageExplainer = false
     private let session = SigningSession()
     private let passkey: any PasskeyService
+    private let apiKeys = APIKeyStore.standard
     private var ticker: Task<Void, Never>?
     private var balancePoller: Task<Void, Never>?
     /// Built once, on the first refresh: it needs the venue's context to learn which
@@ -135,6 +138,13 @@ final class AppModel {
         return text.prefix(6) + "…" + text.suffix(4)
     }
 
+    /// Enough headroom for the faucet call plus the account-opening transactions.
+    /// A non-zero balance is not enough: the faucet call alone has measured ~0.0143 MON.
+    var hasSetupGas: Bool {
+        guard let held = walletMON.value else { return false }
+        return held.raw >= 50_000_000_000_000_000 // 0.05 MON
+    }
+
     func advance(to stage: Stage) { self.stage = stage }
 
     /// The checksummed address, not the shortened one — a truncated address pasted into a
@@ -187,8 +197,21 @@ final class AppModel {
             address = keys.address
             await session.open(keys.trading)
             startTicking()
-            stage = keys.hasDesk ? .trading : .needsDesk
+            // `hasDesk` is an on-chain fact. Passkey derivation deliberately cannot
+            // answer it, so checking `keys.hasDesk` here always sent returning users
+            // back to setup. Read the account before choosing the destination.
+            await refreshBalances()
             startPollingBalances()
+            if hasDesk.value == true, let apiKey = apiKeys.load(for: keys.address) {
+                // A returning user used to jump straight to the trading UI without
+                // rebuilding the authenticated socket. The ticket then had no desk and
+                // could only answer “not connected”. Sign-in now restores the complete
+                // trading session before the first order can be opened.
+                let context = try await PerplREST(configuration: .testnet()).context()
+                await enterTrading(apiKey: apiKey, context: context)
+            } else {
+                stage = .needsDesk
+            }
         } catch PasskeyFailure.cancelledByUser {
             // A dismissed sheet is not a failure and not a reason to offer anything. It
             // used to run a registration, which is how a mis-tap became a second wallet.
@@ -210,14 +233,28 @@ final class AppModel {
     /// Resumable by construction: each step checks whether it is already satisfied before
     /// spending anything, so a sequence interrupted after the approval picks up at the
     /// account rather than paying for the approval twice.
-    func openDesk(depositing deposit: Money) async {
+    func openDesk() async {
         isWorking = true
         openingProblem = nil
+        openingStep = nil
         defer { isWorking = false }
         do {
+            // Never trust the figure a view happened to render. Funding can arrive while
+            // this screen is open, and opening with a stale cached zero produced the
+            // contradictory “10,000 ready / deposit 0.00” state this guard replaces.
+            await refreshBalances()
+            guard let deposit = walletAUSD.value else {
+                openingProblem = walletAUSD.lastFailure
+                    ?? "Your AUSD balance is still loading. Try again in a moment."
+                return
+            }
             let rest = PerplREST(configuration: try .testnet())
             let context = try await rest.context()
             let addresses = try ExchangeAddresses(context: context)
+            if let address, let apiKey = apiKeys.load(for: address) {
+                await enterTrading(apiKey: apiKey, context: context)
+                return
+            }
             let rpc = MonadRPC(configuration: try .testnet())
             let sequence = OpeningSequence(
                 rpc: rpc,
@@ -235,19 +272,87 @@ final class AppModel {
                         Task { @MainActor in self?.openingStep = progress }
                     })
             }
+            if let address { try apiKeys.save(apiKey, for: address) }
 
             // The key exists only now. Handing it to the session is what turns the
             // ticket's confirm button from a sentence into an order.
-            if let market = context.market(id: 16) {
-                trading.adopt(apiKey: apiKey, session: session, market: market)
-                if let head = context.chain.gas?.headBlock { trading.noteHeadBlock(head) }
-                try await trading.connect(lastForwarded: 0)
-            }
-            stage = .trading
-            await refreshBalances()
+            await enterTrading(apiKey: apiKey, context: context)
         } catch {
             openingProblem = Self.openingSentence(for: error)
+            openingStep = nil
         }
+    }
+
+    private func enterTrading(apiKey: APIKey, context: PerplContext) async {
+        guard let market = context.market(id: 16) else { return }
+        trading.adopt(apiKey: apiKey, session: session, market: market)
+        if let head = context.chain.gas?.headBlock { trading.noteHeadBlock(head) }
+        // The account and API key already exist at this point. A live-stream outage is
+        // a connectivity state, not a reason to send the user back through onboarding.
+        stage = .trading
+        await refreshBalances()
+        try? await trading.connect(lastForwarded: 0)
+    }
+
+    /// Claims the real test collateral from Agora's Monad-testnet faucet.
+    /// The wallet signs the faucet call because the caller pays its gas; the faucet pays
+    /// the derived address supplied in calldata.
+    func claimTestAUSD() async {
+        guard let address else { return }
+        guard hasSetupGas else {
+            fundingProblem = "Add at least 0.05 MON before claiming test AUSD. It pays for setup gas."
+            return
+        }
+        isWorking = true
+        fundingProblem = nil
+        defer { isWorking = false }
+        do {
+            let faucet = try Self.ethereumAddress("d236c18d274e54faccc3dd9dda4b27965a73ee6c")
+            let rpc = MonadRPC(configuration: try .testnet())
+            let sender = TransactionSender(rpc: rpc)
+            let signed = try await passkey.withKeys { wallet, _ in
+                try await sender.send(
+                    to: faucet,
+                    data: try Calldata.requestFunds(to: address),
+                    from: wallet)
+            }
+            _ = try await sender.wait(for: signed)
+            // Monad's balance view can trail a mined receipt briefly.
+            try? await Task.sleep(for: .milliseconds(1400))
+            await refreshBalances()
+        } catch let failure as MonadRPC.Failure {
+            if case .rejected(_, _, let data) = failure,
+               let data, let reason = FaucetRevert(selector: data) {
+                fundingProblem = switch reason {
+                case .cooldownActive: "The faucet was just used. Wait a minute, then try again."
+                case .recipientAlreadyFunded: "This wallet already has enough test AUSD."
+                case .transferFailed: "The faucet could not send test AUSD right now."
+                }
+            } else {
+                fundingProblem = "Test AUSD could not be claimed. Your wallet was not charged."
+            }
+        } catch let failure as PasskeyFailure {
+            fundingProblem = failure.sentence
+        } catch {
+            fundingProblem = "Test AUSD could not be claimed. Your wallet was not charged."
+        }
+    }
+
+    private static func ethereumAddress(_ digits: String) throws -> EthereumAddress {
+        var bytes = Data()
+        var index = digits.startIndex
+        while index < digits.endIndex {
+            let next = digits.index(index, offsetBy: 2)
+            guard let byte = UInt8(digits[index..<next], radix: 16) else {
+                throw MonadRPC.Failure.malformedResponse("faucet address")
+            }
+            bytes.append(byte)
+            index = next
+        }
+        guard let address = EthereumAddress(bytes: bytes) else {
+            throw MonadRPC.Failure.malformedResponse("faucet address")
+        }
+        return address
     }
 
     /// The sentence a failed opening shows. Never the underlying error's text: a
@@ -262,6 +367,21 @@ final class AppModel {
                 + "\(needed.display()). Claim more from the faucet first."
         case let failure as PasskeyFailure:
             return failure.sentence
+        case PerplREST.Failure.unauthorized(let status, let detail):
+            return "Perpl refused trading-key registration (HTTP \(status))"
+                + (detail.map { ": \($0)" } ?? ".")
+        case PerplREST.Failure.rejected(let status, let detail):
+            return "Perpl rejected trading-key registration (HTTP \(status))"
+                + (detail.map { ": \($0)" } ?? ".")
+        case PerplREST.Failure.rateLimited(let retryAfter):
+            if let retryAfter {
+                return "Perpl is rate limiting setup. Try again in \(retryAfter) seconds."
+            }
+            return "Perpl is rate limiting setup. Wait a moment, then try again."
+        case PerplREST.Failure.malformedResponse:
+            return "Perpl returned an enrollment response this build could not read."
+        case Enrolment.Failure.apiKeyMissing:
+            return "Perpl registered the trading key but did not return its API token."
         default:
             return "Your desk could not be opened. Nothing was deposited that you cannot "
                 + "recover — try again, and the steps already done will be skipped."
@@ -271,6 +391,73 @@ final class AppModel {
     // MARK: - Withdrawing
 
     private(set) var withdrawal: Withdrawal = .idle
+    private(set) var deposit: Deposit = .idle
+
+    enum Deposit: Equatable {
+        case idle
+        case approving
+        case depositing
+        case sent(String)
+        case failed(String)
+
+        var isBusy: Bool { self == .approving || self == .depositing }
+    }
+
+    /// Moves AUSD from the wallet into the existing Perpl account. Receiving AUSD and
+    /// depositing collateral are intentionally separate operations on-chain; the old
+    /// sheet exposed only the former and made a funded wallet look trade-ready when it
+    /// was not.
+    func depositAUSD(_ amount: Money) async {
+        guard !deposit.isBusy, amount.raw > 0 else { return }
+        deposit = .approving
+        do {
+            await refreshBalances()
+            guard let held = walletAUSD.value, held >= amount else {
+                deposit = .failed("Your wallet does not hold that much AUSD.")
+                return
+            }
+            let rest = PerplREST(configuration: try .testnet())
+            let context = try await rest.context()
+            let addresses = try ExchangeAddresses(context: context)
+            guard let minimum = context.instances.first?.minDeposit, amount >= minimum else {
+                deposit = .failed("Perpl's minimum deposit is \(context.instances.first?.minDeposit?.display() ?? "—") AUSD.")
+                return
+            }
+            let rpc = MonadRPC(configuration: try .testnet())
+            let sender = TransactionSender(rpc: rpc)
+            let hash = try await passkey.withKeys { [weak self] wallet, _ in
+                let allowanceData = try Calldata.allowance(
+                    owner: wallet.address, spender: addresses.exchange)
+                let allowance = ABIMoney.decode(try await rpc.callContract(
+                    to: addresses.collateralToken, data: allowanceData))
+                if allowance < amount {
+                    let approval = try await sender.send(
+                        to: addresses.collateralToken,
+                        data: try Calldata.approve(spender: addresses.exchange, amount: amount),
+                        from: wallet)
+                    _ = try await sender.wait(for: approval)
+                }
+                await MainActor.run { self?.deposit = .depositing }
+                let transaction = try await sender.send(
+                    to: addresses.exchange,
+                    data: try Calldata.depositCollateral(amount: amount),
+                    from: wallet)
+                _ = try await sender.wait(for: transaction)
+                return transaction.hashHex
+            }
+            deposit = .sent(hash)
+            let prior = collateral.value ?? .zero
+            collateral.record(prior + amount)
+            try? await Task.sleep(for: .milliseconds(900))
+            await refreshBalances()
+        } catch let failure as PasskeyFailure {
+            deposit = .failed(failure.sentence)
+        } catch {
+            deposit = .failed("AUSD could not be moved to your trading balance. Nothing was lost.")
+        }
+    }
+
+    func clearDeposit() { deposit = .idle }
 
     enum Withdrawal: Equatable {
         case idle

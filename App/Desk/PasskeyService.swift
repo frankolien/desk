@@ -57,6 +57,7 @@ struct DerivedAccounts: Sendable {
 /// `#if DEBUG` is the only thing standing between a convenience and that, which is why
 /// it wraps the type rather than a call site.
 struct StubPasskeyService: PasskeyService {
+    private let tradingKeyIndex: UInt32 = 2
     var lastSeenAddress: EthereumAddress? { nil }
 
     func deriveAccounts() async throws -> DerivedAccounts {
@@ -64,7 +65,8 @@ struct StubPasskeyService: PasskeyService {
         let pretendPRF = Data(repeating: 0x2A, count: 32)
         return DerivedAccounts(
             address: try PasskeyAccounts.deriveAddress(prfOutput: pretendPRF),
-            trading: try PasskeyAccounts.deriveTradingKey(prfOutput: pretendPRF),
+            trading: try PasskeyAccounts.deriveTradingKey(
+                prfOutput: pretendPRF, index: tradingKeyIndex),
             hasDesk: false)
     }
 
@@ -77,7 +79,8 @@ struct StubPasskeyService: PasskeyService {
         defer { prf.resetBytes(in: 0..<prf.count) }
         return try await body(
             try PasskeyAccounts.deriveWalletKey(prfOutput: prf),
-            try PasskeyAccounts.deriveTradingKey(prfOutput: prf))
+            try PasskeyAccounts.deriveTradingKey(
+                prfOutput: prf, index: tradingKeyIndex))
     }
 }
 #endif

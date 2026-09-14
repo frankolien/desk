@@ -61,6 +61,7 @@ final class TradingSession {
     private var credentials: PerplCredentials?
     private var watching: Task<Void, Never>?
     private var frameID: Int64?
+    private(set) var isConnected = false
     /// Updates that arrived before the order they belong to had a frame id here.
     ///
     /// The window is real: `desk.place` tracks the order and sends it, and the gateway can
@@ -77,6 +78,17 @@ final class TradingSession {
         desk = OrderDesk(socket: .testnet(), market: market)
     }
 
+    /// Rebuilds the order desk for the instrument the person selected. Market discovery
+    /// and order construction now share the same Perpl market instead of every row
+    /// eventually submitting BTC.
+    func selectMarket(_ market: Market) async {
+        guard credentials != nil else { return }
+        watching?.cancel()
+        desk = OrderDesk(socket: .testnet(), market: market)
+        isConnected = false
+        try? await connect(lastForwarded: 0)
+    }
+
     func noteHeadBlock(_ block: Int64) {
         // Monotonic. The context and the market-state stream can report out of order, and
         // an order deadline computed from an older block than one already seen would be
@@ -88,6 +100,7 @@ final class TradingSession {
     func connect(lastForwarded: Int64) async throws {
         guard let desk, let credentials else { throw OrderDesk.Failure.notEnrolled }
         try await desk.open(credentials: credentials, lastForwarded: lastForwarded)
+        isConnected = true
         watching?.cancel()
         watching = Task { [weak self] in
             for await update in await desk.observe() {
@@ -111,6 +124,12 @@ final class TradingSession {
         order.begin()
         do {
             guard let desk else { throw OrderDesk.Failure.notEnrolled }
+            if !isConnected {
+                // Mobile sockets are routinely suspended between opening the ticket and
+                // confirming it. Reconnect at the point of intent instead of making the
+                // user leave the sheet and sign in again.
+                try await connect(lastForwarded: 0)
+            }
             let id = try await desk.place(draft, headBlock: headBlock)
             order.associate(id)
             if let current = await desk.phase(of: id) { order.apply(id: id, phase: current) }
@@ -138,7 +157,10 @@ final class TradingSession {
         }
     }
 
-    private func socketEnded() { order.connectionLost() }
+    private func socketEnded() {
+        isConnected = false
+        order.connectionLost()
+    }
 
     /// The venue's sub-reason codes, as sentences.
     ///
@@ -167,10 +189,44 @@ final class TradingSession {
                 + "is switched on, which is the last step of opening your desk."
         case OrderDesk.Failure.notConnected:
             return "Not connected to Perpl. Nothing was sent."
+        case OrderDesk.Failure.noAccount:
+            return "Perpl accepted your key but did not return a trading account. "
+                + "Nothing was sent."
+        case PerplSocket.Failure.signInRefused:
+            return "Perpl rejected the saved trading credential. Sign in with Face ID "
+                + "again to refresh it; nothing was sent."
+        case PerplSocket.Failure.idleTimeout, PerplSocket.Failure.handshakeTimedOut:
+            return "Perpl did not finish reconnecting in time. Check your connection and try again."
+        case PerplSocket.Failure.closed(let code, _):
+            return "Perpl closed the trading connection (code \(code)). Nothing was sent; try again."
+        case PerplSocket.Failure.notConnected, PerplSocket.Failure.notAuthenticated:
+            return "The Perpl connection ended before the order was sent. Try once more to reconnect."
+        case PerplSocket.Failure.alreadyConnected:
+            return "Desk found a stale Perpl connection. Try once more; it has now been reset."
+        case PerplSocket.Failure.framesAlreadyStarted:
+            return "Desk could not restart the Perpl order stream. Nothing was sent."
+        case OrderBuilder.Failure.sizeMustBePositive:
+            return "Enter an order amount greater than zero."
+        case OrderBuilder.Failure.leverageOutOfRange(_, let maximum):
+            return "That leverage is above this market's \(maximum / 100)× limit."
+        case OrderBuilder.Failure.slippageOutOfRange(_, let maximum):
+            return "That slippage is above Perpl's \(maximum) bps limit for this market."
+        case OrderBuilder.Failure.sizeScaleMismatch:
+            return "The order size does not match this market's precision. Nothing was sent."
+        case OrderBuilder.Failure.priceScaleMismatch:
+            return "The live price precision does not match this market. Nothing was sent."
+        case OrderBuilder.Failure.deadlineOverflow:
+            return "The latest Monad block could not be used for this order. Nothing was sent."
+        case OrderBuilder.Failure.frameIDMustBeNonZero, OrderBuilder.Failure.priceMustBePositive:
+            return "Desk could not build a valid Perpl order. Nothing was sent."
         case SigningSession.Failure.closed:
             return "Your trading key has expired. Sign in with Face ID and try again."
+        case let url as URLError:
+            return url.code == .notConnectedToInternet
+                ? "Your phone is offline. Nothing was sent."
+                : "The network interrupted the Perpl connection. Nothing was sent; try again."
         default:
-            return "The order could not be sent. Nothing left your phone."
+            return "The order could not be sent. Nothing left your phone (\(String(describing: error)))."
         }
     }
 }

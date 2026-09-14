@@ -32,13 +32,16 @@ final class PasskeyCeremony: NSObject, PasskeyService {
     /// 18.4 is the first version whose PRF output can be trusted. Below it the ceremony
     /// refuses rather than deriving an address that will not reproduce.
     static let minimumSystemVersion = OperatingSystemVersion(majorVersion: 18, minorVersion: 4, patchVersion: 0)
+    /// Version 0 was successfully enrolled once but its nested response token was
+    /// discarded by the old decoder. A fresh trading-only derivation recovers without
+    /// changing the wallet address or moving any funds.
+    static let tradingKeyIndex: UInt32 = 2
 
     private let relyingParty: RelyingParty
     private let displayName: String
     private let store: LastSeenAddressStore
 
     init(relyingParty: RelyingParty, displayName: String = "Desk", store: LastSeenAddressStore = .standard) {
-        Self.domainHint = relyingParty.identifier
         self.relyingParty = relyingParty
         self.displayName = displayName
         self.store = store
@@ -94,16 +97,13 @@ final class PasskeyCeremony: NSObject, PasskeyService {
         guard prf.count == 32 else { throw PasskeyFailure.prfReturnedNothing }
 
         let address = try PasskeyAccounts.deriveAddress(prfOutput: prf)
-        let trading = try PasskeyAccounts.deriveTradingKey(prfOutput: prf)
+        let trading = try PasskeyAccounts.deriveTradingKey(
+            prfOutput: prf, index: Self.tradingKeyIndex)
         store.record(address)
         // `hasDesk` is a fact about the chain, not about the passkey. It is read by
         // `BalanceReader` after sign-in rather than guessed here.
         return DerivedAccounts(address: address, trading: trading, hasDesk: false)
     }
-
-    /// Named in the failure text so the sentence points at something checkable rather
-    /// than at a generic setup problem. Set once at launch from the configured party.
-    nonisolated(unsafe) static var domainHint = "its relying party"
 
     static func short(_ address: EthereumAddress) -> String {
         let text = address.checksummed
@@ -124,7 +124,8 @@ final class PasskeyCeremony: NSObject, PasskeyService {
         // returned, so there is no version of this call that leaves one lying around.
         return try await body(
             try PasskeyAccounts.deriveWalletKey(prfOutput: prf),
-            try PasskeyAccounts.deriveTradingKey(prfOutput: prf))
+            try PasskeyAccounts.deriveTradingKey(
+                prfOutput: prf, index: Self.tradingKeyIndex))
     }
 
     // MARK: - The two ceremonies
@@ -273,17 +274,12 @@ private final class CeremonyDelegate: NSObject, ASAuthorizationControllerDelegat
         case .failed, .notHandled:
             // The message names the likely cause and what to check, because this is a
             // setup failure and the user cannot fix it by trying again.
-            let code = authorization.code.rawValue
             let lead = isAssertion
-                ? "iOS would not use a passkey for Desk."
-                : "The passkey could not be created."
-            // Written as one literal rather than concatenated: a multi-line `+` starting
-            // with an interpolated string makes Swift reach for the AttributedString
-            // overload and fail with an error about nothing to do with the problem.
-            let cause = """
-                The app is not associated with \(PasskeyCeremony.domainHint) yet. Associated Domains                 has to be enabled on the App ID itself, not only in the entitlements file.
-                """
-            return PasskeyFailure.platformRefused("\(lead) \(cause) (code \(code))")
+                ? "Face ID sign-in needs one more setup step."
+                : "Account creation needs one more setup step."
+            return PasskeyFailure.platformRefused(
+                "\(lead) Enable Associated Domains for Desk in Apple Developer, "
+                    + "refresh the signing profile, then rebuild the app.")
         default:
             return PasskeyFailure.platformRefused(
                 "Face ID could not finish (code \(authorization.code.rawValue)).")

@@ -1,370 +1,255 @@
+import DeskChain
 import DeskFlow
+import DeskMoney
 import DeskUI
+import SafariServices
 import SwiftUI
 
-/// Turns a newly-created passkey into a funded trading account.
-/// Completed and upcoming work collapse into small glass rows; the current step expands.
+/// A truthful final setup screen. A row is complete only when the chain says it is;
+/// tapping a button never advances local presentation state by itself.
 struct FundScreen: View {
     let model: AppModel
     @State private var didCopy = false
-    @State private var step = Step.mon
+    @State private var faucetPage: FaucetPage?
 
-    enum Step: Int, CaseIterable {
-        case passkey, mon, ausd, desk
-
-        var title: String {
-            switch self {
-            case .passkey: "Passkey secured"
-            case .mon: "Fund network fees"
-            case .ausd: "Claim test dollars"
-            case .desk: "Open your desk"
-            }
-        }
-
-        var shortDetail: String {
-            switch self {
-            case .passkey: "Face ID is ready"
-            case .mon: "Get MON"
-            case .ausd: "Get 10,000 AUSD"
-            case .desk: "Create your trading account"
-            }
-        }
-
-        var detail: String {
-            switch self {
-            case .passkey: "Your trading identity is protected by your passkey."
-            case .mon: "MON covers the three one-time setup transactions. Your orders remain gasless after setup."
-            case .ausd: "Claim 10,000 AUSD from the testnet faucet to use as trading collateral."
-            case .desk: "Approve collateral, create the account, enable gasless orders, and register your key with one Face ID confirmation."
-            }
-        }
-
-        var action: String {
-            switch self {
-            case .passkey: "Done"
-            case .mon: "Open MON faucet"
-            case .ausd: "Claim 10,000 AUSD"
-            case .desk: "Open my desk"
-            }
-        }
-
-        var symbol: String {
-            switch self {
-            case .passkey: "faceid"
-            case .mon: "fuelpump.fill"
-            case .ausd: "dollarsign.circle.fill"
-            case .desk: "chart.xyaxis.line"
-            }
-        }
-    }
+    private let minimum = Money(text: "100") ?? .zero
 
     var body: some View {
         ZStack {
-            setupBackground
+            DeskColor.night.color.ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     topBar
-                    hero
+                    Text("One last step.")
+                        .font(.system(size: 34, weight: .heavy, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .padding(.top, 32)
+                    Text("Fund this wallet, then open your trading desk.")
+                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .padding(.top, 6)
+                    statusList.padding(.top, 25)
+                    actionPanel.padding(.top, 18)
 
-                    VStack(spacing: 12) {
-                        ForEach(Step.allCases, id: \.rawValue) { entry in
-                            SetupStepCard(
-                                step: entry,
-                                number: entry.rawValue + 1,
-                                state: state(of: entry),
-                                isWorking: model.isWorking && entry == step
-                            ) {
-                                advance(from: entry)
-                            }
-                        }
+                    if let problem = model.fundingProblem ?? model.openingProblem {
+                        Label(problem, systemImage: "exclamationmark.circle.fill")
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(DeskColor.fall.color)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 4)
+                            .padding(.top, 13)
                     }
-                    .padding(.top, 30)
-
-                    // A failed opening has to say what happened and what it cost. The
-                    // sequence is resumable, so the reassurance is the true part: a
-                    // second attempt skips whatever already succeeded rather than paying
-                    // for the approval twice.
-                    if let problem = model.openingProblem {
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(DeskColor.action.color)
-                            Text(problem)
-                                .font(.system(size: 14, weight: .medium, design: .rounded))
-                                .foregroundStyle(DeskColor.nightText.color.opacity(0.88))
-                                .fixedSize(horizontal: false, vertical: true)
+                    if let progress = model.openingStep {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text(Self.stepSentence(progress))
                         }
-                        .padding(14)
-                        .background(DeskColor.action.color.opacity(0.1),
-                                    in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .stroke(DeskColor.action.color.opacity(0.3), lineWidth: 0.5))
-                        .padding(.top, 16)
-                        .transition(.opacity)
-                    }
-
-                    // Which of the four contract steps is running, named rather than
-                    // spun. "Registering your key" is a different wait from "approving
-                    // collateral", and on a chain each of them costs real time.
-                    if let step = model.openingStep {
-                        HStack(spacing: 9) {
-                            ProgressView().controlSize(.small).tint(DeskColor.action.color)
-                            Text(Self.stepSentence(step))
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                .foregroundStyle(DeskColor.nightMuted.color)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 16)
-                        .transition(.opacity)
-                    }
-
-                    Text("Testnet only · No real funds")
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(DeskColor.nightMuted.color.opacity(0.7))
+                        .foregroundStyle(DeskColor.nightMuted.color)
                         .frame(maxWidth: .infinity)
-                        .padding(.top, 24)
-                        .padding(.bottom, 32)
+                        .padding(.top, 14)
+                    }
+                    Text("Monad testnet · No real funds")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color.opacity(0.62))
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 22)
+                        .padding(.bottom, 28)
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 10)
+                .padding(.top, 8)
             }
+            .refreshable { await model.refreshBalances() }
         }
-        .animation(.snappy(duration: 0.38), value: step)
-    }
-
-    private var setupBackground: some View {
-        ZStack {
-            DeskColor.night.color
-            RadialGradient(
-                colors: [DeskColor.action.color.opacity(0.16), .clear],
-                center: UnitPoint(x: 0.92, y: 0.08), startRadius: 0, endRadius: 390)
-            RadialGradient(
-                colors: [DeskColor.ledger.color.opacity(0.20), .clear],
-                center: UnitPoint(x: 0.06, y: 0.55), startRadius: 0, endRadius: 430)
+        .task { await model.refreshBalances() }
+        .sheet(item: $faucetPage, onDismiss: {
+            Task { await model.refreshBalances() }
+        }) { page in
+            InAppSafari(url: page.url)
+                .ignoresSafeArea()
         }
-        .ignoresSafeArea()
     }
 
     private var topBar: some View {
         HStack {
-            Label("Setup", systemImage: "sparkles")
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .padding(.horizontal, 15)
-                .frame(height: 48)
-                .nativeGlass(in: Capsule())
-
+            Text("Setup")
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(DeskColor.nightText.color)
             Spacer()
-
             Button {
-                UIPasteboard.general.string = model.address?.checksummed
+                model.copyAddress()
                 didCopy = true
             } label: {
-                HStack(spacing: 8) {
+                HStack(spacing: 7) {
                     Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
                     Text(didCopy ? "Copied" : model.addressShort).monospaced()
                 }
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .padding(.horizontal, 15)
-                .frame(height: 48)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .padding(.horizontal, 13)
+                .frame(height: 40)
             }
             .buttonStyle(.plain)
             .nativeGlass(interactive: true, in: Capsule())
-            .accessibilityLabel("Copy your wallet address")
         }
     }
 
-    private var hero: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("FINISH SETUP")
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .tracking(1.5)
-                .foregroundStyle(DeskColor.action.color)
+    private var statusList: some View {
+        VStack(spacing: 0) {
+            SetupStatusRow(title: "Passkey", detail: "Face ID secured", complete: true,
+                           actionTitle: nil, action: {})
+            Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 42)
+            SetupStatusRow(title: "Network fees", detail: monDetail, complete: hasMON,
+                           actionTitle: hasMON ? nil : "Get MON", action: openMONFaucet)
+            Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 42)
+            SetupStatusRow(title: "Test collateral", detail: ausdDetail, complete: hasMinimumAUSD,
+                           actionTitle: hasMinimumAUSD ? nil : "Claim AUSD",
+                           actionEnabled: hasMON,
+                           action: { Task { await model.claimTestAUSD() } })
+        }
+        .padding(.horizontal, 16)
+        .nativeGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
 
-            Text("Your desk is\nalmost ready.")
-                .font(.system(size: 43, weight: .heavy, design: .rounded))
-                .foregroundStyle(DeskColor.nightText.color)
-                .lineSpacing(-2)
-                .padding(.top, 10)
-
-            HStack(spacing: 10) {
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.10))
-                        Capsule().fill(DeskColor.action.color)
-                            .frame(width: geometry.size.width * progress)
-                    }
+    private var actionPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Available to deposit")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                    Text(ausdBalanceText)
+                        .font(.system(size: 25, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .monospacedDigit()
                 }
-                .frame(height: 7)
-
-                Text("\(stepsDone)/\(Step.allCases.count)")
+                Spacer()
+                Text("AUSD")
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
-                    .monospacedDigit()
             }
-            .padding(.top, 24)
-
-            HStack(spacing: 7) {
-                Circle().fill(DeskColor.rise.color).frame(width: 7, height: 7)
-                Text("10,000 AUSD ready")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
+            Button { Task { await model.openDesk() } } label: {
+                HStack {
+                    Text(model.isWorking ? "Checking…" : "Open my desk")
+                    Spacer()
+                    Image(systemName: "arrow.right")
+                }
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(canOpen ? DeskColor.night.color : DeskColor.nightMuted.color)
+                .padding(.horizontal, 20)
+                .frame(maxWidth: .infinity, minHeight: 54)
+                .background(canOpen ? DeskColor.nightText.color : Color.white.opacity(0.08), in: Capsule())
             }
-            .padding(.top, 14)
+            .buttonStyle(.plain)
+            .disabled(!canOpen)
+            if !hasMinimumAUSD {
+                Text("At least 100 AUSD is required.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color.opacity(0.78))
+            }
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 46)
+        .padding(18)
+        .nativeGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
-    private var stepsDone: Int { step.rawValue }
-    private var progress: CGFloat { CGFloat(stepsDone) / CGFloat(Step.allCases.count) }
+    private var hasMON: Bool { model.hasSetupGas }
+    private var hasMinimumAUSD: Bool { (model.walletAUSD.value ?? .zero) >= minimum }
+    private var canOpen: Bool { hasMON && hasMinimumAUSD && !model.isWorking }
+    private var ausdBalanceText: String { model.walletAUSD.value.map { $0.display() } ?? "—" }
+    private var ausdDetail: String {
+        guard let value = model.walletAUSD.value else { return "Checking balance…" }
+        return "\(value.display()) AUSD"
+    }
+    private var monDetail: String {
+        guard let value = model.walletMON.value else { return "Checking balance…" }
+        return hasMON ? "\(value.display()) MON" : "\(value.display()) MON · 0.05 needed"
+    }
 
-    /// The venue's four steps, in the words a person waiting on them needs.
+    private func openMONFaucet() {
+        model.copyAddress()
+        if let url = URL(string: "https://faucet.monad.xyz/") {
+            faucetPage = FaucetPage(url: url)
+        }
+    }
+
     static func stepSentence(_ progress: OpeningSequence.Progress) -> String {
         let name = switch progress.step {
-        case .approve: "Approving your collateral"
-        case .createAccount: "Creating your account on Perpl"
-        case .allowOrderForwarding: "Switching on gasless orders"
+        case .approve: "Approving collateral"
+        case .createAccount: "Creating your desk"
+        case .allowOrderForwarding: "Enabling gasless orders"
         case .enrol: "Registering your trading key"
         }
-        return progress.outcome == .alreadySatisfied ? "\(name) — already done" : "\(name)…"
-    }
-
-    private func state(of entry: Step) -> SetupStepCard.State {
-        if entry.rawValue < step.rawValue { return .done }
-        return entry == step ? .active : .waiting
-    }
-
-    private func advance(from entry: Step) {
-        switch entry {
-        case .passkey: break
-        case .mon, .ausd: step = Step(rawValue: entry.rawValue + 1) ?? .desk
-        case .desk:
-            // The whole wallet balance, not a figure typed here. The opening deposit is
-            // collateral the user can withdraw again, and asking someone to choose a
-            // number before they have traded once is a question with no information
-            // behind it. The sequence refuses anything under the venue's own minimum.
-            Task { await model.openDesk(depositing: model.walletAUSD.value ?? .zero) }
-        }
+        return progress.outcome == .alreadySatisfied ? "\(name) — done" : "\(name)…"
     }
 }
 
-private struct SetupStepCard: View {
-    enum State { case done, active, waiting }
+private struct FaucetPage: Identifiable {
+    let url: URL
+    var id: String { url.absoluteString }
+}
 
-    let step: FundScreen.Step
-    let number: Int
-    let state: State
-    let isWorking: Bool
+/// Apple's in-app Safari: native privacy controls, cookies and dismissal behavior,
+/// while keeping the user inside Desk's setup flow.
+private struct InAppSafari: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        let configuration = SFSafariViewController.Configuration()
+        configuration.entersReaderIfAvailable = false
+        configuration.barCollapsingEnabled = true
+        let controller = SFSafariViewController(url: url, configuration: configuration)
+        controller.dismissButtonStyle = .done
+        controller.preferredControlTintColor = .white
+        return controller
+    }
+
+    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
+}
+
+private struct SetupStatusRow: View {
+    let title: String
+    let detail: String
+    let complete: Bool
+    let actionTitle: String?
+    var actionEnabled = true
     let action: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 13) {
-                marker
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(step.title)
-                        .font(.system(size: state == .active ? 20 : 17, weight: .bold, design: .rounded))
-                        .foregroundStyle(titleColor)
-                    if state != .active {
-                        Text(step.shortDetail)
-                            .font(.system(size: 13, weight: .medium, design: .rounded))
-                            .foregroundStyle(DeskColor.nightMuted.color.opacity(state == .waiting ? 0.55 : 0.9))
-                    }
-                }
-                Spacer(minLength: 8)
-                if state == .done {
-                    Text("DONE")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
-                        .tracking(0.8)
-                        .foregroundStyle(DeskColor.rise.color)
-                } else if state == .waiting {
-                    Image(systemName: "lock.fill")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(DeskColor.nightMuted.color.opacity(0.45))
-                }
-            }
-
-            if state == .active {
-                Text(step.detail)
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .lineSpacing(2)
-                    .padding(.top, 17)
-
-                Button(action: action) {
-                    HStack {
-                        Text(isWorking ? "Working…" : step.action)
-                        Spacer()
-                        Image(systemName: isWorking ? "ellipsis" : "arrow.up.right")
-                    }
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(DeskColor.onAction.color)
-                    .padding(.horizontal, 21)
-                    .frame(maxWidth: .infinity, minHeight: 58)
-                    .background(DeskColor.action.color.opacity(isWorking ? 0.45 : 1), in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(isWorking)
-                .padding(.top, 22)
-            }
-        }
-        .padding(state == .active ? 22 : 18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .nativeGlass(
-            tint: state == .active ? DeskColor.action.color.opacity(0.10) : nil,
-            interactive: state == .active,
-            in: RoundedRectangle(cornerRadius: state == .active ? 30 : 24, style: .continuous)
-        )
-        .opacity(state == .waiting ? 0.64 : 1)
-    }
-
-    private var titleColor: Color {
-        state == .waiting ? DeskColor.nightMuted.color : DeskColor.nightText.color
-    }
-
-    private var marker: some View {
-        ZStack {
-            Circle().fill(markerFill).frame(width: 42, height: 42)
-            if state == .done {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 17, weight: .heavy))
-                    .foregroundStyle(DeskColor.night.color)
-            } else if state == .active {
-                Image(systemName: step.symbol)
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(DeskColor.action.color)
-            } else {
-                Text("\(number)")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+        HStack(spacing: 12) {
+            Image(systemName: complete ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 21, weight: .semibold))
+                .foregroundStyle(complete ? DeskColor.rise.color : DeskColor.nightMuted.color.opacity(0.55))
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightText.color)
+                Text(detail)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
             }
+            Spacer(minLength: 8)
+            if let actionTitle {
+                Button(actionTitle, action: action)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .tint(DeskColor.nightText.color)
+                    .disabled(!actionEnabled)
+                    .opacity(actionEnabled ? 1 : 0.45)
+            }
         }
-    }
-
-    private var markerFill: Color {
-        switch state {
-        case .done: DeskColor.rise.color
-        case .active: DeskColor.action.color.opacity(0.14)
-        case .waiting: Color.white.opacity(0.06)
-        }
+        .frame(minHeight: 67)
     }
 }
 
 private extension View {
     @ViewBuilder
-    func nativeGlass<S: Shape>(
-        tint: Color? = nil,
-        interactive: Bool = false,
-        in shape: S
-    ) -> some View {
+    func nativeGlass<S: Shape>(interactive: Bool = false, in shape: S) -> some View {
         if #available(iOS 26.0, *) {
-            glassEffect(.regular.tint(tint).interactive(interactive), in: shape)
+            glassEffect(.regular.interactive(interactive), in: shape)
         } else {
             background(.ultraThinMaterial, in: shape)
-                .overlay(shape.stroke(Color.white.opacity(0.12), lineWidth: 0.6))
         }
     }
 }
