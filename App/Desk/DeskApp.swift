@@ -76,15 +76,33 @@ struct DeskApp: App {
 /// on Market without a desk.
 struct RootView: View {
     let model: AppModel
+    @State private var showsLaunchMoment = true
 
     var body: some View {
-        switch model.stage {
-        case .welcome:
-            WelcomeScreen(model: model)
-        case .needsDesk:
-            FundScreen(model: model)
-        case .trading:
-            TradingShell(model: model)
+        ZStack {
+            Group {
+                switch model.stage {
+                case .welcome:
+                    WelcomeScreen(model: model)
+                case .needsDesk:
+                    FundScreen(model: model)
+                case .trading:
+                    TradingShell(model: model)
+                }
+            }
+
+            if showsLaunchMoment {
+                LaunchMoment()
+                    .transition(.opacity.combined(with: .scale(scale: 1.035)))
+                    .zIndex(1)
+            }
+        }
+        .task {
+            guard showsLaunchMoment else { return }
+            try? await Task.sleep(for: .milliseconds(3100))
+            withAnimation(.easeInOut(duration: 0.62)) {
+                showsLaunchMoment = false
+            }
         }
     }
 }

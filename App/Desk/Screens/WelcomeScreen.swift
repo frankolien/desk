@@ -128,20 +128,109 @@ struct WelcomeScreen: View {
         .sheet(isPresented: $showsExplainer) {
             PerpetualExplainer { showsExplainer = false }
         }
-        // One confirmation, and it states the irreversible part rather than asking "are
-        // you sure". A new passkey is a new wallet; the old one keeps its money.
-        .confirmationDialog(
-            "Create a new account?",
-            isPresented: $showsCreateWarning,
-            titleVisibility: .visible
-        ) {
-            Button("Create new account") { Task { await model.createAccount() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This makes a brand new wallet. If you already have a Desk account on "
-                 + "another device, sign in with that passkey instead — a new one cannot "
-                 + "reach the old account's funds.")
+        .sheet(isPresented: $showsCreateWarning) {
+            CreateAccountSheet(model: model)
+                .presentationDetents([.height(390)])
+                .presentationDragIndicator(.visible)
+                .accountSheetGlass()
         }
         .animation(.snappy, value: model.mayOfferCreate)
+    }
+}
+
+private struct CreateAccountSheet: View {
+    let model: AppModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Image(systemName: "person.badge.key.fill")
+                .font(.title2)
+                .foregroundStyle(DeskColor.action.color)
+                .padding(.bottom, 18)
+
+            Text("Create your Desk account")
+                .font(.title2.weight(.bold))
+
+            Text("Face ID creates a new passkey and wallet on this device.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
+
+            VStack(alignment: .leading, spacing: 14) {
+                AccountNote(
+                    symbol: "key.fill",
+                    title: "No seed phrase",
+                    detail: "Your passkey protects the account.")
+                AccountNote(
+                    symbol: "iphone.gen3",
+                    title: "Already have an account?",
+                    detail: "Cancel and sign in so you keep the same wallet.")
+            }
+            .padding(.top, 24)
+
+            Spacer(minLength: 18)
+
+            Button {
+                dismiss()
+                Task { await model.createAccount() }
+            } label: {
+                Text("Create account")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .controlSize(.large)
+            .tint(DeskColor.action.color)
+            .disabled(model.isWorking)
+
+            Button("Cancel", role: .cancel) { dismiss() }
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 14)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 12)
+        .padding(.bottom, 18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func accountSheetGlass() -> some View {
+        if #available(iOS 26.0, *) {
+            self
+                .glassEffect(.regular, in: .rect(cornerRadius: 32))
+                .presentationBackground(.clear)
+        } else {
+            self.presentationBackground(.thinMaterial)
+        }
+    }
+}
+
+private struct AccountNote: View {
+    let symbol: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline)
+                Text(detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
