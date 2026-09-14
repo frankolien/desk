@@ -151,7 +151,13 @@ public actor PerplSocket {
                     }
                     continuation.finish()
                 } catch {
-                    continuation.finish(throwing: Self.map(error))
+                    let mapped = Self.map(error)
+                    // A finished reader means this connection is unusable. Keeping the
+                    // dead channel installed made the next order's reconnect fail with
+                    // `alreadyConnected`, even though the UI correctly knew it was
+                    // offline. Tear it down here so the same desk can reconnect cleanly.
+                    self.disconnect()
+                    continuation.finish(throwing: mapped)
                 }
             }
             continuation.onTermination = { _ in reader.cancel() }

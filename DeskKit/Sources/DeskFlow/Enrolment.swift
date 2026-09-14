@@ -106,8 +106,30 @@ public struct Enrolment: Sendable {
         let enrolled = try await rest.publicData(
             try PerplEndpoint(method: .post, path: "/v1/api-key/enroll", body: enrolBody))
 
-        struct Enrolled: Decodable { let api_key: String? }
-        guard let key = try JSONDecoder().decode(Enrolled.self, from: enrolled).api_key, !key.isEmpty
+        struct Enrolled: Decodable {
+            struct Info: Decodable { let api_key: String? }
+            let api_key: Value?
+
+            enum Value: Decodable {
+                case token(String)
+                case info(Info)
+
+                init(from decoder: Decoder) throws {
+                    let value = try decoder.singleValueContainer()
+                    if let token = try? value.decode(String.self) { self = .token(token) }
+                    else { self = .info(try value.decode(Info.self)) }
+                }
+
+                var token: String? {
+                    switch self {
+                    case .token(let token): token
+                    case .info(let info): info.api_key
+                    }
+                }
+            }
+        }
+        guard let key = try JSONDecoder().decode(Enrolled.self, from: enrolled).api_key?.token,
+              !key.isEmpty
         else { throw Failure.apiKeyMissing }
         return APIKey(key)
     }

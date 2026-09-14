@@ -132,6 +132,17 @@ struct EnrolmentTests {
         #expect(sent["public_key"] as? String == "0x" + String(repeating: "11", count: 32))
     }
 
+    @Test("The current nested API-key response is accepted")
+    func nestedAPIKeyResponse() async throws {
+        let transport = RoutingTransport([
+            "/api/v1/api-key/payload": [String(decoding: try payloadJSON(), as: UTF8.self)],
+            "/api/v1/api-key/enroll": [#"{"api_key":{"api_key":"pk_nested","scope_mask":3}}"#],
+        ])
+        let key = try await Enrolment(rest: try rest(transport), chainID: 10143)
+            .enrol(address: signerAddress, label: "desk", signers: fakeSigners())
+        #expect(key.withValue { $0 } == "pk_nested")
+    }
+
     @Test("typed_data and mac go back exactly as they arrived")
     func echoesVerbatim() async throws {
         let document = try payloadJSON()
