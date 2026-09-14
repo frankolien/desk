@@ -1,5 +1,7 @@
+import Combine
 import DeskAuth
 import SwiftUI
+import UIKit
 
 @main
 struct DeskApp: App {
@@ -58,16 +60,26 @@ struct DeskApp: App {
         #endif
     }
     @Environment(\.scenePhase) private var phase
+    @State private var grace = KeyGrace()
 
     var body: some Scene {
         WindowGroup {
             RootView(model: model)
                 .preferredColorScheme(.dark)
+                // Putting the phone down is not switching apps. The grace exists for the
+                // second case only, so a lock wipes the key at once.
+                .onReceive(NotificationCenter.default.publisher(
+                    for: UIApplication.protectedDataWillBecomeUnavailableNotification)
+                ) { _ in
+                    grace.lock(model)
+                }
         }
         .onChange(of: phase) { _, new in
-            // Backgrounding zeroes the key, and the next order proves it by asking for
-            // Face ID again.
-            if new == .background { Task { await model.enterBackground() } }
+            switch new {
+            case .background: grace.leave(model)
+            case .active: grace.return(model)
+            default: break
+            }
         }
     }
 }
@@ -104,5 +116,80 @@ struct RootView: View {
                 showsLaunchMoment = false
             }
         }
+    }
+}
+
+/// Keeps Desk running just long enough to wipe the trading key after it leaves the
+/// foreground, and keeps the key's transitions in order.
+///
+/// A backgrounded app is suspended within about thirty seconds and a suspended app runs no
+/// code, so a wipe merely scheduled for later would not happen until the person came back.
+/// A background task holds execution open for the grace, and the wipe runs inside it. If
+/// iOS ends that time early, the expiration handler locks on the spot.
+///
+/// Every transition goes through one queue. Leaving and returning are async calls on an
+/// actor, and two unstructured tasks carry no ordering guarantee — a quick return could
+/// otherwise land before the departure it answers, leaving an absence recorded against an
+/// app that is open and a key that would then expire in front of the person.
+///
+/// One limit, stated rather than hidden: iOS may suspend the process the instant the
+/// expiration handler returns, before the lock has run. The key would then sit in
+/// suspended memory until Desk is next opened — and it is wiped before it can be used,
+/// because `SigningSession` checks the absence again on the way back in and before every
+/// signature.
+@MainActor
+final class KeyGrace {
+    private var task: UIBackgroundTaskIdentifier = .invalid
+    private var timer: Task<Void, Never>?
+    private var queue: Task<Void, Never>?
+
+    func leave(_ model: AppModel) {
+        timer?.cancel()
+        finishBackgroundTask()
+        enqueue { await model.enterBackground() }
+
+        task = UIApplication.shared.beginBackgroundTask(withName: "desk.trading-key-grace") { [weak self] in
+            MainActor.assumeIsolated {
+                self?.timer?.cancel()
+                self?.enqueue { await model.lock() }
+                // The handler must end the task before it returns, or iOS ends the app.
+                self?.finishBackgroundTask()
+            }
+        }
+
+        timer = Task { [weak self] in
+            try? await Task.sleep(for: SigningSession.backgroundGrace)
+            guard !Task.isCancelled, let self else { return }
+            await enqueue { await model.expireIfAway() }.value
+            finishBackgroundTask()
+        }
+    }
+
+    func `return`(_ model: AppModel) {
+        timer?.cancel()
+        timer = nil
+        finishBackgroundTask()
+        enqueue { await model.enterForeground() }
+    }
+
+    func lock(_ model: AppModel) {
+        enqueue { await model.lock() }
+    }
+
+    @discardableResult
+    private func enqueue(_ operation: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+        let previous = queue
+        let next = Task { @MainActor in
+            await previous?.value
+            await operation()
+        }
+        queue = next
+        return next
+    }
+
+    private func finishBackgroundTask() {
+        guard task != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(task)
+        task = .invalid
     }
 }

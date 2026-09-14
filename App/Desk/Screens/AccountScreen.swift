@@ -1,9 +1,20 @@
+import DeskAuth
 import DeskUI
 import SwiftUI
 
 /// Where the product's main idea becomes visible.
+///
+/// The key section shows a state, not a countdown. There used to be a fifteen-minute
+/// window here, and when it ran out the app signed the person out — mid-trade included.
+/// The trading key cannot move money, so a timer on it was friction with nothing behind
+/// it. What the screen now promises is what actually happens: the key lives in memory
+/// while Desk is open, and it is wiped when Desk has been away for a moment or the phone
+/// locks.
 struct AccountScreen: View {
     let model: AppModel
+    @State private var showsWithdraw = false
+
+    private var graceSeconds: Int64 { SigningSession.backgroundGrace.components.seconds }
 
     var body: some View {
         ZStack {
@@ -15,31 +26,44 @@ struct AccountScreen: View {
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Trading key")
-                        .font(DeskType.title)
-                        .foregroundStyle(DeskColor.nightText.color)
-
-                    GeometryReader { geometry in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(DeskColor.nightLine.color)
-                            Capsule().fill(DeskColor.action.color)
-                                .frame(width: geometry.size.width * model.sessionFraction)
-                        }
+                    HStack {
+                        Text("Trading key")
+                            .font(DeskType.title)
+                            .foregroundStyle(DeskColor.nightText.color)
+                        Spacer()
+                        Label(model.isKeyUnlocked ? "Unlocked" : "Locked",
+                              systemImage: model.isKeyUnlocked ? "lock.open.fill" : "lock.fill")
+                            .font(DeskType.label)
+                            .foregroundStyle((model.isKeyUnlocked ? DeskColor.rise : DeskColor.nightMuted).color)
+                            .contentTransition(.symbolEffect(.replace))
                     }
-                    .frame(height: 6)
 
-                    Text("\(model.sessionRemaining.clockText) remaining")
-                        .font(DeskType.value)
-                        .foregroundStyle(DeskColor.nightText.color)
-                    Text("Derived from your face. Never stored, never written to disk.")
+                    Text("Derived from your face and held in memory only while Desk is open. "
+                         + "Wiped \(graceSeconds) seconds after you leave Desk, and the moment "
+                         + "your phone locks. Never written to disk.")
                         .font(DeskType.caption)
                         .foregroundStyle(DeskColor.nightMuted.color)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                    Button("End session now") {
-                        Task { await model.endSession() }
+                    if let problem = model.unlockProblem {
+                        Text(problem)
+                            .font(DeskType.caption)
+                            .foregroundStyle(DeskColor.fall.color)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    HStack(spacing: 20) {
+                        if model.isKeyUnlocked {
+                            Button("Lock now") { Task { await model.lock() } }
+                                .foregroundStyle(DeskColor.action.color)
+                        } else {
+                            Button("Unlock with Face ID") { Task { await model.unlock() } }
+                                .foregroundStyle(DeskColor.identity.color)
+                        }
+                        Button("Sign out") { Task { await model.endSession() } }
+                            .foregroundStyle(DeskColor.fall.color)
                     }
                     .font(DeskType.label)
-                    .foregroundStyle(DeskColor.fall.color)
                     .padding(.top, 4)
                 }
 
@@ -52,13 +76,19 @@ struct AccountScreen: View {
                     Text("Withdrawals are signed by your face, not by the trading key. That is why a stolen key cannot move your money.")
                         .font(DeskType.caption)
                         .foregroundStyle(DeskColor.nightMuted.color)
-                    PrimaryButton(title: "Withdraw") {}
+                    PrimaryButton(title: "Withdraw") { showsWithdraw = true }
                 }
 
                 Spacer()
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 24)
+            .animation(.snappy, value: model.isKeyUnlocked)
+        }
+        .sheet(isPresented: $showsWithdraw) {
+            WithdrawSheet(model: model) { showsWithdraw = false }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
     }
 }

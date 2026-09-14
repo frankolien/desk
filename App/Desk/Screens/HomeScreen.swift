@@ -51,7 +51,8 @@ struct HomeScreen: View {
         .confirmationDialog("More", isPresented: $showsMore, titleVisibility: .hidden) {
             Button("Copy address") { model.copyAddress() }
             Button("Account and session") { onAccount() }
-            Button("End session", role: .destructive) { Task { await model.endSession() } }
+            Button("Lock now") { Task { await model.lock() } }
+            Button("Sign out", role: .destructive) { Task { await model.endSession() } }
         }
     }
 
@@ -206,28 +207,34 @@ struct HomeScreen: View {
         return "\(sign)\(magnitude / 10_000).\(String(format: "%02d", (magnitude % 10_000) / 100))%"
     }
 
+    /// The key's state rather than a countdown — there is no timer to show. Unlocked goes
+    /// through to Account; locked goes straight to Face ID, because that is the only thing
+    /// a person tapping a locked key wants.
     private var sessionRow: some View {
-        Button(action: onAccount) {
+        Button {
+            if model.isKeyUnlocked { onAccount() } else { Task { await model.unlock() } }
+        } label: {
             HStack(spacing: 12) {
-                Image(systemName: "faceid")
+                Image(systemName: model.isKeyUnlocked ? "faceid" : "lock.fill")
                     .font(.system(size: 24, weight: .medium))
                     .foregroundStyle(DeskColor.nightText.color)
+                    .contentTransition(.symbolEffect(.replace))
                 .frame(width: 38, height: 38)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Face ID trading key")
                         .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
-                    Text("Never stored")
+                    Text(model.isKeyUnlocked ? "Held in memory while Desk is open" : "Locked · never stored")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
                 }
 
                 Spacer()
 
-                Text(model.sessionRemaining == .zero ? "Sign in" : model.sessionRemaining.clockText)
-                    .font(.system(size: 13, weight: .bold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(DeskColor.nightText.color)
+                Text(model.isKeyUnlocked ? "Unlocked" : "Unlock")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle((model.isKeyUnlocked ? DeskColor.nightText : DeskColor.identity).color)
             }
             .padding(.horizontal, 14)
             .frame(height: 66)

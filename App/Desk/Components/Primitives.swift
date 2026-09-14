@@ -76,29 +76,6 @@ struct Chip<Content: View>: View {
     }
 }
 
-/// The session, as a ring that depletes. One element doing two jobs: it is the way
-/// through to Account, and it puts the product's main idea on the home screen without a
-/// sentence explaining it.
-struct SessionRing: View {
-    /// 0 to 1, how much of the window is left.
-    let remaining: Double
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(DeskColor.nightLine.color, lineWidth: 2)
-            Circle()
-                .trim(from: 0, to: max(0.02, remaining))
-                .stroke(DeskColor.action.color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(.linear(duration: 0.4), value: remaining)
-        }
-        .frame(width: 26, height: 26)
-        .accessibilityLabel("Trading session")
-        .accessibilityValue("\(Int(remaining * 100)) percent remaining")
-    }
-}
-
 /// The app's own keypad, on the ground. Never the system keyboard sliding over the
 /// figure the user is deciding about.
 struct AmountKeypad: View {

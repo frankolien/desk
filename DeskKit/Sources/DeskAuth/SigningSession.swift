@@ -2,38 +2,62 @@ import Foundation
 
 /// The window in which the trading key exists.
 ///
-/// The product claim is that the key does not exist at rest: a Face ID touch derives it,
-/// it lives in memory for the session, and it is gone when the session ends or the app
-/// leaves the foreground. That claim is only true if this is the sole owner. Nothing is
-/// handed a key here — callers borrow one for the duration of a closure, so there is no
-/// second reference to outlive the session and no way for a component to keep signing
-/// after the user ended it.
+/// The product claim is that the key does not exist at rest: a Face ID touch derives it
+/// and it lives only in memory. That claim is only true if this is the sole owner. Nothing
+/// is handed a key here — callers borrow one for the duration of a closure, so there is
+/// no second reference to outlive a lock and no way for a component to keep signing after
+/// the key is gone.
+///
+/// **There is no timer while Desk is open.** The first version expired the key after
+/// fifteen minutes, and the app then signed the person out — including in the middle of
+/// closing a losing position, which is the one moment an app must never stand between a
+/// person and their decision. The trading key cannot move money: deposits and withdrawals
+/// are signed by the wallet key, with Face ID every time. Stolen, its worst case is trades
+/// on the account, not theft of it. A countdown on that key was friction with no security
+/// behind it.
+///
+/// What does end it:
+///   - Desk staying in the background past `backgroundGrace`.
+///   - The phone locking, or the person locking Desk — both `end()`.
+///
+/// An optional absolute `lifetime` remains for callers that want one. Desk sets none.
 public actor SigningSession {
     public enum Failure: Error, Sendable, Equatable {
         case closed
     }
 
-    /// Fifteen minutes, as the Account screen says.
-    public static let defaultLifetime: Duration = .seconds(900)
+    /// How long Desk may sit in the background before the key is wiped.
+    ///
+    /// Twenty seconds, and the number is set by iOS rather than by taste: a backgrounded
+    /// app gets roughly thirty seconds of execution before it is suspended, and the wipe
+    /// has to run inside that window or it would not run until the person came back. Long
+    /// enough that copying an address into another app, or answering a message, does not
+    /// cost a Face ID prompt on return.
+    public static let backgroundGrace: Duration = .seconds(20)
 
-    private let lifetime: Duration
+    private let lifetime: Duration?
+    private let grace: Duration
     private let now: @Sendable () -> ContinuousClock.Instant
     private var key: TradingKey?
     private var deadline: ContinuousClock.Instant?
+    private var backgroundedAt: ContinuousClock.Instant?
 
-    /// The deadline is monotonic on purpose. A wall clock can be wound backwards from
-    /// Settings, and a session that could be extended that way is not a session.
+    /// Every instant is monotonic on purpose. A wall clock can be wound backwards from
+    /// Settings, and a key that could be kept alive that way is not being wiped.
     public init(
-        lifetime: Duration = SigningSession.defaultLifetime,
+        lifetime: Duration? = nil,
+        backgroundGrace: Duration = SigningSession.backgroundGrace,
         now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now }
     ) {
         self.lifetime = lifetime
+        self.grace = backgroundGrace
         self.now = now
     }
 
     public func open(_ key: TradingKey) {
         self.key = key
-        deadline = now().advanced(by: lifetime)
+        deadline = lifetime.map { now().advanced(by: $0) }
+        backgroundedAt = nil
     }
 
     public var isOpen: Bool {
@@ -41,10 +65,11 @@ public actor SigningSession {
         return key != nil
     }
 
-    /// What the countdown on the Account screen renders. Nil when closed.
+    /// Time left before a configured ceiling. Nil when there is no ceiling — Desk
+    /// configures none — and nil when closed.
     public var remaining: Duration? {
         expireIfDue()
-        guard let deadline else { return nil }
+        guard key != nil, let deadline else { return nil }
         return now().duration(to: deadline)
     }
 
@@ -56,25 +81,52 @@ public actor SigningSession {
         return try body(key)
     }
 
-    /// Pushes the deadline out. Only meaningful while open: an expired session is
-    /// reopened with Face ID, never extended.
+    /// Pushes a configured ceiling out. Only meaningful while open and only when a ceiling
+    /// exists: a closed session is reopened with Face ID, never extended.
     public func extend() {
         expireIfDue()
-        guard key != nil else { return }
+        guard key != nil, let lifetime else { return }
         deadline = now().advanced(by: lifetime)
     }
 
+    /// Wipes the key. Used for the phone locking, for the person locking Desk, and for
+    /// signing out.
     public func end() {
         key = nil
         deadline = nil
+        backgroundedAt = nil
     }
 
-    /// The app leaving the foreground ends the session outright. This is the line the
-    /// Account screen's promise rests on, so it is not a shortened timer.
-    public func enterBackground() { end() }
+    /// Desk left the foreground. The key survives the grace period and no longer.
+    ///
+    /// Only the first event starts the clock. iOS can report the transition more than
+    /// once, and restarting the grace on each report would let a key outlive it.
+    public func enterBackground() {
+        guard key != nil, backgroundedAt == nil else { return }
+        backgroundedAt = now()
+    }
+
+    /// Desk is back in the foreground.
+    ///
+    /// The absence is checked before it is forgotten. If iOS suspended Desk before the
+    /// background wipe could run, the key is still in memory at this point — and it is
+    /// wiped here, before anything can borrow it.
+    public func enterForeground() {
+        expireIfDue()
+        backgroundedAt = nil
+    }
+
+    /// Applies whichever expiry is due now. Called at the end of the background grace.
+    public func expireIfOverdue() {
+        expireIfDue()
+    }
 
     private func expireIfDue() {
-        guard let deadline, now() >= deadline else { return }
-        end()
+        let instant = now()
+        if let deadline, instant >= deadline {
+            end()
+        } else if let backgroundedAt, backgroundedAt.duration(to: instant) >= grace {
+            end()
+        }
     }
 }

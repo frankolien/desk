@@ -64,14 +64,15 @@ next section.
 
 **The key does not exist at rest.** Mera's model is that a passkey's PRF output is the
 root and keys are derived from it on demand. Desk takes that literally. A Face ID
-touch derives the Ed25519 key that Perpl trades with; the key lives in memory for the
-session and is zeroed when the session ends or the app leaves the foreground. The
+touch derives the Ed25519 key that Perpl trades with; the key lives in memory while
+Desk is open, and is zeroed twenty seconds after Desk leaves the foreground, the moment
+the phone locks, or when the person locks Desk themselves. The
 secp256k1 wallet key is derived only for a contract call or an enrolment and zeroed on
 the next line. There is no key in the keychain to steal and no export screen, because
 there is nothing to export.
 
 This is a real security property and also a real product one: the Account screen shows
-the session as a live thing with a countdown and a button that ends it now. Most apps
+whether the key is unlocked, and a button that locks it now. Most apps
 hide their key handling. This one makes it the interface.
 
 **Losing the phone costs nothing.** The passkey lives in iCloud Keychain. A new phone
@@ -173,17 +174,24 @@ Done when:
 
 ### 5. Account
 
-The address, the AUSD collateral, withdraw, and the session control: how long the
-trading key stays warm, default fifteen minutes, and a button that ends it now.
+The address, the AUSD collateral, withdraw, and the key control: whether the trading
+key is unlocked, a button that locks it now, and sign out.
+
+There is no countdown. A fifteen-minute window was specified here first, and it was
+wrong: when it ran out it put Face ID — or a sign-out — between a person and closing a
+losing position. The trading key cannot move money, so a timer on it bought no safety.
+It lives while Desk is open, survives a twenty-second trip to another app, and is wiped
+after that or when the phone locks.
 
 Withdrawals are contract calls the wallet signs, never the API key. That is worth a
 sentence on the screen, because it is the reason a stolen API token cannot take the
 money.
 
 Done when:
-- The session countdown is visible and accurate, and ending it forces a Face ID prompt
-  on the next order.
-- Backgrounding the app zeroes the key, provable by the next order asking for Face ID.
+- Nothing interrupts an order while Desk is open, and locking Desk forces a Face ID
+  prompt on the next order.
+- Leaving Desk for more than twenty seconds, or locking the phone, zeroes the key,
+  provable by the next order asking for Face ID.
 - A withdrawal reaches the derived address on Monad and the collateral figure drops by
   the right amount.
 

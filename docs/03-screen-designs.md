@@ -195,8 +195,8 @@ One market. The screen itself is calm; the ticket is a sheet over it.
 └──────────────────────────────────────┘
 ```
 
-The account button doubles as the session indicator: a ring that depletes over the
-fifteen minutes, tapping through to Account. One element doing two jobs, and it puts
+The account button doubles as the key indicator: unlocked or locked, tapping through to
+Account when unlocked and straight to Face ID when locked. One element doing two jobs, and it puts
 the product's main idea on the home screen without a sentence explaining it.
 
 **Long and Short do not trade.** They open the ticket. Keeping the size and leverage
@@ -326,17 +326,18 @@ Address     0x50B2…a8F9            [ copy ]
 Collateral  1,282.18 AUSD
 
 Trading key
-  ████████░░  9m 12s remaining
+  Unlocked · held in memory while Desk is open
   Derived from your face. Never stored, never written to disk.
-                                     [ End session now ]
+                                     [ Lock now ]  [ Sign out ]
 
 Withdraw                             [ Withdraw ]
 Withdrawals are signed by your face, not by the trading key.
 That is why a stolen key cannot move your money.
 ```
 
-The countdown is a live thing and ending it must actually force a Face ID prompt on the
-next order. Backgrounding the app zeroes the key, and that is provable the same way.
+There is no countdown. Locking must actually force a Face ID prompt on the next order,
+and leaving Desk for more than twenty seconds or locking the phone does the same —
+provable the same way.
 
 The withdraw sentence earns its place: it is the reason the architecture is not just a
 convenience. This is the one screen where slide-to-confirm is right — a withdrawal is

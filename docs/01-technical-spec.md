@@ -119,8 +119,9 @@ The one piece of architecture that is not obvious, and the product's main idea.
 
 `SigningSession` is the only object that ever sees PRF output. It holds the 32 byte
 Ed25519 seed in a single heap allocation it can overwrite, constructs a signing key
-per use, and overwrites the buffer when the session ends. It ends when the countdown
-expires, when the user ends it, or when the app leaves the foreground.
+per use, and overwrites the buffer when the session ends. It ends twenty seconds
+after the app leaves the foreground, at once when the phone locks, or when the user
+locks Desk. There is no timer while the app is open.
 
 The wallet key is never held at all. A contract call or an enrolment asks for a fresh
 PRF ceremony, derives the secp256k1 key, signs, and overwrites. The extra Face ID

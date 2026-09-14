@@ -1,5 +1,6 @@
 import DeskMoney
 import SwiftUI
+import UIKit
 
 struct TokenLogo: View {
     enum Asset { case bitcoin, ausd }
@@ -38,8 +39,9 @@ struct TokenLogo: View {
 struct MarketTokenLogo: View {
     let symbol: String
     var size: CGFloat = 38
+    var remoteURL: URL? = nil
 
-    private var url: URL? {
+    static func artworkURL(for symbol: String) -> URL? {
         let address = switch symbol.uppercased() {
         case "BTC": "https://assets.coingecko.com/coins/images/1/large/bitcoin.png"
         case "ETH": "https://assets.coingecko.com/coins/images/279/large/ethereum.png"
@@ -51,9 +53,11 @@ struct MarketTokenLogo: View {
         return URL(string: address)
     }
 
+    private var url: URL? { remoteURL ?? Self.artworkURL(for: symbol) }
+
     var body: some View {
         Group {
-            if ["MON", "LIT", "PUMP"].contains(symbol.uppercased()) {
+            if remoteURL == nil && ["MON", "LIT", "PUMP"].contains(symbol.uppercased()) {
                 Image(symbol.uppercased()).resizable().scaledToFit()
             } else {
                 AsyncImage(url: url) { phase in
@@ -69,6 +73,80 @@ struct MarketTokenLogo: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         .accessibilityLabel(symbol)
+    }
+}
+
+/// A restrained card wash derived from the token artwork itself. This mirrors the
+/// one-pixel palette extraction used by Gathr's `CoverPalette`, while keeping text
+/// contrast anchored to the system background.
+struct TokenAdaptiveCardBackground: View {
+    let symbol: String
+    var cornerRadius: CGFloat = 20
+    var artworkURL: URL? = nil
+    @State private var tint = Color.white.opacity(0.16)
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [tint.opacity(0.30), tint.opacity(0.09), Color(.secondarySystemBackground).opacity(0.72)],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(tint.opacity(0.34), lineWidth: 0.75)
+            }
+            .task(id: artworkURL?.absoluteString ?? symbol) { await loadTint() }
+    }
+
+    @MainActor
+    private func loadTint() async {
+        let key = symbol.uppercased()
+        let image: UIImage?
+        if let artworkURL,
+           let (data, _) = try? await URLSession.shared.data(from: artworkURL) {
+            image = UIImage(data: data)
+        } else if ["MON", "LIT", "PUMP"].contains(key) {
+            image = UIImage(named: key)
+        } else if let url = MarketTokenLogo.artworkURL(for: key),
+                  let (data, _) = try? await URLSession.shared.data(from: url) {
+            image = UIImage(data: data)
+        } else {
+            image = nil
+        }
+        guard let image, let sampled = Self.averageColor(of: image) else { return }
+        tint = Color(uiColor: Self.vivid(sampled))
+    }
+
+    private static func averageColor(of image: UIImage) -> UIColor? {
+        guard let cgImage = image.cgImage else { return nil }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        guard let context = CGContext(
+            data: &pixel,
+            width: 1,
+            height: 1,
+            bitsPerComponent: 8,
+            bytesPerRow: 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return UIColor(red: CGFloat(pixel[0]) / 255, green: CGFloat(pixel[1]) / 255,
+                       blue: CGFloat(pixel[2]) / 255, alpha: 1)
+    }
+
+    private static func vivid(_ color: UIColor) -> UIColor {
+        var hue: CGFloat = 0
+        var saturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard color.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha) else {
+            return color
+        }
+        return UIColor(hue: hue, saturation: min(max(saturation * 1.45, 0.34), 0.90),
+                       brightness: min(max(brightness, 0.40), 0.76), alpha: 1)
     }
 }
 

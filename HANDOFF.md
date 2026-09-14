@@ -131,6 +131,17 @@ every screen either comes from the venue or renders `--`.
    the order-association race lived in app code. The fix that scales is moving logic
    down — `OrderProgress` is the pattern — rather than adding a UI test target.
 
+### The trading key has no timer
+
+Decided 14 September. The fifteen-minute session window is gone: it signed people out
+mid-trade, including between them and closing a position. The key lives while Desk is
+open, survives twenty seconds in the background (iOS allows about thirty, and the wipe
+must run inside that), and is wiped after that or the moment the phone locks. Locked is
+not signed out — balances and positions stay visible — and one Face ID prompt unlocks,
+asked for on return to the trading screens rather than mid-order. An order that still
+finds Desk locked unlocks once and carries on. Deposits and withdrawals are unchanged:
+Face ID every time, because the wallet key is the one that can move money.
+
 ### Two traps worth not rediscovering
 
 **`INFOPLIST_KEY_<custom>` silently does nothing.** Xcode injects only keys it

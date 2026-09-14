@@ -373,20 +373,24 @@ struct SessionOwnershipTests {
         try TradingKey(seed: SecureBytes(Data(repeating: 5, count: 32)))
     }
 
-    /// The product document's acceptance criterion, as a test: "Backgrounding the app
-    /// zeroes the key, provable by the next order asking for Face ID."
-    @Test("Backgrounding stops the client signing")
-    func backgroundingStopsSigning() async throws {
-        let transport = RecordingTransport([])
-        let session = SigningSession()
+    /// The product document's acceptance criterion, as a test: "Leaving Desk for more than
+    /// twenty seconds zeroes the key, provable by the next order asking for Face ID."
+    @Test("Leaving Desk past the grace stops the client signing")
+    func absenceStopsSigning() async throws {
+        let base = ContinuousClock.now
+        let elapsed = Elapsed()
+        let session = SigningSession(now: { base.advanced(by: elapsed.value) })
         try await session.open(tradingKey())
-        let rest = PerplREST(configuration: try .testnet(retry: .none), transport: transport)
+        let rest = PerplREST(configuration: try .testnet(retry: .none), transport: RecordingTransport([]))
         await rest.adopt(.init(apiKey: APIKey("pk"), session: session))
 
+        await session.enterBackground()
+        elapsed.advance(.seconds(10))
+        // Inside the grace the client still signs: a quick app switch costs nothing.
         await #expect(throws: Never.self) {
             try await rest.signedData(try PerplEndpoint(method: .get, path: "/v1/a"))
         }
-        await session.enterBackground()
+        elapsed.advance(.seconds(11))
         // The client holds a function, not a key, so there is nothing left to sign with.
         await #expect(throws: SigningSession.Failure.closed) {
             try await rest.signedData(try PerplEndpoint(method: .get, path: "/v1/b"))

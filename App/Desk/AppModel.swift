@@ -50,7 +50,16 @@ final class AppModel {
     private(set) var openPosition: PerplPosition?
     private(set) var openPositions: [PerplPosition] = []
 
-    private(set) var sessionRemaining: Duration = .zero
+    /// Whether the trading key is in memory right now.
+    ///
+    /// There is no countdown. The key stays while Desk is open, is wiped twenty seconds
+    /// after Desk leaves the foreground or the moment the phone locks, and comes back with
+    /// one Face ID prompt. Locked is not signed out: the address, balances and positions
+    /// stay on screen, because none of them needs the key to be read.
+    private(set) var isKeyUnlocked = false
+    /// Why the last unlock did not finish, if it did not.
+    private(set) var unlockProblem: String?
+    private var isUnlocking = false
     /// Why the last attempt to open a desk stopped, if it did.
     private(set) var openingProblem: String?
     /// A setup failure that happened before the exchange-opening sequence.
@@ -64,7 +73,6 @@ final class AppModel {
     private let session = SigningSession()
     private let passkey: any PasskeyService
     private let apiKeys = APIKeyStore.standard
-    private var ticker: Task<Void, Never>?
     private var balancePoller: Task<Void, Never>?
     /// Built once, on the first refresh: it needs the venue's context to learn which
     /// contracts to read, and that is one network call rather than a constant.
@@ -80,6 +88,13 @@ final class AppModel {
             let open = positions.filter(\.isOpen)
             self?.openPositions = open
             self?.openPosition = open.first
+        }
+        // An order that finds Desk locked asks for Face ID once and carries on. Only a
+        // locked key qualifies: a connection that failed for any other reason is reported
+        // as itself, not answered with a prompt that would not fix it.
+        trading.onNeedsUnlock = { [weak self] in
+            guard let self, await session.isOpen == false else { return false }
+            return await unlock()
         }
         #if DEBUG
         // `-stage fund|market` jumps straight to a screen, so each one can be captured
@@ -102,7 +117,7 @@ final class AppModel {
                 walletMON.record(.zero)
                 collateral.record(.zero)
                 hasDesk.record(false)
-                sessionRemaining = .seconds(596)
+                isKeyUnlocked = true
             } else if stage != .welcome {
                 address = try? PasskeyAccounts.deriveAddress(prfOutput: Data(repeating: 0x2A, count: 32))
                 walletAUSD.record(Money(text: "10000") ?? .zero)
@@ -113,7 +128,7 @@ final class AppModel {
                 hasDesk.record(true)
                 openPosition = Self.reviewPosition
                 openPositions = Self.reviewPosition.map { [$0] } ?? []
-                sessionRemaining = .seconds(552)
+                isKeyUnlocked = true
             }
         }
         #endif
@@ -136,12 +151,6 @@ final class AppModel {
         return try? JSONDecoder().decode(PerplPosition.self, from: body)
     }()
     #endif
-
-    var sessionFraction: Double {
-        let total = Double(SigningSession.defaultLifetime.components.seconds)
-        guard total > 0 else { return 0 }
-        return min(1, max(0, Double(sessionRemaining.components.seconds) / total))
-    }
 
     var addressShort: String {
         guard let address else { return "—" }
@@ -207,7 +216,7 @@ final class AppModel {
             }
             address = keys.address
             await session.open(keys.trading)
-            startTicking()
+            isKeyUnlocked = true
             // `hasDesk` is an on-chain fact. Passkey derivation deliberately cannot
             // answer it, so checking `keys.hasDesk` here always sent returning users
             // back to setup. Read the account before choosing the destination.
@@ -532,21 +541,92 @@ final class AppModel {
         }
     }
 
+    /// Signs out: the key, the connection and the account on screen all go.
     func endSession() async {
         await trading.close()
         await session.end()
-        sessionRemaining = .zero
+        isKeyUnlocked = false
+        unlockProblem = nil
         stage = .welcome
         address = nil
-        ticker?.cancel()
-        ticker = nil
         balancePoller?.cancel()
         balancePoller = nil
     }
 
+    // MARK: - The trading key
+
+    /// Desk left the foreground. The key survives a short trip to another app; the scene
+    /// holds a background task open for the grace and calls `expireIfAway` at the end of
+    /// it, so the wipe runs while Desk can still execute.
     func enterBackground() async {
         await session.enterBackground()
-        sessionRemaining = .zero
+    }
+
+    /// The end of the background grace.
+    func expireIfAway() async {
+        await session.expireIfOverdue()
+        if await session.isOpen == false, address != nil { await lock() }
+    }
+
+    /// Back in the foreground.
+    ///
+    /// If the key did not survive the absence, Face ID is asked for once, now — before the
+    /// person reaches for an order — rather than at the moment they try to send one. Only
+    /// on the trading screens: setup signs every transaction with a fresh ceremony anyway,
+    /// so an unlock there would be a prompt for nothing.
+    func enterForeground() async {
+        await session.enterForeground()
+        if await session.isOpen == false, isKeyUnlocked { await lock() }
+        guard !isKeyUnlocked, address != nil, stage == .trading else { return }
+        await unlock()
+    }
+
+    /// Wipes the key without signing out. The phone locking, iOS ending Desk's background
+    /// time early, and the person choosing to lock all come here.
+    func lock() async {
+        await session.end()
+        isKeyUnlocked = false
+        // An authenticated socket keeps accepting orders with no key behind it, so a lock
+        // that left it open would not be a lock. Closed, the next order has to sign in
+        // again — and signing in is what asks for Face ID.
+        await trading.close()
+    }
+
+    /// Brings the trading key back with one Face ID prompt, without signing out.
+    ///
+    /// Assertion only, so it can never create a passkey. And the derived address must be
+    /// the one already on screen: a different address is a different wallet, and adopting
+    /// it quietly would swap the account out from under the balances being looked at.
+    @discardableResult
+    func unlock() async -> Bool {
+        if await session.isOpen {
+            isKeyUnlocked = true
+            return true
+        }
+        guard let address, !isUnlocking else { return false }
+        isUnlocking = true
+        unlockProblem = nil
+        defer { isUnlocking = false }
+        do {
+            let keys = try await passkey.deriveAccounts()
+            guard keys.address == address else {
+                unlockProblem = "That passkey belongs to a different wallet, so Desk stayed "
+                    + "locked. Sign out to switch accounts."
+                return false
+            }
+            await session.open(keys.trading)
+            isKeyUnlocked = true
+            await trading.reconnect()
+            return true
+        } catch PasskeyFailure.cancelledByUser {
+            return false
+        } catch let failure as PasskeyFailure {
+            unlockProblem = failure.sentence
+            return false
+        } catch {
+            unlockProblem = "Face ID could not unlock Desk. Try again."
+            return false
+        }
     }
 
     // MARK: - Balances
@@ -608,28 +688,5 @@ final class AppModel {
             addresses: try ExchangeAddresses(context: await rest.context()))
         balances = reader
         return reader
-    }
-
-    private func startTicking() {
-        ticker?.cancel()
-        ticker = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                sessionRemaining = await session.remaining ?? .zero
-                if sessionRemaining == .zero, await session.isOpen == false, stage != .welcome {
-                    stage = .welcome
-                    return
-                }
-                try? await Task.sleep(for: .seconds(1))
-            }
-        }
-    }
-}
-
-extension Duration {
-    /// `9m 12s`, the shape the Account screen's countdown wants.
-    var clockText: String {
-        let total = Int(components.seconds)
-        return "\(total / 60)m \(String(format: "%02d", total % 60))s"
     }
 }

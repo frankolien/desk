@@ -66,6 +66,9 @@ final class TradingSession {
     private(set) var isConnected = false
     var onAccount: ((PerplAccount) -> Void)?
     var onPositions: (([PerplPosition]) -> Void)?
+    /// Asked when connecting fails. Answers true once Desk has been unlocked, in which
+    /// case the connection is tried once more; false leaves the original failure standing.
+    var onNeedsUnlock: (@MainActor () async -> Bool)?
     private var connectionID = UUID()
     /// Updates that arrived before the order they belong to had a frame id here.
     ///
@@ -152,7 +155,17 @@ final class TradingSession {
                 // Mobile sockets are routinely suspended between opening the ticket and
                 // confirming it. Reconnect at the point of intent instead of making the
                 // user leave the sheet and sign in again.
-                try await connect(lastForwarded: 0)
+                do {
+                    try await connect(lastForwarded: 0)
+                } catch {
+                    // Signing in needs the trading key, and Desk may be locked — the key
+                    // is wiped after a spell in the background or when the phone locks.
+                    // One Face ID prompt, then the order carries on. This is a closing
+                    // order as often as an opening one, and it must not be turned away
+                    // for want of a key the person can restore with a glance.
+                    guard let unlock = onNeedsUnlock, await unlock() else { throw error }
+                    if !isConnected { try await connect(lastForwarded: 0) }
+                }
             }
             let id = try await desk.place(draft, headBlock: headBlock)
             order.associate(id)
@@ -260,7 +273,7 @@ final class TradingSession {
         case OrderBuilder.Failure.frameIDMustBeNonZero, OrderBuilder.Failure.priceMustBePositive:
             return "Desk could not build a valid Perpl order. Nothing was sent."
         case SigningSession.Failure.closed:
-            return "Your trading key has expired. Sign in with Face ID and try again."
+            return "Desk is locked, so nothing was sent. Unlock with Face ID and send it again."
         case let url as URLError:
             return url.code == .notConnectedToInternet
                 ? "Your phone is offline. Nothing was sent."

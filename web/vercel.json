@@ -2,6 +2,9 @@
   "framework": null,
   "buildCommand": null,
   "outputDirectory": "public",
+  "functions": {
+    "api/market-stream.mjs": { "maxDuration": 300 }
+  },
   "headers": [
     {
       "source": "/.well-known/apple-app-site-association",

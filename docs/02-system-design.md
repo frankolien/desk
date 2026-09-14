@@ -258,8 +258,8 @@ first transaction path, so the Fund screen waits there deliberately.
 Unchanged in principle, refined in two places.
 
 `SigningSession` is the only object that sees PRF output. It holds the Ed25519 seed,
-constructs a signing key per use, and overwrites on expiry, on an explicit end, or when
-the app leaves the foreground. On iOS the PRF output arrives as a `CryptoKit`
+constructs a signing key per use, and overwrites twenty seconds after the app leaves the
+foreground, when the phone locks, or on an explicit lock. On iOS the PRF output arrives as a `CryptoKit`
 `SymmetricKey` rather than `Data`, which suits this better than a raw buffer.
 
 The wallet key is never held. A contract call derives it from a fresh PRF ceremony,
@@ -277,14 +277,20 @@ would simply have been false, with every test still green.
 So credentials carry the API token and a **signing function**, never a key. The function
 comes from the session, borrows the key for the length of one signature, and throws once
 the session has ended. No key material crosses into `DeskPerpl` at all. The acceptance
-criterion is now a test: open a session, sign, background, and watch the next signed call
-fail because there is nothing left to sign with.
+criterion is now a test: open a session, sign, background past the grace, and watch the next
+signed call fail because there is nothing left to sign with.
 
 The deadline is monotonic rather than wall-clock. A wall clock can be wound backwards
 from Settings, and a session that can be extended that way is not a session.
 
-**Two windows, not one.** The session window is fifteen minutes and governs whether an
-order needs a fresh ceremony. The order window is much shorter and governs whether the
+**No session window, and one order window.** There was a session window — fifteen
+minutes — and it was wrong: it put a Face ID prompt, and then a sign-out, between a
+person and closing a losing position. The trading key cannot move money; deposits and
+withdrawals are signed by the wallet key with Face ID every time, so a stolen trading
+key can trade the account but not empty it. The key now lives while Desk is open,
+survives a twenty-second trip to another app — twenty because iOS allows roughly thirty
+seconds of background execution and the wipe must run inside it — and is wiped after
+that or the moment the phone locks. The order window is much shorter and governs whether the
 estimate on screen is still the estimate being signed for; Apple Pay uses sixty seconds
 for the same reason and re-asks for intent after it. An estimate that has aged past the
 order window is re-priced before it is sent.
