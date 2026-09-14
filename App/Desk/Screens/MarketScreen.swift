@@ -46,7 +46,7 @@ struct MarketScreen: View {
                     .presentationDetents([.large])
             }
             .sheet(isPresented: $showsPosition) {
-                PositionScreen(model: model, isStale: market.freshness.freezesDigits)
+                PositionScreen(model: model, market: market)
             }
             .sheet(isPresented: $showsFunding) { AddFundsSheet(model: model) }
         }

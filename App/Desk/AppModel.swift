@@ -48,6 +48,7 @@ final class AppModel {
     /// until a real session exists. Nil is rendered as "no position", which is correct
     /// while there is no way to have one.
     private(set) var openPosition: PerplPosition?
+    private(set) var openPositions: [PerplPosition] = []
 
     private(set) var sessionRemaining: Duration = .zero
     /// Why the last attempt to open a desk stopped, if it did.
@@ -71,6 +72,15 @@ final class AppModel {
 
     init(passkey: any PasskeyService) {
         self.passkey = passkey
+        trading.onAccount = { [weak self] account in
+            guard let free = account.free else { return }
+            self?.collateral.record(free)
+        }
+        trading.onPositions = { [weak self] positions in
+            let open = positions.filter(\.isOpen)
+            self?.openPositions = open
+            self?.openPosition = open.first
+        }
         #if DEBUG
         // `-stage fund|market` jumps straight to a screen, so each one can be captured
         // and reviewed without walking the flow. Debug only, and never a way into a
@@ -102,6 +112,7 @@ final class AppModel {
                 collateral.record(Money(text: "1282.18") ?? .zero)
                 hasDesk.record(true)
                 openPosition = Self.reviewPosition
+                openPositions = Self.reviewPosition.map { [$0] } ?? []
                 sessionRemaining = .seconds(552)
             }
         }
@@ -450,6 +461,7 @@ final class AppModel {
             collateral.record(prior + amount)
             try? await Task.sleep(for: .milliseconds(900))
             await refreshBalances()
+            await trading.reconnect()
         } catch let failure as PasskeyFailure {
             deposit = .failed(failure.sentence)
         } catch {
@@ -503,6 +515,7 @@ final class AppModel {
             }
             withdrawal = .sent(hash)
             await refreshBalances()
+            await trading.reconnect()
         } catch {
             withdrawal = .failed(Self.withdrawSentence(for: error))
         }
@@ -520,6 +533,7 @@ final class AppModel {
     }
 
     func endSession() async {
+        await trading.close()
         await session.end()
         sessionRemaining = .zero
         stage = .welcome

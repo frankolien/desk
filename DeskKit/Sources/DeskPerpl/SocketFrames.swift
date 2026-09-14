@@ -3,8 +3,11 @@ import Foundation
 public enum PerplMessage: Int, Sendable, Hashable {
     case orderStatus = 3
     case walletSnapshot = 19
+    case account = 21
     case order = 22
     case orderUpdate = 24
+    case positionsSnapshot = 26
+    case positionsUpdate = 27
     case signIn = 29
 }
 

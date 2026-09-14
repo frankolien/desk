@@ -22,6 +22,11 @@ import Foundation
 /// concurrent submissions racing for request ids is exactly the bug that produces `sr: 32`
 /// on the second one.
 public actor OrderDesk {
+    public enum Event: Sendable, Hashable {
+        case account(PerplAccount)
+        case positions([PerplPosition])
+        case order(frameID: Int64, phase: OrderPhase)
+    }
     public enum Failure: Error, Sendable, Equatable {
         /// No enrolled key, so nothing can be signed. The honest state before enrolment.
         case notEnrolled
@@ -136,7 +141,7 @@ public actor OrderDesk {
     /// Ends when the socket ends. A closed socket is not an error to swallow — the caller
     /// has to know the session is gone, which is why the stream finishes rather than
     /// quietly stopping.
-    public func observe() -> AsyncStream<(frameID: Int64, phase: OrderPhase)> {
+    public func observe() -> AsyncStream<Event> {
         AsyncStream { continuation in
             let task = Task {
                 do {
@@ -144,12 +149,18 @@ public actor OrderDesk {
                         // `mt: 21` carries the forwarding flag, which decides whether an
                         // order can be sent at all. Read here because this is the only
                         // reader.
-                        if let account = try? frame.decode(PerplAccount.self), frame.kind == nil {
+                        if frame.kind == .account,
+                           let account = try? frame.decode(PerplAccount.self) {
                             noteForwarding(account.allowsForwarding)
+                            continuation.yield(.account(account))
+                        }
+                        if frame.kind == .positionsSnapshot || frame.kind == .positionsUpdate,
+                           let positions = try? frame.decode(PositionsFrame.self) {
+                            continuation.yield(.positions(positions.positions))
                         }
                         guard let moved = await apply(frame),
                               let phase = await phase(of: moved) else { continue }
-                        continuation.yield((moved, phase))
+                        continuation.yield(.order(frameID: moved, phase: phase))
                     }
                 } catch {
                     // Falls through to finish: the socket closing is the event, and the

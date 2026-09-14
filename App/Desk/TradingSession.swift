@@ -24,6 +24,8 @@ final class TradingSession {
     /// replay and the terminal rule are not re-implemented here, because they were once
     /// and that is how the race got in.
     private(set) var order = OrderProgress()
+    private(set) var account = LastGood<PerplAccount>()
+    private(set) var positions = LastGood<[PerplPosition]>()
 
     /// The sentence the ticket shows, or nothing while there is no order.
     var statusText: String? {
@@ -62,6 +64,9 @@ final class TradingSession {
     private var watching: Task<Void, Never>?
     private var frameID: Int64?
     private(set) var isConnected = false
+    var onAccount: ((PerplAccount) -> Void)?
+    var onPositions: (([PerplPosition]) -> Void)?
+    private var connectionID = UUID()
     /// Updates that arrived before the order they belong to had a frame id here.
     ///
     /// The window is real: `desk.place` tracks the order and sends it, and the gateway can
@@ -84,6 +89,7 @@ final class TradingSession {
     func selectMarket(_ market: Market) async {
         guard credentials != nil else { return }
         watching?.cancel()
+        await desk?.close()
         desk = OrderDesk(socket: .testnet(), market: market)
         isConnected = false
         try? await connect(lastForwarded: 0)
@@ -99,18 +105,36 @@ final class TradingSession {
     /// Connects, and begins the single read of the socket.
     func connect(lastForwarded: Int64) async throws {
         guard let desk, let credentials else { throw OrderDesk.Failure.notEnrolled }
+        let id = UUID()
+        connectionID = id
         try await desk.open(credentials: credentials, lastForwarded: lastForwarded)
         isConnected = true
         watching?.cancel()
         watching = Task { [weak self] in
             for await update in await desk.observe() {
                 guard let self else { return }
-                await record(update.frameID, update.phase)
+                await record(update)
             }
             // The stream finishing means the socket went away. An order still in flight
             // has no answer coming, and saying so beats a spinner that never ends.
-            await self?.socketEnded()
+            await self?.socketEnded(id: id)
         }
+    }
+
+    func reconnect() async {
+        guard credentials != nil else { return }
+        watching?.cancel()
+        await desk?.close()
+        isConnected = false
+        try? await connect(lastForwarded: 0)
+    }
+
+    func close() async {
+        connectionID = UUID()
+        watching?.cancel()
+        watching = nil
+        await desk?.close()
+        isConnected = false
     }
 
     /// Sends the order, or explains why it cannot be sent.
@@ -157,8 +181,24 @@ final class TradingSession {
         }
     }
 
-    private func socketEnded() {
+    private func record(_ event: OrderDesk.Event) {
+        switch event {
+        case .account(let value):
+            account.record(value)
+            onAccount?(value)
+        case .positions(let value):
+            positions.record(value)
+            onPositions?(value)
+        case .order(let id, let phase):
+            record(id, phase)
+        }
+    }
+
+    private func socketEnded(id: UUID) {
+        guard id == connectionID else { return }
         isConnected = false
+        account.recordFailure("The Perpl account stream disconnected.")
+        positions.recordFailure("The Perpl position stream disconnected.")
         order.connectionLost()
     }
 

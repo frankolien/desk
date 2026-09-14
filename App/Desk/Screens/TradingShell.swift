@@ -56,7 +56,7 @@ struct TradingShell: View {
             }
 
             Tab("Watchlist", systemImage: "bookmark.fill", value: .watchlist) {
-                WatchlistScreen(market: market)
+                WatchlistScreen(model: model, market: market, session: session)
             }
 
             Tab("Signals", systemImage: "antenna.radiowaves.left.and.right", value: .signals) {

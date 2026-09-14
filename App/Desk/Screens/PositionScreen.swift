@@ -1,59 +1,89 @@
+import DeskPerpl
 import DeskUI
 import SwiftUI
 
-/// Profit and loss first, liquidation second, then size, then reference prices. The
-/// mobile ordering, not the desktop table's.
 struct PositionScreen: View {
     let model: AppModel
-    let isStale: Bool
+    let market: MarketModel
+    @Environment(\.dismiss) private var dismiss
+
+    private var figures: PositionFigures? {
+        guard let held = model.openPosition,
+              held.marketID == market.market?.id,
+              let config = market.market?.config,
+              let mark = market.mark.value else { return nil }
+        return PositionFigures(position: held, market: config, mark: mark)
+    }
+
+    private var stale: Bool { market.freshness.freezesDigits }
 
     var body: some View {
-        ZStack {
-            DeskBackground()
-            VStack(alignment: .leading, spacing: 24) {
-                HStack(spacing: 9) {
-                    AssetMark.bitcoin(size: 30)
-                    Text("Long BTC · 3×")
-                        .font(DeskType.label)
-                        .foregroundStyle(DeskColor.nightMuted.color)
+        NavigationStack {
+            ZStack {
+                DeskBackground()
+                if let figures { content(figures) } else { unavailable }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+            }
+        }
+    }
+
+    private func content(_ figures: PositionFigures) -> some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(spacing: 10) {
+                    MarketTokenLogo(symbol: market.symbol, size: 34)
+                    Text("\(figures.side == .long ? "Long" : "Short") \(market.symbol)")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                    Text("\(figures.leverageHundredths / 100)×")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Color.white.opacity(0.1), in: Capsule())
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Image(systemName: Direction.up.symbolName)
-                            .foregroundStyle(DeskColor.rise.color)
-                        Text("+42.18 AUSD")
-                            .font(DeskType.display)
-                            .foregroundStyle(DeskColor.rise.color)
-                    }
-                    // The denominator is named because there is no standard one:
-                    // Hyperliquid divides by equity, Binance by entry margin, OKX by
-                    // position margin. They are not interchangeable.
-                    Text("+4.2% on margin")
-                        .font(DeskType.caption)
+                    Text((figures.unrealisedPnL.isNegative ? "" : "+")
+                         + figures.unrealisedPnL.display() + " AUSD")
+                        .font(.system(size: 42, weight: .heavy, design: .rounded).monospacedDigit())
+                        .foregroundStyle(figures.isProfit ? DeskColor.rise.color : DeskColor.fall.color)
+                        .contentTransition(.numericText())
+                    Text(HomeScreen.percent(figures.returnOnMarginMicros) + " on margin")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
                 }
-                // Field-level staleness: mark, PnL and liquidation derive from the same
-                // tick, so they dim and freeze together.
-                .opacity(isStale ? 0.55 : 1)
+                .opacity(stale ? 0.55 : 1)
 
-                VStack(spacing: 12) {
-                    ValueRow(label: "Liquidation", value: "62,315.40", detail: "7.6% away",
-                             tint: DeskColor.fall, isDimmed: isStale)
-                    ValueRow(label: "Size", value: "1,000.00 AUSD", detail: "0.0148 BTC")
-                    ValueRow(label: "Entry", value: "66,980.10")
-                    ValueRow(label: "Mark", value: "67,412.30", isDimmed: isStale)
-                    // Entry, size and funding do not dim: they are still true.
-                    ValueRow(label: "Funding", value: "\(Direction.minus)0.83 AUSD",
+                VStack(spacing: 10) {
+                    ValueRow(
+                        label: "Liquidation",
+                        value: figures.liquidationPrice?.display(fractionDigits: figures.entry.decimals) ?? Unavailable.text,
+                        detail: figures.liquidationDistanceMicros.map {
+                            $0 == 0 ? "At liquidation" : HomeScreen.percent($0, signed: false) + " away"
+                        }, tint: DeskColor.fall, isDimmed: stale)
+                    ValueRow(
+                        label: "Size",
+                        value: figures.size.display(fractionDigits: figures.size.decimals) + " \(market.symbol)",
+                        detail: figures.collateral.display() + " AUSD collateral")
+                    ValueRow(label: "Entry", value: figures.entry.display(fractionDigits: figures.entry.decimals))
+                    ValueRow(label: "Mark", value: figures.mark.display(fractionDigits: figures.mark.decimals), isDimmed: stale)
+                    ValueRow(label: "Funding", value: figures.fundingSinceEntry.map { $0.display() + " AUSD" } ?? Unavailable.text,
                              detail: "since you opened")
                 }
 
-                Spacer()
-
-                PrimaryButton(title: "Close position", tint: DeskColor.fall) {}
+                Text("Closing is coming next. Desk will not fake it by sending an opposite order, which could increase risk instead of reducing this position.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 24)
+            .foregroundStyle(DeskColor.nightText.color)
+            .padding(20)
         }
+    }
+
+    private var unavailable: some View {
+        ContentUnavailableView("Position unavailable", systemImage: "chart.xyaxis.line",
+            description: Text("Waiting for the authenticated Perpl position stream."))
+            .foregroundStyle(DeskColor.nightText.color)
     }
 }
