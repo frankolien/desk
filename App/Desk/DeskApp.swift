@@ -19,7 +19,7 @@ struct DeskApp: App {
     /// So the copies stay, and `tools/check-relying-party.sh` compares them. Run it before
     /// shipping; a mismatch fails only on hardware, because the association is checked by
     /// the system rather than by the app.
-    static let relyingPartyIdentifier = "desk-trading.vercel.app"
+    static let relyingPartyIdentifier = "desk-trading-opia.vercel.app"
 
     static var relyingParty: RelyingParty? {
         // `RelyingParty` refuses the shapes that fail on a device rather than at build

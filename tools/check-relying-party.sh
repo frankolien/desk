@@ -19,6 +19,7 @@ set -uo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 domain="${1:-}"
+expected_app_id=""
 if [[ -z "$domain" ]]; then
   swift_value=$(grep -oE 'relyingPartyIdentifier = "[^"]+"' "$root/App/Desk/DeskApp.swift" \
     | head -1 | sed -E 's/.*"([^"]+)"/\1/')
@@ -39,6 +40,14 @@ if [[ -z "$domain" ]]; then
   fi
   echo "  ok    Swift constant and entitlement agree: $swift_value"
   domain="$swift_value"
+
+  team_id=$(sed -nE 's/^[[:space:]]*DEVELOPMENT_TEAM:[[:space:]]*([^[:space:]]+).*/\1/p' "$root/project.yml" | head -1)
+  bundle_id=$(sed -nE 's/^[[:space:]]*PRODUCT_BUNDLE_IDENTIFIER:[[:space:]]*([^[:space:]]+).*/\1/p' "$root/project.yml" | head -1)
+  if [[ -z "$team_id" || -z "$bundle_id" ]]; then
+    echo "FAIL  could not derive TEAMID.bundle.id from project.yml" >&2
+    exit 1
+  fi
+  expected_app_id="${team_id}.${bundle_id}"
 fi
 if [[ "$domain" == *"://"* || "$domain" == *"/"* ]]; then
   echo "FAIL  a relying party is a bare domain: no scheme, no path" >&2
@@ -92,6 +101,9 @@ PY
 )
   if [[ "$apps" == "(none)" ]]; then
     note "FAIL" "no webcredentials.apps entries — passkeys need TEAMID.bundle.id listed"
+  elif [[ -n "$expected_app_id" && ",$apps," != *",$expected_app_id,"* ]]; then
+    note "FAIL" "webcredentials.apps does not contain the signed app identity $expected_app_id"
+    note "note" "server currently authorizes: $apps"
   else
     note "ok" "webcredentials.apps: $apps"
   fi

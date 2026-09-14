@@ -1,4 +1,7 @@
 {
+  "framework": null,
+  "buildCommand": null,
+  "outputDirectory": "public",
   "headers": [
     {
       "source": "/.well-known/apple-app-site-association",

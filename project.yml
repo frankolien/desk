@@ -11,7 +11,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    DEVELOPMENT_TEAM: WH43PPJBR7
+    DEVELOPMENT_TEAM: YCKKUWB4WD
     CODE_SIGN_STYLE: Automatic
     SWIFT_STRICT_CONCURRENCY: complete
     ENABLE_USER_SCRIPT_SANDBOXING: YES
@@ -56,7 +56,7 @@ targets:
           # file — checked directly at app-site-association.cdn-apple.com — so the
           # developer bypass would only add a requirement (a Settings toggle) without
           # fixing anything, and it must not ship.
-          - webcredentials:desk-trading.vercel.app
+          - webcredentials:desk-trading-opia.vercel.app
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

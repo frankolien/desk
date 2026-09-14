@@ -105,7 +105,7 @@ Both are the screens most likely to be wrong and least likely to be looked at.
 
 **Every blocker in `05-milestones.md` is closed.** Paid Apple membership confirmed,
 individual account is fine on the internal TestFlight path, and the relying party is
-live at **`desk-trading.vercel.app`** — verified serving its association file directly,
+live at **`desk-trading-opia.vercel.app`** — verified serving its association file directly,
 no redirect. `tools/check-relying-party.sh` with no arguments checks the domain *and*
 compares the two copies of it in the repository.
 

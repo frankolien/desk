@@ -10,10 +10,9 @@ device. `vercel.json` pins the content type and switches off `cleanUrls` and
 The `apps` entry is `TEAMID.bundleid`. Changing either side of that string breaks the
 association, and the app's `webcredentials:` entitlement must name this exact domain.
 
-The domain is **desk-trading.vercel.app**, deployed from the Vercel project of the same
-name. `desk-trade.vercel.app` was the first choice and is taken by someone else, which is
-why Vercel handed out a long team-scoped alias instead — a bare `<project>.vercel.app` is
-granted only when that name is globally free.
+The domain is **desk-trading-opia.vercel.app**, a stable alias on the team's `web`
+project. The earlier `desk-trading.vercel.app` deployment belongs to another Vercel
+account and cannot be updated by this project.
 
 Deployment Protection must stay off. With it on, Vercel answers 302 to an SSO page, and
 that is the redirect Apple refuses to follow while a browser follows it silently.
