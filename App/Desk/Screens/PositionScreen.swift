@@ -3,16 +3,17 @@ import DeskUI
 import SwiftUI
 
 struct PositionScreen: View {
-    let model: AppModel
+    let position: PerplPosition
     let market: MarketModel
+    let session: TradingSession
     @Environment(\.dismiss) private var dismiss
+    @State private var confirmsClose = false
 
     private var figures: PositionFigures? {
-        guard let held = model.openPosition,
-              held.marketID == market.market?.id,
+        guard position.marketID == market.market?.id,
               let config = market.market?.config,
               let mark = market.mark.value else { return nil }
-        return PositionFigures(position: held, market: config, mark: mark)
+        return PositionFigures(position: position, market: config, mark: mark)
     }
 
     private var stale: Bool { market.freshness.freezesDigits }
@@ -25,6 +26,22 @@ struct PositionScreen: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+            }
+            .confirmationDialog(
+                "Close the entire \(market.symbol) position?",
+                isPresented: $confirmsClose,
+                titleVisibility: .visible
+            ) {
+                Button("Close position", role: .destructive) {
+                    guard let selected = market.market else { return }
+                    Task {
+                        await session.closePosition(
+                            position, slippageBps: min(50, selected.maxMarketSlippageBps))
+                    }
+                }
+                Button("Keep position", role: .cancel) {}
+            } message: {
+                Text("This submits a reduce-only market close. It cannot open an opposite position.")
             }
         }
     }
@@ -71,10 +88,21 @@ struct PositionScreen: View {
                              detail: "since you opened")
                 }
 
-                Text("Closing is coming next. Desk will not fake it by sending an opposite order, which could increase risk instead of reducing this position.")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-                    .fixedSize(horizontal: false, vertical: true)
+                Button(role: .destructive) { confirmsClose = true } label: {
+                    Text(session.isBusy ? "Closing…" : "Close position")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(DeskColor.fall.color)
+                .disabled(session.isBusy)
+
+                if let status = session.statusText {
+                    Text(status)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(session.hasFailed ? DeskColor.fall.color : DeskColor.nightMuted.color)
+                }
             }
             .foregroundStyle(DeskColor.nightText.color)
             .padding(20)

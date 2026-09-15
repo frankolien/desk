@@ -157,8 +157,18 @@ final class MarketModel {
     }
 
     func markText(for item: Market) -> String {
+        price(for: item)?.display(fractionDigits: item.config.priceDecimals) ?? "—"
+    }
+
+    /// The latest mark for this exact market. Position maths must never use the mark of
+    /// whichever market happens to be selected in the UI.
+    func price(for item: Market) -> Price? {
         let raw = quotes[item.id]?.markRaw ?? item.state.markRaw
-        return item.price(raw)?.display(fractionDigits: item.config.priceDecimals) ?? "—"
+        return item.price(raw)
+    }
+
+    func market(id: UInt32) -> Market? {
+        market?.id == id ? market : allMarkets.first(where: { $0.id == id })
     }
 
     func changePercent(for item: Market) -> Double? {
@@ -230,7 +240,11 @@ final class MarketModel {
 
                     while !Task.isCancelled {
                         let text = try await socket.receive()
-                        ingestLiveFrame(Data(text.utf8))
+                        let data = Data(text.utf8)
+                        let updates = await Task.detached(priority: .utility) {
+                            Self.decodeLiveQuotes(data)
+                        }.value
+                        ingestLiveQuotes(updates)
                     }
                 } catch {
                     self?.liveSocket?.close()
@@ -242,16 +256,24 @@ final class MarketModel {
         }
     }
 
-    private func ingestLiveFrame(_ data: Data) {
+    nonisolated private static func decodeLiveQuotes(_ data: Data) -> [UInt32: Int64] {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               (root["mt"] as? NSNumber)?.intValue == 9,
               let states = root["d"] as? [String: Any]
-        else { return }
+        else { return [:] }
 
+        var result: [UInt32: Int64] = [:]
         for (key, value) in states {
             guard let id = UInt32(key), let state = value as? [String: Any],
-                  let raw = Self.wireInt(state["mrk"])
+                  let raw = wireInt(state["mrk"])
             else { continue }
+            result[id] = raw
+        }
+        return result
+    }
+
+    private func ingestLiveQuotes(_ updates: [UInt32: Int64]) {
+        for (id, raw) in updates {
             let previous = quotes[id]?.previousRaw
                 ?? allMarkets.first(where: { $0.id == id })?.state.previousRaw
                 ?? raw
@@ -270,7 +292,7 @@ final class MarketModel {
         isLoadingFirstValue = false
     }
 
-    private static func wireInt(_ value: Any?) -> Int64? {
+    nonisolated private static func wireInt(_ value: Any?) -> Int64? {
         if let number = value as? NSNumber { return number.int64Value }
         if let text = value as? String { return Int64(text) }
         return nil
@@ -289,7 +311,9 @@ final class MarketModel {
                 method: .get,
                 path: "/v1/market-data/\(requestedMarket)/candles/\(requestedInterval)/\(from)-\(to)")
             let data = try await rest.publicData(endpoint)
-            let result = try JSONDecoder().decode(CandleSeries.self, from: data).d
+            let result = try await Task.detached(priority: .utility) {
+                try JSONDecoder().decode(CandleSeries.self, from: data).d
+            }.value
             guard requestedMarket == marketID, requestedInterval == candleIntervalSeconds else { return }
             candles = result
             lastCandleFetch = Date()

@@ -27,11 +27,11 @@ public struct AmountText: View {
     public var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
             Text(whole)
-                .font(.system(size: size, weight: .bold).monospacedDigit())
+                .font(.system(size: size, weight: .heavy, design: .rounded).monospacedDigit())
                 .foregroundStyle(colour.color)
             if let fraction {
                 Text(fraction)
-                    .font(.system(size: size * 0.62, weight: .bold).monospacedDigit())
+                    .font(.system(size: size * 0.62, weight: .bold, design: .rounded).monospacedDigit())
                     .foregroundStyle(colour.color.opacity(0.55))
             }
         }

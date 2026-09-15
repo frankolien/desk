@@ -5,10 +5,8 @@ import SwiftUI
 
 /// An open position, at a glance.
 ///
-/// Ordered the way a person reads it on a phone rather than the way a desktop table lays
-/// it out. Profit first, because that is the question. Liquidation second, because it is
-/// the one that can end the position. Size and entry last, because they do not change and
-/// nobody opens an app to check them.
+/// A compact portfolio row. Full risk analysis belongs on the detail screen; repeating it
+/// inside every row made a handful of positions consume the whole Perps page.
 ///
 /// Mark, profit and liquidation distance descend from a single tick and therefore dim as
 /// a group when the price goes stale. Entry, size and leverage do not dim: they are still
@@ -34,17 +32,49 @@ struct OpenPositionCard: View {
 
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                pnl.padding(.top, 14)
-                liquidationBar.padding(.top, 16)
-                facts.padding(.top, 16)
+            HStack(spacing: 12) {
+                MarketTokenLogo(symbol: symbol, size: 38)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 7) {
+                        Text("\(figures.side == .long ? "Long" : "Short") \(symbol)")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                        Text("\(figures.leverageHundredths / 100)×")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(Color.white.opacity(0.1), in: Capsule())
+                    }
+                    Text("Entry " + figures.entry.display(fractionDigits: figures.entry.decimals)
+                         + " · Liq. " + (figures.liquidationPrice?.display(
+                            fractionDigits: figures.entry.decimals) ?? Unavailable.text))
+                        .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text((figures.unrealisedPnL.isNegative ? "" : "+")
+                         + figures.unrealisedPnL.display() + " AUSD")
+                        .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(tint.color)
+                    Text(HomeScreen.percent(figures.returnOnMarginMicros) + " margin")
+                        .font(.system(size: 11, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(tint.color)
+                }
+                .opacity(isStale ? 0.55 : 1)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(DeskColor.nightMuted.color)
             }
-            .padding(16)
+            .padding(.horizontal, 14)
+            .frame(height: 82)
             .background(DeskColor.nightChip.color.opacity(0.6),
-                        in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(DeskColor.nightLine.color, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
@@ -53,7 +83,7 @@ struct OpenPositionCard: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            AssetMark.bitcoin(size: 30)
+            MarketTokenLogo(symbol: symbol, size: 30)
 
             Text("\(figures.side == .long ? "Long" : "Short") \(symbol)")
                 .font(.system(size: 16, weight: .bold, design: .rounded))

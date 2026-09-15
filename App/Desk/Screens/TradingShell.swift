@@ -74,7 +74,9 @@ struct TradingShell: View {
         .tint(.white)
         .sheet(isPresented: $showsAccount) {
             AccountScreen(model: model)
-                .presentationBackground(.black)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(Color(.systemBackground))
         }
         .sheet(isPresented: $showsFunding) { AddFundsSheet(model: model) }
         .task { market.start() }

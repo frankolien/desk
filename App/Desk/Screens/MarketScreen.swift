@@ -1,4 +1,5 @@
 import DeskPerpl
+import DeskMoney
 import DeskUI
 import SwiftUI
 
@@ -6,6 +7,13 @@ import SwiftUI
 /// collateral, positions, then supported markets. Desk currently supports one live market,
 /// so the list stays truthful rather than filling the design with invented feeds.
 struct MarketScreen: View {
+    private struct PositionContext: Identifiable {
+        let held: PerplPosition
+        let market: Market
+        let figures: PositionFigures
+        var id: String { "\(held.accountID):\(held.positionID)" }
+    }
+
     let model: AppModel
     let market: MarketModel
     let session: TradingSession
@@ -13,6 +21,7 @@ struct MarketScreen: View {
     @State private var query = ""
     @State private var showsMarket = false
     @State private var showsPosition = false
+    @State private var selectedPosition: PerplPosition?
     @State private var showsWithdraw = false
     @State private var showsFunding = false
 
@@ -46,7 +55,9 @@ struct MarketScreen: View {
                     .presentationDetents([.large])
             }
             .sheet(isPresented: $showsPosition) {
-                PositionScreen(model: model, market: market)
+                if let held = selectedPosition {
+                    PositionScreen(position: held, market: market, session: session)
+                }
             }
             .sheet(isPresented: $showsFunding) { AddFundsSheet(model: model) }
         }
@@ -118,12 +129,21 @@ struct MarketScreen: View {
 
     /// Derived at the point of display so that the header total, the PnL and the
     /// liquidation distance all descend from the one mark current when the screen drew.
-    private var position: PositionFigures? {
-        guard let held = model.openPosition,
-              let mark = market.mark.value,
-              let config = market.market?.config
-        else { return nil }
-        return PositionFigures(position: held, market: config, mark: mark)
+    private var positionContexts: [PositionContext] {
+        model.openPositions.compactMap { held in
+            guard let positionMarket = market.market(id: held.marketID),
+                  let mark = market.price(for: positionMarket),
+                  let figures = PositionFigures(
+                    position: held, market: positionMarket.config, mark: mark)
+            else { return nil }
+            return PositionContext(held: held, market: positionMarket, figures: figures)
+        }
+    }
+
+    private var totalPositionPnL: Money? {
+        let contexts = positionContexts
+        guard !contexts.isEmpty else { return nil }
+        return contexts.reduce(.zero) { $0 + $1.figures.unrealisedPnL }
     }
 
     private var positions: some View {
@@ -135,22 +155,31 @@ struct MarketScreen: View {
             // The header total is unrealised PnL, not notional. Notional is the number
             // that looks impressive and answers nothing; this is the one a person came
             // to see.
-            Text(position.map { figures in
-                (figures.unrealisedPnL.isNegative ? "" : "+") + "$" + figures.unrealisedPnL.display()
+            Text(totalPositionPnL.map { pnl in
+                (pnl.isNegative ? "" : "+") + "$" + pnl.display()
             } ?? "$0.00")
                 .font(.system(size: 28, weight: .bold, design: .rounded).monospacedDigit())
-                .foregroundStyle((position.map { $0.isProfit ? DeskColor.rise : DeskColor.fall }
+                .foregroundStyle((totalPositionPnL.map { !$0.isNegative && !$0.isZero ? DeskColor.rise : DeskColor.fall }
                                   ?? DeskColor.nightText).color)
                 .contentTransition(.numericText())
-                .animation(.snappy(duration: 0.25), value: position?.unrealisedPnL.raw)
+                .animation(.snappy(duration: 0.25), value: totalPositionPnL?.raw)
                 .padding(.top, 3)
 
-            if let position {
-                OpenPositionCard(
-                    figures: position,
-                    symbol: market.symbol,
-                    isStale: market.freshness.freezesDigits) { showsPosition = true }
-                    .padding(.top, 16)
+            if !positionContexts.isEmpty {
+                LazyVStack(spacing: 12) {
+                    ForEach(positionContexts) { position in
+                        OpenPositionCard(
+                            figures: position.figures,
+                            symbol: position.market.symbol,
+                            isStale: market.freshness.freezesDigits) {
+                                market.select(position.market)
+                                selectedPosition = position.held
+                                showsPosition = true
+                                Task { await session.selectMarket(position.market) }
+                            }
+                    }
+                }
+                .padding(.top, 16)
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "infinity")
@@ -183,8 +212,10 @@ struct MarketScreen: View {
                 ForEach(visible, id: \.id) { item in
                 Button {
                     market.select(item)
-                    Task { await session.selectMarket(item) }
-                    showsMarket = true
+                    Task {
+                        await session.selectMarket(item)
+                        showsMarket = true
+                    }
                 } label: {
                     HStack(spacing: 12) {
                         MarketTokenLogo(symbol: item.symbol, size: 42)

@@ -4,6 +4,13 @@ import SwiftUI
 
 /// The signed-in landing page: balance, actions, then the account's live instruments.
 struct HomeScreen: View {
+    private struct PositionContext: Identifiable {
+        let held: PerplPosition
+        let market: Market
+        let figures: PositionFigures
+        var id: String { "\(held.accountID):\(held.positionID)" }
+    }
+
     let model: AppModel
     let market: MarketModel
     let onTrade: () -> Void
@@ -14,7 +21,9 @@ struct HomeScreen: View {
     @State private var showsMore = false
 
     private var collateralText: String {
-        (model.collateral.value ?? model.walletAUSD.value)?.display() ?? Unavailable.text
+        // Wallet AUSD and Perpl collateral are different balances. Falling back to the
+        // wallet here made a still-loading exchange balance look like a real $0 balance.
+        model.collateral.value?.display() ?? Unavailable.text
     }
 
     private var isEmpty: Bool {
@@ -24,12 +33,15 @@ struct HomeScreen: View {
     /// Derived here, at the point of display, so every figure in the row descends from the
     /// one mark that was current when it was drawn. Held on the model instead, PnL and
     /// mark could come from two ticks a frame apart and disagree on screen.
-    private var position: PositionFigures? {
-        guard let held = model.openPosition,
-              let mark = market.mark.value,
-              let config = market.market?.config
-        else { return nil }
-        return PositionFigures(position: held, market: config, mark: mark)
+    private var positionContexts: [PositionContext] {
+        model.openPositions.compactMap { held in
+            guard let positionMarket = market.market(id: held.marketID),
+                  let mark = market.price(for: positionMarket),
+                  let figures = PositionFigures(
+                    position: held, market: positionMarket.config, mark: mark)
+            else { return nil }
+            return PositionContext(held: held, market: positionMarket, figures: figures)
+        }
     }
 
     var body: some View {
@@ -159,20 +171,34 @@ struct HomeScreen: View {
 
             // Profit first. A position row that leads with size answers a question
             // nobody opens the app to ask.
-            HomeAssetRow(
-                mark: { MonochromeSymbolMark(symbol: "chart.xyaxis.line") },
-                title: position.map { "\($0.side == .long ? "Long" : "Short") \(market.symbol) · \($0.leverageHundredths / 100)×" }
-                    ?? "Open positions",
-                subtitle: positionSubtitle,
-                value: position.map { figures in
-                    hidesBalance
-                        ? "•••••"
-                        : (figures.unrealisedPnL.isNegative ? "" : "+")
-                            + figures.unrealisedPnL.display() + " AUSD"
-                } ?? "None",
-                change: position.map { Self.percent($0.returnOnMarginMicros) + " on margin" } ?? "Ready",
-                tint: position.map { $0.isProfit ? DeskColor.rise : DeskColor.fall } ?? DeskColor.nightMuted,
-                action: onTrade)
+            if positionContexts.isEmpty {
+                HomeAssetRow(
+                    mark: { MonochromeSymbolMark(symbol: "chart.xyaxis.line") },
+                    title: "Open positions", subtitle: "Perpl testnet",
+                    value: "None", change: "Ready", tint: DeskColor.nightMuted,
+                    action: onTrade)
+            } else {
+                ForEach(Array(positionContexts.prefix(3))) { position in
+                    HomeAssetRow(
+                        mark: { MarketTokenLogo(symbol: position.market.symbol, size: 38) },
+                        title: "\(position.figures.side == .long ? "Long" : "Short") \(position.market.symbol) · \(position.figures.leverageHundredths / 100)×",
+                        subtitle: positionSubtitle(position.figures),
+                        value: hidesBalance
+                            ? "•••••"
+                            : (position.figures.unrealisedPnL.isNegative ? "" : "+")
+                                + position.figures.unrealisedPnL.display() + " AUSD",
+                        change: Self.percent(position.figures.returnOnMarginMicros) + " on margin",
+                        tint: position.figures.isProfit ? DeskColor.rise : DeskColor.fall,
+                        action: onTrade)
+                }
+                if positionContexts.count > 3 {
+                    Button("View \(positionContexts.count - 3) more positions", action: onTrade)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
+                }
+            }
 
             HomeAssetRow(
                 mark: { TokenLogo(asset: .bitcoin, size: 38) },
@@ -190,8 +216,7 @@ struct HomeScreen: View {
     /// Liquidation distance rather than size, because distance is the figure that
     /// changes and the one that can end the position. `--` when the price is not yet
     /// known: a distance computed from no mark would be a claim.
-    private var positionSubtitle: String {
-        guard let position else { return "Perpl testnet" }
+    private func positionSubtitle(_ position: PositionFigures) -> String {
         guard let distance = position.liquidationDistanceMicros else {
             return "Liquidation \(Unavailable.text)"
         }
