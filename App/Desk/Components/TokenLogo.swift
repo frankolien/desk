@@ -2,6 +2,20 @@ import DeskMoney
 import SwiftUI
 import UIKit
 
+private struct TokenPaletteSample: Sendable {
+    let red: Double
+    let green: Double
+    let blue: Double
+}
+
+private actor TokenPaletteCache {
+    static let shared = TokenPaletteCache()
+    private var values: [String: TokenPaletteSample] = [:]
+
+    func value(for key: String) -> TokenPaletteSample? { values[key] }
+    func insert(_ value: TokenPaletteSample, for key: String) { values[key] = value }
+}
+
 struct TokenLogo: View {
     enum Asset { case bitcoin, ausd }
     let asset: Asset
@@ -104,23 +118,34 @@ struct TokenAdaptiveCardBackground: View {
     @MainActor
     private func loadTint() async {
         let key = symbol.uppercased()
-        let image: UIImage?
-        if let artworkURL,
-           let (data, _) = try? await URLSession.shared.data(from: artworkURL) {
-            image = UIImage(data: data)
-        } else if ["MON", "LIT", "PUMP"].contains(key) {
-            image = UIImage(named: key)
-        } else if let url = MarketTokenLogo.artworkURL(for: key),
-                  let (data, _) = try? await URLSession.shared.data(from: url) {
-            image = UIImage(data: data)
-        } else {
-            image = nil
+        let cacheKey = artworkURL?.absoluteString ?? "asset:\(key)"
+        if let cached = await TokenPaletteCache.shared.value(for: cacheKey) {
+            tint = Self.color(cached)
+            return
         }
-        guard let image, let sampled = Self.averageColor(of: image) else { return }
-        tint = Color(uiColor: Self.vivid(sampled))
+        let data: Data?
+        if let artworkURL,
+           let (downloaded, _) = try? await URLSession.shared.data(from: artworkURL) {
+            data = downloaded
+        } else if ["MON", "LIT", "PUMP"].contains(key) {
+            data = UIImage(named: key)?.pngData()
+        } else if let url = MarketTokenLogo.artworkURL(for: key),
+                  let (downloaded, _) = try? await URLSession.shared.data(from: url) {
+            data = downloaded
+        } else {
+            data = nil
+        }
+        guard let data else { return }
+        let sampled = await Task.detached(priority: .utility) {
+            Self.averageColor(in: data)
+        }.value
+        guard !Task.isCancelled, let sampled else { return }
+        await TokenPaletteCache.shared.insert(sampled, for: cacheKey)
+        tint = Self.color(sampled)
     }
 
-    private static func averageColor(of image: UIImage) -> UIColor? {
+    nonisolated private static func averageColor(in data: Data) -> TokenPaletteSample? {
+        guard let image = UIImage(data: data) else { return nil }
         guard let cgImage = image.cgImage else { return nil }
         var pixel = [UInt8](repeating: 0, count: 4)
         guard let context = CGContext(
@@ -133,11 +158,15 @@ struct TokenAdaptiveCardBackground: View {
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-        return UIColor(red: CGFloat(pixel[0]) / 255, green: CGFloat(pixel[1]) / 255,
-                       blue: CGFloat(pixel[2]) / 255, alpha: 1)
+        let original = UIColor(red: CGFloat(pixel[0]) / 255, green: CGFloat(pixel[1]) / 255,
+                               blue: CGFloat(pixel[2]) / 255, alpha: 1)
+        let vivid = vivid(original)
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        guard vivid.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return nil }
+        return TokenPaletteSample(red: Double(red), green: Double(green), blue: Double(blue))
     }
 
-    private static func vivid(_ color: UIColor) -> UIColor {
+    nonisolated private static func vivid(_ color: UIColor) -> UIColor {
         var hue: CGFloat = 0
         var saturation: CGFloat = 0
         var brightness: CGFloat = 0
@@ -147,6 +176,10 @@ struct TokenAdaptiveCardBackground: View {
         }
         return UIColor(hue: hue, saturation: min(max(saturation * 1.45, 0.34), 0.90),
                        brightness: min(max(brightness, 0.40), 0.76), alpha: 1)
+    }
+
+    private static func color(_ sample: TokenPaletteSample) -> Color {
+        Color(red: sample.red, green: sample.green, blue: sample.blue)
     }
 }
 
@@ -179,6 +212,31 @@ struct AddFundsSheet: View {
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
 
+                if walletAmount == .zero {
+                    Button { Task { await model.claimTestAUSD() } } label: {
+                        HStack {
+                            if model.isWorking { ProgressView().tint(.black) }
+                            Text(model.isWorking ? "Claiming test AUSD…" : "Claim 10,000 test AUSD")
+                            Spacer()
+                            Image(systemName: "sparkles")
+                        }
+                        .font(.headline)
+                        .frame(maxWidth: .infinity).frame(height: 52)
+                        .padding(.horizontal, 18)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.black)
+                    .background(.white, in: Capsule())
+                    .disabled(model.isWorking || !model.hasSetupGas)
+                    .opacity(model.hasSetupGas ? 1 : 0.42)
+
+                    if !model.hasSetupGas {
+                        Label("Add at least 0.05 MON for faucet gas first.", systemImage: "fuelpump.fill")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.yellow)
+                    }
+                }
+
                 Button { Task { await model.depositAUSD(walletAmount) } } label: {
                     HStack {
                         if model.deposit.isBusy { ProgressView().tint(.black) }
@@ -206,9 +264,14 @@ struct AddFundsSheet: View {
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundStyle(.green)
                 }
+                if let sentence = model.fundingProblem {
+                    Label(sentence, systemImage: "exclamationmark.circle.fill")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.red)
+                }
 
                 Button { model.copyAddress() } label: {
-                    Label("Receive more AUSD", systemImage: "doc.on.doc")
+                    Label("Copy wallet address", systemImage: "doc.on.doc")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -219,7 +282,8 @@ struct AddFundsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.fraction(0.68), .large])
+        .task { await model.refreshBalances() }
         .onDisappear { model.clearDeposit() }
     }
 
