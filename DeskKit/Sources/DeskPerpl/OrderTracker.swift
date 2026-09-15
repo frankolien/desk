@@ -13,7 +13,7 @@ public enum OrderPhase: Sendable, Hashable {
     /// `mt: 3`, `code: 0`. The gateway has it. Nothing has happened on the book.
     case forwarded
     /// `mt: 3`, non-zero. Terminal: no update will follow.
-    case rejected(code: Int, subReason: Int?)
+    case rejected(code: Int, subReason: Int?, error: String? = nil)
     /// `mt: 24`. The only frame that settles anything.
     case settled
     /// The deadline block passed with no update. The order is gone, and saying so is
@@ -44,6 +44,7 @@ public actor OrderTracker {
 
     private struct Entry {
         var phase: OrderPhase
+        let requestID: Int64
         let deadlineBlock: Int64
     }
 
@@ -54,9 +55,12 @@ public actor OrderTracker {
     /// A zero frame id is omitted from the status response, so an order carrying one can
     /// never be correlated with its outcome. `OrderBuilder` refuses to make one; this
     /// refuses to track one.
-    public func track(frameID: Int64, deadlineBlock: Int64) throws {
+    public func track(frameID: Int64, requestID: Int64? = nil, deadlineBlock: Int64) throws {
         guard frameID != 0 else { throw Failure.frameIDMustBeNonZero }
-        entries[frameID] = Entry(phase: .sent, deadlineBlock: deadlineBlock)
+        entries[frameID] = Entry(
+            phase: .sent,
+            requestID: requestID ?? frameID,
+            deadlineBlock: deadlineBlock)
     }
 
     public func phase(of frameID: Int64) -> OrderPhase? { entries[frameID]?.phase }
@@ -81,15 +85,30 @@ public actor OrderTracker {
             guard !entry.phase.isTerminal else { return frameID }
             entry.phase = status.isAccepted
                 ? .forwarded
-                : .rejected(code: status.code, subReason: status.subReason)
+                : .rejected(code: status.code, subReason: status.subReason, error: status.error)
             entries[frameID] = entry
             return frameID
 
         case .orderUpdate:
-            struct Update: Decodable { let sn: Int64? }
-            guard let update = try? frame.decode(Update.self), let frameID = update.sn,
-                  var entry = entries[frameID]
-            else { return nil }
+            struct Update: Decodable {
+                let sn: Int64?
+                let rq: Int64?
+            }
+            struct Batch: Decodable { let d: [Update] }
+
+            // v235 sends `{mt:24,d:[{rq:...}]}`. Older captures used a root `sn`.
+            let update = (try? frame.decode(Batch.self).d.first { item in
+                guard let requestID = item.rq else { return false }
+                return entries.values.contains { $0.requestID == requestID }
+            }) ?? (try? frame.decode(Update.self))
+            guard let update else { return nil }
+            let frameID: Int64?
+            if let requestID = update.rq {
+                frameID = entries.first { $0.value.requestID == requestID }?.key
+            } else {
+                frameID = update.sn
+            }
+            guard let frameID, var entry = entries[frameID] else { return nil }
             // An update settles even an order we had already written off as rejected —
             // the venue is the authority on its own book, not our state machine.
             entry.phase = .settled

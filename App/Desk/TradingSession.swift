@@ -38,8 +38,8 @@ final class TradingSession {
         case .abandoned:
             "The connection to Perpl dropped before the order settled. "
                 + "Check your position before sending another."
-        case .rejected(let code, let subReason):
-            localProblem ?? Self.reason(code: code, subReason: subReason)
+        case .rejected(let code, let subReason, let error):
+            localProblem ?? error ?? Self.reason(code: code, subReason: subReason)
         }
     }
 
@@ -62,6 +62,10 @@ final class TradingSession {
     private var desk: OrderDesk?
     private var credentials: PerplCredentials?
     private var watching: Task<Void, Never>?
+    /// One handshake at a time. Main-actor isolation prevents data races, but an `await`
+    /// makes this object re-entrant: market selection and an order tap could previously
+    /// open two sockets, with either path closing the other while it authenticated.
+    private var connecting: Task<Void, any Error>?
     private var frameID: Int64?
     private(set) var isConnected = false
     var onAccount: ((PerplAccount) -> Void)?
@@ -95,7 +99,7 @@ final class TradingSession {
         await desk?.close()
         desk = OrderDesk(socket: .testnet(), market: market)
         isConnected = false
-        try? await connect(lastForwarded: 0)
+        try? await connect()
     }
 
     func noteHeadBlock(_ block: Int64) {
@@ -103,37 +107,66 @@ final class TradingSession {
         // an order deadline computed from an older block than one already seen would be
         // shorter than intended.
         headBlock = max(headBlock, block)
+        let current = headBlock
+        Task { [weak self] in
+            guard let self, let desk = self.desk else { return }
+            for id in await desk.expire(headBlock: current) {
+                guard let phase = await desk.phase(of: id) else { continue }
+                self.record(id, phase)
+            }
+        }
     }
 
     /// Connects, and begins the single read of the socket.
-    func connect(lastForwarded: Int64) async throws {
+    func connect() async throws {
+        if let connecting {
+            try await connecting.value
+            return
+        }
         guard let desk, let credentials else { throw OrderDesk.Failure.notEnrolled }
         let id = UUID()
         connectionID = id
-        try await desk.open(credentials: credentials, lastForwarded: lastForwarded)
-        isConnected = true
-        watching?.cancel()
-        watching = Task { [weak self] in
-            for await update in await desk.observe() {
-                guard let self else { return }
-                await record(update)
+        let attempt = Task { [weak self] in
+            try await desk.open(credentials: credentials)
+            guard let self, self.connectionID == id else {
+                throw PerplSocket.Failure.notConnected
             }
-            // The stream finishing means the socket went away. An order still in flight
-            // has no answer coming, and saying so beats a spinner that never ends.
-            await self?.socketEnded(id: id)
+            // mt:19 is the authoritative initial balance. mt:21 is only a subsequent
+            // update and may never arrive until the account changes.
+            if let initial = await desk.accountSnapshot {
+                self.record(.account(initial))
+            }
+            self.isConnected = true
+            self.watching?.cancel()
+            self.watching = Task { [weak self] in
+                for await update in await desk.observe() {
+                    guard let self else { return }
+                    await record(update)
+                }
+                // The stream finishing means the socket went away. An order still in
+                // flight has no answer coming, and saying so beats a spinner forever.
+                await self?.socketEnded(id: id)
+            }
         }
+        connecting = attempt
+        defer { connecting = nil }
+        try await attempt.value
     }
 
     func reconnect() async {
         guard credentials != nil else { return }
+        connecting?.cancel()
+        connecting = nil
         watching?.cancel()
         await desk?.close()
         isConnected = false
-        try? await connect(lastForwarded: 0)
+        try? await connect()
     }
 
     func close() async {
         connectionID = UUID()
+        connecting?.cancel()
+        connecting = nil
         watching?.cancel()
         watching = nil
         await desk?.close()
@@ -156,7 +189,7 @@ final class TradingSession {
                 // confirming it. Reconnect at the point of intent instead of making the
                 // user leave the sheet and sign in again.
                 do {
-                    try await connect(lastForwarded: 0)
+                    try await connect()
                 } catch {
                     // Signing in needs the trading key, and Desk may be locked — the key
                     // is wiped after a spell in the background or when the phone locks.
@@ -164,10 +197,35 @@ final class TradingSession {
                     // order as often as an opening one, and it must not be turned away
                     // for want of a key the person can restore with a glance.
                     guard let unlock = onNeedsUnlock, await unlock() else { throw error }
-                    if !isConnected { try await connect(lastForwarded: 0) }
+                    if !isConnected { try await connect() }
                 }
             }
             let id = try await desk.place(draft, headBlock: headBlock)
+            order.associate(id)
+            if let current = await desk.phase(of: id) { order.apply(id: id, phase: current) }
+            if order.outcome == .settled { Haptics.success() }
+        } catch {
+            Haptics.failure()
+            localProblem = Self.sentence(for: error)
+            order.failLocally()
+        }
+    }
+
+    func closePosition(_ position: PerplPosition, slippageBps: Int) async {
+        localProblem = nil
+        order.begin()
+        do {
+            guard let desk else { throw OrderDesk.Failure.notEnrolled }
+            if !isConnected {
+                do {
+                    try await connect()
+                } catch {
+                    guard let unlock = onNeedsUnlock, await unlock() else { throw error }
+                    if !isConnected { try await connect() }
+                }
+            }
+            let id = try await desk.closePosition(
+                position, slippageBps: slippageBps, headBlock: headBlock)
             order.associate(id)
             if let current = await desk.phase(of: id) { order.apply(id: id, phase: current) }
             if order.outcome == .settled { Haptics.success() }
@@ -199,12 +257,33 @@ final class TradingSession {
         case .account(let value):
             account.record(value)
             onAccount?(value)
-        case .positions(let value):
-            positions.record(value)
-            onPositions?(value)
+        case .positions(let value, let isSnapshot):
+            let portfolio = isSnapshot
+                ? value
+                : Self.merging(existing: positions.value ?? [], updates: value)
+            positions.record(portfolio)
+            onPositions?(portfolio)
         case .order(let id, let phase):
             record(id, phase)
         }
+    }
+
+    /// Position updates are deltas, not miniature snapshots. Replacing the array with an
+    /// ETH update made an existing BTC position disappear from Desk until reconnect.
+    static func merging(
+        existing: [PerplPosition], updates: [PerplPosition]
+    ) -> [PerplPosition] {
+        var result = existing
+        for update in updates {
+            if let index = result.firstIndex(where: {
+                $0.accountID == update.accountID && $0.positionID == update.positionID
+            }) {
+                result[index] = update
+            } else {
+                result.append(update)
+            }
+        }
+        return result
     }
 
     private func socketEnded(id: UUID) {
@@ -250,6 +329,8 @@ final class TradingSession {
                 + "again to refresh it; nothing was sent."
         case PerplSocket.Failure.idleTimeout, PerplSocket.Failure.handshakeTimedOut:
             return "Perpl did not finish reconnecting in time. Check your connection and try again."
+        case PerplSocket.Failure.malformedWalletSnapshot:
+            return "Perpl answered, but its account snapshot has a format this version of Desk cannot read. Nothing was sent."
         case PerplSocket.Failure.closed(let code, _):
             return "Perpl closed the trading connection (code \(code)). Nothing was sent; try again."
         case PerplSocket.Failure.notConnected, PerplSocket.Failure.notAuthenticated:

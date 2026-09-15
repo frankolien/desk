@@ -24,7 +24,8 @@ import Foundation
 public actor OrderDesk {
     public enum Event: Sendable, Hashable {
         case account(PerplAccount)
-        case positions([PerplPosition])
+        /// mt:26 replaces the portfolio; mt:27 only patches the positions it carries.
+        case positions([PerplPosition], isSnapshot: Bool)
         case order(frameID: Int64, phase: OrderPhase)
     }
     public enum Failure: Error, Sendable, Equatable {
@@ -59,6 +60,7 @@ public actor OrderDesk {
     private let tracker = OrderTracker()
     private var account: UInt32?
     private var allowsForwarding = true
+    private var initialAccount: PerplAccount?
     /// Frame ids are this device's own correlation handle and only have to be non-zero
     /// and unique within a connection.
     private var nextFrameID: Int64 = 1
@@ -75,10 +77,13 @@ public actor OrderDesk {
     /// The snapshot arriving at all is the only evidence the gateway accepted the key —
     /// there is no acknowledgement frame — which is why this returns rather than reports.
     @discardableResult
-    public func open(credentials: PerplCredentials, lastForwarded: Int64) async throws -> WalletSnapshot {
+    public func open(credentials: PerplCredentials) async throws -> WalletSnapshot {
         let snapshot = try await socket.connect(credentials: credentials)
-        guard let first = snapshot.firstAccount else { throw Failure.noAccount }
-        account = first
+        guard let selected = snapshot.account(for: market.instanceID) else { throw Failure.noAccount }
+        account = selected.id
+        initialAccount = selected.accountUpdate
+        if let initialAccount { allowsForwarding = initialAccount.allowsForwarding }
+        let lastForwarded = selected.lastForwarded ?? 0
         // Reseeded per connection, never carried across one. The venue's counter is the
         // authority and ours is a cache of it.
         if let counter {
@@ -88,6 +93,8 @@ public actor OrderDesk {
         }
         return snapshot
     }
+
+    public var accountSnapshot: PerplAccount? { initialAccount }
 
     /// Whether the account will accept forwarded orders. Set from `mt: 21`; false means
     /// the desk is not finished opening rather than that anything failed.
@@ -121,7 +128,46 @@ public actor OrderDesk {
         // Before the send, not after. The gateway can answer faster than `send` returns,
         // and a status frame for an untracked id is dropped — which the user experiences
         // as an order that disappeared.
-        try await tracker.track(frameID: frameID, deadlineBlock: request.lastBlock)
+        // `lb` is zero in the v235 wire request, but the UI still needs a local timeout.
+        // Keep that deadline out of the payload and derive it from the advertised TTL.
+        let (deadline, overflow) = headBlock.addingReportingOverflow(Int64(market.orderTTLBlocks))
+        try await tracker.track(
+            frameID: frameID,
+            requestID: request.requestID,
+            deadlineBlock: overflow ? Int64.max : deadline)
+        do {
+            try await socket.send(request)
+        } catch {
+            await tracker.forget(frameID)
+            throw error
+        }
+        return frameID
+    }
+
+    /// Closes an existing position with Perpl's dedicated reduce-only close type. This
+    /// must never be implemented as an opposite open: that can invert exposure instead.
+    public func closePosition(
+        _ position: PerplPosition,
+        slippageBps: Int,
+        headBlock: Int64
+    ) async throws -> Int64 {
+        guard let account else { throw Failure.notConnected }
+        guard let counter else { throw Failure.notConnected }
+        guard allowsForwarding else { throw Failure.forwardingNotAllowed }
+        guard await socket.isConnected else { throw Failure.notConnected }
+        guard position.marketID == market.id,
+              let size = market.size(position.sizeRaw) else { throw Failure.notConnected }
+
+        let frameID = nextFrameID
+        nextFrameID += 1
+        let request = try OrderBuilder.close(
+            side: position.side, market: market, account: account, size: size,
+            slippageBps: slippageBps, headBlock: headBlock,
+            requestID: await counter.take(), frameID: frameID)
+        let (deadline, overflow) = headBlock.addingReportingOverflow(Int64(market.orderTTLBlocks))
+        try await tracker.track(
+            frameID: frameID, requestID: request.requestID,
+            deadlineBlock: overflow ? Int64.max : deadline)
         do {
             try await socket.send(request)
         } catch {
@@ -156,7 +202,9 @@ public actor OrderDesk {
                         }
                         if frame.kind == .positionsSnapshot || frame.kind == .positionsUpdate,
                            let positions = try? frame.decode(PositionsFrame.self) {
-                            continuation.yield(.positions(positions.positions))
+                            continuation.yield(.positions(
+                                positions.positions,
+                                isSnapshot: frame.kind == .positionsSnapshot))
                         }
                         guard let moved = await apply(frame),
                               let phase = await phase(of: moved) else { continue }
@@ -195,5 +243,6 @@ public actor OrderDesk {
     public func close() async {
         await socket.disconnect()
         account = nil
+        initialAccount = nil
     }
 }

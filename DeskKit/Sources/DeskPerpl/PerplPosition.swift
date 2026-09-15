@@ -141,6 +141,22 @@ public struct PerplAccount: Decodable, Sendable, Hashable {
         case locked = "lb"
     }
 
+    public init(
+        instanceID: UInt32,
+        accountID: UInt32,
+        isFrozen: Bool,
+        allowsForwarding: Bool,
+        balanceRaw: Int64,
+        lockedRaw: Int64
+    ) {
+        self.instanceID = instanceID
+        self.accountID = accountID
+        self.isFrozen = isFrozen
+        self.allowsForwarding = allowsForwarding
+        self.balanceRaw = balanceRaw
+        self.lockedRaw = lockedRaw
+    }
+
     public init(from decoder: any Decoder) throws {
         let box = try decoder.container(keyedBy: CodingKeys.self)
         instanceID = try box.decode(UInt32.self, forKey: .instanceID)

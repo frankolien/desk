@@ -88,15 +88,6 @@ public enum OrderBuilder {
         case deadlineOverflow(headBlock: Int64, ttl: UInt32)
     }
 
-    /// `lb` is a block number, and `headBlock` arrives from the server. Swift traps on
-    /// overflow rather than wrapping, and a trap is a dead app rather than a rejected
-    /// order.
-    static func deadline(headBlock: Int64, ttl: UInt32) throws -> Int64 {
-        let (sum, overflowed) = headBlock.addingReportingOverflow(Int64(ttl))
-        guard !overflowed else { throw Failure.deadlineOverflow(headBlock: headBlock, ttl: ttl) }
-        return sum
-    }
-
     /// A market order: price zero, immediate-or-cancel, bounded by slippage.
     public static func market(
         side: Side,
@@ -123,7 +114,9 @@ public enum OrderBuilder {
             sizeRaw: size.raw,
             flags: .immediateOrCancel,
             leverageHundredths: leverageHundredths,
-            lastBlock: try deadline(headBlock: headBlock, ttl: config.orderTTLBlocks),
+            // Protocol v235 uses zero here for client orders. A future chain height was
+            // accepted by the old gateway but is rejected by the deployed exchange.
+            lastBlock: 0,
             maxSlippageBps: slippageBps,
             orderID: nil)
     }
@@ -156,7 +149,7 @@ public enum OrderBuilder {
             sizeRaw: size.raw,
             flags: postOnly ? .postOnly : .goodTillCancelled,
             leverageHundredths: leverageHundredths,
-            lastBlock: try deadline(headBlock: headBlock, ttl: config.orderTTLBlocks),
+            lastBlock: 0,
             maxSlippageBps: nil,
             orderID: nil)
     }
@@ -194,7 +187,7 @@ public enum OrderBuilder {
             sizeRaw: size.raw,
             flags: .immediateOrCancel,
             leverageHundredths: 100,
-            lastBlock: try deadline(headBlock: headBlock, ttl: config.orderTTLBlocks),
+            lastBlock: 0,
             maxSlippageBps: slippageBps,
             orderID: nil)
     }
@@ -219,7 +212,7 @@ public enum OrderBuilder {
             sizeRaw: 0,
             flags: .goodTillCancelled,
             leverageHundredths: 100,
-            lastBlock: try deadline(headBlock: headBlock, ttl: config.orderTTLBlocks),
+            lastBlock: 0,
             maxSlippageBps: nil,
             orderID: orderID)
     }

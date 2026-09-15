@@ -48,6 +48,9 @@ private final class ScriptedChannel: WebSocketChannel, @unchecked Sendable {
 private struct Rejected: Error, Equatable {}
 
 private let snapshot = #"{"mt":19,"accounts":[{"id":7}]}"#
+private func snapshot(lastForwarded: Int64) -> String {
+    #"{"mt":19,"accounts":[{"id":7,"lfr":\#(lastForwarded)}]}"#
+}
 
 private func market() throws -> Market {
     let url = try #require(Bundle.module.url(forResource: "Context-testnet", withExtension: "json"))
@@ -82,6 +85,21 @@ private func draft(_ side: Side = .long) throws -> OrderDesk.Draft {
 
 @Suite("Sending an order")
 struct OrderDeskTests {
+    @Test("The account is selected for the market's exchange instance")
+    func selectsMatchingInstanceAccount() async throws {
+        let channel = ScriptedChannel(inbound: [
+            #"{"mt":19,"as":[{"id":99,"in":77,"lfr":900},{"id":7,"in":12,"lfr":41}]}"#
+        ])
+        let subject = try desk(channel)
+        try await subject.open(credentials: credentials())
+        _ = try await subject.place(try draft(), headBlock: 1_000)
+
+        let order = try #require(channel.sent.first { $0.contains("\"mt\":22") })
+        let json = try #require(JSONSerialization.jsonObject(with: Data(order.utf8)) as? [String: Any])
+        #expect(json["acc"] as? Int == 7)
+        #expect(json["rq"] as? Int == 42)
+    }
+
     @Test("An order cannot be placed before the socket has signed in")
     func mustConnectFirst() async throws {
         let subject = try desk(ScriptedChannel(inbound: [snapshot]))
@@ -97,7 +115,7 @@ struct OrderDeskTests {
     func trackedBeforeSend() async throws {
         let channel = ScriptedChannel(inbound: [snapshot])
         let subject = try desk(channel)
-        try await subject.open(credentials: credentials(), lastForwarded: 0)
+        try await subject.open(credentials: credentials())
 
         // Asked while `send` is still on the stack: the order must already be known.
         let seen = LockedBox<OrderPhase?>(nil)
@@ -118,7 +136,7 @@ struct OrderDeskTests {
         let channel = ScriptedChannel(inbound: [snapshot])
         channel.sendFails = Rejected()
         let subject = try desk(channel)
-        try await subject.open(credentials: credentials(), lastForwarded: 0)
+        try await subject.open(credentials: credentials())
 
         await #expect(throws: Rejected.self) {
             _ = try await subject.place(try draft(), headBlock: 1_000)
@@ -130,9 +148,9 @@ struct OrderDeskTests {
     /// rejects with `sr: 32`. Two orders placed back to back must not share one.
     @Test("Request ids strictly increase across orders")
     func requestIdsIncrease() async throws {
-        let channel = ScriptedChannel(inbound: [snapshot])
+        let channel = ScriptedChannel(inbound: [snapshot(lastForwarded: 41)])
         let subject = try desk(channel)
-        try await subject.open(credentials: credentials(), lastForwarded: 41)
+        try await subject.open(credentials: credentials())
 
         _ = try await subject.place(try draft(), headBlock: 1_000)
         _ = try await subject.place(try draft(.short), headBlock: 1_000)
@@ -155,7 +173,7 @@ struct OrderDeskTests {
     func forwardingRefused() async throws {
         let channel = ScriptedChannel(inbound: [snapshot])
         let subject = try desk(channel)
-        try await subject.open(credentials: credentials(), lastForwarded: 0)
+        try await subject.open(credentials: credentials())
         await subject.noteForwarding(false)
 
         await #expect(throws: OrderDesk.Failure.forwardingNotAllowed) {
@@ -169,7 +187,7 @@ struct OrderDeskTests {
     func forwardedIsNotSettled() async throws {
         let channel = ScriptedChannel(inbound: [snapshot])
         let subject = try desk(channel)
-        try await subject.open(credentials: credentials(), lastForwarded: 0)
+        try await subject.open(credentials: credentials())
         let frameID = try await subject.place(try draft(), headBlock: 1_000)
 
         let forwarded = try InboundFrame(payload: Data(#"{"mt":3,"sn":\#(frameID),"code":0}"#.utf8))
@@ -184,7 +202,7 @@ struct OrderDeskTests {
     func updateSettles() async throws {
         let channel = ScriptedChannel(inbound: [snapshot])
         let subject = try desk(channel)
-        try await subject.open(credentials: credentials(), lastForwarded: 0)
+        try await subject.open(credentials: credentials())
         let frameID = try await subject.place(try draft(), headBlock: 1_000)
 
         _ = await subject.apply(try InboundFrame(payload: Data(#"{"mt":24,"sn":\#(frameID)}"#.utf8)))
@@ -197,7 +215,7 @@ struct OrderDeskTests {
     func expiry() async throws {
         let channel = ScriptedChannel(inbound: [snapshot])
         let subject = try desk(channel)
-        try await subject.open(credentials: credentials(), lastForwarded: 0)
+        try await subject.open(credentials: credentials())
         let frameID = try await subject.place(try draft(), headBlock: 1_000, ttlBlocks: 30)
 
         #expect(await subject.expire(headBlock: 1_020).isEmpty)
@@ -210,14 +228,14 @@ struct OrderDeskTests {
     func reseedOnReconnect() async throws {
         let channel = ScriptedChannel(inbound: [snapshot])
         let subject = try desk(channel)
-        try await subject.open(credentials: credentials(), lastForwarded: 0)
+        try await subject.open(credentials: credentials())
         _ = try await subject.place(try draft(), headBlock: 1_000)
         await subject.close()
 
-        let second = ScriptedChannel(inbound: [snapshot])
-        // The same desk, reconnected against a channel the venue says is further along.
+        let second = ScriptedChannel(inbound: [snapshot(lastForwarded: 500)])
+        // A fresh desk connects to a venue snapshot that is already further along.
         let reopened = try desk(second)
-        try await reopened.open(credentials: credentials(), lastForwarded: 500)
+        try await reopened.open(credentials: credentials())
         _ = try await reopened.place(try draft(), headBlock: 1_000)
 
         let body = try #require(second.sent.first { $0.contains("\"mt\":22") })

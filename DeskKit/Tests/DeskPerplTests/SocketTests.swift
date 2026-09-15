@@ -61,6 +61,67 @@ private func btcMarket() throws -> Market {
 
 @Suite("Socket handshake")
 struct SocketHandshakeTests {
+    @Test("The wallet snapshot carries the server request-id seed")
+    func snapshotRequestSeed() throws {
+        let numeric = try InboundFrame(
+            payload: Data(#"{"mt":19,"accounts":[{"id":7,"lfr":41}]}"#.utf8))
+            .decode(WalletSnapshot.self)
+        let string = try InboundFrame(
+            payload: Data(#"{"mt":19,"accounts":[{"id":7,"lfr":"500"}]}"#.utf8))
+            .decode(WalletSnapshot.self)
+
+        #expect(numeric.firstLastForwarded == 41)
+        #expect(string.firstLastForwarded == 500)
+    }
+
+    @Test("The compact request-status response carries its correlation id")
+    func compactOrderStatus() throws {
+        let accepted = try InboundFrame(
+            payload: Data(#"{"mt":3,"cid":41,"ses":"phone","status":{"code":0}}"#.utf8))
+            .decode(OrderStatus.self)
+        let rejected = try InboundFrame(
+            payload: Data(#"{"mt":3,"cid":42,"status":{"code":400,"sr":34,"error":"bad account"}}"#.utf8))
+            .decode(OrderStatus.self)
+
+        #expect(accepted.frameID == 41)
+        #expect(accepted.isAccepted)
+        #expect(rejected.frameID == 42)
+        #expect(rejected.code == 400)
+        #expect(rejected.subReason == 34)
+        #expect(rejected.error == "bad account")
+    }
+
+    @Test("The version-235 compact wallet snapshot remains readable")
+    func compactSnapshot() throws {
+        let snapshot = try InboundFrame(
+            payload: Data(#"{"mt":19,"addr":"0xabc","as":[{"id":7,"in":12,"lfr":501}]}"#.utf8))
+            .decode(WalletSnapshot.self)
+
+        #expect(snapshot.firstAccount == 7)
+        #expect(snapshot.firstLastForwarded == 501)
+        #expect(snapshot.accounts.first?.instanceID == 12)
+    }
+
+    @Test("The wallet snapshot carries the initial available collateral")
+    func snapshotAccountBalance() throws {
+        let snapshot = try InboundFrame(payload: Data(
+            #"{"mt":19,"as":[{"id":7,"in":12,"lfr":501,"b":"120000000000","lb":"10000000000","fw":true}]}"#.utf8))
+            .decode(WalletSnapshot.self)
+
+        let account = try #require(snapshot.account(for: 12)?.accountUpdate)
+        #expect(account.balance?.display() == "120,000.00")
+        #expect(account.free?.display() == "110,000.00")
+        #expect(account.allowsForwarding)
+    }
+
+    @Test("A wallet frame with neither account shape is diagnosed immediately")
+    func malformedSnapshot() async throws {
+        let channel = FakeChannel(frames: [#"{"mt":19,"addr":"0xabc"}"#])
+        await #expect(throws: PerplSocket.Failure.malformedWalletSnapshot) {
+            try await socket(channel).connect(credentials: credentials())
+        }
+    }
+
     @Test("Sign-in is the first thing written, and it verifies against the canonical string")
     func signInFrameIsFirst() async throws {
         let channel = FakeChannel(frames: [snapshotFrame])

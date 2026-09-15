@@ -18,6 +18,27 @@ public protocol WebSocketChannel: Sendable {
     func close()
 }
 
+/// URLSession callbacks are documented as one-shot, but cancellation can race a pending
+/// WebSocket ping and deliver more than one completion on the delegate queue. A checked
+/// continuation deliberately traps on the second resume, so the callback boundary must
+/// enforce the one-shot rule itself.
+final class OneShotVoidContinuation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, any Error>?
+
+    init(_ continuation: CheckedContinuation<Void, any Error>) {
+        self.continuation = continuation
+    }
+
+    func resume(with result: Result<Void, any Error>) {
+        let pending = lock.withLock {
+            defer { continuation = nil }
+            return continuation
+        }
+        pending?.resume(with: result)
+    }
+}
+
 public final class URLSessionWebSocket: WebSocketChannel, @unchecked Sendable {
     public enum Failure: Error, Equatable, Sendable {
         case mustBeWSS(scheme: String?)
@@ -39,6 +60,7 @@ public final class URLSessionWebSocket: WebSocketChannel, @unchecked Sendable {
         configuration.tlsMinimumSupportedProtocolVersion = .TLSv12
         session = URLSession(configuration: configuration)
         task = session.webSocketTask(with: url)
+        
         task.resume()
     }
 
@@ -60,8 +82,10 @@ public final class URLSessionWebSocket: WebSocketChannel, @unchecked Sendable {
 
     public func ping() async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            let oneShot = OneShotVoidContinuation(continuation)
             task.sendPing { error in
-                if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+                if let error { oneShot.resume(with: .failure(error)) }
+                else { oneShot.resume(with: .success(())) }
             }
         }
     }

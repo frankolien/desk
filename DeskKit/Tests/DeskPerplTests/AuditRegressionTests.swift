@@ -49,21 +49,14 @@ struct OrderAuditTests {
         }
     }
 
-    @Test("A head block near the ceiling is refused rather than trapping")
-    func deadlineOverflow() throws {
-        #expect(throws: OrderBuilder.Failure.deadlineOverflow(headBlock: .max, ttl: 20)) {
-            try OrderBuilder.market(
-                side: .long, market: try btc(), account: 7,
-                size: #require(Size(raw: 1500, decimals: 5)),
-                leverageHundredths: 100, slippageBps: 50,
-                headBlock: .max, requestID: 1, frameID: 1)
-        }
+    @Test("The chain head cannot overflow the version-235 wire order")
+    func headBlockIsNotEncoded() throws {
         #expect(throws: Never.self) {
             try OrderBuilder.market(
                 side: .long, market: try btc(), account: 7,
                 size: #require(Size(raw: 1500, decimals: 5)),
                 leverageHundredths: 100, slippageBps: 50,
-                headBlock: .max - 20, requestID: 1, frameID: 1)
+                headBlock: .max, requestID: 1, frameID: 1)
         }
     }
 

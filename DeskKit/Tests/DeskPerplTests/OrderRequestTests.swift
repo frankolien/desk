@@ -45,17 +45,16 @@ struct OrderRequestTests {
         #expect(json["oid"] == nil)
     }
 
-    @Test("the last block sits inside the market's window")
-    func lastBlockWindow() throws {
+    @Test("version 235 client orders carry a zero last block")
+    func lastBlockIsProtocolSentinel() throws {
         let head: Int64 = 62_050_000
         let order = try OrderBuilder.market(
             side: .long, market: btc, account: 7,
             size: #require(Size(typed: "0.001", decimals: 5)),
             leverageHundredths: 100, slippageBps: 50,
             headBlock: head, requestID: 1, frameID: 1)
-        #expect(order.lastBlock > head)
-        #expect(order.lastBlock <= head + Int64(btc.orderTTLBlocks))
-        #expect(order.lastBlock == head + 20)
+        #expect(order.lastBlock == 0)
+        #expect(try encoded(order)["lb"] as? Int == 0)
     }
 
     @Test("a short opens with type two")

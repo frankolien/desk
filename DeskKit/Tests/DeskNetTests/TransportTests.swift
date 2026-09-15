@@ -50,4 +50,13 @@ struct WebSocketChannelTests {
         #expect(closed.reason == "unauthorized")
         #expect(closed != SocketClosed(code: 1008, reason: "idle timeout"))
     }
+
+    @Test("A duplicate URLSession completion cannot resume a ping twice")
+    func duplicatePingCompletionIsIgnored() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            let oneShot = OneShotVoidContinuation(continuation)
+            oneShot.resume(with: .success(()))
+            oneShot.resume(with: .failure(URLError(.cancelled)))
+        }
+    }
 }

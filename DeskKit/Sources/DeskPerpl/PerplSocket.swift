@@ -17,6 +17,7 @@ public actor PerplSocket {
         case notAuthenticated
         case alreadyConnected
         case handshakeTimedOut
+        case malformedWalletSnapshot
         case framesAlreadyStarted
     }
 
@@ -105,7 +106,10 @@ public actor PerplSocket {
                     // An unmodelled or unparseable frame is read past, never fatal: the
                     // catalogue is larger than what this app has seen on the wire.
                     guard let frame = try? InboundFrame(payload: Data(text.utf8)) else { continue }
-                    if frame.kind == .walletSnapshot, let snapshot = try? frame.decode(WalletSnapshot.self) {
+                    if frame.kind == .walletSnapshot {
+                        guard let snapshot = try? frame.decode(WalletSnapshot.self) else {
+                            throw Failure.malformedWalletSnapshot
+                        }
                         return snapshot
                     }
                 }

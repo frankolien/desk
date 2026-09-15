@@ -29,7 +29,7 @@ public struct OrderProgress: Sendable, Equatable {
         /// `mt: 3`, `code: 0`. The gateway has it; the book does not.
         case forwarded
         case settled
-        case rejected(code: Int, subReason: Int?)
+        case rejected(code: Int, subReason: Int?, error: String? = nil)
         case expired
         /// The socket went away while the order was still in flight, so no answer is
         /// coming. Distinct from a rejection: nobody knows what happened to the order.
@@ -88,7 +88,8 @@ public struct OrderProgress: Sendable, Equatable {
         case .forwarded: .forwarded
         case .settled: .settled
         case .expired: .expired
-        case .rejected(let code, let subReason): .rejected(code: code, subReason: subReason)
+        case .rejected(let code, let subReason, let error):
+            .rejected(code: code, subReason: subReason, error: error)
         }
     }
 
@@ -101,7 +102,7 @@ public struct OrderProgress: Sendable, Equatable {
 
     /// A failure raised before the order reached the desk at all.
     public mutating func failLocally() {
-        outcome = .rejected(code: 0, subReason: nil)
+        outcome = .rejected(code: 0, subReason: nil, error: nil)
     }
 
     public mutating func reset() {

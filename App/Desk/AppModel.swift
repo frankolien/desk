@@ -311,7 +311,7 @@ final class AppModel {
         // a connectivity state, not a reason to send the user back through onboarding.
         stage = .trading
         await refreshBalances()
-        try? await trading.connect(lastForwarded: 0)
+        try? await trading.connect()
     }
 
     /// Claims the real test collateral from Agora's Monad-testnet faucet.

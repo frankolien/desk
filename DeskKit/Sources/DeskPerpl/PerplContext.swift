@@ -128,6 +128,9 @@ public struct Token: Decodable, Sendable {
 
 public struct Market: Decodable, Sendable {
     public let id: UInt32
+    /// The exchange instance which owns this market. Wallet snapshots may contain
+    /// accounts for more than one instance; orders must use the matching account.
+    public let instanceID: UInt32
     public let symbol: String
     public let sizeUnits: String
     public let fundingIntervalSeconds: Int
@@ -140,6 +143,7 @@ public struct Market: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id, symbol, config, state, funding
+        case instanceID = "instance_id"
         case sizeUnits = "size_units"
         case fundingIntervalSeconds = "funding_interval_sec"
         case orderTTLBlocks = "order_ttl_blocks"

@@ -5,6 +5,17 @@ import Testing
 
 @Suite("Order outcomes")
 struct OrderTrackerTests {
+    @Test("The version-235 batched order update settles by request id")
+    func compactBatchedUpdateSettlesByRequestID() async throws {
+        let tracker = OrderTracker()
+        try await tracker.track(frameID: 7, requestID: 42, deadlineBlock: 100)
+        let frame = try InboundFrame(
+            payload: Data(#"{"mt":24,"d":[{"oid":900,"rq":42,"st":3}]}"#.utf8))
+
+        #expect(await tracker.apply(frame) == 7)
+        #expect(await tracker.phase(of: 7) == .settled)
+    }
+
     private func frame(_ json: String) throws -> InboundFrame {
         try InboundFrame(payload: Data(json.utf8))
     }
