@@ -28,6 +28,7 @@ struct WatchlistScreen: View {
     let model: AppModel
     let market: MarketModel
     let session: TradingSession
+    let onOrderFilled: (Direction, String) -> Void
     @State private var showsMarket = false
     @State private var selectedSpot: TrendingSpotToken?
     @State private var isEditing = false
@@ -122,7 +123,9 @@ struct WatchlistScreen: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showsMarket) {
-                PerpDetailScreen(model: model, market: market, session: session)
+                PerpDetailScreen(
+                    model: model, market: market, session: session,
+                    onOrderFilled: onOrderFilled)
                     .toolbar(.hidden, for: .tabBar)
             }
             .navigationDestination(item: $selectedSpot) { token in
@@ -178,6 +181,7 @@ struct MarketSearchScreen: View {
     let model: AppModel
     let market: MarketModel
     let session: TradingSession
+    let onOrderFilled: (Direction, String) -> Void
     @State private var query = ""
     @State private var showsMarket = false
     @State private var selectedSpot: TrendingSpotToken?
@@ -318,7 +322,9 @@ struct MarketSearchScreen: View {
             .toolbar(.hidden, for: .navigationBar)
             .searchable(text: $query, prompt: "Search anything")
             .navigationDestination(isPresented: $showsMarket) {
-                PerpDetailScreen(model: model, market: market, session: session)
+                PerpDetailScreen(
+                    model: model, market: market, session: session,
+                    onOrderFilled: onOrderFilled)
                     .toolbar(.hidden, for: .tabBar)
             }
             .navigationDestination(item: $selectedSpot) { token in

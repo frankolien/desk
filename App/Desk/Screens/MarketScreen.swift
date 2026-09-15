@@ -17,6 +17,7 @@ struct MarketScreen: View {
     let model: AppModel
     let market: MarketModel
     let session: TradingSession
+    let onOrderFilled: (Direction, String) -> Void
 
     @State private var query = ""
     @State private var showsMarket = false
@@ -47,7 +48,12 @@ struct MarketScreen: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showsMarket) {
-                PerpDetailScreen(model: model, market: market, session: session)
+                PerpDetailScreen(
+                    model: model, market: market, session: session,
+                    onOrderFilled: { side, symbol in
+                        showsMarket = false
+                        onOrderFilled(side, symbol)
+                    })
                     .toolbar(.hidden, for: .tabBar)
             }
             .sheet(isPresented: $showsWithdraw) {
@@ -263,6 +269,7 @@ struct PerpDetailScreen: View {
     /// Handed down rather than rebuilt: an order outlives the sheet that sent it, and a
     /// session created per presentation would lose the answer.
     let session: TradingSession
+    let onOrderFilled: (Direction, String) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var ticket: Direction?
@@ -299,6 +306,8 @@ struct PerpDetailScreen: View {
             ) {
                 session.clear()
                 ticket = nil
+                dismiss()
+                onOrderFilled(side, market.symbol)
             }
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)

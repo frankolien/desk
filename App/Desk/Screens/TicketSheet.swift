@@ -17,6 +17,7 @@ struct TicketSheet: View {
 
     @State private var amount = ""
     @State private var leverage = 1
+    @State private var handledFill = false
 
     private var quote: OrderQuote? {
         guard let market, let mark, let money = Money(text: amount.isEmpty ? "0" : amount),
@@ -151,6 +152,18 @@ struct TicketSheet: View {
         }
         .padding(24)
         .background(DeskColor.night.color)
+        .onChange(of: session.order.outcome) { _, outcome in
+            guard outcome == .settled, !handledFill else { return }
+            handledFill = true
+            Task { @MainActor in
+                // Leave the venue's confirmation visible for a beat before returning to
+                // the portfolio. Forwarded is deliberately not enough: only a real fill
+                // earns automatic dismissal.
+                try? await Task.sleep(for: .milliseconds(650))
+                guard !Task.isCancelled else { return }
+                onDismiss()
+            }
+        }
     }
 
     /// Builds the draft and hands it to the session.
