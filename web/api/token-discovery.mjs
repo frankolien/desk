@@ -1,6 +1,15 @@
 import crypto from "node:crypto";
 
-const CHAIN_NAMES = { "1": "Ethereum", "501": "Solana" };
+const CHAIN_NAMES = {
+  "1": "Ethereum",
+  "10": "Optimism",
+  "56": "BNB Chain",
+  "137": "Polygon",
+  "196": "X Layer",
+  "501": "Solana",
+  "8453": "Base",
+  "42161": "Arbitrum",
+};
 
 function authHeaders(timestamp, requestPath) {
   const signature = crypto.createHmac("sha256", process.env.OKX_SECRET_KEY)
@@ -43,6 +52,7 @@ function normalize(row) {
     name: String(row.tokenName || row.tokenSymbol || "Unknown token"),
     logoURL: String(row.tokenLogoUrl || ""),
     contract,
+    decimals: numeric(row.decimal ?? row.decimals),
     explorerURL: String(row.explorerUrl || ""),
     price: numeric(row.price),
     change: numeric(row.change),

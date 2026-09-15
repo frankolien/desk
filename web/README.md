@@ -20,3 +20,15 @@ that is the redirect Apple refuses to follow while a browser follows it silently
 Verify with `tools/check-relying-party.sh` before creating the first passkey — with no
 arguments it also compares the two copies of the domain in the repository. Every passkey
 binds to this domain permanently.
+
+## Server-side market credentials
+
+The functions under `api/` read credentials only from Vercel environment variables. Never
+embed them in the iOS target or expose them through a public-prefixed variable.
+
+- `OKX_API_KEY`, `OKX_SECRET_KEY`, and `OKX_PASSPHRASE` power discovery, market data,
+  Solana quotes, and the primary spot-quote route.
+- `ZEROX_API_KEY` enables the 0x Swap API v2 fallback for supported EVM chains.
+
+`api/swap-quote` returns a `provider` field (`okx` or `0x`) so production failures can be
+traced without exposing either credential.

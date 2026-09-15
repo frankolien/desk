@@ -29,9 +29,12 @@ struct WatchlistScreen: View {
     let market: MarketModel
     let session: TradingSession
     @State private var showsMarket = false
+    @State private var selectedSpot: TrendingSpotToken?
+    @State private var isEditing = false
     /// Saved locally. A watchlist is the user's own note about markets, it never needs to
     /// leave the phone, and the list is short enough that defaults are the right home.
     @AppStorage("desk.watchlist") private var savedIDs = ""
+    @AppStorage("desk.spotWatchlist") private var savedSpotData = ""
 
     private var saved: Set<UInt32> {
         Set(savedIDs.split(separator: ",").compactMap { UInt32($0) })
@@ -41,6 +44,10 @@ struct WatchlistScreen: View {
         market.allMarkets.filter { saved.contains($0.id) }
     }
 
+    private var spotRows: [TrendingSpotToken] {
+        SpotWatchlistStorage.decode(savedSpotData)
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -48,22 +55,54 @@ struct WatchlistScreen: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Watchlist")
-                        .font(.system(size: 30, weight: .heavy, design: .rounded))
-                        .foregroundStyle(DeskColor.nightText.color)
-                        .padding(.top, 10)
+                    HStack {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .font(.title2)
+                            .frame(width: 44, height: 44)
+                            .perpSearchGlass(in: Circle())
+                        Spacer()
+                        Text("Watchlist").font(.title2.bold())
+                        Spacer()
+                        Button(isEditing ? "Done" : "Edit") {
+                            withAnimation(.easeInOut(duration: 0.2)) { isEditing.toggle() }
+                        }
+                            .font(.body)
+                            .frame(width: 64, height: 44)
+                            .perpSearchGlass(in: Capsule())
+                    }
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .padding(.top, 10)
 
-                    Text(rows.isEmpty
+                    Text(rows.isEmpty && spotRows.isEmpty
                          ? "Markets you save from Search appear here."
-                         : "\(rows.count) market\(rows.count == 1 ? "" : "s") saved.")
+                         : "\(rows.count + spotRows.count) market\(rows.count + spotRows.count == 1 ? "" : "s") saved.")
                         .font(DeskType.caption)
                         .foregroundStyle(DeskColor.nightMuted.color)
                         .padding(.top, 6)
 
-                    if rows.isEmpty {
+                    if rows.isEmpty && spotRows.isEmpty {
                         empty.padding(.top, 40)
                     } else {
                         VStack(spacing: 10) {
+                            ForEach(spotRows) { token in
+                                ZStack(alignment: .trailing) {
+                                    Button { selectedSpot = token } label: {
+                                        SpotWatchlistCard(token: token)
+                                    }
+                                    .buttonStyle(.plain)
+                                    if isEditing {
+                                        Button { remove(token) } label: {
+                                            Image(systemName: "minus")
+                                                .font(.headline)
+                                                .frame(width: 36, height: 36)
+                                                .background(.red, in: Circle())
+                                        }
+                                        .foregroundStyle(.white)
+                                        .padding(.trailing, 14)
+                                        .transition(.scale.combined(with: .opacity))
+                                    }
+                                }
+                            }
                             ForEach(rows, id: \.id) { entry in
                                 MarketRow(
                                     model: market,
@@ -84,6 +123,10 @@ struct WatchlistScreen: View {
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showsMarket) {
                 PerpDetailScreen(model: model, market: market, session: session)
+                    .toolbar(.hidden, for: .tabBar)
+            }
+            .navigationDestination(item: $selectedSpot) { token in
+                SpotTokenDetailScreen(token: token)
                     .toolbar(.hidden, for: .tabBar)
             }
         }
@@ -116,10 +159,16 @@ struct WatchlistScreen: View {
         savedIDs = next.sorted().map(String.init).joined(separator: ",")
     }
 
+    private func remove(_ token: TrendingSpotToken) {
+        savedSpotData = SpotWatchlistStorage.toggling(token, in: savedSpotData)
+    }
+
     private func open(_ entry: Market) {
         market.select(entry)
-        Task { await session.selectMarket(entry) }
-        showsMarket = true
+        Task {
+            await session.selectMarket(entry)
+            showsMarket = true
+        }
     }
 }
 
@@ -192,8 +241,6 @@ struct MarketSearchScreen: View {
                     }
                     .foregroundStyle(DeskColor.nightText.color)
                     .padding(.top, 30)
-
-                    field.padding(.top, 12)
 
                     if !spotResults.isEmpty {
                         HStack {
@@ -269,6 +316,7 @@ struct MarketSearchScreen: View {
             }
             }
             .toolbar(.hidden, for: .navigationBar)
+            .searchable(text: $query, prompt: "Search anything")
             .navigationDestination(isPresented: $showsMarket) {
                 PerpDetailScreen(model: model, market: market, session: session)
                     .toolbar(.hidden, for: .tabBar)
@@ -317,14 +365,16 @@ struct MarketSearchScreen: View {
 
     private func open(_ entry: Market) {
         market.select(entry)
-        Task { await session.selectMarket(entry) }
-        showsMarket = true
+        Task {
+            await session.selectMarket(entry)
+            showsMarket = true
+        }
     }
 }
 
 // MARK: - Spot discovery
 
-private struct TrendingSpotToken: Identifiable, Hashable, Decodable {
+private struct TrendingSpotToken: Identifiable, Hashable, Codable, Sendable {
     let id: String
     let chainIndex: String
     let chainName: String
@@ -332,6 +382,7 @@ private struct TrendingSpotToken: Identifiable, Hashable, Decodable {
     let name: String
     let logoURL: String
     let contract: String
+    let decimals: Double?
     let explorerURL: String
     let price: Double?
     let change: Double?
@@ -347,7 +398,7 @@ private struct TrendingSpotToken: Identifiable, Hashable, Decodable {
 
 @MainActor
 private final class TokenDiscoveryModel: ObservableObject {
-    private struct Response: Decodable { let tokens: [TrendingSpotToken] }
+    private struct Response: Decodable, Sendable { let tokens: [TrendingSpotToken] }
     @Published private(set) var trending: [TrendingSpotToken] = []
     @Published private(set) var searchResults: [TrendingSpotToken] = []
     @Published private(set) var isLoading = true
@@ -380,7 +431,9 @@ private final class TokenDiscoveryModel: ObservableObject {
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 throw URLError(.badServerResponse)
             }
-            let tokens = try JSONDecoder().decode(Response.self, from: data).tokens
+            let tokens = try await Task.detached(priority: .utility) {
+                try JSONDecoder().decode(Response.self, from: data).tokens
+            }.value
             guard !intoSearch || latestQuery == query else { return }
             if intoSearch { searchResults = tokens } else { trending = tokens }
             errorText = nil
@@ -425,6 +478,78 @@ private struct TrendingSpotRow: View {
         .padding(.horizontal, 14)
         .frame(height: 76)
         .background { TokenAdaptiveCardBackground(symbol: token.symbol, cornerRadius: 18, artworkURL: token.artworkURL) }
+    }
+}
+
+private enum SpotWatchlistStorage {
+    static func decode(_ raw: String) -> [TrendingSpotToken] {
+        guard let data = raw.data(using: .utf8),
+              let tokens = try? JSONDecoder().decode([TrendingSpotToken].self, from: data)
+        else { return [] }
+        return tokens
+    }
+
+    static func contains(_ token: TrendingSpotToken, in raw: String) -> Bool {
+        decode(raw).contains { $0.id == token.id }
+    }
+
+    static func toggling(_ token: TrendingSpotToken, in raw: String) -> String {
+        var tokens = decode(raw)
+        if let index = tokens.firstIndex(where: { $0.id == token.id }) {
+            tokens.remove(at: index)
+        } else {
+            tokens.insert(token, at: 0)
+        }
+        guard let data = try? JSONEncoder().encode(tokens),
+              let result = String(data: data, encoding: .utf8) else { return raw }
+        return result
+    }
+}
+
+private struct SpotWatchlistCard: View {
+    let token: TrendingSpotToken
+
+    var body: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 12) {
+                MarketTokenLogo(symbol: token.symbol, size: 42, remoteURL: token.artworkURL)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(token.symbol).font(.headline)
+                    Text(token.name).font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(token.price.map(spotPrice) ?? "$—")
+                        .font(.headline.monospacedDigit())
+                    if let change = token.change {
+                        Text(String(format: "24H %+.1f%%", change))
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(change >= 0 ? DeskColor.rise.color : DeskColor.fall.color)
+                    }
+                }
+            }
+            HStack(spacing: 8) {
+                metric("VOL", token.volume24H)
+                metric("MCAP", token.marketCap)
+                metric("LIQUIDITY", token.liquidity)
+            }
+        }
+        .foregroundStyle(DeskColor.nightText.color)
+        .padding(14)
+        .background { TokenAdaptiveCardBackground(symbol: token.symbol, cornerRadius: 22, artworkURL: token.artworkURL) }
+    }
+
+    private func metric(_ label: String, _ value: Double?) -> some View {
+        VStack(spacing: 2) {
+            Text(label).font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+            Text(value.map(Self.compactUSD) ?? "$—").font(.subheadline.weight(.bold).monospacedDigit())
+        }
+        .frame(maxWidth: .infinity).frame(height: 44)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private static func compactUSD(_ value: Double) -> String {
+        "$" + value.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
     }
 }
 
@@ -578,7 +703,7 @@ private enum SpotDetailTab: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
-private struct SpotWallet: Identifiable, Hashable {
+private struct SpotWallet: Identifiable, Hashable, Sendable {
     let address: String
     let emoji: String
     let portfolio: String
@@ -589,7 +714,7 @@ private struct SpotWallet: Identifiable, Hashable {
     }
 }
 
-private struct SpotTransaction: Identifiable {
+private struct SpotTransaction: Identifiable, Sendable {
     let age: String
     let isBuy: Bool
     let amount: String
@@ -606,10 +731,17 @@ private struct SpotTokenDetailScreen: View {
     @State private var range = "1H"
     @State private var selectedWallet: SpotWallet?
     @State private var tradeSide: String?
+    @AppStorage("desk.spotWatchlist") private var savedSpotData = ""
+
+    private var isSaved: Bool {
+        SpotWatchlistStorage.contains(token, in: savedSpotData)
+    }
 
     init(token: TrendingSpotToken) {
         self.token = token
-        _feed = StateObject(wrappedValue: SpotLiveFeed(symbol: token.symbol))
+        _feed = StateObject(wrappedValue: SpotLiveFeed(
+            symbol: token.symbol, chainIndex: token.chainIndex, contract: token.contract
+        ))
     }
 
     var body: some View {
@@ -639,8 +771,8 @@ private struct SpotTokenDetailScreen: View {
             get: { tradeSide != nil },
             set: { if !$0 { tradeSide = nil } }
         )) {
-            SpotTradePreview(token: token, side: tradeSide ?? "Buy")
-                .presentationDetents([.height(330)])
+            SpotTradeTicket(token: token, side: tradeSide ?? "Buy")
+                .presentationDetents([.height(560)])
                 .presentationDragIndicator(.visible)
         }
     }
@@ -654,25 +786,29 @@ private struct SpotTokenDetailScreen: View {
                 }
                 .perpSearchGlass(in: Circle())
                 Spacer()
-                ShareLink(item: "\(token.name) (\(token.symbol))") {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 17, weight: .semibold)).frame(width: 48, height: 48)
+                Button {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                        savedSpotData = SpotWatchlistStorage.toggling(token, in: savedSpotData)
+                    }
+                } label: {
+                    Image(systemName: isSaved ? "star.fill" : "star")
+                        .font(.system(size: 20, weight: .semibold)).frame(width: 48, height: 48)
                 }
                 .perpSearchGlass(in: Circle())
+                .foregroundStyle(isSaved ? Color.yellow : Color.white)
+                .accessibilityLabel(isSaved ? "Remove from watchlist" : "Add to watchlist")
             }
-            .foregroundStyle(.white)
 
             HStack(spacing: 12) {
-                MarketTokenLogo(symbol: token.symbol, size: 46)
+                MarketTokenLogo(symbol: token.symbol, size: 46, remoteURL: token.artworkURL)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(token.name).font(.system(size: 18, weight: .bold, design: .rounded))
-                    Text(token.symbol).font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
+                    Text("\(token.symbol) · \(token.chainName)").font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
                 }
             }
 
             HStack(alignment: .firstTextBaseline) {
-                Text(spotPrice(feed.latestPrice ?? token.price))
-                    .font(.system(size: 30, weight: .bold, design: .rounded).monospacedDigit())
+                AmountText((feed.latestPrice ?? token.price).map(spotPrice) ?? "$—", size: 36)
                     .minimumScaleFactor(0.7)
                 Spacer()
                 Text("SPOT")
@@ -690,9 +826,17 @@ private struct SpotTokenDetailScreen: View {
     }
 
     private var chart: some View {
-        SpotCandlestickChart(isUp: feed.isUp, seed: token.symbol, values: feed.candles)
-            .frame(height: 330)
-            .padding(.top, 18)
+        VStack(alignment: .leading, spacing: 8) {
+            SpotCandlestickChart(isUp: feed.isUp, seed: token.symbol, values: feed.candles)
+                .frame(height: 286)
+            if !feed.candles.isEmpty && feed.candles.count < 12 {
+                Text("Sparse market · only \(feed.candles.count) real candles in this range")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 20)
+            }
+        }
+        .padding(.top, 14)
     }
 
     private var changeStatusText: String {
@@ -751,25 +895,32 @@ private struct SpotTokenDetailScreen: View {
                 .foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.vertical, 34)
             }
             ForEach(feed.transactions) { tx in
-                HStack {
-                    Text(tx.age).frame(width: 42, alignment: .leading)
-                    Text(tx.isBuy ? "BUY" : "SELL")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded)).foregroundStyle(.white)
-                        .padding(.horizontal, 9).padding(.vertical, 5)
-                        .background(tx.isBuy ? DeskColor.rise.color : DeskColor.fall.color, in: Capsule())
-                    Spacer()
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(tx.age).foregroundStyle(.secondary)
+                        Text(tx.isBuy ? "BUY" : "SELL")
+                            .font(.caption2.weight(.heavy)).foregroundStyle(.white)
+                            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(tx.isBuy ? DeskColor.rise.color : DeskColor.fall.color, in: Capsule())
+                    }
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 58, alignment: .leading)
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(tx.amount).foregroundStyle(tx.isBuy ? DeskColor.rise.color : DeskColor.fall.color)
+                        Text(tx.amount)
+                            .lineLimit(1).minimumScaleFactor(0.75)
+                            .foregroundStyle(tx.isBuy ? DeskColor.rise.color : DeskColor.fall.color)
                         Text(tx.value).font(.caption).foregroundStyle(.secondary)
                     }
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .frame(width: 115, alignment: .trailing)
+                    .font(.subheadline.weight(.bold).monospacedDigit())
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     Button { selectedWallet = tx.wallet } label: {
                         HStack(spacing: 6) { Text(tx.wallet.emoji); Text(tx.wallet.displayAddress).underline() }
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    }.foregroundStyle(.secondary).frame(width: 130, alignment: .trailing)
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                    }.foregroundStyle(.secondary).frame(width: 104, alignment: .trailing)
                 }
-                .padding(.horizontal, 20).frame(height: 66)
+                .padding(.horizontal, 20).frame(height: 64)
                 Divider().overlay(Color.white.opacity(0.1)).padding(.leading, 20)
             }
             Text("Real on-chain trades · refreshes every 2 seconds while open")
@@ -823,7 +974,20 @@ private struct SpotTokenDetailScreen: View {
             infoRow("24h Volume", feed.details?.volume24H ?? "—", "chart.bar.fill")
             infoRow("Liquidity", feed.details?.liquidity ?? "—", "drop.fill")
             infoRow("Holders", feed.details?.holderCount ?? "—", "person.2.fill")
-            infoRow("Network", token.symbol == "SOL" ? "Solana" : "Multi-chain", "network")
+            infoRow("Network", token.chainName, "network")
+            if token.communityRecognized == false {
+                Label("Community recognition is not verified. Confirm the contract before trading.", systemImage: "exclamationmark.shield.fill")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.yellow)
+                    .padding(14)
+                    .background(Color.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            }
+            if let liquidity = token.liquidity, liquidity < 10_000 {
+                Label(liquidity < 1_000 ? "Extremely low liquidity" : "Low liquidity", systemImage: "drop.triangle.fill")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(liquidity < 1_000 ? .red : .yellow)
+                    .padding(.top, 8)
+            }
             liveCaption("OKX token snapshot · refreshed every 30 seconds")
         }.padding(.horizontal, 20)
     }
@@ -843,20 +1007,20 @@ private struct SpotTokenDetailScreen: View {
     }
 
     private var tradeBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             ShareLink(item: "\(token.name) (\(token.symbol))") {
-                Image(systemName: "square.and.arrow.up").frame(width: 52, height: 52)
+                Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
             }.perpSearchGlass(in: Circle())
             Spacer()
-            Button { tradeSide = "Buy" } label: { Text("Buy").frame(width: 92, height: 52) }.perpSearchGlass(in: Capsule())
-            Button { tradeSide = "Sell" } label: { Text("Sell").frame(width: 92, height: 52) }.perpSearchGlass(in: Capsule())
-        }.font(.system(size: 18, weight: .semibold, design: .rounded)).foregroundStyle(.white)
+            Button { tradeSide = "Buy" } label: { Text("Buy").frame(width: 78, height: 44) }.perpSearchGlass(in: Capsule())
+            Button { tradeSide = "Sell" } label: { Text("Sell").frame(width: 78, height: 44) }.perpSearchGlass(in: Capsule())
+        }.font(.headline).foregroundStyle(.white)
     }
 }
 
 @MainActor
 private final class SpotLiveFeed: ObservableObject {
-    struct Candle: Identifiable {
+    struct Candle: Identifiable, Sendable {
         let timestamp: Int64
         let open: Double
         let high: Double
@@ -865,14 +1029,14 @@ private final class SpotLiveFeed: ObservableObject {
         var id: Int64 { timestamp }
     }
 
-    struct Details {
+    struct Details: Sendable {
         let marketCap: String
         let liquidity: String
         let volume24H: String
         let holderCount: String
     }
 
-    struct Holder: Identifiable {
+    struct Holder: Identifiable, Sendable {
         let wallet: SpotWallet
         let amount: String
         let value: String
@@ -890,10 +1054,26 @@ private final class SpotLiveFeed: ObservableObject {
     @Published private(set) var holders: [Holder] = []
     @Published private(set) var detailsError: String?
 
+    private struct SnapshotPayload: Sendable {
+        let candles: [Candle]
+        let transactions: [SpotTransaction]
+    }
+
+    private struct DetailsPayload: Sendable {
+        let details: Details
+        let holders: [Holder]
+    }
+
     let symbol: String
+    let chainIndex: String
+    let contract: String
     private var period = "1H"
 
-    init(symbol: String) { self.symbol = symbol }
+    init(symbol: String, chainIndex: String, contract: String) {
+        self.symbol = symbol
+        self.chainIndex = chainIndex
+        self.contract = contract
+    }
 
     var stateText: String {
         if isLoading { return "CONNECTING" }
@@ -926,39 +1106,22 @@ private final class SpotLiveFeed: ObservableObject {
     }
 
     private func refreshDetails() async {
-        guard ["BTC", "ETH", "SOL", "PUMP"].contains(symbol) else {
-            detailsError = "Verified token details are not available for \(symbol) yet."
-            return
-        }
         var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/token-details")!
-        components.queryItems = [URLQueryItem(name: "symbol", value: symbol)]
+        components.queryItems = [
+            URLQueryItem(name: "symbol", value: symbol),
+            URLQueryItem(name: "chainIndex", value: chainIndex),
+            URLQueryItem(name: "address", value: contract)
+        ]
         do {
             let (data, response) = try await URLSession.shared.data(from: components.url!)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200,
-                  let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 throw URLError(.badServerResponse)
             }
-            let info = root["priceInfo"] as? [String: Any]
-            let price = Self.number(info?["price"])
-            details = Details(
-                marketCap: Self.compactUSD(Self.number(info?["marketCap"])),
-                liquidity: Self.compactUSD(Self.number(info?["liquidity"])),
-                volume24H: Self.compactUSD(Self.number(info?["volume24H"])),
-                holderCount: Self.count(Self.number(info?["holders"]))
-            )
-            let rows = root["holders"] as? [[String: Any]] ?? []
-            holders = rows.compactMap { row in
-                guard let address = row["holderWalletAddress"] as? String, !address.isEmpty else { return nil }
-                let rawAmount = Self.number(row["holdAmount"])
-                let rawPercent = Self.number(row["holdPercent"])
-                let rawValue = rawAmount.flatMap { amount in price.map { amount * $0 } }
-                return Holder(
-                    wallet: SpotWallet(address: address, emoji: "◉", portfolio: Self.compactUSD(rawValue)),
-                    amount: Self.compactNumber(rawAmount),
-                    value: Self.compactUSD(rawValue),
-                    percent: rawPercent.map { String(format: "%.2f%%", $0) } ?? "—"
-                )
-            }
+            let payload = try await Task.detached(priority: .utility) {
+                try Self.decodeDetails(data)
+            }.value
+            details = payload.details
+            holders = payload.holders
             detailsError = nil
         } catch {
             detailsError = "Token details are temporarily unavailable."
@@ -966,25 +1129,24 @@ private final class SpotLiveFeed: ObservableObject {
     }
 
     private func refresh() async {
-        guard ["BTC", "ETH", "SOL", "PUMP"].contains(symbol) else {
-            isLoading = false
-            errorText = "Live on-chain coverage is not available for \(symbol) yet."
-            return
-        }
         var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/market-snapshot")!
-        components.queryItems = [URLQueryItem(name: "symbol", value: symbol), URLQueryItem(name: "period", value: period)]
+        components.queryItems = [
+            URLQueryItem(name: "symbol", value: symbol),
+            URLQueryItem(name: "chainIndex", value: chainIndex),
+            URLQueryItem(name: "address", value: contract),
+            URLQueryItem(name: "period", value: period)
+        ]
         do {
             let (data, response) = try await URLSession.shared.data(from: components.url!)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 throw URLError(.badServerResponse)
             }
-            guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                throw URLError(.cannotParseResponse)
-            }
-            let nextCandles = (root["candles"] as? [[String]] ?? []).compactMap(Self.candle).reversed()
-            let nextTrades = (root["trades"] as? [[String: Any]] ?? []).compactMap { Self.trade($0, symbol: symbol) }
-            candles = Array(nextCandles)
-            transactions = Array(nextTrades.prefix(60))
+            let currentSymbol = symbol
+            let payload = try await Task.detached(priority: .utility) {
+                try Self.decodeSnapshot(data, symbol: currentSymbol)
+            }.value
+            candles = payload.candles
+            transactions = payload.transactions
             latestPrice = candles.last?.close
             observedAt = Date()
             errorText = nil
@@ -995,13 +1157,50 @@ private final class SpotLiveFeed: ObservableObject {
         }
     }
 
-    private static func candle(_ row: [String]) -> Candle? {
+    nonisolated private static func decodeSnapshot(_ data: Data, symbol: String) throws -> SnapshotPayload {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw URLError(.cannotParseResponse)
+        }
+        let candles = Array((root["candles"] as? [[String]] ?? []).compactMap(candle).reversed())
+        let transactions = Array((root["trades"] as? [[String: Any]] ?? [])
+            .compactMap { trade($0, symbol: symbol) }.prefix(60))
+        return SnapshotPayload(candles: candles, transactions: transactions)
+    }
+
+    nonisolated private static func decodeDetails(_ data: Data) throws -> DetailsPayload {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw URLError(.cannotParseResponse)
+        }
+        let info = root["priceInfo"] as? [String: Any]
+        let price = number(info?["price"])
+        let details = Details(
+            marketCap: compactUSD(number(info?["marketCap"])),
+            liquidity: compactUSD(number(info?["liquidity"])),
+            volume24H: compactUSD(number(info?["volume24H"])),
+            holderCount: count(number(info?["holders"]))
+        )
+        let holders = (root["holders"] as? [[String: Any]] ?? []).compactMap { row -> Holder? in
+            guard let address = row["holderWalletAddress"] as? String, !address.isEmpty else { return nil }
+            let rawAmount = number(row["holdAmount"])
+            let rawPercent = number(row["holdPercent"])
+            let rawValue = rawAmount.flatMap { amount in price.map { amount * $0 } }
+            return Holder(
+                wallet: SpotWallet(address: address, emoji: "◉", portfolio: compactUSD(rawValue)),
+                amount: compactNumber(rawAmount),
+                value: compactUSD(rawValue),
+                percent: rawPercent.map { String(format: "%.2f%%", $0) } ?? "—"
+            )
+        }
+        return DetailsPayload(details: details, holders: holders)
+    }
+
+    nonisolated private static func candle(_ row: [String]) -> Candle? {
         guard row.count >= 5, let timestamp = Int64(row[0]), let open = Double(row[1]),
               let high = Double(row[2]), let low = Double(row[3]), let close = Double(row[4]) else { return nil }
         return Candle(timestamp: timestamp, open: open, high: high, low: low, close: close)
     }
 
-    private static func trade(_ row: [String: Any], symbol: String) -> SpotTransaction? {
+    nonisolated private static func trade(_ row: [String: Any], symbol: String) -> SpotTransaction? {
         guard row["id"] as? String != nil,
               let address = row["userAddress"] as? String,
               let kind = row["type"] as? String else { return nil }
@@ -1019,24 +1218,24 @@ private final class SpotLiveFeed: ObservableObject {
                                amount: "\(amount) \(symbol)", value: spotPrice(volume), wallet: wallet)
     }
 
-    private static func number(_ value: Any?) -> Double? {
+    nonisolated private static func number(_ value: Any?) -> Double? {
         if let value = value as? Double { return value }
         if let value = value as? NSNumber { return value.doubleValue }
         if let value = value as? String { return Double(value) }
         return nil
     }
 
-    private static func compactUSD(_ value: Double?) -> String {
+    nonisolated private static func compactUSD(_ value: Double?) -> String {
         guard let value, value.isFinite, value != 0 else { return "—" }
         return "$" + compactNumber(value)
     }
 
-    private static func count(_ value: Double?) -> String {
+    nonisolated private static func count(_ value: Double?) -> String {
         guard let value, value.isFinite else { return "—" }
         return value.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
     }
 
-    private static func compactNumber(_ value: Double?) -> String {
+    nonisolated private static func compactNumber(_ value: Double?) -> String {
         guard let value, value.isFinite else { return "—" }
         return value.formatted(.number.notation(.compactName).precision(.fractionLength(0...2)))
     }
@@ -1051,19 +1250,26 @@ private struct SpotCandlestickChart: View {
         GeometryReader { proxy in
             let width = proxy.size.width
             let height = proxy.size.height
-            let step = width / CGFloat(max(values.count, 1))
+            // An illiquid token may truthfully return only one or two buckets. Reserve a
+            // normal chart density so those candles stay candle-sized instead of each
+            // expanding to half the phone.
+            let visibleSlots = max(values.count, 24)
+            let step = width / CGFloat(visibleSlots)
+            let leadingSlots = visibleSlots - values.count
             let low = values.map(\.low).min() ?? 0
             let high = values.map(\.high).max() ?? 1
-            let span = max(high - low, 0.00000001)
+            let rawSpan = max(high - low, max(abs(high) * 0.002, 0.00000001))
+            let lowerBound = low - rawSpan * 0.08
+            let span = rawSpan * 1.16
             let y: (Double) -> CGFloat = { value in
-                height * CGFloat(1 - ((value - low) / span))
+                height * CGFloat(1 - ((value - lowerBound) / span))
             }
             ZStack {
                 VStack(spacing: 0) {
                     ForEach(0..<4) { _ in Spacer(); Divider().overlay(Color.white.opacity(0.07)) }
                 }
                 ForEach(Array(values.enumerated()), id: \.element.id) { index, item in
-                    let x = CGFloat(index) * step + step / 2
+                    let x = CGFloat(leadingSlots + index) * step + step / 2
                     let color = item.close >= item.open ? DeskColor.rise.color : DeskColor.fall.color
                     Path { path in
                         path.move(to: CGPoint(x: x, y: y(item.high)))
@@ -1071,7 +1277,7 @@ private struct SpotCandlestickChart: View {
                     }.stroke(color, lineWidth: 1.2)
                     RoundedRectangle(cornerRadius: 2)
                         .fill(color)
-                        .frame(width: max(2, step * 0.56), height: max(2, abs(y(item.open) - y(item.close))))
+                        .frame(width: min(9, max(3, step * 0.58)), height: max(2, abs(y(item.open) - y(item.close))))
                         .position(x: x, y: (y(item.open) + y(item.close)) / 2)
                 }
                 Rectangle().fill(isUp ? DeskColor.rise.color.opacity(0.4) : DeskColor.fall.color.opacity(0.4)).frame(height: 1)
@@ -1083,22 +1289,140 @@ private struct SpotCandlestickChart: View {
     }
 }
 
-private struct SpotTradePreview: View {
+private struct SpotTradeTicket: View {
     let token: TrendingSpotToken
     let side: String
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var quote = SpotQuoteModel()
+    @State private var amount = ""
+
+    private var nativeSymbol: String {
+        switch token.chainIndex {
+        case "501": "SOL"
+        case "56": "BNB"
+        case "137": "POL"
+        case "196": "OKB"
+        default: "ETH"
+        }
+    }
+
+    private var sourceSymbol: String { side == "Buy" ? nativeSymbol : token.symbol }
+    private var destinationSymbol: String { side == "Buy" ? token.symbol : nativeSymbol }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack { MarketTokenLogo(symbol: token.symbol, size: 42); Text("\(side) \(token.symbol)").font(.system(size: 24, weight: .heavy, design: .rounded)); Spacer() }
-            Text("Spot execution is not connected yet")
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-            Text("This is a preview of the spot ticket. No quote has been requested and nothing will leave your wallet.")
-                .font(.system(size: 14, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
-            Button("Done") { dismiss() }
-                .font(.system(size: 16, weight: .bold, design: .rounded)).frame(maxWidth: .infinity).frame(height: 52)
-                .foregroundStyle(.black).background(.white, in: Capsule())
-        }.padding(24).preferredColorScheme(.dark)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 12) {
+                MarketTokenLogo(symbol: token.symbol, size: 42, remoteURL: token.artworkURL)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(side) \(token.symbol)").font(.system(size: 22, weight: .heavy, design: .rounded))
+                    Text(token.chainName).font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button { dismiss() } label: { Image(systemName: "xmark.circle.fill").font(.title2) }.foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("YOU PAY").font(.system(size: 10, weight: .heavy, design: .rounded)).tracking(1.2).foregroundStyle(.secondary)
+                HStack(alignment: .firstTextBaseline) {
+                    TextField("0", text: $amount)
+                        .keyboardType(.decimalPad)
+                        .font(.system(size: 34, weight: .bold, design: .rounded).monospacedDigit())
+                    Text(sourceSymbol).font(.system(size: 16, weight: .bold, design: .rounded)).foregroundStyle(.secondary)
+                }
+                Text("Wallet balance unavailable · not Monad testnet AUSD")
+                    .font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
+            }
+            .padding(16)
+            .perpSearchGlass(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+            HStack {
+                Text("You receive")
+                Spacer()
+                Text(quote.output.map { "\($0) \(destinationSymbol)" } ?? "— \(destinationSymbol)")
+                    .fontWeight(.bold).monospacedDigit()
+            }
+            .font(.system(size: 14, design: .rounded))
+
+            if let impact = quote.priceImpact {
+                HStack { Text("Price impact"); Spacer(); Text(impact).fontWeight(.bold) }
+                    .font(.system(size: 13, design: .rounded)).foregroundStyle(.secondary)
+            }
+            if let error = quote.errorText {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.yellow)
+            }
+            if token.communityRecognized == false || (token.liquidity ?? .greatestFiniteMagnitude) < 10_000 {
+                Text("Verify the contract and liquidity independently before trading.")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded)).foregroundStyle(.yellow)
+            }
+
+            Button { Task { await quote.fetch(token: token, side: side, amount: amount) } } label: {
+                HStack {
+                    if quote.isLoading { ProgressView().tint(.black) }
+                    Text(quote.output == nil ? "Get live quote" : "Refresh quote")
+                    Spacer(); Image(systemName: "arrow.right")
+                }
+                .font(.system(size: 16, weight: .bold, design: .rounded)).padding(.horizontal, 18)
+                .frame(maxWidth: .infinity).frame(height: 54)
+            }
+            .buttonStyle(.plain).foregroundStyle(.black).background(.white, in: Capsule())
+            .disabled(amount.isEmpty || quote.isLoading).opacity(amount.isEmpty ? 0.35 : 1)
+
+            Text("Quote only · no approval, signature or transaction is sent")
+                .font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+        }
+        .padding(24).preferredColorScheme(.dark)
+        .onChange(of: amount) { _, _ in quote.clear() }
+    }
+}
+
+@MainActor
+private final class SpotQuoteModel: ObservableObject {
+    @Published private(set) var output: String?
+    @Published private(set) var priceImpact: String?
+    @Published private(set) var errorText: String?
+    @Published private(set) var isLoading = false
+
+    func clear() { output = nil; priceImpact = nil; errorText = nil }
+
+    func fetch(token: TrendingSpotToken, side: String, amount: String) async {
+        clear(); isLoading = true; defer { isLoading = false }
+        guard let decimals = token.decimals.map(Int.init) else {
+            errorText = "This token’s decimal precision is unavailable, so it cannot be quoted safely."
+            return
+        }
+        var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/swap-quote")!
+        components.queryItems = [
+            URLQueryItem(name: "chainIndex", value: token.chainIndex),
+            URLQueryItem(name: "tokenAddress", value: token.contract),
+            URLQueryItem(name: "tokenDecimals", value: String(decimals)),
+            URLQueryItem(name: "side", value: side.lowercased()),
+            URLQueryItem(name: "amount", value: amount)
+        ]
+        do {
+            let (data, response) = try await URLSession.shared.data(from: components.url!)
+            let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+                  let quote = root?["quote"] as? [String: Any] else {
+                errorText = root?["error"] as? String ?? "A live quote is unavailable right now."
+                return
+            }
+            output = Self.read(quote["toAmountReadable"])
+            if let raw = Self.read(quote["priceImpactPercentage"]), let value = Double(raw) {
+                priceImpact = String(format: "%.2f%%", value)
+            }
+            if output == nil { errorText = "OKX returned a quote without a verifiable output amount." }
+        } catch {
+            errorText = "The quote service could not be reached."
+        }
+    }
+
+    private static func read(_ value: Any?) -> String? {
+        if let value = value as? String, !value.isEmpty { return value }
+        if let value = value as? NSNumber { return value.stringValue }
+        return nil
     }
 }
 

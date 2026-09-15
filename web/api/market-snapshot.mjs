@@ -39,20 +39,30 @@ async function exchangeCandles(instrument, bar) {
   return body.data;
 }
 
+async function dexCandles(identity, bar) {
+  return signedGet("/api/v6/dex/market/candles", { ...identity, bar, limit: "80" });
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
   const symbol = String(req.query.symbol || "").toUpperCase();
   const bar = String(req.query.period || "1m");
-  const token = TOKENS[symbol];
-  if (!token || !PERIODS.has(bar)) return res.status(400).json({ error: "Unsupported market" });
+  const known = TOKENS[symbol];
+  const chainIndex = String(req.query.chainIndex || known?.chainIndex || "");
+  const address = String(req.query.address || known?.address || "");
+  const validChain = /^\d{1,10}$/.test(chainIndex);
+  const validAddress = /^0x[a-fA-F0-9]{40}$/.test(address) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
+  if (!PERIODS.has(bar) || !validChain || !validAddress) return res.status(400).json({ error: "Unsupported market" });
   try {
-    const common = { chainIndex: token.chainIndex, tokenContractAddress: token.address };
+    const common = { chainIndex, tokenContractAddress: address };
     const [candles, trades] = await Promise.all([
-      exchangeCandles(token.instrument, bar),
+      known && known.chainIndex === chainIndex && known.address.toLowerCase() === address.toLowerCase()
+        ? exchangeCandles(known.instrument, bar)
+        : dexCandles(common, bar),
       signedGet("/api/v6/dex/market/trades", { ...common, limit: "60" }),
     ]);
     res.setHeader("Cache-Control", "private, no-store");
-    return res.status(200).json({ symbol, bar, observedAt: Date.now(), candles, trades });
+    return res.status(200).json({ symbol, chainIndex, address, bar, observedAt: Date.now(), candles, trades });
   } catch (error) {
     return res.status(502).json({ error: error.message });
   }

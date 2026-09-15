@@ -50,10 +50,14 @@ async function okxPost(path, value) {
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
   const symbol = String(req.query.symbol || "").toUpperCase();
-  const token = TOKENS[symbol];
-  if (!token) return res.status(400).json({ error: "Token details are not available for this market" });
+  const known = TOKENS[symbol];
+  const chainIndex = String(req.query.chainIndex || known?.chainIndex || "");
+  const address = String(req.query.address || known?.address || "");
+  const validChain = /^\d{1,10}$/.test(chainIndex);
+  const validAddress = /^0x[a-fA-F0-9]{40}$/.test(address) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
+  if (!validChain || !validAddress) return res.status(400).json({ error: "Valid token identity required" });
 
-  const identity = { chainIndex: token.chainIndex, tokenContractAddress: token.address };
+  const identity = { chainIndex, tokenContractAddress: address };
   try {
     const [priceRows, holderRows] = await Promise.all([
       okxPost("/api/v6/dex/market/price-info", [identity]),
