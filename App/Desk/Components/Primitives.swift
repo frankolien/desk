@@ -61,6 +61,20 @@ struct ValueRow: View {
     }
 }
 
+extension View {
+    /// The app's one raised surface. Liquid Glass where the system supplies it, and a
+    /// material with a hairline where it does not.
+    @ViewBuilder
+    func deskGlass<S: Shape>(interactive: Bool = false, in shape: S) -> some View {
+        if #available(iOS 26.0, *) {
+            glassEffect(.regular.interactive(interactive), in: shape)
+        } else {
+            background(.ultraThinMaterial, in: shape)
+                .overlay(shape.stroke(Color.white.opacity(0.12), lineWidth: 0.6))
+        }
+    }
+}
+
 /// Only ever on something tappable. Dark means flat: a chip is a hint, not a card.
 struct Chip<Content: View>: View {
     @ViewBuilder var content: Content

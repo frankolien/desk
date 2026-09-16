@@ -15,6 +15,7 @@ struct TradingShell: View {
     @State private var tab: Destination
     @State private var showsAccount = false
     @State private var showsFunding = false
+    @State private var fillConfirmation: String?
 
     enum Destination: Hashable {
         case home, watchlist, signals, perps, search
@@ -56,7 +57,9 @@ struct TradingShell: View {
             }
 
             Tab("Watchlist", systemImage: "bookmark.fill", value: .watchlist) {
-                WatchlistScreen(model: model, market: market, session: session)
+                WatchlistScreen(
+                    model: model, market: market, session: session,
+                    onOrderFilled: orderFilled)
             }
 
             Tab("Signals", systemImage: "antenna.radiowaves.left.and.right", value: .signals) {
@@ -64,11 +67,15 @@ struct TradingShell: View {
             }
 
             Tab("Perps", systemImage: "infinity", value: .perps) {
-                MarketScreen(model: model, market: market, session: session)
+                MarketScreen(
+                    model: model, market: market, session: session,
+                    onOrderFilled: orderFilled)
             }
 
             Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
-                MarketSearchScreen(model: model, market: market, session: session)
+                MarketSearchScreen(
+                    model: model, market: market, session: session,
+                    onOrderFilled: orderFilled)
             }
         }
         .tint(.white)
@@ -84,5 +91,30 @@ struct TradingShell: View {
         // order's deadline is computed against it.
         .onChange(of: market.headBlock) { _, block in session.noteHeadBlock(block) }
         .onDisappear(perform: market.stop)
+        .overlay(alignment: .top) {
+            if let fillConfirmation {
+                Label(fillConfirmation, systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 16)
+                    .frame(height: 44)
+                    .background(DeskColor.rise.color, in: Capsule())
+                    .shadow(color: .black.opacity(0.35), radius: 14, y: 6)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.28), value: fillConfirmation)
+    }
+
+    private func orderFilled(_ side: Direction, _ symbol: String) {
+        tab = .perps
+        let message = "\(side.word()) \(symbol) filled"
+        fillConfirmation = message
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2.4))
+            guard fillConfirmation == message else { return }
+            fillConfirmation = nil
+        }
     }
 }

@@ -83,6 +83,11 @@ private func draft(_ side: Side = .long) throws -> OrderDesk.Draft {
         slippageBps: 50)
 }
 
+private func position(side: Int = 1, size: Int64 = 1_000, id: Int64 = 99) throws -> PerplPosition {
+    let body = #"{"mkt":16,"acc":7,"pid":"\#(id)","sd":\#(side),"c":"1000000","ep":700000,"s":"\#(size)","lv":500,"st":1}"#
+    return try JSONDecoder().decode(PerplPosition.self, from: Data(body.utf8))
+}
+
 @Suite("Sending an order")
 struct OrderDeskTests {
     @Test("The account is selected for the market's exchange instance")
@@ -164,6 +169,80 @@ struct OrderDeskTests {
         }
         #expect(ids.count == 2)
         #expect(ids == [42, 43], "seeded from lastForwarded 41 and strictly increasing")
+    }
+
+    @Test("stop loss and take profit are linked to the opening request")
+    func linkedProtection() async throws {
+        let channel = ScriptedChannel(inbound: [snapshot(lastForwarded: 41)])
+        let subject = try desk(channel)
+        try await subject.open(credentials: credentials())
+        let config = try market().config
+        let protected = OrderDesk.Draft(
+            side: .long,
+            size: try #require(Size(raw: 1_000, decimals: config.sizeDecimals)),
+            leverageHundredths: 500,
+            slippageBps: 50,
+            protection: .init(
+                stopLoss: try #require(Price(selling: "64000", decimals: config.priceDecimals)),
+                takeProfit: try #require(Price(buying: "80000", decimals: config.priceDecimals))))
+
+        _ = try await subject.place(protected, headBlock: 1_000)
+
+        let bodies = channel.sent.filter { $0.contains("\"mt\":22") }
+        let orders = try bodies.map { body in
+            try #require(JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])
+        }
+        #expect(orders.count == 3)
+        #expect(orders.map { $0["rq"] as? Int } == [42, 43, 44])
+        #expect(orders[1]["tr"] as? Int == 42)
+        #expect(orders[2]["tr"] as? Int == 42)
+        #expect(orders[1]["tpc"] as? Int == 4)
+        #expect(orders[2]["tpc"] as? Int == 3)
+        #expect(orders[1]["t"] as? Int == 3)
+        #expect(orders[2]["t"] as? Int == 3)
+    }
+
+    @Test("A partial close is reduce-only and uses only the requested size")
+    func partialClose() async throws {
+        let channel = ScriptedChannel(inbound: [snapshot(lastForwarded: 41)])
+        let subject = try desk(channel)
+        try await subject.open(credentials: credentials())
+        let config = try market().config
+        let half = try #require(Size(raw: 500, decimals: config.sizeDecimals))
+
+        _ = try await subject.closePosition(
+            try position(), size: half, slippageBps: 50, headBlock: 1_000)
+
+        let body = try #require(channel.sent.first { $0.contains("\"mt\":22") })
+        let order = try #require(
+            JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])
+        #expect(order["t"] as? Int == 3)
+        #expect(order["s"] as? Int == 500)
+        #expect(order["rq"] as? Int == 42)
+    }
+
+    @Test("Protection for an open position links both triggers to its position id")
+    func protectsExistingPosition() async throws {
+        let channel = ScriptedChannel(inbound: [snapshot(lastForwarded: 41)])
+        let subject = try desk(channel)
+        try await subject.open(credentials: credentials())
+        let config = try market().config
+
+        try await subject.protectPosition(
+            try position(),
+            stopLoss: try #require(Price(selling: "64000", decimals: config.priceDecimals)),
+            takeProfit: try #require(Price(buying: "80000", decimals: config.priceDecimals)),
+            slippageBps: 50)
+
+        let orders = try channel.sent.filter { $0.contains("\"mt\":22") }.map { body in
+            try #require(JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])
+        }
+        #expect(orders.count == 2)
+        #expect(orders.map { $0["rq"] as? Int } == [42, 43])
+        #expect(orders.map { $0["lp"] as? Int } == [99, 99])
+        #expect(orders.map { $0["tpc"] as? Int } == [4, 3])
+        #expect(orders.allSatisfy { $0["tr"] == nil })
+        #expect(orders.allSatisfy { $0["t"] as? Int == 3 })
     }
 
     /// The venue refuses forwarded orders until `fw` is set, which the opening sequence

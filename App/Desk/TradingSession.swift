@@ -211,7 +211,7 @@ final class TradingSession {
         }
     }
 
-    func closePosition(_ position: PerplPosition, slippageBps: Int) async {
+    func closePosition(_ position: PerplPosition, size: Size? = nil, slippageBps: Int) async {
         localProblem = nil
         order.begin()
         do {
@@ -225,7 +225,7 @@ final class TradingSession {
                 }
             }
             let id = try await desk.closePosition(
-                position, slippageBps: slippageBps, headBlock: headBlock)
+                position, size: size, slippageBps: slippageBps, headBlock: headBlock)
             order.associate(id)
             if let current = await desk.phase(of: id) { order.apply(id: id, phase: current) }
             if order.outcome == .settled { Haptics.success() }
@@ -233,6 +233,25 @@ final class TradingSession {
             Haptics.failure()
             localProblem = Self.sentence(for: error)
             order.failLocally()
+        }
+    }
+
+    func protectPosition(
+        _ position: PerplPosition, stopLoss: Price?, takeProfit: Price?, slippageBps: Int
+    ) async -> Bool {
+        localProblem = nil
+        do {
+            guard let desk else { throw OrderDesk.Failure.notEnrolled }
+            if !isConnected { try await connect() }
+            try await desk.protectPosition(
+                position, stopLoss: stopLoss, takeProfit: takeProfit,
+                slippageBps: slippageBps)
+            Haptics.success()
+            return true
+        } catch {
+            Haptics.failure()
+            localProblem = Self.sentence(for: error)
+            return false
         }
     }
 

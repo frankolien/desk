@@ -49,6 +49,12 @@ final class AppModel {
     /// while there is no way to have one.
     private(set) var openPosition: PerplPosition?
     private(set) var openPositions: [PerplPosition] = []
+    /// Positions the venue has already closed, newest first.
+    ///
+    /// They arrive on the same `mt: 26`/`mt: 27` stream as the open ones and were being
+    /// filtered away and dropped. They carry the exit price and the realised PnL, which
+    /// makes them the only record Desk has of what this account has actually done.
+    private(set) var closedPositions: [PerplPosition] = []
 
     /// Whether the trading key is in memory right now.
     ///
@@ -88,6 +94,12 @@ final class AppModel {
             let open = positions.filter(\.isOpen)
             self?.openPositions = open
             self?.openPosition = open.first
+            // Newest first by the venue's own position id, which is monotonic. Sorting by
+            // anything this device computes would reorder the list every time a figure
+            // was recalculated.
+            self?.closedPositions = positions
+                .filter { !$0.isOpen }
+                .sorted { $0.positionID > $1.positionID }
         }
         // An order that finds Desk locked asks for Face ID once and carries on. Only a
         // locked key qualifies: a connection that failed for any other reason is reported
@@ -128,6 +140,7 @@ final class AppModel {
                 hasDesk.record(true)
                 openPosition = Self.reviewPosition
                 openPositions = Self.reviewPosition.map { [$0] } ?? []
+                closedPositions = Self.reviewClosedPositions
                 isKeyUnlocked = true
             }
         }
@@ -149,6 +162,22 @@ final class AppModel {
          "s":100000,"lv":1500,"efs":"0","xfs":"0","fee":"3850000","st":1}
         """#.utf8)
         return try? JSONDecoder().decode(PerplPosition.self, from: body)
+    }()
+
+    /// Two positions the venue has already closed, so History can be drawn and reviewed
+    /// before an account with a real trading past exists. The same `mt: 26` shape as the
+    /// open one, with the exit price and realised PnL a closed position carries: a short
+    /// that made 325 AUSD and a long that lost 67.50.
+    static let reviewClosedPositions: [PerplPosition] = {
+        let body = Data(#"""
+        [{"mkt":16,"acc":42,"pid":"5","sd":2,"c":"1200000000","ep":768000,"s":50000,
+          "lv":1000,"efs":"0","xfs":"0","fee":"1920000","xp":761500,
+          "dpnl":"325000000","fnd":"-125000","st":2},
+         {"mkt":16,"acc":42,"pid":"4","sd":1,"c":"800000000","ep":772000,"s":25000,
+          "lv":1200,"efs":"0","xfs":"0","fee":"965000","xp":769300,
+          "dpnl":"-67500000","fnd":"40000","st":2}]
+        """#.utf8)
+        return (try? JSONDecoder().decode([PerplPosition].self, from: body)) ?? []
     }()
     #endif
 

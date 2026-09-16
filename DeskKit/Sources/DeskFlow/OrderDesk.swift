@@ -41,16 +41,31 @@ public actor OrderDesk {
 
     /// What the caller has to decide. Everything else is derived.
     public struct Draft: Sendable, Hashable {
+        public struct Protection: Sendable, Hashable {
+            public let stopLoss: Price?
+            public let takeProfit: Price?
+
+            public init(stopLoss: Price? = nil, takeProfit: Price? = nil) {
+                self.stopLoss = stopLoss
+                self.takeProfit = takeProfit
+            }
+        }
+
         public let side: Side
         public let size: Size
         public let leverageHundredths: Int
         public let slippageBps: Int
+        public let protection: Protection?
 
-        public init(side: Side, size: Size, leverageHundredths: Int, slippageBps: Int) {
+        public init(
+            side: Side, size: Size, leverageHundredths: Int, slippageBps: Int,
+            protection: Protection? = nil
+        ) {
             self.side = side
             self.size = size
             self.leverageHundredths = leverageHundredths
             self.slippageBps = slippageBps
+            self.protection = protection
         }
     }
 
@@ -141,13 +156,52 @@ public actor OrderDesk {
             await tracker.forget(frameID)
             throw error
         }
+        // Once this point is reached the opening order may fill. Never forget it if a
+        // later protective send fails: losing correlation would make a live position
+        // look as though it never existed.
+        try await sendProtection(for: draft, linkedTo: request.requestID)
         return frameID
+    }
+
+    /// Sends stop loss and take profit as Perpl trigger orders linked to the opening
+    /// request. The venue owns these orders after admission, so they still protect the
+    /// position if iOS suspends Desk or the app is closed.
+    private func sendProtection(for draft: Draft, linkedTo openingRequestID: Int64) async throws {
+        guard let protection = draft.protection, let account, let counter else { return }
+        let triggers: [(Price?, TriggerPriceCondition)] = [
+            (protection.stopLoss,
+             draft.side == .long ? .lessThanOrEqualMark : .greaterThanOrEqualMark),
+            (protection.takeProfit,
+             draft.side == .long ? .greaterThanOrEqualMark : .lessThanOrEqualMark),
+        ]
+        for (price, condition) in triggers {
+            guard let price else { continue }
+            let frameID = nextFrameID
+            nextFrameID += 1
+            let trigger = try OrderBuilder.protectiveClose(
+                side: draft.side, market: market, account: account, size: draft.size,
+                triggerPrice: price, condition: condition,
+                linkedRequestID: openingRequestID,
+                slippageBps: draft.slippageBps,
+                requestID: await counter.take(), frameID: frameID)
+            // Trigger orders have no short local expiry. The linked position/request is
+            // their lifetime; Perpl will cancel them when that relationship ends.
+            try await tracker.track(
+                frameID: frameID, requestID: trigger.requestID, deadlineBlock: .max)
+            do {
+                try await socket.send(trigger)
+            } catch {
+                await tracker.forget(frameID)
+                throw error
+            }
+        }
     }
 
     /// Closes an existing position with Perpl's dedicated reduce-only close type. This
     /// must never be implemented as an opposite open: that can invert exposure instead.
     public func closePosition(
         _ position: PerplPosition,
+        size requestedSize: Size? = nil,
         slippageBps: Int,
         headBlock: Int64
     ) async throws -> Int64 {
@@ -156,7 +210,11 @@ public actor OrderDesk {
         guard allowsForwarding else { throw Failure.forwardingNotAllowed }
         guard await socket.isConnected else { throw Failure.notConnected }
         guard position.marketID == market.id,
-              let size = market.size(position.sizeRaw) else { throw Failure.notConnected }
+              let fullSize = market.size(position.sizeRaw) else { throw Failure.notConnected }
+        let size = requestedSize ?? fullSize
+        guard size.decimals == fullSize.decimals, size.raw > 0, size.raw <= fullSize.raw else {
+            throw OrderBuilder.Failure.sizeMustBePositive
+        }
 
         let frameID = nextFrameID
         nextFrameID += 1
@@ -175,6 +233,44 @@ public actor OrderDesk {
             throw error
         }
         return frameID
+    }
+
+    /// Adds venue-hosted protection to an already-open position. Linking by position id
+    /// lets Perpl retire the triggers when that position closes or reverses.
+    public func protectPosition(
+        _ position: PerplPosition,
+        stopLoss: Price?,
+        takeProfit: Price?,
+        slippageBps: Int
+    ) async throws {
+        guard let account else { throw Failure.notConnected }
+        guard let counter else { throw Failure.notConnected }
+        guard allowsForwarding else { throw Failure.forwardingNotAllowed }
+        guard await socket.isConnected else { throw Failure.notConnected }
+        guard position.marketID == market.id,
+              let size = market.size(position.sizeRaw) else { throw Failure.notConnected }
+
+        let triggers: [(Price?, TriggerPriceCondition)] = [
+            (stopLoss, position.side == .long ? .lessThanOrEqualMark : .greaterThanOrEqualMark),
+            (takeProfit, position.side == .long ? .greaterThanOrEqualMark : .lessThanOrEqualMark),
+        ]
+        for (price, condition) in triggers {
+            guard let price else { continue }
+            let frameID = nextFrameID
+            nextFrameID += 1
+            let request = try OrderBuilder.protectiveClose(
+                side: position.side, market: market, account: account, size: size,
+                triggerPrice: price, condition: condition,
+                linkedPositionID: position.positionID, slippageBps: slippageBps,
+                requestID: await counter.take(), frameID: frameID)
+            try await tracker.track(
+                frameID: frameID, requestID: request.requestID, deadlineBlock: .max)
+            do { try await socket.send(request) }
+            catch {
+                await tracker.forget(frameID)
+                throw error
+            }
+        }
     }
 
     /// One reader over the socket, applying every frame to the tracker and reporting
