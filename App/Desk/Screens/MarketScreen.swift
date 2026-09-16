@@ -21,7 +21,6 @@ struct MarketScreen: View {
 
     @State private var query = ""
     @State private var showsMarket = false
-    @State private var showsPosition = false
     @State private var selectedPosition: PerplPosition?
     @State private var showsWithdraw = false
     @State private var showsFunding = false
@@ -60,10 +59,12 @@ struct MarketScreen: View {
                 WithdrawSheet(model: model) { showsWithdraw = false }
                     .presentationDetents([.large])
             }
-            .sheet(isPresented: $showsPosition) {
-                if let held = selectedPosition {
-                    PositionScreen(position: held, market: market, session: session)
-                }
+            // `item:` rather than `isPresented:`. With a boolean, SwiftUI can evaluate
+            // this closure before the sibling `selectedPosition` write has landed, and the
+            // sheet then presents with no content at all — a blank card, which is what
+            // tapping a position actually did.
+            .sheet(item: $selectedPosition) { held in
+                PositionScreen(position: held, market: market, session: session)
             }
             .sheet(isPresented: $showsFunding) { AddFundsSheet(model: model) }
         }
@@ -180,7 +181,6 @@ struct MarketScreen: View {
                             isStale: market.freshness.freezesDigits) {
                                 market.select(position.market)
                                 selectedPosition = position.held
-                                showsPosition = true
                                 Task { await session.selectMarket(position.market) }
                             }
                     }

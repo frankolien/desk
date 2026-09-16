@@ -270,3 +270,9 @@ private struct PositionProtectionSheet: View {
         }
     }
 }
+
+/// A position is identified by the venue's own position id, so a sheet can be presented
+/// from the value itself rather than from a flag beside it.
+extension PerplPosition: @retroactive Identifiable {
+    public var id: Int64 { positionID }
+}

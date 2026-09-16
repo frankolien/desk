@@ -20,7 +20,6 @@ struct HomeScreen: View {
     @AppStorage("desk.hidesBalance") private var hidesBalance = false
     @State private var showsMore = false
     @State private var selectedPosition: PerplPosition?
-    @State private var showsPosition = false
 
     private var collateralText: String {
         // Wallet AUSD and Perpl collateral are different balances. Falling back to the
@@ -68,11 +67,11 @@ struct HomeScreen: View {
             Button("Lock now") { Task { await model.lock() } }
             Button("Sign out", role: .destructive) { Task { await model.endSession() } }
         }
-        .sheet(isPresented: $showsPosition) {
-            if let held = selectedPosition {
-                PositionScreen(position: held, market: market, session: model.trading)
-                    .presentationDetents([.large])
-            }
+        // See MarketScreen: presenting on a boolean let the content be built while
+        // `selectedPosition` was still nil, so the sheet came up empty.
+        .sheet(item: $selectedPosition) { held in
+            PositionScreen(position: held, market: market, session: model.trading)
+                .presentationDetents([.large])
         }
     }
 
@@ -200,7 +199,6 @@ struct HomeScreen: View {
                         action: {
                             market.select(position.market)
                             selectedPosition = position.held
-                            showsPosition = true
                             Task { await model.trading.selectMarket(position.market) }
                         })
                 }
