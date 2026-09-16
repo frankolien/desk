@@ -311,16 +311,16 @@ struct PositionScreen: View {
         }
     }
 
-    private func guides(_ figures: PositionFigures) -> [PriceGuide] {
+    private func guides(_ figures: PositionFigures, scale: Double) -> [PriceGuide] {
         var guides = [PriceGuide(
             label: "Entry",
-            raw: figures.entry.raw,
+            value: Double(figures.entry.raw) / scale,
             text: figures.entry.display(fractionDigits: figures.entry.decimals),
             tint: DeskColor.nightText.color)]
         if let liquidation = figures.liquidationPrice {
             guides.append(PriceGuide(
                 label: "\(figures.side == .long ? "Long" : "Short") Liq.",
-                raw: liquidation.raw,
+                value: Double(liquidation.raw) / scale,
                 text: liquidation.display(fractionDigits: figures.entry.decimals),
                 tint: liquidationTint(figures).color))
         }
@@ -330,10 +330,10 @@ struct PositionScreen: View {
     @ViewBuilder
     private func chart(_ figures: PositionFigures) -> some View {
         if !market.candles.isEmpty, let config = market.market?.config {
+            let scale = pow(10.0, Double(config.priceDecimals))
             CandlestickChart(
-                candles: market.candles,
-                priceDecimals: Int(config.priceDecimals),
-                guides: guides(figures))
+                candles: market.candles.map { $0.chartCandle(scale: scale) },
+                guides: guides(figures, scale: scale))
                 .frame(height: 250)
                 .overlay(alignment: .bottom) { Divider().overlay(Color.white.opacity(0.12)) }
         } else {

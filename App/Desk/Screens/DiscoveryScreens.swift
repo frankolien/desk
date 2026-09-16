@@ -858,8 +858,11 @@ private struct SpotTokenDetailScreen: View {
 
     private var chart: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SpotCandlestickChart(isUp: feed.isUp, seed: token.symbol, values: feed.candles)
+            CandlestickChart(candles: feed.candles.map {
+                ChartCandle(open: $0.open, high: $0.high, low: $0.low, close: $0.close)
+            })
                 .frame(height: 286)
+                .accessibilityLabel("Live candlestick chart for \(token.symbol)")
             if !feed.candles.isEmpty && feed.candles.count < 12 {
                 Text("Sparse market · only \(feed.candles.count) real candles in this range")
                     .font(.caption2.weight(.medium))
@@ -1269,54 +1272,6 @@ private final class SpotLiveFeed: ObservableObject {
     nonisolated private static func compactNumber(_ value: Double?) -> String {
         guard let value, value.isFinite else { return "—" }
         return value.formatted(.number.notation(.compactName).precision(.fractionLength(0...2)))
-    }
-}
-
-private struct SpotCandlestickChart: View {
-    let isUp: Bool
-    let seed: String
-    let values: [SpotLiveFeed.Candle]
-
-    var body: some View {
-        GeometryReader { proxy in
-            let width = proxy.size.width
-            let height = proxy.size.height
-            // An illiquid token may truthfully return only one or two buckets. Reserve a
-            // normal chart density so those candles stay candle-sized instead of each
-            // expanding to half the phone.
-            let visibleSlots = max(values.count, 24)
-            let step = width / CGFloat(visibleSlots)
-            let leadingSlots = visibleSlots - values.count
-            let low = values.map(\.low).min() ?? 0
-            let high = values.map(\.high).max() ?? 1
-            let rawSpan = max(high - low, max(abs(high) * 0.002, 0.00000001))
-            let lowerBound = low - rawSpan * 0.08
-            let span = rawSpan * 1.16
-            let y: (Double) -> CGFloat = { value in
-                height * CGFloat(1 - ((value - lowerBound) / span))
-            }
-            ZStack {
-                VStack(spacing: 0) {
-                    ForEach(0..<4) { _ in Spacer(); Divider().overlay(Color.white.opacity(0.07)) }
-                }
-                ForEach(Array(values.enumerated()), id: \.element.id) { index, item in
-                    let x = CGFloat(leadingSlots + index) * step + step / 2
-                    let color = item.close >= item.open ? DeskColor.rise.color : DeskColor.fall.color
-                    Path { path in
-                        path.move(to: CGPoint(x: x, y: y(item.high)))
-                        path.addLine(to: CGPoint(x: x, y: y(item.low)))
-                    }.stroke(color, lineWidth: 1.2)
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(color)
-                        .frame(width: min(9, max(3, step * 0.58)), height: max(2, abs(y(item.open) - y(item.close))))
-                        .position(x: x, y: (y(item.open) + y(item.close)) / 2)
-                }
-                Rectangle().fill(isUp ? DeskColor.rise.color.opacity(0.4) : DeskColor.fall.color.opacity(0.4)).frame(height: 1)
-            }
-        }
-        .padding(.horizontal, 10)
-        .background(Color.white.opacity(0.025))
-        .accessibilityLabel("Live candlestick chart for \(seed)")
     }
 }
 

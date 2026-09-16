@@ -8,10 +8,12 @@ import Foundation
 /// disagreeing about where a price belongs — a grid row against a candle, a clamped guide
 /// against a tick — and each was invisible until it was drawn. Here it can be tested.
 public struct PriceAxis: Sendable, Equatable {
-    /// A labelled position on the axis.
+    /// A labelled position on the axis. The label is formatted from the step every tick
+    /// shares, so a column of them cannot print at mixed precision.
     public struct Tick: Sendable, Equatable {
         public let value: Double
         public let y: CGFloat
+        public let label: String
     }
 
     /// Where a price sits, and whether it is outside the range entirely.
@@ -110,7 +112,7 @@ public struct PriceAxis: Sendable, Equatable {
             values.append(value)
             value += step
         }
-        return values.map { Tick(value: $0, y: y($0)) }
+        return values.map { Tick(value: $0, y: y($0), label: Self.label($0, step: step)) }
     }
 
     /// Ticks with any that would crowd a guide removed.
@@ -123,6 +125,33 @@ public struct PriceAxis: Sendable, Equatable {
         return ticks(count: count).filter { tick in
             !positions.contains { abs($0 - tick.y) < separation }
         }
+    }
+
+    /// A label whose precision comes from the axis step rather than from the value.
+    ///
+    /// Derived per value, neighbouring ticks printed at different widths: a spot token's
+    /// axis read "0.000100" above "0.0000500". One step, one precision.
+    public static func label(_ value: Double, step: Double) -> String {
+        if abs(value) >= 1_000 { return String(format: "%.2fK", value / 1_000) }
+        guard step > 0, step.isFinite else { return label(value) }
+        let places = min(max(Int(ceil(-log10(step))) + 1, 0), 12)
+        return String(format: "%.\(places)f", value)
+    }
+
+    /// A tick label that survives the range of things Desk charts.
+    ///
+    /// The perpetual markets print in thousands and the spot tokens in millionths. A
+    /// single fixed format cannot show both: two decimals renders a token at 0.0000761
+    /// as "0.00", and eight renders Bitcoin as a wall of zeroes.
+    public static func label(_ value: Double) -> String {
+        let magnitude = abs(value)
+        if magnitude >= 1_000 { return String(format: "%.2fK", value / 1_000) }
+        if magnitude >= 1 { return String(format: "%.2f", value) }
+        if magnitude >= 0.01 { return String(format: "%.4f", value) }
+        if magnitude == 0 { return "0" }
+        // Two digits past the first significant one, so neighbouring ticks differ.
+        let places = min(Int(ceil(-log10(magnitude))) + 2, 12)
+        return String(format: "%.\(places)f", value)
     }
 
     /// The 1, 2, 5, 10 ladder every axis uses.

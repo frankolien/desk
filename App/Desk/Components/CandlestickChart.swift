@@ -6,46 +6,43 @@ import SwiftUI
 /// many digits a market shows.
 struct PriceGuide: Identifiable, Hashable {
     let label: String
-    /// Raw, at the same price decimals as the candles beside it.
-    let raw: Int64
+    let value: Double
     let text: String
     let tint: Color
 
     var id: String { label }
 }
 
-/// OHLC candles from the venue's own candle endpoint, with optional guides for the
-/// prices a held position turns on.
+/// Every candlestick Desk draws, on every screen.
 ///
-/// Shared by the market screen and the position screen, which is the point: the chart a
-/// user reads before opening a position and the one they read while holding it should
-/// not be two different drawings of the same market.
+/// The perpetual markets and the spot tokens used to have separate charts with separate
+/// axis arithmetic, and the spot one had no price labels at all. They take the same
+/// candles now, so the chart a user reads before opening a position, while holding it,
+/// and while looking at a token they do not own is one drawing with one scale.
 struct CandlestickChart: View {
-    let candles: [MarketModel.Candle]
-    let priceDecimals: Int
+    let candles: [ChartCandle]
     var guides: [PriceGuide] = []
 
     var body: some View {
         Canvas { context, size in
             let samples = Array(candles.suffix(25))
             guard samples.count > 1,
-                  let lowRaw = samples.map(\.l).min(),
-                  let highRaw = samples.map(\.h).max() else { return }
-            let scale = pow(10.0, Double(priceDecimals))
-            let plotWidth = size.width - 62
-            let priceHeight = size.height * 0.76
-            let volumeTop = size.height * 0.80
-            let xStep = plotWidth / CGFloat(samples.count)
+                  let low = samples.map(\.low).min(),
+                  let high = samples.map(\.high).max() else { return }
 
-            let guideValues = guides.map { Double($0.raw) / scale }
+            let volumes = samples.compactMap(\.volume)
+            let hasVolume = volumes.contains { $0 > 0 }
+            let plotWidth = size.width - 62
+            // Without a volume band the price keeps the whole frame, which is what the
+            // spot feed needs: it publishes no volume per candle.
+            let priceHeight = hasVolume ? size.height * 0.76 : size.height - 6
+            let volumeTop = size.height * 0.80
+            let layout = CandleLayout(count: samples.count, width: plotWidth)
+
+            let guideValues = guides.map(\.value)
             let axis = PriceAxis(
-                candleLow: Double(lowRaw) / scale,
-                candleHigh: Double(highRaw) / scale,
-                guides: guideValues,
-                height: priceHeight,
-                topInset: 7,
-                bottomInset: 7)
-            func y(_ raw: UInt64) -> CGFloat { axis.y(Double(raw) / scale) }
+                candleLow: low, candleHigh: high, guides: guideValues,
+                height: priceHeight, topInset: 7, bottomInset: 7)
             let placements = Array(zip(guides, guideValues.map(axis.place)))
 
             for tick in axis.ticks(clearOf: guideValues, within: 11) {
@@ -55,43 +52,45 @@ struct CandlestickChart: View {
                 context.stroke(grid, with: .color(.white.opacity(0.07)),
                                style: StrokeStyle(lineWidth: 0.6, dash: [3, 5]))
                 context.draw(
-                    Text(Self.axis(tick.value)).font(.system(size: 10, weight: .semibold))
+                    Text(tick.label).font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.gray),
                     at: CGPoint(x: plotWidth + 31, y: tick.y))
             }
 
-            let maxVolume = samples.compactMap { Double($0.v) }.max() ?? 1
+            let maxVolume = volumes.max() ?? 1
             for (index, candle) in samples.enumerated() {
-                let rising = candle.c >= candle.o
-                let color = rising ? DeskColor.rise.color : DeskColor.fall.color
-                let x = (CGFloat(index) + 0.5) * xStep
-                let top = min(y(candle.o), y(candle.c)), bottom = max(y(candle.o), y(candle.c))
+                let color = candle.isRising ? DeskColor.rise.color : DeskColor.fall.color
+                let x = layout.x(index)
+                let top = min(axis.y(candle.open), axis.y(candle.close))
+                let bottom = max(axis.y(candle.open), axis.y(candle.close))
                 var wick = Path()
-                wick.move(to: CGPoint(x: x, y: y(candle.h)))
-                wick.addLine(to: CGPoint(x: x, y: y(candle.l)))
+                wick.move(to: CGPoint(x: x, y: axis.y(candle.high)))
+                wick.addLine(to: CGPoint(x: x, y: axis.y(candle.low)))
                 context.stroke(wick, with: .color(color), lineWidth: 0.7)
                 // Narrow bodies: a fat candle hides the wick, which is the telling part.
-                let halfBody = max(1, xStep * 0.16)
+                let halfBody = max(1, layout.step * 0.16)
                 let body = CGRect(x: x - halfBody, y: top,
                                   width: halfBody * 2, height: max(1, bottom - top))
                 context.fill(Path(roundedRect: body, cornerRadius: 1), with: .color(color))
-                let volume = (Double(candle.v) ?? 0) / maxVolume
-                let volumeRect = CGRect(x: x - xStep * 0.17,
-                                        y: size.height - 2 - CGFloat(volume) * (size.height - volumeTop),
-                                        width: xStep * 0.34,
-                                        height: CGFloat(volume) * (size.height - volumeTop))
+
+                guard hasVolume, let volume = candle.volume else { continue }
+                let share = volume / maxVolume
+                let volumeRect = CGRect(x: x - layout.step * 0.17,
+                                        y: size.height - 2 - CGFloat(share) * (size.height - volumeTop),
+                                        width: layout.step * 0.34,
+                                        height: CGFloat(share) * (size.height - volumeTop))
                 context.fill(Path(roundedRect: volumeRect, cornerRadius: 2),
                              with: .color(.white.opacity(0.15)))
             }
 
             if let last = samples.last {
-                let currentY = y(last.c)
+                let currentY = axis.y(last.close)
                 var line = Path()
                 line.move(to: CGPoint(x: 0, y: currentY))
                 line.addLine(to: CGPoint(x: plotWidth, y: currentY))
                 context.stroke(
                     line,
-                    with: .color((last.c >= last.o ? DeskColor.rise : DeskColor.fall).color.opacity(0.55)),
+                    with: .color((last.isRising ? DeskColor.rise : DeskColor.fall).color.opacity(0.55)),
                     lineWidth: 0.8)
             }
 
@@ -130,9 +129,15 @@ struct CandlestickChart: View {
             }
         }
     }
+}
 
-    private static func axis(_ value: Double) -> String {
-        value >= 1_000 ? String(format: "%.2fK", value / 1_000) : String(format: "%.2f", value)
+extension MarketModel.Candle {
+    /// The venue's integers, scaled for drawing only.
+    func chartCandle(scale: Double) -> ChartCandle {
+        ChartCandle(
+            open: Double(o) / scale, high: Double(h) / scale,
+            low: Double(l) / scale, close: Double(c) / scale,
+            volume: Double(v))
     }
 }
 
