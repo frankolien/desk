@@ -232,10 +232,8 @@ struct MarketSearchScreen: View {
                             }
                         }
                     }
-                    // Full bleed, with the inset moved inside the scroller. Taking the
-                    // parent's 20pt padding, the row was cropped 20pt short of the
-                    // screen and the next card read as cut off rather than as waiting
-                    // to be scrolled to.
+                    // Full bleed: the inset lives inside the scroller, so cards reach the
+                    // screen edge instead of being cropped short of it.
                     .contentMargins(.horizontal, 20)
                     .padding(.horizontal, -20)
                     .padding(.top, 12)
@@ -276,10 +274,7 @@ struct MarketSearchScreen: View {
                             .frame(minHeight: 150)
                     }
 
-                    // Directly above the rows it titles. This header used to sit above
-                    // the trending-coins section, so the screen announced "All Perpl
-                    // Markets · 7 live" and then listed spot tokens, while the seven
-                    // markets themselves arrived further down under no heading at all.
+                    // Directly above the rows it titles.
                     HStack {
                         Text("All Perpl Markets")
                             .font(.system(size: 18, weight: .bold, design: .rounded))
@@ -325,9 +320,7 @@ struct MarketSearchScreen: View {
                         .padding(.top, 24)
                 }
                 .padding(.horizontal, 20)
-                // Clears the floating search field as well as the tab bar. At 130 the
-                // last trending row sat underneath "Search anything" and could not be
-                // read or tapped.
+                // Clears the floating search field as well as the tab bar.
                 .padding(.bottom, 184)
             }
             }
@@ -482,11 +475,7 @@ private struct TrendingSpotRow: View {
                     .truncationMode(.tail)
             }
             Spacer(minLength: 8)
-            // Price and change in one trailing column, the way every other row in Desk
-            // reads. Sharing a line with the symbol and the chain, these wrapped
-            // mid-word inside a 76pt row — "ARGU" above "S" — and once that was held to
-            // one line the change became the part that truncated, to "+1130.9…". A
-            // percentage with its digits cut off is worse than no percentage at all.
+            // Price and change in one trailing column, as every other row in Desk reads.
             VStack(alignment: .trailing, spacing: 3) {
                 Text(token.price.map(spotPrice) ?? "$—")
                     .font(.system(size: 15, weight: .bold).monospacedDigit())
@@ -791,9 +780,7 @@ private struct SpotTokenDetailScreen: View {
                 .padding(.top, 20)
                 .padding(.bottom, 12)
                 .background {
-                    // The transaction rows pass under this bar as they scroll. Without
-                    // a fade they show through the glass and read as colliding with Buy
-                    // and Sell rather than sitting behind them.
+                    // Rows pass under this bar as they scroll; the fade keeps them behind.
                     LinearGradient(
                         colors: [.black.opacity(0), .black.opacity(0.9), .black],
                         startPoint: .top, endPoint: .bottom)
@@ -1490,11 +1477,6 @@ private struct WalletProfileScreen: View {
 
                 Text(wallet.displayAddress).font(.system(size: 20, weight: .bold, design: .rounded)).padding(.top, 22)
 
-                // Follow and Set Name did nothing at all, and the three holdings under
-                // them were invented figures attached to a real wallet address — $42.18
-                // of Bitcoin for whoever this person is. A caption calling the screen a
-                // preview does not make the numbers on it true. What Desk actually
-                // cannot do is stated instead.
                 ContentUnavailableView(
                     "Wallet history not connected",
                     systemImage: "chart.bar.doc.horizontal",
