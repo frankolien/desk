@@ -117,18 +117,9 @@ struct TicketSheet: View {
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .padding(.top, 20)
 
-            HStack(spacing: 8) {
-                ForEach([1, 2, 5, 10, 15].filter { $0 <= (market?.config.maxLeverage ?? 1) }, id: \.self) { option in
-                    Button { leverage = option } label: {
-                        Text("\(option)×")
-                            .font(DeskType.caption)
-                            .foregroundStyle(leverage == option ? DeskColor.onLedger.color : DeskColor.nightMuted.color)
-                            .frame(maxWidth: .infinity, minHeight: 34)
-                            .background(leverage == option ? DeskColor.ledger.color : DeskColor.nightChip.color)
-                            .clipShape(Capsule())
-                    }
-                }
-            }
+            LeverageRail(
+                leverage: $leverage,
+                maximum: max(1, market?.config.maxLeverage ?? 1))
             .padding(.top, 16)
 
             VStack(spacing: 10) {
@@ -272,5 +263,59 @@ struct TicketSheet: View {
 
     private func percent(_ micros: Int) -> String {
         String(format: "%.2f%%", Double(micros) / 10_000)
+    }
+}
+
+private struct LeverageRail: View {
+    @Binding var leverage: Int
+    let maximum: Int
+
+    private var value: Binding<Double> {
+        Binding(
+            get: { Double(min(leverage, maximum)) },
+            set: { leverage = Int($0.rounded()) })
+    }
+
+    var body: some View {
+        VStack(spacing: 7) {
+            HStack {
+                Text("Leverage")
+                    .font(DeskType.caption)
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                Spacer()
+                Text("\(leverage)×")
+                    .font(.system(size: 17, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(DeskColor.nightText.color)
+            }
+            ZStack {
+                HStack(alignment: .center, spacing: 0) {
+                    ForEach(1...maximum, id: \.self) { tick in
+                        Capsule()
+                            .fill(tick <= leverage
+                                  ? DeskColor.action.color
+                                  : DeskColor.nightMuted.color.opacity(0.38))
+                            .frame(width: tick == 1 || tick == maximum || tick % 5 == 0 ? 3 : 2,
+                                   height: tick == 1 || tick == maximum || tick % 5 == 0 ? 24 : 13)
+                        if tick < maximum { Spacer(minLength: 1) }
+                    }
+                }
+                Slider(value: value, in: 1...Double(maximum), step: 1)
+                    .tint(.clear)
+                    .opacity(0.02)
+                    .accessibilityLabel("Leverage")
+                    .accessibilityValue("\(leverage) times")
+            }
+            HStack {
+                Text("1×")
+                Spacer()
+                Text("MAX \(maximum)×")
+            }
+            .font(DeskType.caption)
+            .foregroundStyle(DeskColor.nightMuted.color)
+        }
+        .padding(14)
+        .background(DeskColor.nightChip.color)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onChange(of: maximum) { _, limit in leverage = min(leverage, limit) }
     }
 }

@@ -19,6 +19,8 @@ struct HomeScreen: View {
 
     @AppStorage("desk.hidesBalance") private var hidesBalance = false
     @State private var showsMore = false
+    @State private var selectedPosition: PerplPosition?
+    @State private var showsPosition = false
 
     private var collateralText: String {
         // Wallet AUSD and Perpl collateral are different balances. Falling back to the
@@ -65,6 +67,12 @@ struct HomeScreen: View {
             Button("Account and session") { onAccount() }
             Button("Lock now") { Task { await model.lock() } }
             Button("Sign out", role: .destructive) { Task { await model.endSession() } }
+        }
+        .sheet(isPresented: $showsPosition) {
+            if let held = selectedPosition {
+                PositionScreen(position: held, market: market, session: model.trading)
+                    .presentationDetents([.large])
+            }
         }
     }
 
@@ -189,7 +197,12 @@ struct HomeScreen: View {
                                 + position.figures.unrealisedPnL.display() + " AUSD",
                         change: Self.percent(position.figures.returnOnMarginMicros) + " on margin",
                         tint: position.figures.isProfit ? DeskColor.rise : DeskColor.fall,
-                        action: onTrade)
+                        action: {
+                            market.select(position.market)
+                            selectedPosition = position.held
+                            showsPosition = true
+                            Task { await model.trading.selectMarket(position.market) }
+                        })
                 }
                 if positionContexts.count > 3 {
                     Button("View \(positionContexts.count - 3) more positions", action: onTrade)
