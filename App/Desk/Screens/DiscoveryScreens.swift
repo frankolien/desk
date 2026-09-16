@@ -1489,31 +1489,22 @@ private struct WalletProfileScreen: View {
                 }.padding(.top, 42)
 
                 Text(wallet.displayAddress).font(.system(size: 20, weight: .bold, design: .rounded)).padding(.top, 22)
-                Label("Online", systemImage: "circle.fill").font(.system(size: 13, weight: .semibold)).foregroundStyle(DeskColor.rise.color).padding(.top, 8)
 
-                HStack(spacing: 10) {
-                    Button("Follow") {}.frame(maxWidth: .infinity).frame(height: 42).perpSearchGlass(in: RoundedRectangle(cornerRadius: 12))
-                    Button("Set Name") {}.frame(maxWidth: .infinity).frame(height: 42).perpSearchGlass(in: RoundedRectangle(cornerRadius: 12))
-                }.font(.system(size: 14, weight: .bold, design: .rounded)).padding(.top, 18)
-
-                HStack { Text("Positions").foregroundStyle(.white); Spacer(); Text("Closed"); Spacer(); Text("Activity") }
-                    .font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(.secondary).padding(.horizontal, 24).padding(.top, 34).padding(.bottom, 14)
-                Divider().overlay(Color.white.opacity(0.12))
-                VStack(spacing: 0) {
-                    profileRow("Bitcoin", "BTC", "$42.18")
-                    profileRow("Ethereum", "ETH", "$18.75")
-                    profileRow("Solana", "SOL", "$10.45")
-                }
-                Text("Preview profile · indexed wallet history is not connected")
-                    .font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.top, 20)
+                // Follow and Set Name did nothing at all, and the three holdings under
+                // them were invented figures attached to a real wallet address — $42.18
+                // of Bitcoin for whoever this person is. A caption calling the screen a
+                // preview does not make the numbers on it true. What Desk actually
+                // cannot do is stated instead.
+                ContentUnavailableView(
+                    "Wallet history not connected",
+                    systemImage: "chart.bar.doc.horizontal",
+                    description: Text("Perpl publishes no account identity on its public "
+                                      + "trade stream, so Desk cannot show this wallet's "
+                                      + "positions or activity without indexing Monad."))
+                    .padding(.top, 26)
                 Spacer()
             }.padding(.horizontal, 20).padding(.top, 8)
         }.toolbar(.hidden, for: .navigationBar)
     }
 
-    private func profileRow(_ name: String, _ symbol: String, _ value: String) -> some View {
-        HStack { MarketTokenLogo(symbol: symbol, size: 42); VStack(alignment: .leading) { Text(name).fontWeight(.bold); Text(symbol).foregroundStyle(.secondary) }; Spacer(); Text(value).fontWeight(.bold) }
-            .font(.system(size: 15, design: .rounded)).frame(height: 72)
-            .overlay(alignment: .bottom) { Divider().overlay(Color.white.opacity(0.1)).padding(.leading, 54) }
-    }
 }
