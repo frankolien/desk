@@ -394,6 +394,9 @@ private struct TrendingSpotToken: Identifiable, Hashable, Codable, Sendable {
     let logoURL: String
     let contract: String
     let decimals: Double?
+    /// Both optional: a build can meet a deployment that predates them.
+    let quotable: Bool?
+    let nativeSymbol: String?
     let explorerURL: String
     let price: Double?
     let change: Double?
@@ -1324,15 +1327,12 @@ private struct SpotTradeTicket: View {
     @StateObject private var quote = SpotQuoteModel()
     @State private var amount = ""
 
-    private var nativeSymbol: String {
-        switch token.chainIndex {
-        case "501": "SOL"
-        case "56": "BNB"
-        case "137": "POL"
-        case "196": "OKB"
-        default: "ETH"
-        }
-    }
+    /// From the feed, which reads one chain table. The switch that used to be here
+    /// answered "ETH" for every chain it had not heard of, Arc included, whose gas token
+    /// is USDC.
+    private var nativeSymbol: String { token.nativeSymbol ?? "native token" }
+
+    private var isQuotable: Bool { token.quotable ?? true }
 
     private var sourceSymbol: String { side == "Buy" ? nativeSymbol : token.symbol }
     private var destinationSymbol: String { side == "Buy" ? token.symbol : nativeSymbol }
@@ -1385,17 +1385,27 @@ private struct SpotTradeTicket: View {
                     .font(.system(size: 11, weight: .semibold, design: .rounded)).foregroundStyle(.yellow)
             }
 
-            Button { Task { await quote.fetch(token: token, side: side, amount: amount) } } label: {
-                HStack {
-                    if quote.isLoading { ProgressView().tint(.black) }
-                    Text(quote.output == nil ? "Get live quote" : "Refresh quote")
-                    Spacer(); Image(systemName: "arrow.right")
+            if isQuotable {
+                Button { Task { await quote.fetch(token: token, side: side, amount: amount) } } label: {
+                    HStack {
+                        if quote.isLoading { ProgressView().tint(.black) }
+                        Text(quote.output == nil ? "Get live quote" : "Refresh quote")
+                        Spacer(); Image(systemName: "arrow.right")
+                    }
+                    .font(.system(size: 16, weight: .bold, design: .rounded)).padding(.horizontal, 18)
+                    .frame(maxWidth: .infinity).frame(height: 54)
                 }
-                .font(.system(size: 16, weight: .bold, design: .rounded)).padding(.horizontal, 18)
-                .frame(maxWidth: .infinity).frame(height: 54)
+                .buttonStyle(.plain).foregroundStyle(.black).background(.white, in: Capsule())
+                .disabled(amount.isEmpty || quote.isLoading).opacity(amount.isEmpty ? 0.35 : 1)
+            } else {
+                // Said before an amount is typed rather than after a quote fails.
+                Label("No quote provider covers \(token.chainName) yet.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.yellow)
+                    .frame(maxWidth: .infinity).frame(height: 54)
+                    .background(Color.white.opacity(0.06), in: Capsule())
             }
-            .buttonStyle(.plain).foregroundStyle(.black).background(.white, in: Capsule())
-            .disabled(amount.isEmpty || quote.isLoading).opacity(amount.isEmpty ? 0.35 : 1)
 
             Text("Quote only · no approval, signature or transaction is sent")
                 .font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
@@ -1417,18 +1427,20 @@ private final class SpotQuoteModel: ObservableObject {
 
     func fetch(token: TrendingSpotToken, side: String, amount: String) async {
         clear(); isLoading = true; defer { isLoading = false }
-        guard let decimals = token.decimals.map(Int.init) else {
-            errorText = "This token’s decimal precision is unavailable, so it cannot be quoted safely."
-            return
-        }
+        // The discovery feed carries no decimal for any token it trends, so requiring one
+        // here stopped every quote before it was sent. The server resolves it from the
+        // chain; a hint is passed only when there is one.
         var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/swap-quote")!
-        components.queryItems = [
+        var items = [
             URLQueryItem(name: "chainIndex", value: token.chainIndex),
             URLQueryItem(name: "tokenAddress", value: token.contract),
-            URLQueryItem(name: "tokenDecimals", value: String(decimals)),
             URLQueryItem(name: "side", value: side.lowercased()),
             URLQueryItem(name: "amount", value: amount)
         ]
+        if let decimals = token.decimals.map(Int.init) {
+            items.append(URLQueryItem(name: "tokenDecimals", value: String(decimals)))
+        }
+        components.queryItems = items
         do {
             let (data, response) = try await URLSession.shared.data(from: components.url!)
             let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
