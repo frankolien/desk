@@ -64,7 +64,7 @@ struct MarketScreen: View {
             // sheet then presents with no content at all — a blank card, which is what
             // tapping a position actually did.
             .sheet(item: $selectedPosition) { held in
-                PositionScreen(position: held, market: market, session: session)
+                PositionScreen(position: held, market: market, session: session, model: model)
             }
             .sheet(isPresented: $showsFunding) { AddFundsSheet(model: model) }
         }

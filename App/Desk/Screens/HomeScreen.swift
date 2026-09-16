@@ -70,7 +70,7 @@ struct HomeScreen: View {
         // See MarketScreen: presenting on a boolean let the content be built while
         // `selectedPosition` was still nil, so the sheet came up empty.
         .sheet(item: $selectedPosition) { held in
-            PositionScreen(position: held, market: market, session: model.trading)
+            PositionScreen(position: held, market: market, session: model.trading, model: model)
                 .presentationDetents([.large])
         }
     }

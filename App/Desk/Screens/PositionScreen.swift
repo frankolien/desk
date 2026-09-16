@@ -3,13 +3,21 @@ import DeskMoney
 import DeskUI
 import SwiftUI
 
+/// One held position, in full.
+///
+/// The chart comes first and carries the position on it: entry, liquidation, and the
+/// mark moving between them. A row of figures can say the liquidation price is 75,080,
+/// but only the chart says whether the last hour has been walking toward it — and that
+/// is the question someone opens a position they already hold to answer.
 struct PositionScreen: View {
     let position: PerplPosition
     let market: MarketModel
     let session: TradingSession
+    let model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var showsClose = false
     @State private var showsProtection = false
+    @State private var tab: PositionTab = .positions
 
     private var figures: PositionFigures? {
         guard position.marketID == market.market?.id,
@@ -23,12 +31,13 @@ struct PositionScreen: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                DeskBackground()
+                Color.black.ignoresSafeArea()
                 if let figures { content(figures) } else { unavailable }
             }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
-            }
+            // Hidden, and dismissal moved into the heading. A navigation bar carrying
+            // one "Done" button costs the top sixth of the screen to say nothing, and
+            // on a position screen that space belongs to the chart.
+            .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showsClose) {
                 if let figures, let selected = market.market {
                     MarketCloseSheet(
@@ -46,81 +55,484 @@ struct PositionScreen: View {
         }
     }
 
+    /// The actions are pinned rather than placed at the end of the scroll.
+    ///
+    /// Closing is the one thing a person opens a position they already hold to do, and
+    /// on this device the figures alone are taller than the screen — so in the card it
+    /// sat below the fold, reachable only by scrolling past a chart that is telling them
+    /// they are losing money. The market screen pins Long and Short for the same reason.
     private func content(_ figures: PositionFigures) -> some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 20) {
-                HStack(spacing: 10) {
-                    MarketTokenLogo(symbol: market.symbol, size: 34)
-                    Text("\(figures.side == .long ? "Long" : "Short") \(market.symbol)")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                    Text("\(figures.leverageHundredths / 100)×")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Color.white.opacity(0.1), in: Capsule())
-                }
+        ZStack(alignment: .bottom) {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    heading(figures)
+                    priceBlock.padding(.top, 20)
+                    chart(figures).padding(.top, 20)
+                    CandleIntervalRail(market: market).padding(.top, 14)
+                    tabStrip.padding(.top, 20)
+                    tabContent(figures).padding(.top, 16)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text((figures.unrealisedPnL.isNegative ? "" : "+")
-                         + figures.unrealisedPnL.display() + " AUSD")
-                        .font(.system(size: 42, weight: .heavy, design: .rounded).monospacedDigit())
-                        .foregroundStyle(figures.isProfit ? DeskColor.rise.color : DeskColor.fall.color)
-                        .contentTransition(.numericText())
-                    Text(HomeScreen.percent(figures.returnOnMarginMicros) + " on margin")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    if let status = session.statusText {
+                        Text(status)
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(session.hasFailed ? DeskColor.fall.color : DeskColor.nightMuted.color)
+                            .padding(.top, 14)
+                    }
+                }
+                .foregroundStyle(DeskColor.nightText.color)
+                .padding(.horizontal, 16)
+                .padding(.bottom, tab == .positions ? 104 : 28)
+            }
+
+            // Only beside the position they act on. Pinned over the history of closed
+            // trades, a red Close button acts on something that is no longer on screen.
+            if tab == .positions { actionBar }
+        }
+    }
+
+    private var tabStrip: some View {
+        HStack(spacing: 0) {
+            ForEach(PositionTab.allCases) { item in
+                Button { withAnimation(.easeOut(duration: 0.18)) { tab = item } } label: {
+                    Text(title(for: item))
+                        .font(.system(size: 13, weight: tab == item ? .bold : .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 36)
+                        .background(tab == item ? Color.white.opacity(0.24) : .clear, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Color.white.opacity(0.11), in: Capsule())
+    }
+
+    private func title(for item: PositionTab) -> String {
+        switch item {
+        case .positions:
+            let count = model.openPositions.count
+            return count > 0 ? "Positions (\(count))" : "Positions"
+        case .orders: return "Open Orders"
+        case .history: return "History"
+        }
+    }
+
+    @ViewBuilder
+    private func tabContent(_ figures: PositionFigures) -> some View {
+        switch tab {
+        case .positions: card(figures)
+        case .orders: orders
+        case .history: history
+        }
+    }
+
+    // MARK: Open orders
+
+    /// What Desk can actually say about resting orders, which is little.
+    ///
+    /// An order in flight is real and is shown. Beyond that Desk sends market orders,
+    /// which fill or fail rather than rest, and the take-profit and stop-loss triggers it
+    /// registers live at the venue — `mt: 22`/`mt: 24` are read only to correlate an
+    /// order with its outcome, so there is no resting-order feed to list. An empty table
+    /// here would be a claim that the account has none, which Desk does not know.
+    private var orders: some View {
+        VStack(spacing: 12) {
+            if let status = session.statusText, session.isBusy {
+                HStack(spacing: 12) {
+                    ProgressView().tint(DeskColor.nightMuted.color)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Order in flight")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                        Text(status)
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(16)
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: "tray")
+                        .font(.system(size: 28, weight: .semibold))
                         .foregroundStyle(DeskColor.nightMuted.color)
+                    Text("Nothing resting")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                    Text("Desk sends market orders, which fill or fail straight away. "
+                         + "Take profit and stop loss are held by Perpl, not listed here yet.")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .multilineTextAlignment(.center)
                 }
-                .opacity(stale ? 0.55 : 1)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 30)
+                .padding(.horizontal, 20)
+            }
+        }
+        .deskGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
 
-                VStack(spacing: 10) {
-                    ValueRow(
-                        label: "Liquidation",
-                        value: figures.liquidationPrice?.display(fractionDigits: figures.entry.decimals) ?? Unavailable.text,
-                        detail: figures.liquidationDistanceMicros.map {
-                            $0 == 0 ? "At liquidation" : HomeScreen.percent($0, signed: false) + " away"
-                        }, tint: DeskColor.fall, isDimmed: stale)
-                    ValueRow(
-                        label: "Size",
-                        value: figures.size.display(fractionDigits: figures.size.decimals) + " \(market.symbol)",
-                        detail: figures.collateral.display() + " AUSD collateral")
-                    ValueRow(label: "Entry", value: figures.entry.display(fractionDigits: figures.entry.decimals))
-                    ValueRow(label: "Mark", value: figures.mark.display(fractionDigits: figures.mark.decimals), isDimmed: stale)
-                    ValueRow(label: "Funding", value: figures.fundingSinceEntry.map { $0.display() + " AUSD" } ?? Unavailable.text,
-                             detail: "since you opened")
+    // MARK: History
+
+    private var history: some View {
+        VStack(spacing: 0) {
+            if model.closedPositions.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                    Text("No closed positions")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                    Text("Positions you close appear here with what they made or lost.")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .multilineTextAlignment(.center)
                 }
-
-                HStack(spacing: 10) {
-                    Button { showsProtection = true } label: {
-                        Label("Add TP/SL", systemImage: "shield.lefthalf.filled")
-                            .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 30)
+                .padding(.horizontal, 20)
+            } else {
+                ForEach(Array(model.closedPositions.enumerated()), id: \.element.positionID) { index, closed in
+                    ClosedPositionRow(
+                        position: closed,
+                        symbol: market.market(id: closed.marketID)?.symbol ?? Unavailable.text,
+                        priceDecimals: market.market(id: closed.marketID)?.config.priceDecimals)
+                    if index < model.closedPositions.count - 1 {
+                        Divider().overlay(Color.white.opacity(0.08)).padding(.horizontal, 16)
                     }
-                    .tint(DeskColor.nightChip.color)
-
-                    Button { showsClose = true } label: {
-                        Text(session.isBusy ? "Closing…" : "Close")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .tint(DeskColor.fall.color)
-                }
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(session.isBusy)
-
-                if let status = session.statusText {
-                    Text(status)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(session.hasFailed ? DeskColor.fall.color : DeskColor.nightMuted.color)
                 }
             }
-            .foregroundStyle(DeskColor.nightText.color)
-            .padding(20)
         }
+        .deskGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var actionBar: some View {
+        HStack(spacing: 10) {
+            actionButton("Add TP/SL", tint: DeskColor.nightText) { showsProtection = true }
+            actionButton(session.isBusy ? "Closing…" : "Close", tint: DeskColor.fall) {
+                showsClose = true
+            }
+        }
+        .disabled(session.isBusy)
+        .padding(.horizontal, 20)
+        .padding(.top, 20)
+        .padding(.bottom, 12)
+        .background {
+            // The card passes under this bar as it scrolls. Without a fade its figures
+            // show through the glass and read as colliding with the buttons rather than
+            // sitting behind them.
+            LinearGradient(
+                colors: [.black.opacity(0), .black.opacity(0.9), .black],
+                startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea(edges: .bottom)
+                .allowsHitTesting(false)
+        }
+    }
+
+    // MARK: Heading
+
+    /// The logo and the side badge used to sit here as well as on the card. They belong
+    /// on the card, beside the figures they describe, so this is left as the market and
+    /// the way out.
+    private func heading(_ figures: PositionFigures) -> some View {
+        HStack(spacing: 11) {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 15, weight: .bold))
+                    .frame(width: 38, height: 38)
+            }
+            .buttonStyle(.plain)
+            .deskGlass(interactive: true, in: Circle())
+            .accessibilityLabel("Close")
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("\(market.symbol)-PERP")
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                Text("Your position")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+            }
+            Spacer(minLength: 8)
+        }
+        .padding(.top, 10)
+    }
+
+    private func sideTint(_ figures: PositionFigures) -> DeskRGB {
+        figures.side == .long ? DeskColor.rise : DeskColor.fall
+    }
+
+    private var priceBlock: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            AmountText(market.markText == "—" ? "—" : "$" + market.markText, size: 38)
+                .contentTransition(.numericText())
+            HStack(spacing: 8) {
+                Text(market.changePercentText ?? "—")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(market.trend.color)
+                Text(stale ? "LAST KNOWN" : "LIVE")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.16)))
+            }
+        }
+        .opacity(stale ? 0.7 : 1)
+    }
+
+    // MARK: Chart
+
+    /// Amber under five percent of room, red under two — the point at which an ordinary
+    /// candle can end the position, rather than a taste. The same thresholds the
+    /// position rows use, so a line and a row never disagree about how close it is.
+    private func liquidationTint(_ figures: PositionFigures) -> DeskRGB {
+        guard let distance = figures.liquidationDistanceMicros else { return DeskColor.nightMuted }
+        switch distance {
+        case ..<20_000: return DeskColor.fall
+        case ..<50_000: return DeskColor.action
+        default: return DeskColor.nightMuted
+        }
+    }
+
+    private func guides(_ figures: PositionFigures) -> [PriceGuide] {
+        var guides = [PriceGuide(
+            label: "Entry",
+            raw: figures.entry.raw,
+            text: figures.entry.display(fractionDigits: figures.entry.decimals),
+            tint: DeskColor.nightText.color)]
+        if let liquidation = figures.liquidationPrice {
+            guides.append(PriceGuide(
+                label: "\(figures.side == .long ? "Long" : "Short") Liq.",
+                raw: liquidation.raw,
+                text: liquidation.display(fractionDigits: figures.entry.decimals),
+                tint: liquidationTint(figures).color))
+        }
+        return guides
+    }
+
+    @ViewBuilder
+    private func chart(_ figures: PositionFigures) -> some View {
+        if !market.candles.isEmpty, let config = market.market?.config {
+            CandlestickChart(
+                candles: market.candles,
+                priceDecimals: Int(config.priceDecimals),
+                guides: guides(figures))
+                .frame(height: 250)
+                .overlay(alignment: .bottom) { Divider().overlay(Color.white.opacity(0.12)) }
+        } else {
+            VStack(spacing: 18) {
+                SkeletonRow(widthFraction: 0.88)
+                SkeletonRow(widthFraction: 0.64)
+                SkeletonRow(widthFraction: 0.76)
+            }
+            .frame(height: 250)
+        }
+    }
+
+    // MARK: Figures
+
+    /// What the position is worth at the current mark. Not the collateral, and not the
+    /// size: the number a person means when they ask how big the position is.
+    private func value(_ figures: PositionFigures) -> Money? {
+        Money.notional(price: figures.mark, size: figures.size, rounding: .towardZero)
+    }
+
+    private func card(_ figures: PositionFigures) -> some View {
+        VStack(spacing: 0) {
+            cardHeader(figures)
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 14)
+
+            VStack(spacing: 16) {
+                HStack(alignment: .top, spacing: 12) {
+                    metric("Value", value(figures).map { "$" + $0.display() } ?? Unavailable.text,
+                           isDimmed: stale)
+                    metric("PnL",
+                           (figures.unrealisedPnL.isNegative ? "" : "+")
+                               + figures.unrealisedPnL.display() + " AUSD",
+                           detail: HomeScreen.percent(figures.returnOnMarginMicros) + " on margin",
+                           tint: figures.isProfit ? DeskColor.rise : DeskColor.fall,
+                           alignment: .trailing, isDimmed: stale)
+                }
+                HStack(alignment: .top, spacing: 12) {
+                    metric("Entry / Mark",
+                           figures.entry.display(fractionDigits: figures.entry.decimals)
+                               + " / " + figures.mark.display(fractionDigits: figures.mark.decimals),
+                           isDimmed: stale)
+                    metric("Liq. Price",
+                           figures.liquidationPrice?.display(fractionDigits: figures.entry.decimals)
+                               ?? Unavailable.text,
+                           detail: figures.liquidationDistanceMicros.map {
+                               $0 == 0 ? "At liquidation" : HomeScreen.percent($0, signed: false) + " away"
+                           },
+                           tint: liquidationTint(figures),
+                           alignment: .trailing, isDimmed: stale)
+                }
+                HStack(alignment: .top, spacing: 12) {
+                    metric("Size",
+                           figures.size.display(fractionDigits: figures.size.decimals)
+                               + " " + market.symbol)
+                    metric("Collateral", figures.collateral.display() + " AUSD",
+                           alignment: .trailing)
+                }
+                HStack(alignment: .top, spacing: 12) {
+                    metric("Funding",
+                           figures.fundingSinceEntry.map { $0.display() + " AUSD" } ?? Unavailable.text,
+                           detail: "since you opened")
+                    // The venue's own fee figure for this position. It is the one cost
+                    // that never appears anywhere else in the app, and repeating the
+                    // entry price here instead — which is what sat in this cell —
+                    // filled the grid without telling anyone anything.
+                    metric("Fees",
+                           Money(raw: position.feeRaw).map { $0.display() + " AUSD" }
+                               ?? Unavailable.text,
+                           detail: "charged so far",
+                           alignment: .trailing)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+        }
+        .deskGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    /// The market, the side and the size of the bet, above the figures — so the card can
+    /// be read on its own once the History tab has scrolled the heading away.
+    private func cardHeader(_ figures: PositionFigures) -> some View {
+        HStack(spacing: 9) {
+            MarketTokenLogo(symbol: market.symbol, size: 30)
+            Text(market.symbol)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+            Text("\(figures.leverageHundredths / 100)× \(figures.side == .long ? "Long" : "Short")")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(sideTint(figures).color)
+                .padding(.horizontal, 9)
+                .frame(height: 24)
+                .background(sideTint(figures).color.opacity(0.14), in: Capsule())
+            Spacer(minLength: 8)
+            // Not a button yet. Sharing a position is its own piece of work, and a
+            // control that looks live and answers nothing is worse than the icon alone.
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(DeskColor.nightMuted.color)
+                .frame(width: 30, height: 30)
+                .background(Color.white.opacity(0.08), in: Circle())
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func metric(
+        _ label: String,
+        _ value: String,
+        detail: String? = nil,
+        tint: DeskRGB = DeskColor.nightText,
+        alignment: HorizontalAlignment = .leading,
+        isDimmed: Bool = false
+    ) -> some View {
+        VStack(alignment: alignment, spacing: 3) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(DeskColor.nightMuted.color)
+            Text(value)
+                .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
+                .foregroundStyle(tint.color)
+                .contentTransition(.numericText())
+            if let detail {
+                Text(detail)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(DeskColor.nightMuted.color)
+            }
+        }
+        .frame(maxWidth: .infinity,
+               alignment: alignment == .leading ? .leading : .trailing)
+        .multilineTextAlignment(alignment == .leading ? .leading : .trailing)
+        .opacity(isDimmed ? 0.55 : 1)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func actionButton(
+        _ title: String,
+        tint: DeskRGB,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(tint.color)
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
+        }
+        .buttonStyle(.plain)
+        .deskGlass(interactive: true, in: Capsule())
     }
 
     private var unavailable: some View {
         ContentUnavailableView("Position unavailable", systemImage: "chart.xyaxis.line",
             description: Text("Waiting for the authenticated Perpl position stream."))
             .foregroundStyle(DeskColor.nightText.color)
+    }
+}
+
+enum PositionTab: String, CaseIterable, Identifiable {
+    case positions, orders, history
+    var id: String { rawValue }
+}
+
+/// One position the venue has already closed.
+///
+/// The realised figure is the venue's own `dpnl`, never recomputed here: once a position
+/// is closed there is no mark to derive it from, and a number invented from the last
+/// price this device happened to see would disagree with the exchange.
+private struct ClosedPositionRow: View {
+    let position: PerplPosition
+    let symbol: String
+    let priceDecimals: UInt8?
+
+    private var realised: Money? { position.realisedPnLRaw.flatMap { Money(raw: $0) } }
+
+    private func price(_ raw: Int64?) -> String {
+        guard let raw, let priceDecimals,
+              let value = Price(raw: raw, decimals: priceDecimals) else { return Unavailable.text }
+        return value.display(fractionDigits: priceDecimals)
+    }
+
+    var body: some View {
+        HStack(spacing: 11) {
+            MarketTokenLogo(symbol: symbol, size: 30)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text("\(position.side == .long ? "Long" : "Short") \(symbol)")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                    Text("\(position.leverageHundredths / 100)×")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.white.opacity(0.1), in: Capsule())
+                }
+                Text(price(position.entryRaw) + " → " + price(position.exitRaw))
+                    .font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(realised.map { ($0.isNegative ? "" : "+") + $0.display() + " AUSD" }
+                     ?? Unavailable.text)
+                    .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle((realised.map { $0.isNegative ? DeskColor.fall : DeskColor.rise }
+                                      ?? DeskColor.nightMuted).color)
+                Text("realised")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .accessibilityElement(children: .combine)
     }
 }
 
