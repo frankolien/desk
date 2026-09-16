@@ -786,7 +786,20 @@ private struct SpotTokenDetailScreen: View {
                 }
                 .padding(.bottom, 120)
             }
-            tradeBar.padding(.horizontal, 20).padding(.bottom, 12)
+            tradeBar
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 12)
+                .background {
+                    // The transaction rows pass under this bar as they scroll. Without
+                    // a fade they show through the glass and read as colliding with Buy
+                    // and Sell rather than sitting behind them.
+                    LinearGradient(
+                        colors: [.black.opacity(0), .black.opacity(0.9), .black],
+                        startPoint: .top, endPoint: .bottom)
+                        .ignoresSafeArea(edges: .bottom)
+                        .allowsHitTesting(false)
+                }
         }
         .toolbar(.hidden, for: .navigationBar)
         .task { await feed.run(period: range) }
