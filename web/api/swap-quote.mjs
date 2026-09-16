@@ -1,14 +1,13 @@
 import crypto from "node:crypto";
+import {
+  ZEROX_CHAINS, chainName, isQuotable, nativeToken, rpcEndpoint,
+} from "./_chains.mjs";
 
-const NATIVE = {
-  "501": { address: "11111111111111111111111111111111", symbol: "SOL", decimals: 9 },
-};
-const EVM_NATIVE = { address: "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", decimals: 18 };
-const EVM_SYMBOLS = {
-  "1": "ETH", "10": "ETH", "56": "BNB", "137": "POL", "143": "MON",
-  "196": "OKB", "8453": "ETH", "42161": "ETH",
-};
-const ZEROX_CHAINS = new Set(["1", "10", "56", "137", "143", "8453", "42161"]);
+/// `decimals()`. Resolved from the chain rather than required from the caller: the
+/// discovery feed returns a null decimal for every token OKX trends, so a client that had
+/// to supply one could never ask for a quote at all.
+const DECIMALS_SELECTOR = "0x313ce567";
+const decimalsCache = new Map();
 
 function okxConfigured() {
   return Boolean(process.env.OKX_API_KEY && process.env.OKX_SECRET_KEY && process.env.OKX_PASSPHRASE);
@@ -29,11 +28,11 @@ function headers(timestamp, requestPath) {
   };
 }
 
-function validAddress(value) {
-  return /^0x[a-f0-9]{40}$/.test(value) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
+export function validAddress(value) {
+  return /^0x[a-fA-F0-9]{40}$/.test(value) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
 }
 
-function baseUnits(text, decimals) {
+export function baseUnits(text, decimals) {
   if (!/^\d+(\.\d+)?$/.test(text)) return null;
   const [whole, fraction = ""] = text.split(".");
   if (fraction.length > decimals) return null;
@@ -41,13 +40,43 @@ function baseUnits(text, decimals) {
   return result === "" ? "0" : result;
 }
 
-function readableUnits(text, decimals) {
+export function readableUnits(text, decimals) {
   if (!/^\d+$/.test(String(text || ""))) return null;
   if (decimals === 0) return String(text);
   const padded = String(text).padStart(decimals + 1, "0");
   const whole = padded.slice(0, -decimals) || "0";
   const fraction = decimals === 0 ? "" : padded.slice(-decimals).replace(/0+$/, "");
   return fraction ? `${whole}.${fraction}` : whole;
+}
+
+/// A token's decimals, from the caller's hint when it has one and from the chain when it
+/// does not. Cached: the same token is quoted repeatedly while someone edits an amount.
+export async function resolveDecimals(chainIndex, tokenAddress, hint, fetchImpl = fetch) {
+  if (Number.isInteger(hint) && hint >= 0 && hint <= 30) return hint;
+  const key = `${chainIndex}:${tokenAddress.toLowerCase()}`;
+  if (decimalsCache.has(key)) return decimalsCache.get(key);
+
+  const rpc = rpcEndpoint(chainIndex);
+  if (!rpc || !/^0x[a-fA-F0-9]{40}$/.test(tokenAddress)) return null;
+  try {
+    const response = await fetchImpl(rpc, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0", id: 1, method: "eth_call",
+        params: [{ to: tokenAddress, data: DECIMALS_SELECTOR }, "latest"],
+      }),
+    });
+    const payload = await response.json();
+    const result = payload?.result;
+    if (typeof result !== "string" || result === "0x") return null;
+    const decimals = Number.parseInt(result, 16);
+    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 30) return null;
+    decimalsCache.set(key, decimals);
+    return decimals;
+  } catch {
+    return null;
+  }
 }
 
 async function okxQuote({ chainIndex, amount, fromTokenAddress, toTokenAddress }) {
@@ -103,29 +132,52 @@ export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
   const chainIndex = String(req.query.chainIndex || "");
   const tokenAddress = String(req.query.tokenAddress || "");
-  const tokenDecimals = Number(req.query.tokenDecimals);
   const side = String(req.query.side || "buy").toLowerCase();
   const readableAmount = String(req.query.amount || "");
-  const native = NATIVE[chainIndex] || (EVM_SYMBOLS[chainIndex]
-    ? { ...EVM_NATIVE, symbol: EVM_SYMBOLS[chainIndex] } : null);
-  if (!native || !validAddress(tokenAddress) || !Number.isInteger(tokenDecimals)
-      || tokenDecimals < 0 || tokenDecimals > 30 || !["buy", "sell"].includes(side)) {
+  const hinted = Number(req.query.tokenDecimals);
+
+  // Malformed input and an unsupported chain are different answers. They used to share
+  // one 400, so the app could not tell a bad request from a chain Desk cannot price.
+  if (!validAddress(tokenAddress) || !["buy", "sell"].includes(side)) {
     return res.status(400).json({ error: "Valid quote parameters required" });
   }
+  const native = nativeToken(chainIndex);
+  if (!isQuotable(chainIndex) || !native) {
+    return res.status(422).json({
+      error: `Desk cannot quote on ${chainName(chainIndex)} yet.`,
+      reason: "unsupported-chain",
+      chainIndex,
+      chainName: chainName(chainIndex),
+    });
+  }
+
+  const tokenDecimals = await resolveDecimals(
+    chainIndex, tokenAddress, Number.isInteger(hinted) ? hinted : undefined);
+  if (tokenDecimals === null) {
+    return res.status(422).json({
+      error: "This token's decimal precision could not be confirmed on-chain, so it cannot be quoted safely.",
+      reason: "unknown-decimals",
+      chainIndex,
+      chainName: chainName(chainIndex),
+    });
+  }
+
   const sourceDecimals = side === "buy" ? native.decimals : tokenDecimals;
   const amount = baseUnits(readableAmount, sourceDecimals);
   if (!amount || amount === "0") return res.status(400).json({ error: "Enter a valid amount" });
   const fromTokenAddress = side === "buy" ? native.address : tokenAddress;
   const toTokenAddress = side === "buy" ? tokenAddress : native.address;
   const request = { chainIndex, amount, fromTokenAddress, toTokenAddress };
+
   const attempts = [];
   if (okxConfigured()) attempts.push(["okx", okxQuote]);
   if (ZEROX_CHAINS.has(chainIndex) && zeroXConfigured()) attempts.push(["0x", zeroXQuote]);
   if (attempts.length === 0) {
-    const detail = chainIndex === "501"
-      ? "OKX quote credentials are not configured."
-      : "No quote provider is configured for this chain.";
-    return res.status(503).json({ error: detail });
+    return res.status(503).json({
+      error: chainIndex === "501"
+        ? "OKX quote credentials are not configured."
+        : "No quote provider is configured for this chain.",
+    });
   }
 
   const failures = [];
@@ -136,6 +188,7 @@ export default async function handler(req, res) {
       res.setHeader("Cache-Control", "private, no-store");
       return res.status(200).json({
         observedAt: Date.now(), side, nativeSymbol: native.symbol, provider,
+        chainName: chainName(chainIndex), tokenDecimals,
         quote: {
           toAmountReadable: readableUnits(quote.toTokenAmount, destinationDecimals),
           priceImpactPercentage: quote.priceImpactPercentage,
