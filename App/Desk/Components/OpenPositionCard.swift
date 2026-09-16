@@ -76,6 +76,7 @@ struct OpenPositionCard: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(DeskColor.nightLine.color, lineWidth: 0.5))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)

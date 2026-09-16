@@ -254,7 +254,7 @@ struct MarketSearchScreen: View {
                         VStack(spacing: 10) {
                             ForEach(spotResults) { token in
                                 Button { selectedSpot = token } label: {
-                                    TrendingSpotRow(token: token)
+                                    TrendingSpotRow(token: token).contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -1349,6 +1349,7 @@ private struct SpotTradeTicket: View {
                     }
                     .font(.system(size: 16, weight: .bold, design: .rounded)).padding(.horizontal, 18)
                     .frame(maxWidth: .infinity).frame(height: 54)
+                    .contentShape(Capsule())
                 }
                 .buttonStyle(.plain).foregroundStyle(.black).background(.white, in: Capsule())
                 .disabled(amount.isEmpty || quote.isLoading).opacity(amount.isEmpty ? 0.35 : 1)

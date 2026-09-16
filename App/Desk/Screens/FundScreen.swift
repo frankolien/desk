@@ -88,6 +88,7 @@ struct FundScreen: View {
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .padding(.horizontal, 13)
                 .frame(height: 40)
+                .contentShape(Capsule())
             }
             .buttonStyle(.plain)
             .nativeGlass(interactive: true, in: Capsule())

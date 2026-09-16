@@ -100,6 +100,7 @@ struct HomeScreen: View {
                 .foregroundStyle(DeskColor.nightText.color)
                 .padding(.horizontal, 14)
                 .frame(height: 42)
+                .contentShape(Capsule())
             }
             .buttonStyle(.plain)
             .homeGlass(interactive: true, in: Capsule())
@@ -117,6 +118,7 @@ struct HomeScreen: View {
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(DeskColor.nightText.color)
                 .frame(width: 42, height: 42)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .homeGlass(interactive: true, in: Circle())
@@ -143,6 +145,7 @@ struct HomeScreen: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Collateral balance")
@@ -275,6 +278,7 @@ struct HomeScreen: View {
             .padding(.horizontal, 14)
             .frame(height: 66)
             .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .homeGlass(interactive: true, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -302,6 +306,9 @@ private struct HomeActionTile: View {
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: 76)
+            // Without this the tile is tappable only where its glyph and label are
+            // drawn: the padding and the glass behind it are not part of the button.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .homeGlass(interactive: true,
@@ -348,6 +355,7 @@ private struct HomeAssetRow<Mark: View>: View {
             .padding(.horizontal, 14)
             .frame(height: 66)
             .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .homeGlass(interactive: true, in: RoundedRectangle(cornerRadius: 20, style: .continuous))

@@ -258,6 +258,7 @@ struct PositionScreen: View {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 15, weight: .bold))
                     .frame(width: 38, height: 38)
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .deskGlass(interactive: true, in: Circle())
@@ -474,6 +475,7 @@ struct PositionScreen: View {
                 .foregroundStyle(tint.color)
                 .frame(maxWidth: .infinity)
                 .frame(height: 48)
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .deskGlass(interactive: true, in: Capsule())

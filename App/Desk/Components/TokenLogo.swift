@@ -223,6 +223,7 @@ struct AddFundsSheet: View {
                         .font(.headline)
                         .frame(maxWidth: .infinity).frame(height: 52)
                         .padding(.horizontal, 18)
+                        .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.black)
@@ -247,6 +248,7 @@ struct AddFundsSheet: View {
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .frame(maxWidth: .infinity).frame(height: 54)
                     .padding(.horizontal, 18)
+                    .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.black)
