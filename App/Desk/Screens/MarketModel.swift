@@ -143,6 +143,9 @@ final class MarketModel {
         market = selected
         symbol = selected.symbol
         candles = []
+        // The series belongs to the market that produced it. `record` reseeds it from
+        // the new market's own previous mark.
+        history = []
         lastCandleFetch = nil
         applyQuote(for: selected)
         Task { await refreshCandles() }

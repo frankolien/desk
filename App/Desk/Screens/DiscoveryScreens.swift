@@ -232,19 +232,11 @@ struct MarketSearchScreen: View {
                             }
                         }
                     }
-                    .contentMargins(.horizontal, 0)
+                    // Full bleed: the inset lives inside the scroller, so cards reach the
+                    // screen edge instead of being cropped short of it.
+                    .contentMargins(.horizontal, 20)
+                    .padding(.horizontal, -20)
                     .padding(.top, 12)
-
-                    HStack {
-                        Text("All Perpl Markets")
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                        Spacer()
-                        Text("\(market.allMarkets.count) live")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundStyle(DeskColor.nightMuted.color)
-                    }
-                    .foregroundStyle(DeskColor.nightText.color)
-                    .padding(.top, 30)
 
                     if !spotResults.isEmpty {
                         HStack {
@@ -282,6 +274,18 @@ struct MarketSearchScreen: View {
                             .frame(minHeight: 150)
                     }
 
+                    // Directly above the rows it titles.
+                    HStack {
+                        Text("All Perpl Markets")
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                        Spacer()
+                        Text("\(market.allMarkets.count) live")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                    }
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .padding(.top, 30)
+
                     if market.allMarkets.isEmpty {
                         // Still loading the context. Skeletons rather than "no results",
                         // which would be a claim about the venue.
@@ -316,7 +320,8 @@ struct MarketSearchScreen: View {
                         .padding(.top, 24)
                 }
                 .padding(.horizontal, 20)
-                .padding(.bottom, 130)
+                // Clears the floating search field as well as the tab bar.
+                .padding(.bottom, 184)
             }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -389,6 +394,9 @@ private struct TrendingSpotToken: Identifiable, Hashable, Codable, Sendable {
     let logoURL: String
     let contract: String
     let decimals: Double?
+    /// Both optional: a build can meet a deployment that predates them.
+    let quotable: Bool?
+    let nativeSymbol: String?
     let explorerURL: String
     let price: Double?
     let change: Double?
@@ -462,21 +470,27 @@ private struct TrendingSpotRow: View {
                 Text(token.name)
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .foregroundStyle(DeskColor.nightText.color)
-                HStack(spacing: 7) {
-                    Text(token.symbol)
-                    Text(token.chainName)
-                    if let change = token.change {
-                        Text(String(format: "%+.2f%%", change))
-                            .foregroundStyle(change >= 0 ? DeskColor.rise.color : DeskColor.fall.color)
-                    }
-                }
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(DeskColor.nightMuted.color)
+                    .lineLimit(1)
+                Text(token.symbol + " · " + token.chainName)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            Spacer()
-            Text(token.price.map(spotPrice) ?? "$—")
-                .font(.system(size: 15, weight: .bold).monospacedDigit())
-                .foregroundStyle(DeskColor.nightText.color)
+            Spacer(minLength: 8)
+            // Price and change in one trailing column, as every other row in Desk reads.
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(token.price.map(spotPrice) ?? "$—")
+                    .font(.system(size: 15, weight: .bold).monospacedDigit())
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .lineLimit(1)
+                if let change = token.change {
+                    Text(String(format: "%+.2f%%", change))
+                        .font(.system(size: 12, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(change >= 0 ? DeskColor.rise.color : DeskColor.fall.color)
+                        .lineLimit(1)
+                }
+            }
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(DeskColor.nightMuted.color)
@@ -764,7 +778,18 @@ private struct SpotTokenDetailScreen: View {
                 }
                 .padding(.bottom, 120)
             }
-            tradeBar.padding(.horizontal, 20).padding(.bottom, 12)
+            tradeBar
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 12)
+                .background {
+                    // Rows pass under this bar as they scroll; the fade keeps them behind.
+                    LinearGradient(
+                        colors: [.black.opacity(0), .black.opacity(0.9), .black],
+                        startPoint: .top, endPoint: .bottom)
+                        .ignoresSafeArea(edges: .bottom)
+                        .allowsHitTesting(false)
+                }
         }
         .toolbar(.hidden, for: .navigationBar)
         .task { await feed.run(period: range) }
@@ -833,8 +858,11 @@ private struct SpotTokenDetailScreen: View {
 
     private var chart: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SpotCandlestickChart(isUp: feed.isUp, seed: token.symbol, values: feed.candles)
+            CandlestickChart(candles: feed.candles.map {
+                ChartCandle(open: $0.open, high: $0.high, low: $0.low, close: $0.close)
+            })
                 .frame(height: 286)
+                .accessibilityLabel("Live candlestick chart for \(token.symbol)")
             if !feed.candles.isEmpty && feed.candles.count < 12 {
                 Text("Sparse market · only \(feed.candles.count) real candles in this range")
                     .font(.caption2.weight(.medium))
@@ -1247,54 +1275,6 @@ private final class SpotLiveFeed: ObservableObject {
     }
 }
 
-private struct SpotCandlestickChart: View {
-    let isUp: Bool
-    let seed: String
-    let values: [SpotLiveFeed.Candle]
-
-    var body: some View {
-        GeometryReader { proxy in
-            let width = proxy.size.width
-            let height = proxy.size.height
-            // An illiquid token may truthfully return only one or two buckets. Reserve a
-            // normal chart density so those candles stay candle-sized instead of each
-            // expanding to half the phone.
-            let visibleSlots = max(values.count, 24)
-            let step = width / CGFloat(visibleSlots)
-            let leadingSlots = visibleSlots - values.count
-            let low = values.map(\.low).min() ?? 0
-            let high = values.map(\.high).max() ?? 1
-            let rawSpan = max(high - low, max(abs(high) * 0.002, 0.00000001))
-            let lowerBound = low - rawSpan * 0.08
-            let span = rawSpan * 1.16
-            let y: (Double) -> CGFloat = { value in
-                height * CGFloat(1 - ((value - lowerBound) / span))
-            }
-            ZStack {
-                VStack(spacing: 0) {
-                    ForEach(0..<4) { _ in Spacer(); Divider().overlay(Color.white.opacity(0.07)) }
-                }
-                ForEach(Array(values.enumerated()), id: \.element.id) { index, item in
-                    let x = CGFloat(leadingSlots + index) * step + step / 2
-                    let color = item.close >= item.open ? DeskColor.rise.color : DeskColor.fall.color
-                    Path { path in
-                        path.move(to: CGPoint(x: x, y: y(item.high)))
-                        path.addLine(to: CGPoint(x: x, y: y(item.low)))
-                    }.stroke(color, lineWidth: 1.2)
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(color)
-                        .frame(width: min(9, max(3, step * 0.58)), height: max(2, abs(y(item.open) - y(item.close))))
-                        .position(x: x, y: (y(item.open) + y(item.close)) / 2)
-                }
-                Rectangle().fill(isUp ? DeskColor.rise.color.opacity(0.4) : DeskColor.fall.color.opacity(0.4)).frame(height: 1)
-            }
-        }
-        .padding(.horizontal, 10)
-        .background(Color.white.opacity(0.025))
-        .accessibilityLabel("Live candlestick chart for \(seed)")
-    }
-}
-
 private struct SpotTradeTicket: View {
     let token: TrendingSpotToken
     let side: String
@@ -1302,15 +1282,12 @@ private struct SpotTradeTicket: View {
     @StateObject private var quote = SpotQuoteModel()
     @State private var amount = ""
 
-    private var nativeSymbol: String {
-        switch token.chainIndex {
-        case "501": "SOL"
-        case "56": "BNB"
-        case "137": "POL"
-        case "196": "OKB"
-        default: "ETH"
-        }
-    }
+    /// From the feed, which reads one chain table. The switch that used to be here
+    /// answered "ETH" for every chain it had not heard of, Arc included, whose gas token
+    /// is USDC.
+    private var nativeSymbol: String { token.nativeSymbol ?? "native token" }
+
+    private var isQuotable: Bool { token.quotable ?? true }
 
     private var sourceSymbol: String { side == "Buy" ? nativeSymbol : token.symbol }
     private var destinationSymbol: String { side == "Buy" ? token.symbol : nativeSymbol }
@@ -1363,17 +1340,27 @@ private struct SpotTradeTicket: View {
                     .font(.system(size: 11, weight: .semibold, design: .rounded)).foregroundStyle(.yellow)
             }
 
-            Button { Task { await quote.fetch(token: token, side: side, amount: amount) } } label: {
-                HStack {
-                    if quote.isLoading { ProgressView().tint(.black) }
-                    Text(quote.output == nil ? "Get live quote" : "Refresh quote")
-                    Spacer(); Image(systemName: "arrow.right")
+            if isQuotable {
+                Button { Task { await quote.fetch(token: token, side: side, amount: amount) } } label: {
+                    HStack {
+                        if quote.isLoading { ProgressView().tint(.black) }
+                        Text(quote.output == nil ? "Get live quote" : "Refresh quote")
+                        Spacer(); Image(systemName: "arrow.right")
+                    }
+                    .font(.system(size: 16, weight: .bold, design: .rounded)).padding(.horizontal, 18)
+                    .frame(maxWidth: .infinity).frame(height: 54)
                 }
-                .font(.system(size: 16, weight: .bold, design: .rounded)).padding(.horizontal, 18)
-                .frame(maxWidth: .infinity).frame(height: 54)
+                .buttonStyle(.plain).foregroundStyle(.black).background(.white, in: Capsule())
+                .disabled(amount.isEmpty || quote.isLoading).opacity(amount.isEmpty ? 0.35 : 1)
+            } else {
+                // Said before an amount is typed rather than after a quote fails.
+                Label("No quote provider covers \(token.chainName) yet.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.yellow)
+                    .frame(maxWidth: .infinity).frame(height: 54)
+                    .background(Color.white.opacity(0.06), in: Capsule())
             }
-            .buttonStyle(.plain).foregroundStyle(.black).background(.white, in: Capsule())
-            .disabled(amount.isEmpty || quote.isLoading).opacity(amount.isEmpty ? 0.35 : 1)
 
             Text("Quote only · no approval, signature or transaction is sent")
                 .font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
@@ -1395,18 +1382,20 @@ private final class SpotQuoteModel: ObservableObject {
 
     func fetch(token: TrendingSpotToken, side: String, amount: String) async {
         clear(); isLoading = true; defer { isLoading = false }
-        guard let decimals = token.decimals.map(Int.init) else {
-            errorText = "This token’s decimal precision is unavailable, so it cannot be quoted safely."
-            return
-        }
+        // The discovery feed carries no decimal for any token it trends, so requiring one
+        // here stopped every quote before it was sent. The server resolves it from the
+        // chain; a hint is passed only when there is one.
         var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/swap-quote")!
-        components.queryItems = [
+        var items = [
             URLQueryItem(name: "chainIndex", value: token.chainIndex),
             URLQueryItem(name: "tokenAddress", value: token.contract),
-            URLQueryItem(name: "tokenDecimals", value: String(decimals)),
             URLQueryItem(name: "side", value: side.lowercased()),
             URLQueryItem(name: "amount", value: amount)
         ]
+        if let decimals = token.decimals.map(Int.init) {
+            items.append(URLQueryItem(name: "tokenDecimals", value: String(decimals)))
+        }
+        components.queryItems = items
         do {
             let (data, response) = try await URLSession.shared.data(from: components.url!)
             let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -1454,31 +1443,17 @@ private struct WalletProfileScreen: View {
                 }.padding(.top, 42)
 
                 Text(wallet.displayAddress).font(.system(size: 20, weight: .bold, design: .rounded)).padding(.top, 22)
-                Label("Online", systemImage: "circle.fill").font(.system(size: 13, weight: .semibold)).foregroundStyle(DeskColor.rise.color).padding(.top, 8)
 
-                HStack(spacing: 10) {
-                    Button("Follow") {}.frame(maxWidth: .infinity).frame(height: 42).perpSearchGlass(in: RoundedRectangle(cornerRadius: 12))
-                    Button("Set Name") {}.frame(maxWidth: .infinity).frame(height: 42).perpSearchGlass(in: RoundedRectangle(cornerRadius: 12))
-                }.font(.system(size: 14, weight: .bold, design: .rounded)).padding(.top, 18)
-
-                HStack { Text("Positions").foregroundStyle(.white); Spacer(); Text("Closed"); Spacer(); Text("Activity") }
-                    .font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(.secondary).padding(.horizontal, 24).padding(.top, 34).padding(.bottom, 14)
-                Divider().overlay(Color.white.opacity(0.12))
-                VStack(spacing: 0) {
-                    profileRow("Bitcoin", "BTC", "$42.18")
-                    profileRow("Ethereum", "ETH", "$18.75")
-                    profileRow("Solana", "SOL", "$10.45")
-                }
-                Text("Preview profile · indexed wallet history is not connected")
-                    .font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.top, 20)
+                ContentUnavailableView(
+                    "Wallet history not connected",
+                    systemImage: "chart.bar.doc.horizontal",
+                    description: Text("Perpl publishes no account identity on its public "
+                                      + "trade stream, so Desk cannot show this wallet's "
+                                      + "positions or activity without indexing Monad."))
+                    .padding(.top, 26)
                 Spacer()
             }.padding(.horizontal, 20).padding(.top, 8)
         }.toolbar(.hidden, for: .navigationBar)
     }
 
-    private func profileRow(_ name: String, _ symbol: String, _ value: String) -> some View {
-        HStack { MarketTokenLogo(symbol: symbol, size: 42); VStack(alignment: .leading) { Text(name).fontWeight(.bold); Text(symbol).foregroundStyle(.secondary) }; Spacer(); Text(value).fontWeight(.bold) }
-            .font(.system(size: 15, design: .rounded)).frame(height: 72)
-            .overlay(alignment: .bottom) { Divider().overlay(Color.white.opacity(0.1)).padding(.leading, 54) }
-    }
 }

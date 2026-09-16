@@ -18,12 +18,22 @@ struct PositionScreen: View {
     @State private var showsClose = false
     @State private var showsProtection = false
     @State private var tab: PositionTab = .positions
+    /// Which position the screen is showing. Starts at the one that was tapped.
+    @State private var focusedID: Int64?
+
+    private var active: PerplPosition {
+        model.openPositions.first { $0.positionID == focusedID } ?? position
+    }
+
+    private var others: [PerplPosition] {
+        model.openPositions.filter { $0.positionID != active.positionID }
+    }
 
     private var figures: PositionFigures? {
-        guard position.marketID == market.market?.id,
+        guard active.marketID == market.market?.id,
               let config = market.market?.config,
               let mark = market.mark.value else { return nil }
-        return PositionFigures(position: position, market: config, mark: mark)
+        return PositionFigures(position: active, market: config, mark: mark)
     }
 
     private var stale: Bool { market.freshness.freezesDigits }
@@ -34,38 +44,32 @@ struct PositionScreen: View {
                 Color.black.ignoresSafeArea()
                 if let figures { content(figures) } else { unavailable }
             }
-            // Hidden, and dismissal moved into the heading. A navigation bar carrying
-            // one "Done" button costs the top sixth of the screen to say nothing, and
-            // on a position screen that space belongs to the chart.
+            // Dismissal lives in the heading instead.
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showsClose) {
                 if let figures, let selected = market.market {
                     MarketCloseSheet(
-                        position: position, figures: figures, market: selected,
+                        position: active, figures: figures, market: selected,
                         session: session) { showsClose = false }
                 }
             }
             .sheet(isPresented: $showsProtection) {
                 if let figures, let selected = market.market {
                     PositionProtectionSheet(
-                        position: position, figures: figures, market: selected,
+                        position: active, figures: figures, market: selected,
                         session: session) { showsProtection = false }
                 }
             }
         }
     }
 
-    /// The actions are pinned rather than placed at the end of the scroll.
-    ///
-    /// Closing is the one thing a person opens a position they already hold to do, and
-    /// on this device the figures alone are taller than the screen — so in the card it
-    /// sat below the fold, reachable only by scrolling past a chart that is telling them
-    /// they are losing money. The market screen pins Long and Short for the same reason.
+    /// Actions stay pinned: closing is what a person opens a held position to do, and the
+    /// figures alone are taller than the screen.
     private func content(_ figures: PositionFigures) -> some View {
         ZStack(alignment: .bottom) {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    heading(figures)
+                    heading
                     priceBlock.padding(.top, 20)
                     chart(figures).padding(.top, 20)
                     CandleIntervalRail(market: market).padding(.top, 14)
@@ -84,8 +88,7 @@ struct PositionScreen: View {
                 .padding(.bottom, tab == .positions ? 104 : 28)
             }
 
-            // Only beside the position they act on. Pinned over the history of closed
-            // trades, a red Close button acts on something that is no longer on screen.
+            // A close button has nothing to act on outside the positions tab.
             if tab == .positions { actionBar }
         }
     }
@@ -121,21 +124,39 @@ struct PositionScreen: View {
     @ViewBuilder
     private func tabContent(_ figures: PositionFigures) -> some View {
         switch tab {
-        case .positions: card(figures)
+        case .positions: positions(figures)
         case .orders: orders
         case .history: history
         }
     }
 
+    /// The focused position in full, then the rest of the account's. The tab counts them
+    /// all, so it has to show them all.
+    private func positions(_ figures: PositionFigures) -> some View {
+        VStack(spacing: 12) {
+            card(figures)
+            ForEach(others, id: \.positionID) { held in
+                if let itsMarket = market.market(id: held.marketID),
+                   let mark = market.price(for: itsMarket),
+                   let itsFigures = PositionFigures(
+                    position: held, market: itsMarket.config, mark: mark) {
+                    OpenPositionCard(
+                        figures: itsFigures, symbol: itsMarket.symbol, isStale: stale
+                    ) {
+                        focusedID = held.positionID
+                        market.select(itsMarket)
+                        Task { await session.selectMarket(itsMarket) }
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: Open orders
 
-    /// What Desk can actually say about resting orders, which is little.
-    ///
-    /// An order in flight is real and is shown. Beyond that Desk sends market orders,
-    /// which fill or fail rather than rest, and the take-profit and stop-loss triggers it
-    /// registers live at the venue — `mt: 22`/`mt: 24` are read only to correlate an
-    /// order with its outcome, so there is no resting-order feed to list. An empty table
-    /// here would be a claim that the account has none, which Desk does not know.
+    /// Desk has no resting-order feed: order frames are read only to correlate an order
+    /// with its outcome, and triggers are held by the venue. An empty table would claim
+    /// the account has none, which Desk cannot know.
     private var orders: some View {
         VStack(spacing: 12) {
             if let status = session.statusText, session.isBusy {
@@ -231,10 +252,7 @@ struct PositionScreen: View {
 
     // MARK: Heading
 
-    /// The logo and the side badge used to sit here as well as on the card. They belong
-    /// on the card, beside the figures they describe, so this is left as the market and
-    /// the way out.
-    private func heading(_ figures: PositionFigures) -> some View {
+    private var heading: some View {
         HStack(spacing: 11) {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.down")
@@ -282,9 +300,8 @@ struct PositionScreen: View {
 
     // MARK: Chart
 
-    /// Amber under five percent of room, red under two — the point at which an ordinary
-    /// candle can end the position, rather than a taste. The same thresholds the
-    /// position rows use, so a line and a row never disagree about how close it is.
+    /// Amber under five percent of room, red under two: the same thresholds the position
+    /// rows use, so a line and a row never disagree about how close it is.
     private func liquidationTint(_ figures: PositionFigures) -> DeskRGB {
         guard let distance = figures.liquidationDistanceMicros else { return DeskColor.nightMuted }
         switch distance {
@@ -294,16 +311,16 @@ struct PositionScreen: View {
         }
     }
 
-    private func guides(_ figures: PositionFigures) -> [PriceGuide] {
+    private func guides(_ figures: PositionFigures, scale: Double) -> [PriceGuide] {
         var guides = [PriceGuide(
             label: "Entry",
-            raw: figures.entry.raw,
+            value: Double(figures.entry.raw) / scale,
             text: figures.entry.display(fractionDigits: figures.entry.decimals),
             tint: DeskColor.nightText.color)]
         if let liquidation = figures.liquidationPrice {
             guides.append(PriceGuide(
                 label: "\(figures.side == .long ? "Long" : "Short") Liq.",
-                raw: liquidation.raw,
+                value: Double(liquidation.raw) / scale,
                 text: liquidation.display(fractionDigits: figures.entry.decimals),
                 tint: liquidationTint(figures).color))
         }
@@ -313,10 +330,10 @@ struct PositionScreen: View {
     @ViewBuilder
     private func chart(_ figures: PositionFigures) -> some View {
         if !market.candles.isEmpty, let config = market.market?.config {
+            let scale = pow(10.0, Double(config.priceDecimals))
             CandlestickChart(
-                candles: market.candles,
-                priceDecimals: Int(config.priceDecimals),
-                guides: guides(figures))
+                candles: market.candles.map { $0.chartCandle(scale: scale) },
+                guides: guides(figures, scale: scale))
                 .frame(height: 250)
                 .overlay(alignment: .bottom) { Divider().overlay(Color.white.opacity(0.12)) }
         } else {
@@ -380,12 +397,8 @@ struct PositionScreen: View {
                     metric("Funding",
                            figures.fundingSinceEntry.map { $0.display() + " AUSD" } ?? Unavailable.text,
                            detail: "since you opened")
-                    // The venue's own fee figure for this position. It is the one cost
-                    // that never appears anywhere else in the app, and repeating the
-                    // entry price here instead — which is what sat in this cell —
-                    // filled the grid without telling anyone anything.
                     metric("Fees",
-                           Money(raw: position.feeRaw).map { $0.display() + " AUSD" }
+                           Money(raw: active.feeRaw).map { $0.display() + " AUSD" }
                                ?? Unavailable.text,
                            detail: "charged so far",
                            alignment: .trailing)
@@ -411,8 +424,7 @@ struct PositionScreen: View {
                 .frame(height: 24)
                 .background(sideTint(figures).color.opacity(0.14), in: Capsule())
             Spacer(minLength: 8)
-            // Not a button yet. Sharing a position is its own piece of work, and a
-            // control that looks live and answers nothing is worse than the icon alone.
+            // Not a button yet: a control that looks live and answers nothing is worse.
             Image(systemName: "square.and.arrow.up")
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(DeskColor.nightMuted.color)
@@ -479,11 +491,8 @@ enum PositionTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-/// One position the venue has already closed.
-///
-/// The realised figure is the venue's own `dpnl`, never recomputed here: once a position
-/// is closed there is no mark to derive it from, and a number invented from the last
-/// price this device happened to see would disagree with the exchange.
+/// One closed position. The realised figure is the venue's own `dpnl`, never recomputed:
+/// once closed there is no mark to derive it from.
 private struct ClosedPositionRow: View {
     let position: PerplPosition
     let symbol: String

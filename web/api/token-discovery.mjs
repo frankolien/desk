@@ -1,15 +1,5 @@
 import crypto from "node:crypto";
-
-const CHAIN_NAMES = {
-  "1": "Ethereum",
-  "10": "Optimism",
-  "56": "BNB Chain",
-  "137": "Polygon",
-  "196": "X Layer",
-  "501": "Solana",
-  "8453": "Base",
-  "42161": "Arbitrum",
-};
+import { chainName, isQuotable, nativeToken } from "./_chains.mjs";
 
 function authHeaders(timestamp, requestPath) {
   const signature = crypto.createHmac("sha256", process.env.OKX_SECRET_KEY)
@@ -47,7 +37,11 @@ function normalize(row) {
   return {
     id: `${chainIndex}:${contract}`,
     chainIndex,
-    chainName: CHAIN_NAMES[chainIndex] || `Chain ${chainIndex}`,
+    chainName: chainName(chainIndex),
+    // Said here so the app can retire Buy and Sell before someone types an amount and
+    // waits on a quote that was never going to arrive.
+    quotable: isQuotable(chainIndex),
+    nativeSymbol: nativeToken(chainIndex)?.symbol ?? null,
     symbol: String(row.tokenSymbol || "").toUpperCase(),
     name: String(row.tokenName || row.tokenSymbol || "Unknown token"),
     logoURL: String(row.tokenLogoUrl || ""),

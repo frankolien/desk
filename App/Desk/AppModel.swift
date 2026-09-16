@@ -49,11 +49,8 @@ final class AppModel {
     /// while there is no way to have one.
     private(set) var openPosition: PerplPosition?
     private(set) var openPositions: [PerplPosition] = []
-    /// Positions the venue has already closed, newest first.
-    ///
-    /// They arrive on the same `mt: 26`/`mt: 27` stream as the open ones and were being
-    /// filtered away and dropped. They carry the exit price and the realised PnL, which
-    /// makes them the only record Desk has of what this account has actually done.
+    /// Positions the venue has already closed, newest first. They arrive on the same
+    /// `mt: 26`/`mt: 27` stream and carry the exit price and the realised PnL.
     private(set) var closedPositions: [PerplPosition] = []
 
     /// Whether the trading key is in memory right now.
@@ -94,9 +91,7 @@ final class AppModel {
             let open = positions.filter(\.isOpen)
             self?.openPositions = open
             self?.openPosition = open.first
-            // Newest first by the venue's own position id, which is monotonic. Sorting by
-            // anything this device computes would reorder the list every time a figure
-            // was recalculated.
+            // By the venue's own monotonic position id, so the order never reshuffles.
             self?.closedPositions = positions
                 .filter { !$0.isOpen }
                 .sorted { $0.positionID > $1.positionID }

@@ -365,7 +365,8 @@ struct PerpDetailScreen: View {
 
     @ViewBuilder private var chart: some View {
         if !market.candles.isEmpty, let config = market.market?.config {
-            CandlestickChart(candles: market.candles, priceDecimals: Int(config.priceDecimals))
+            let scale = pow(10.0, Double(config.priceDecimals))
+            CandlestickChart(candles: market.candles.map { $0.chartCandle(scale: scale) })
                 .frame(height: 250)
                 .overlay(alignment: .bottom) { Divider().overlay(Color.white.opacity(0.12)) }
         } else {
