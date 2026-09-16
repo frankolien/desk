@@ -378,24 +378,7 @@ struct PerpDetailScreen: View {
         }
     }
 
-    private var ranges: some View {
-        HStack {
-            ForEach([(60, "1m"), (180, "3m"), (300, "5m"),
-                     (900, "15m"), (1_800, "30m"), (3_600, "1H")], id: \.0) { seconds, label in
-                Button { market.selectCandleInterval(seconds) } label: {
-                    Text(label)
-                        .foregroundStyle(market.candleIntervalSeconds == seconds
-                                         ? DeskColor.nightText.color : DeskColor.nightMuted.color)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .modifier(RangeSelectionGlass(selected: market.candleIntervalSeconds == seconds))
-            }
-        }
-        .font(.system(size: 13, weight: .bold, design: .rounded))
-    }
+    private var ranges: some View { CandleIntervalRail(market: market) }
 
     private var stats: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -426,78 +409,8 @@ struct PerpDetailScreen: View {
     }
 }
 
-private struct RangeSelectionGlass: ViewModifier {
-    let selected: Bool
-    func body(content: Content) -> some View {
-        if selected { content.perpGlass(in: Capsule()) } else { content }
-    }
-}
-
 extension Direction: @retroactive Identifiable {
     public var id: String { rawValue }
-}
-
-/// OHLC candles built only from marks this device actually observed. Until a historical
-/// candle endpoint is available, no invented highs or lows are shown.
-private struct CandlestickChart: View {
-    let candles: [MarketModel.Candle]
-    let priceDecimals: Int
-
-    var body: some View {
-        Canvas { context, size in
-            let samples = Array(candles.suffix(25))
-            guard samples.count > 1,
-                  let lowRaw = samples.map(\.l).min(),
-                  let highRaw = samples.map(\.h).max() else { return }
-            let scale = pow(10.0, Double(priceDecimals))
-            let low = Double(lowRaw) / scale, high = Double(highRaw) / scale
-            let spread = max(high - low, high * 0.0001)
-            let plotWidth = size.width - 62
-            let priceHeight = size.height * 0.76
-            let volumeTop = size.height * 0.80
-            let xStep = plotWidth / CGFloat(samples.count)
-            func y(_ raw: UInt64) -> CGFloat {
-                let value = Double(raw) / scale
-                return priceHeight * CGFloat(1 - (value - low) / spread) * 0.90 + 7
-            }
-            for row in 0...3 {
-                let y = priceHeight * CGFloat(row) / 3
-                var grid = Path(); grid.move(to: CGPoint(x: 0, y: y)); grid.addLine(to: CGPoint(x: plotWidth, y: y))
-                context.stroke(grid, with: .color(.white.opacity(0.07)), style: StrokeStyle(lineWidth: 0.6, dash: [3, 5]))
-                let price = high - spread * Double(row) / 3
-                context.draw(Text(Self.axis(price)).font(.system(size: 10, weight: .semibold)).foregroundStyle(.gray),
-                             at: CGPoint(x: plotWidth + 31, y: y + 6))
-            }
-            let maxVolume = samples.compactMap { Double($0.v) }.max() ?? 1
-            for (index, candle) in samples.enumerated() {
-                let rising = candle.c >= candle.o
-                let color = rising ? Color.green : Color.red
-                let x = (CGFloat(index) + 0.5) * xStep
-                let top = min(y(candle.o), y(candle.c)), bottom = max(y(candle.o), y(candle.c))
-                var wick = Path(); wick.move(to: CGPoint(x: x, y: y(candle.h))); wick.addLine(to: CGPoint(x: x, y: y(candle.l)))
-                context.stroke(wick, with: .color(color), lineWidth: 1)
-                let body = CGRect(x: x - max(2, xStep * 0.28), y: top,
-                                  width: max(4, xStep * 0.56), height: max(2, bottom - top))
-                context.fill(Path(roundedRect: body, cornerRadius: 2), with: .color(color))
-                let volume = (Double(candle.v) ?? 0) / maxVolume
-                let volumeRect = CGRect(x: x - xStep * 0.30,
-                                        y: size.height - 2 - CGFloat(volume) * (size.height - volumeTop),
-                                        width: xStep * 0.60,
-                                        height: CGFloat(volume) * (size.height - volumeTop))
-                context.fill(Path(roundedRect: volumeRect, cornerRadius: 2),
-                             with: .color(.white.opacity(0.15)))
-            }
-            if let last = samples.last {
-                let currentY = y(last.c)
-                var line = Path(); line.move(to: CGPoint(x: 0, y: currentY)); line.addLine(to: CGPoint(x: plotWidth, y: currentY))
-                context.stroke(line, with: .color((last.c >= last.o ? Color.green : .red).opacity(0.55)), lineWidth: 0.8)
-            }
-        }
-    }
-
-    private static func axis(_ value: Double) -> String {
-        value >= 1_000 ? String(format: "%.2fK", value / 1_000) : String(format: "%.2f", value)
-    }
 }
 
 private extension View {
