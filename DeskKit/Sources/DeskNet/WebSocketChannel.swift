@@ -60,7 +60,7 @@ public final class URLSessionWebSocket: WebSocketChannel, @unchecked Sendable {
         configuration.tlsMinimumSupportedProtocolVersion = .TLSv12
         session = URLSession(configuration: configuration)
         task = session.webSocketTask(with: url)
-        
+           
         task.resume()
     }
 
