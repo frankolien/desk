@@ -41,7 +41,14 @@ struct CandlestickChart: View {
             // A guide only widens the axis while it is near enough to be worth seeing.
             // A liquidation price a long way off would otherwise squash every candle
             // into a flat line to make room for one dashed rule.
-            let reach = candleSpread * 1.5
+            //
+            // Eight tenths of the candle range rather than one and a half. At the wider
+            // reach a liquidation sitting five dollars under a six dollar range still
+            // pulled the floor down to meet it, and the price action — the reason the
+            // chart is there — was compressed into the top half with an empty band
+            // beneath it. Past this distance the guide clamps to the edge and keeps its
+            // arrow, which says "further than this" without costing the candles room.
+            let reach = candleSpread * 0.8
             var low = candleLow, high = candleHigh
             for guide in guides {
                 let value = Double(guide.raw) / scale
@@ -71,18 +78,26 @@ struct CandlestickChart: View {
             }
 
             for row in 0...3 {
-                let rowY = priceHeight * CGFloat(row) / 3
+                // Placed by the same mapping the candles and guides use, rather than by
+                // an even division of the plot. `y` compresses the data to 0.90 of the
+                // height and offsets it by seven points; the grid did neither, so every
+                // label sat up to twelve points away from its own price. That is how
+                // 92.74 came to be drawn twice on one chart — once as a liquidation
+                // guide at its true height, and once as an axis label well below it,
+                // far enough apart that the nine-point guard below could not tell they
+                // were the same number.
+                let price = high - spread * Double(row) / 3
+                let rowY = y(price)
                 var grid = Path()
                 grid.move(to: CGPoint(x: 0, y: rowY))
                 grid.addLine(to: CGPoint(x: plotWidth, y: rowY))
                 context.stroke(grid, with: .color(.white.opacity(0.07)),
                                style: StrokeStyle(lineWidth: 0.6, dash: [3, 5]))
                 guard !guidePositions.contains(where: { abs($0.1 - rowY) < 9 }) else { continue }
-                let price = high - spread * Double(row) / 3
                 context.draw(
                     Text(Self.axis(price)).font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.gray),
-                    at: CGPoint(x: plotWidth + 31, y: rowY + 6))
+                    at: CGPoint(x: plotWidth + 31, y: rowY))
             }
 
             let maxVolume = samples.compactMap { Double($0.v) }.max() ?? 1
