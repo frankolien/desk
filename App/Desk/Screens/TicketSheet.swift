@@ -5,7 +5,12 @@ import DeskUI
 import SwiftUI
 
 /// The order ticket. Its order is fixed: the amount, then what the amount costs, then
-/// the keypad, then the action. Nothing consequential is behind a disclosure.
+/// the keypad, then the action.
+///
+/// Nothing consequential is behind a disclosure. Margin, liquidation, fee and total stay
+/// on screen at all times; only stop loss and take profit fold away, because they are
+/// optional and empty unless asked for — and leaving them open pushed the keypad and the
+/// confirm control off the bottom of the sheet.
 struct TicketSheet: View {
     let side: Direction
     let market: Market?
@@ -20,6 +25,7 @@ struct TicketSheet: View {
     @State private var stopLoss = ""
     @State private var takeProfit = ""
     @State private var handledFill = false
+    @State private var showsProtection = false
 
     private var quote: OrderQuote? {
         guard let market, let mark, let margin = Money(text: amount.isEmpty ? "0" : amount),
@@ -63,7 +69,9 @@ struct TicketSheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         HStack(spacing: 9) {
-                            AssetMark.bitcoin(size: 30)
+                            // The market's own mark. This drew Bitcoin for every market,
+                            // so shorting PUMP showed a Bitcoin coin on the ticket.
+                            MarketTokenLogo(symbol: market?.symbol ?? "", size: 30)
                             Text(side.word())
                                 .font(DeskType.title)
                                 .foregroundStyle(side.color.color)
@@ -91,35 +99,36 @@ struct TicketSheet: View {
                         .foregroundStyle(DeskColor.nightMuted.color)
                         .padding(.top, 4)
 
-                    // What it costs, immediately under what was typed. Principle three, as a
-                    // layout rather than as a promise.
-                    VStack(spacing: 10) {
-                        ValueRow(label: "Leveraged size", value: quote?.notional.display() ?? Unavailable.text)
-                        ValueRow(label: "Your margin", value: quote?.margin.display() ?? Unavailable.text)
-                        if leverage == 1 {
-                            // The honesty case. A default of 1× is invisible unless it is said
-                            // out loud, and saying it is the cheapest credibility in the app.
-                            ValueRow(
-                                label: "Liquidation",
-                                value: "None",
-                                detail: "Trading without leverage",
-                                tint: DeskColor.rise)
-                        } else {
-                            ValueRow(
-                                label: "Liquidation",
-                                value: quote.map { liquidationText($0) } ?? Unavailable.text,
-                                // An estimate, and said to be one: the real figure depends on the
-                                // fill, and every venue that is honest about this labels it.
-                                detail: quote.map { "est · \(percent($0.liquidationDistanceMicros)) away" },
-                                tint: DeskColor.fall)
+                    // What it costs, immediately under what was typed. Paired rather than
+                    // stacked: five full-width rows for four figures did not leave the
+                    // keypad and the confirm control room on the sheet.
+                    VStack(spacing: 12) {
+                        HStack(alignment: .top, spacing: 12) {
+                            figure("Your margin", quote?.margin.display() ?? Unavailable.text)
+                            if leverage == 1 {
+                                // A default of 1× is invisible unless it is said out loud.
+                                figure("Liquidation", "None",
+                                       detail: "No leverage", tint: DeskColor.rise,
+                                       alignment: .trailing)
+                            } else {
+                                figure("Liquidation",
+                                       quote.map { liquidationText($0) } ?? Unavailable.text,
+                                       // An estimate, and said to be one: the real figure
+                                       // depends on the fill.
+                                       detail: quote.map { "est · \(percent($0.liquidationDistanceMicros)) away" },
+                                       tint: DeskColor.fall, alignment: .trailing)
+                            }
                         }
-                        ValueRow(label: "Fee", value: quote?.fee.display(fractionDigits: 4) ?? Unavailable.text)
-                        ValueRow(label: "Total", value: quote?.total.display() ?? Unavailable.text)
+                        HStack(alignment: .top, spacing: 12) {
+                            figure("Fee", quote?.fee.display(fractionDigits: 4) ?? Unavailable.text)
+                            figure("Total", quote?.total.display() ?? Unavailable.text,
+                                   alignment: .trailing)
+                        }
                     }
-                    .padding(16)
+                    .padding(14)
                     .background(DeskColor.nightChip.color)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .padding(.top, 20)
+                    .padding(.top, 14)
 
                     LeverageRail(
                         leverage: $leverage,
@@ -128,17 +137,38 @@ struct TicketSheet: View {
                     .padding(.top, 16)
 
                     VStack(spacing: 10) {
-                        HStack {
-                            Text("Stop loss / Take profit")
-                                .font(DeskType.label)
-                            Spacer()
-                            Text("Mark price")
-                                .font(DeskType.caption)
-                                .foregroundStyle(DeskColor.nightMuted.color)
+                        Button {
+                            withAnimation(.snappy(duration: 0.22)) { showsProtection.toggle() }
+                        } label: {
+                            HStack {
+                                Text("Stop loss / Take profit")
+                                    .font(DeskType.label)
+                                    .foregroundStyle(DeskColor.nightText.color)
+                                if protection != nil {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundStyle(DeskColor.rise.color)
+                                }
+                                Spacer()
+                                Image(systemName: showsProtection ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(DeskColor.nightMuted.color)
+                            }
+                            .contentShape(Rectangle())
                         }
-                        HStack(spacing: 10) {
-                            protectionField("SL price", text: $stopLoss)
-                            protectionField("TP price", text: $takeProfit)
+                        .buttonStyle(.plain)
+
+                        if showsProtection {
+                            HStack {
+                                Spacer()
+                                Text("Mark price")
+                                    .font(DeskType.caption)
+                                    .foregroundStyle(DeskColor.nightMuted.color)
+                            }
+                            HStack(spacing: 10) {
+                                protectionField("SL price", text: $stopLoss)
+                                protectionField("TP price", text: $takeProfit)
+                            }
                         }
                         if let loss = projectedPnL(stopLoss, isProfit: false) {
                             ValueRow(
@@ -250,6 +280,33 @@ struct TicketSheet: View {
         await session.place(draft)
     }
 
+    private func figure(
+        _ label: String,
+        _ value: String,
+        detail: String? = nil,
+        tint: DeskRGB = DeskColor.nightText,
+        alignment: HorizontalAlignment = .leading
+    ) -> some View {
+        VStack(alignment: alignment, spacing: 3) {
+            Text(label)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(DeskColor.nightMuted.color)
+            Text(value)
+                .font(.system(size: 16, weight: .bold, design: .rounded).monospacedDigit())
+                .foregroundStyle(tint.color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            if let detail {
+                Text(detail)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
+        .accessibilityElement(children: .combine)
+    }
+
     private func protectionField(_ title: String, text: Binding<String>) -> some View {
         TextField(title, text: text)
             .keyboardType(.decimalPad)
@@ -285,8 +342,10 @@ private struct LeverageRail: View {
     @Binding var leverage: Int
     let maximum: Int
 
+    private var scale: LeverageScale { LeverageScale(maximum: maximum) }
+
     var body: some View {
-        VStack(spacing: 7) {
+        VStack(spacing: 6) {
             HStack {
                 Text("Leverage")
                     .font(DeskType.caption)
@@ -295,20 +354,19 @@ private struct LeverageRail: View {
                 Text("\(leverage)×")
                     .font(.system(size: 17, weight: .bold, design: .rounded).monospacedDigit())
                     .foregroundStyle(DeskColor.nightText.color)
+                    .contentTransition(.numericText())
             }
             GeometryReader { proxy in
                 HStack(alignment: .center, spacing: 0) {
-                    ForEach(1...maximum, id: \.self) { tick in
+                    ForEach(0..<scale.tickCount, id: \.self) { index in
+                        let major = scale.isMajor(tick: index)
                         Capsule()
                             .fill(
-                                tick <= leverage
+                                scale.isFilled(tick: index, at: leverage)
                                     ? DeskColor.action.color
-                                    : DeskColor.nightMuted.color.opacity(0.38)
-                            )
-                            .frame(
-                                width: tick == 1 || tick == maximum || tick % 5 == 0 ? 3 : 2,
-                                height: tick == 1 || tick == maximum || tick % 5 == 0 ? 24 : 13)
-                        if tick < maximum { Spacer(minLength: 1) }
+                                    : DeskColor.nightMuted.color.opacity(0.32))
+                            .frame(width: major ? 2.5 : 1.5, height: major ? 26 : 14)
+                        if index < scale.tickCount - 1 { Spacer(minLength: 0) }
                     }
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height)
@@ -316,14 +374,14 @@ private struct LeverageRail: View {
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { drag in
-                            let fraction = min(max(drag.location.x / proxy.size.width, 0), 1)
-                            let next = 1 + Int((fraction * Double(maximum - 1)).rounded())
+                            let next = scale.value(
+                                atFraction: drag.location.x / proxy.size.width)
                             guard next != leverage else { return }
                             leverage = next
                             Haptics.selection()
                         })
             }
-            .frame(height: 32)
+            .frame(height: 30)
             .accessibilityElement()
             .accessibilityLabel("Leverage")
             .accessibilityValue("\(leverage) times")
@@ -334,15 +392,19 @@ private struct LeverageRail: View {
                 @unknown default: break
                 }
             }
-            HStack {
-                Text("1×")
-                Spacer()
-                Text("MAX \(maximum)×")
+            HStack(spacing: 0) {
+                ForEach(Array(scale.labelledValues.enumerated()), id: \.offset) { index, value in
+                    Text(value == maximum ? "MAX \(value)×" : "\(value)×")
+                        .frame(maxWidth: .infinity,
+                               alignment: index == 0 ? .leading
+                                   : (index == scale.labelledValues.count - 1 ? .trailing : .center))
+                }
             }
             .font(DeskType.caption)
             .foregroundStyle(DeskColor.nightMuted.color)
         }
-        .padding(14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .background(DeskColor.nightChip.color)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onChange(of: maximum) { _, limit in leverage = min(leverage, limit) }

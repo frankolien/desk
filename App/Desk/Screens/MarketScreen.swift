@@ -300,6 +300,13 @@ struct PerpDetailScreen: View {
             .padding(.bottom, 12)
         }
         .toolbar(.hidden, for: .navigationBar)
+        .task {
+            #if DEBUG
+            // The ticket sits behind a floating bar that UI automation cannot hit, so it
+            // gets the same way in that `-stage` gives every other screen.
+            if ProcessInfo.processInfo.arguments.contains("-open-ticket") { ticket = .up }
+            #endif
+        }
         .sheet(item: $ticket) { side in
             TicketSheet(
                 side: side, market: market.market, mark: market.mark.value, session: session
@@ -329,6 +336,7 @@ struct PerpDetailScreen: View {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 16, weight: .bold))
                     .frame(width: 42, height: 42)
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .perpGlass(interactive: true, in: Circle())
@@ -404,6 +412,7 @@ struct PerpDetailScreen: View {
                 .foregroundStyle(side.color.color)
                 .frame(maxWidth: .infinity)
                 .frame(height: 52)
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .perpGlass(interactive: true, in: Capsule())
