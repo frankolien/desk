@@ -53,24 +53,37 @@ export function readableUnits(text, decimals) {
 /// does not. Cached: the same token is quoted repeatedly while someone edits an amount.
 export async function resolveDecimals(chainIndex, tokenAddress, hint, fetchImpl = fetch) {
   if (Number.isInteger(hint) && hint >= 0 && hint <= 30) return hint;
-  const key = `${chainIndex}:${tokenAddress.toLowerCase()}`;
+  const isSolana = chainIndex === "501";
+  // Solana addresses are case significant, so only EVM keys are folded.
+  const key = `${chainIndex}:${isSolana ? tokenAddress : tokenAddress.toLowerCase()}`;
   if (decimalsCache.has(key)) return decimalsCache.get(key);
 
   const rpc = rpcEndpoint(chainIndex);
-  if (!rpc || !/^0x[a-fA-F0-9]{40}$/.test(tokenAddress)) return null;
+  const addressed = isSolana
+    ? /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(tokenAddress)
+    : /^0x[a-fA-F0-9]{40}$/.test(tokenAddress);
+  if (!rpc || !addressed) return null;
+
+  // Solana holds decimals on the mint rather than behind a contract call, so it is asked
+  // a different question. Without this it answered "unknown decimals" for every token.
+  const request = isSolana
+    ? { jsonrpc: "2.0", id: 1, method: "getTokenSupply", params: [tokenAddress] }
+    : {
+        jsonrpc: "2.0", id: 1, method: "eth_call",
+        params: [{ to: tokenAddress, data: DECIMALS_SELECTOR }, "latest"],
+      };
   try {
     const response = await fetchImpl(rpc, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0", id: 1, method: "eth_call",
-        params: [{ to: tokenAddress, data: DECIMALS_SELECTOR }, "latest"],
-      }),
+      body: JSON.stringify(request),
     });
     const payload = await response.json();
-    const result = payload?.result;
-    if (typeof result !== "string" || result === "0x") return null;
-    const decimals = Number.parseInt(result, 16);
+    const decimals = isSolana
+      ? payload?.result?.value?.decimals
+      : (typeof payload?.result === "string" && payload.result !== "0x"
+          ? Number.parseInt(payload.result, 16)
+          : null);
     if (!Number.isInteger(decimals) || decimals < 0 || decimals > 30) return null;
     decimalsCache.set(key, decimals);
     return decimals;

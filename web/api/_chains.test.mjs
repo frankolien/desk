@@ -106,6 +106,21 @@ test("Decimals come off the chain when the feed has none", async () => {
   assert.equal(calls[0].body.params[0].data, "0x313ce567");
 });
 
+test("Solana decimals come off the mint, not a contract call", async () => {
+  // eth_call means nothing on Solana, so every token there was refused as having
+  // unconfirmable precision until this asked the right question.
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, body: JSON.parse(options.body) });
+    return { json: async () => ({ result: { value: { decimals: 6, amount: "1" } } }) };
+  };
+  const mint = "7GPGqsfVK1gG88GuVEetrsVyDiikABTsj9B9aHEHpump";
+  const decimals = await resolveDecimals("501", mint, undefined, fetchImpl);
+  assert.equal(decimals, 6);
+  assert.equal(calls[0].body.method, "getTokenSupply");
+  assert.equal(calls[0].body.params[0], mint);
+});
+
 test("A chain with no RPC reports unknown decimals rather than inventing them", async () => {
   const decimals = await resolveDecimals(
     "5042", "0x78e35c13252836e2313208ab48f8bb07a7551a43", undefined, () => {
@@ -149,10 +164,10 @@ test("A chain 0x covers gets past both gates", async () => {
 });
 
 test("A token whose decimals cannot be confirmed is refused honestly", async () => {
-  // Solana has no RPC in the table, so an unhinted token cannot be sized safely.
+  // Chain 999 is quotable through 0x but carries no RPC, because its identity is
+  // contested, so an unhinted token there cannot be sized safely.
   const result = await quote({
-    chainIndex: "501", tokenAddress: "So11111111111111111111111111111111111111112",
-    side: "buy", amount: "0.01",
+    chainIndex: "999", tokenAddress: ARGUS, side: "buy", amount: "0.01",
   });
   assert.equal(result.status, 422);
   assert.equal(result.body.reason, "unknown-decimals");

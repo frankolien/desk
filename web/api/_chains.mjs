@@ -28,7 +28,7 @@ export const CHAINS = {
   "146": { name: "Sonic", symbol: "S", rpc: "https://rpc.soniclabs.com" },
   "196": { name: "X Layer", symbol: "OKB", rpc: null },
   "480": { name: "World Chain", symbol: "ETH", rpc: "https://worldchain-mainnet.g.alchemy.com/public" },
-  "501": { name: "Solana", symbol: "SOL", rpc: null },
+  "501": { name: "Solana", symbol: "SOL", rpc: "https://api.mainnet-beta.solana.com" },
   "999": { name: "HyperEVM", symbol: null, rpc: null },
   "2741": { name: "Abstract", symbol: "ETH", rpc: "https://api.mainnet.abs.xyz" },
   "4217": { name: "Tempo", symbol: "USD", rpc: "https://rpc.mainnet.tempo.xyz" },
