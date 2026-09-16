@@ -41,16 +41,31 @@ public actor OrderDesk {
 
     /// What the caller has to decide. Everything else is derived.
     public struct Draft: Sendable, Hashable {
+        public struct Protection: Sendable, Hashable {
+            public let stopLoss: Price?
+            public let takeProfit: Price?
+
+            public init(stopLoss: Price? = nil, takeProfit: Price? = nil) {
+                self.stopLoss = stopLoss
+                self.takeProfit = takeProfit
+            }
+        }
+
         public let side: Side
         public let size: Size
         public let leverageHundredths: Int
         public let slippageBps: Int
+        public let protection: Protection?
 
-        public init(side: Side, size: Size, leverageHundredths: Int, slippageBps: Int) {
+        public init(
+            side: Side, size: Size, leverageHundredths: Int, slippageBps: Int,
+            protection: Protection? = nil
+        ) {
             self.side = side
             self.size = size
             self.leverageHundredths = leverageHundredths
             self.slippageBps = slippageBps
+            self.protection = protection
         }
     }
 
@@ -141,7 +156,45 @@ public actor OrderDesk {
             await tracker.forget(frameID)
             throw error
         }
+        // Once this point is reached the opening order may fill. Never forget it if a
+        // later protective send fails: losing correlation would make a live position
+        // look as though it never existed.
+        try await sendProtection(for: draft, linkedTo: request.requestID)
         return frameID
+    }
+
+    /// Sends stop loss and take profit as Perpl trigger orders linked to the opening
+    /// request. The venue owns these orders after admission, so they still protect the
+    /// position if iOS suspends Desk or the app is closed.
+    private func sendProtection(for draft: Draft, linkedTo openingRequestID: Int64) async throws {
+        guard let protection = draft.protection, let account, let counter else { return }
+        let triggers: [(Price?, TriggerPriceCondition)] = [
+            (protection.stopLoss,
+             draft.side == .long ? .lessThanOrEqualMark : .greaterThanOrEqualMark),
+            (protection.takeProfit,
+             draft.side == .long ? .greaterThanOrEqualMark : .lessThanOrEqualMark),
+        ]
+        for (price, condition) in triggers {
+            guard let price else { continue }
+            let frameID = nextFrameID
+            nextFrameID += 1
+            let trigger = try OrderBuilder.protectiveClose(
+                side: draft.side, market: market, account: account, size: draft.size,
+                triggerPrice: price, condition: condition,
+                linkedRequestID: openingRequestID,
+                slippageBps: draft.slippageBps,
+                requestID: await counter.take(), frameID: frameID)
+            // Trigger orders have no short local expiry. The linked position/request is
+            // their lifetime; Perpl will cancel them when that relationship ends.
+            try await tracker.track(
+                frameID: frameID, requestID: trigger.requestID, deadlineBlock: .max)
+            do {
+                try await socket.send(trigger)
+            } catch {
+                await tracker.forget(frameID)
+                throw error
+            }
+        }
     }
 
     /// Closes an existing position with Perpl's dedicated reduce-only close type. This

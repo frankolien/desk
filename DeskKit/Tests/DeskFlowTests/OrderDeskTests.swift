@@ -166,6 +166,37 @@ struct OrderDeskTests {
         #expect(ids == [42, 43], "seeded from lastForwarded 41 and strictly increasing")
     }
 
+    @Test("stop loss and take profit are linked to the opening request")
+    func linkedProtection() async throws {
+        let channel = ScriptedChannel(inbound: [snapshot(lastForwarded: 41)])
+        let subject = try desk(channel)
+        try await subject.open(credentials: credentials())
+        let config = try market().config
+        let protected = OrderDesk.Draft(
+            side: .long,
+            size: try #require(Size(raw: 1_000, decimals: config.sizeDecimals)),
+            leverageHundredths: 500,
+            slippageBps: 50,
+            protection: .init(
+                stopLoss: try #require(Price(selling: "64000", decimals: config.priceDecimals)),
+                takeProfit: try #require(Price(buying: "80000", decimals: config.priceDecimals))))
+
+        _ = try await subject.place(protected, headBlock: 1_000)
+
+        let bodies = channel.sent.filter { $0.contains("\"mt\":22") }
+        let orders = try bodies.map { body in
+            try #require(JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])
+        }
+        #expect(orders.count == 3)
+        #expect(orders.map { $0["rq"] as? Int } == [42, 43, 44])
+        #expect(orders[1]["tr"] as? Int == 42)
+        #expect(orders[2]["tr"] as? Int == 42)
+        #expect(orders[1]["tpc"] as? Int == 4)
+        #expect(orders[2]["tpc"] as? Int == 3)
+        #expect(orders[1]["t"] as? Int == 3)
+        #expect(orders[2]["t"] as? Int == 3)
+    }
+
     /// The venue refuses forwarded orders until `fw` is set, which the opening sequence
     /// does. It gets its own case because the sentence a user needs is "finish opening
     /// your desk" rather than "the order failed".

@@ -17,16 +17,35 @@ struct TicketSheet: View {
 
     @State private var amount = ""
     @State private var leverage = 1
+    @State private var stopLoss = ""
+    @State private var takeProfit = ""
     @State private var handledFill = false
 
     private var quote: OrderQuote? {
-        guard let market, let mark, let money = Money(text: amount.isEmpty ? "0" : amount),
-              money.raw > 0,
-              let size = sizeFor(money, mark: mark, market: market)
+        guard let market, let mark, let margin = Money(text: amount.isEmpty ? "0" : amount),
+              margin.raw > 0,
+              let notionalRaw = Int64(exactly: Int128(margin.raw) * Int128(leverage)),
+              let notional = Money(raw: notionalRaw),
+              let size = sizeFor(notional, mark: mark, market: market)
         else { return nil }
         return try? OrderQuote.forMarket(
             market, side: side == .up ? .long : .short, size: size, price: mark,
             leverageHundredths: leverage * 100)
+    }
+
+    private var protection: OrderDesk.Draft.Protection? {
+        guard let market, let mark else { return nil }
+        let decimals = market.config.priceDecimals
+        let sl = stopLoss.isEmpty ? nil : Price(selling: stopLoss, decimals: decimals)
+        let tp = takeProfit.isEmpty ? nil : Price(buying: takeProfit, decimals: decimals)
+        guard sl != nil || tp != nil else { return nil }
+        if let sl, side == .up ? sl >= mark : sl <= mark { return nil }
+        if let tp, side == .up ? tp <= mark : tp >= mark { return nil }
+        return .init(stopLoss: sl, takeProfit: tp)
+    }
+
+    private var hasInvalidProtection: Bool {
+        (!stopLoss.isEmpty || !takeProfit.isEmpty) && protection == nil
     }
 
     private func sizeFor(_ notional: Money, mark: Price, market: Market) -> Size? {
@@ -63,11 +82,16 @@ struct TicketSheet: View {
             }
             .padding(.top, 12)
 
+            Text("Leveraged size  \(quote?.notional.display() ?? Unavailable.text) AUSD")
+                .font(DeskType.caption)
+                .foregroundStyle(DeskColor.nightMuted.color)
+                .padding(.top, 4)
+
             // What it costs, immediately under what was typed. Principle three, as a
             // layout rather than as a promise.
             VStack(spacing: 10) {
-                ValueRow(label: "Order value", value: quote?.notional.display() ?? Unavailable.text)
-                ValueRow(label: "Margin", value: quote?.margin.display() ?? Unavailable.text)
+                ValueRow(label: "Leveraged size", value: quote?.notional.display() ?? Unavailable.text)
+                ValueRow(label: "Your margin", value: quote?.margin.display() ?? Unavailable.text)
                 if leverage == 1 {
                     // The honesty case. A default of 1× is invisible unless it is said
                     // out loud, and saying it is the cheapest credibility in the app.
@@ -94,7 +118,7 @@ struct TicketSheet: View {
             .padding(.top, 20)
 
             HStack(spacing: 8) {
-                ForEach([1, 2, 5, 10, 15], id: \.self) { option in
+                ForEach([1, 2, 5, 10, 15].filter { $0 <= (market?.config.maxLeverage ?? 1) }, id: \.self) { option in
                     Button { leverage = option } label: {
                         Text("\(option)×")
                             .font(DeskType.caption)
@@ -106,6 +130,41 @@ struct TicketSheet: View {
                 }
             }
             .padding(.top, 16)
+
+            VStack(spacing: 10) {
+                HStack {
+                    Text("Stop loss / Take profit")
+                        .font(DeskType.label)
+                    Spacer()
+                    Text("Mark price")
+                        .font(DeskType.caption)
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+                HStack(spacing: 10) {
+                    protectionField("SL price", text: $stopLoss)
+                    protectionField("TP price", text: $takeProfit)
+                }
+                if let loss = projectedPnL(stopLoss, isProfit: false) {
+                    ValueRow(label: "Potential loss", value: "−\(loss.display()) AUSD", tint: DeskColor.fall)
+                }
+                if let profit = projectedPnL(takeProfit, isProfit: true) {
+                    ValueRow(label: "Potential profit", value: "+\(profit.display()) AUSD", tint: DeskColor.rise)
+                }
+                if hasInvalidProtection {
+                    Text(side == .up
+                         ? "For a long, SL must be below mark and TP above it."
+                         : "For a short, SL must be above mark and TP below it.")
+                        .font(DeskType.caption)
+                        .foregroundStyle(DeskColor.fall.color)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if protection != nil {
+                    Text("Held by Perpl even when Desk is closed")
+                        .font(DeskType.caption)
+                        .foregroundStyle(DeskColor.rise.color)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.top, 14)
 
             AmountKeypad(text: $amount)
                 .padding(.top, 8)
@@ -133,7 +192,7 @@ struct TicketSheet: View {
                     ? "Enter order size"
                     : "Hold to \(side.word().lowercased()) \(amount) AUSD · \(leverage)×",
                 tint: side == .up ? DeskColor.rise : DeskColor.fall,
-                isEnabled: quote != nil && !session.isBusy
+                isEnabled: quote != nil && !hasInvalidProtection && !session.isBusy
             ) {
                 Task { await submit() }
             }
@@ -180,8 +239,31 @@ struct TicketSheet: View {
             // The venue's own cap, not a number chosen here. A market order is a
             // marketable limit bounded by slippage, so this is the only thing standing
             // between a thin book and a fill at any price.
-            slippageBps: min(50, market.maxMarketSlippageBps))
+            slippageBps: min(50, market.maxMarketSlippageBps),
+            protection: protection)
+
         await session.place(draft)
+    }
+
+    private func protectionField(_ title: String, text: Binding<String>) -> some View {
+        TextField(title, text: text)
+            .keyboardType(.decimalPad)
+            .font(DeskType.label)
+            .foregroundStyle(DeskColor.nightText.color)
+            .padding(.horizontal, 14)
+            .frame(height: 44)
+            .background(DeskColor.nightChip.color)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func projectedPnL(_ text: String, isProfit: Bool) -> Money? {
+        guard !text.isEmpty, let market, let mark, let size = quote?.size else { return nil }
+        let entered = isProfit
+            ? Price(buying: text, decimals: market.config.priceDecimals)
+            : Price(selling: text, decimals: market.config.priceDecimals)
+        guard let entered else { return nil }
+        let difference = entered.raw >= mark.raw ? entered - mark : mark - entered
+        return Money.notional(price: difference, size: size, rounding: .towardZero)
     }
 
     private func liquidationText(_ quote: OrderQuote) -> String {

@@ -11,6 +11,15 @@ public enum OrderType: Int, Sendable, Hashable {
     case change = 7
 }
 
+/// The venue compares trigger prices against either the last trade or mark price. Desk
+/// uses mark price for protection because one stray trade must not close a position.
+public enum TriggerPriceCondition: Int, Sendable, Hashable {
+    case greaterThanOrEqualLast = 1
+    case lessThanOrEqualLast = 2
+    case greaterThanOrEqualMark = 3
+    case lessThanOrEqualMark = 4
+}
+
 /// Good-till-cancelled is the absence of a flag, not a value.
 public struct OrderFlags: OptionSet, Sendable, Hashable {
     public let rawValue: Int
@@ -41,6 +50,10 @@ public struct OrderRequest: Encodable, Sendable, Hashable {
     public let lastBlock: Int64
     public let maxSlippageBps: Int?
     public let orderID: Int64?
+    public let triggerPriceRaw: Int64?
+    public let triggerCondition: TriggerPriceCondition?
+    public let linkedRequestID: Int64?
+    public let linkedPositionID: Int64?
 
     enum CodingKeys: String, CodingKey {
         case messageType = "mt"
@@ -56,6 +69,10 @@ public struct OrderRequest: Encodable, Sendable, Hashable {
         case lastBlock = "lb"
         case maxSlippageBps = "ms"
         case orderID = "oid"
+        case triggerPriceRaw = "tp"
+        case triggerCondition = "tpc"
+        case linkedRequestID = "tr"
+        case linkedPositionID = "lp"
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -73,6 +90,10 @@ public struct OrderRequest: Encodable, Sendable, Hashable {
         try box.encode(lastBlock, forKey: .lastBlock)
         try box.encodeIfPresent(maxSlippageBps, forKey: .maxSlippageBps)
         try box.encodeIfPresent(orderID, forKey: .orderID)
+        try box.encodeIfPresent(triggerPriceRaw, forKey: .triggerPriceRaw)
+        try box.encodeIfPresent(triggerCondition?.rawValue, forKey: .triggerCondition)
+        try box.encodeIfPresent(linkedRequestID, forKey: .linkedRequestID)
+        try box.encodeIfPresent(linkedPositionID, forKey: .linkedPositionID)
     }
 }
 
@@ -85,6 +106,7 @@ public enum OrderBuilder {
         case priceScaleMismatch
         case sizeScaleMismatch
         case priceMustBePositive
+        case triggerRequiresLink
         case deadlineOverflow(headBlock: Int64, ttl: UInt32)
     }
 
@@ -118,7 +140,9 @@ public enum OrderBuilder {
             // accepted by the old gateway but is rejected by the deployed exchange.
             lastBlock: 0,
             maxSlippageBps: slippageBps,
-            orderID: nil)
+            orderID: nil,
+            triggerPriceRaw: nil, triggerCondition: nil,
+            linkedRequestID: nil, linkedPositionID: nil)
     }
 
     public static func limit(
@@ -151,7 +175,9 @@ public enum OrderBuilder {
             leverageHundredths: leverageHundredths,
             lastBlock: 0,
             maxSlippageBps: nil,
-            orderID: nil)
+            orderID: nil,
+            triggerPriceRaw: nil, triggerCondition: nil,
+            linkedRequestID: nil, linkedPositionID: nil)
     }
 
     /// Closing uses its own types, never an opposing open.
@@ -189,7 +215,57 @@ public enum OrderBuilder {
             leverageHundredths: 100,
             lastBlock: 0,
             maxSlippageBps: slippageBps,
-            orderID: nil)
+            orderID: nil,
+            triggerPriceRaw: nil, triggerCondition: nil,
+            linkedRequestID: nil, linkedPositionID: nil)
+    }
+
+    /// A venue-hosted protective close. Linking it to the opening request means it only
+    /// becomes active if that request trades, and the venue cancels it when the linked
+    /// position closes. It therefore remains protective while Desk is suspended or shut.
+    public static func protectiveClose(
+        side: Side,
+        market config: Market,
+        account: UInt32,
+        size: Size,
+        triggerPrice: Price,
+        condition: TriggerPriceCondition,
+        linkedRequestID: Int64? = nil,
+        linkedPositionID: Int64? = nil,
+        slippageBps: Int,
+        requestID: Int64,
+        frameID: Int64
+    ) throws -> OrderRequest {
+        guard frameID != 0 else { throw Failure.frameIDMustBeNonZero }
+        guard size.raw > 0 else { throw Failure.sizeMustBePositive }
+        guard size.decimals == config.config.sizeDecimals else { throw Failure.sizeScaleMismatch }
+        guard triggerPrice.decimals == config.config.priceDecimals else {
+            throw Failure.priceScaleMismatch
+        }
+        guard triggerPrice.raw > 0 else { throw Failure.priceMustBePositive }
+        guard linkedRequestID != nil || linkedPositionID != nil else {
+            throw Failure.triggerRequiresLink
+        }
+        guard slippageBps > 0, slippageBps <= config.maxMarketSlippageBps else {
+            throw Failure.slippageOutOfRange(slippageBps, max: config.maxMarketSlippageBps)
+        }
+        return OrderRequest(
+            frameID: frameID,
+            requestID: requestID,
+            market: config.id,
+            account: account,
+            type: side == .long ? .closeLong : .closeShort,
+            priceRaw: 0,
+            sizeRaw: size.raw,
+            flags: .immediateOrCancel,
+            leverageHundredths: 100,
+            lastBlock: 0,
+            maxSlippageBps: slippageBps,
+            orderID: nil,
+            triggerPriceRaw: triggerPrice.raw,
+            triggerCondition: condition,
+            linkedRequestID: linkedRequestID,
+            linkedPositionID: linkedPositionID)
     }
 
     /// Cancel is message 22 with type 5, not a message of its own.
@@ -214,7 +290,9 @@ public enum OrderBuilder {
             leverageHundredths: 100,
             lastBlock: 0,
             maxSlippageBps: nil,
-            orderID: orderID)
+            orderID: orderID,
+            triggerPriceRaw: nil, triggerCondition: nil,
+            linkedRequestID: nil, linkedPositionID: nil)
     }
 
     private static func validate(

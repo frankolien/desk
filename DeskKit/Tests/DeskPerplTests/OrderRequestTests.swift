@@ -97,6 +97,38 @@ struct OrderRequestTests {
         #expect(short.type == .closeShort)
     }
 
+    @Test("protective closes are linked mark-price triggers")
+    func protectiveClose() throws {
+        let order = try OrderBuilder.protectiveClose(
+            side: .long, market: btc, account: 7,
+            size: #require(Size(typed: "0.01480", decimals: 5)),
+            triggerPrice: #require(Price(selling: "64000", decimals: 1)),
+            condition: .lessThanOrEqualMark,
+            linkedRequestID: 41, slippageBps: 50,
+            requestID: 42, frameID: 2)
+        let json = try encoded(order)
+        #expect(json["t"] as? Int == 3)
+        #expect(json["p"] as? Int == 0)
+        #expect(json["fl"] as? Int == 4)
+        #expect(json["tp"] as? Int == 640_000)
+        #expect(json["tpc"] as? Int == 4)
+        #expect(json["tr"] as? Int == 41)
+        #expect(json["lb"] as? Int == 0)
+        #expect(json["ms"] as? Int == 50)
+    }
+
+    @Test("a protective close cannot float without a request or position link")
+    func protectionRequiresLink() throws {
+        #expect(throws: OrderBuilder.Failure.triggerRequiresLink) {
+            try OrderBuilder.protectiveClose(
+                side: .short, market: btc, account: 7,
+                size: #require(Size(typed: "0.01480", decimals: 5)),
+                triggerPrice: #require(Price(buying: "70000", decimals: 1)),
+                condition: .greaterThanOrEqualMark,
+                slippageBps: 50, requestID: 42, frameID: 2)
+        }
+    }
+
     @Test("cancel is message 22 with type five and an order id")
     func cancelIsNotItsOwnMessage() throws {
         let order = try OrderBuilder.cancel(
