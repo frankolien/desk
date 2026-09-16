@@ -143,6 +143,13 @@ final class MarketModel {
         market = selected
         symbol = selected.symbol
         candles = []
+        // The series belongs to the market that produced it. Carried across a switch,
+        // its first and last entries were two different instruments, and every figure
+        // derived from them compared one market's price to another's: selecting SOL
+        // after BTC rendered SOL, live at $97, as down 99.87%, and coloured the trend
+        // from the same comparison. Cleared here so `record` reseeds from the new
+        // market's own previous mark.
+        history = []
         lastCandleFetch = nil
         applyQuote(for: selected)
         Task { await refreshCandles() }
