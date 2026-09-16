@@ -232,19 +232,13 @@ struct MarketSearchScreen: View {
                             }
                         }
                     }
-                    .contentMargins(.horizontal, 0)
+                    // Full bleed, with the inset moved inside the scroller. Taking the
+                    // parent's 20pt padding, the row was cropped 20pt short of the
+                    // screen and the next card read as cut off rather than as waiting
+                    // to be scrolled to.
+                    .contentMargins(.horizontal, 20)
+                    .padding(.horizontal, -20)
                     .padding(.top, 12)
-
-                    HStack {
-                        Text("All Perpl Markets")
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                        Spacer()
-                        Text("\(market.allMarkets.count) live")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundStyle(DeskColor.nightMuted.color)
-                    }
-                    .foregroundStyle(DeskColor.nightText.color)
-                    .padding(.top, 30)
 
                     if !spotResults.isEmpty {
                         HStack {
@@ -282,6 +276,21 @@ struct MarketSearchScreen: View {
                             .frame(minHeight: 150)
                     }
 
+                    // Directly above the rows it titles. This header used to sit above
+                    // the trending-coins section, so the screen announced "All Perpl
+                    // Markets · 7 live" and then listed spot tokens, while the seven
+                    // markets themselves arrived further down under no heading at all.
+                    HStack {
+                        Text("All Perpl Markets")
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                        Spacer()
+                        Text("\(market.allMarkets.count) live")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                    }
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .padding(.top, 30)
+
                     if market.allMarkets.isEmpty {
                         // Still loading the context. Skeletons rather than "no results",
                         // which would be a claim about the venue.
@@ -316,7 +325,10 @@ struct MarketSearchScreen: View {
                         .padding(.top, 24)
                 }
                 .padding(.horizontal, 20)
-                .padding(.bottom, 130)
+                // Clears the floating search field as well as the tab bar. At 130 the
+                // last trending row sat underneath "Search anything" and could not be
+                // read or tapped.
+                .padding(.bottom, 184)
             }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -462,21 +474,31 @@ private struct TrendingSpotRow: View {
                 Text(token.name)
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .foregroundStyle(DeskColor.nightText.color)
-                HStack(spacing: 7) {
-                    Text(token.symbol)
-                    Text(token.chainName)
-                    if let change = token.change {
-                        Text(String(format: "%+.2f%%", change))
-                            .foregroundStyle(change >= 0 ? DeskColor.rise.color : DeskColor.fall.color)
-                    }
-                }
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(DeskColor.nightMuted.color)
+                    .lineLimit(1)
+                Text(token.symbol + " · " + token.chainName)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            Spacer()
-            Text(token.price.map(spotPrice) ?? "$—")
-                .font(.system(size: 15, weight: .bold).monospacedDigit())
-                .foregroundStyle(DeskColor.nightText.color)
+            Spacer(minLength: 8)
+            // Price and change in one trailing column, the way every other row in Desk
+            // reads. Sharing a line with the symbol and the chain, these wrapped
+            // mid-word inside a 76pt row — "ARGU" above "S" — and once that was held to
+            // one line the change became the part that truncated, to "+1130.9…". A
+            // percentage with its digits cut off is worse than no percentage at all.
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(token.price.map(spotPrice) ?? "$—")
+                    .font(.system(size: 15, weight: .bold).monospacedDigit())
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .lineLimit(1)
+                if let change = token.change {
+                    Text(String(format: "%+.2f%%", change))
+                        .font(.system(size: 12, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(change >= 0 ? DeskColor.rise.color : DeskColor.fall.color)
+                        .lineLimit(1)
+                }
+            }
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(DeskColor.nightMuted.color)
