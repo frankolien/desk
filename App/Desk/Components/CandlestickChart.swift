@@ -1,12 +1,9 @@
 import DeskUI
 import SwiftUI
 
-/// A horizontal line drawn across the price plot at a price the position depends on:
-/// where the user got in, and where the venue takes them out.
-///
-/// The price arrives already formatted. The chart knows how to place a number on a
-/// canvas and nothing about how many digits a market shows, and a chart that decides
-/// that for itself is a chart that disagrees with the rows underneath it.
+/// A horizontal line across the price plot: where the user got in, and where the venue
+/// takes them out. The price arrives already formatted, so the chart never decides how
+/// many digits a market shows.
 struct PriceGuide: Identifiable, Hashable {
     let label: String
     /// Raw, at the same price decimals as the candles beside it.
@@ -38,24 +35,20 @@ struct CandlestickChart: View {
             let candleLow = Double(lowRaw) / scale, candleHigh = Double(highRaw) / scale
             let candleSpread = max(candleHigh - candleLow, candleHigh * 0.0001)
 
-            // A guide only widens the axis while it is near enough to be worth seeing.
-            // A liquidation price a long way off would otherwise squash every candle
-            // into a flat line to make room for one dashed rule.
-            //
-            // Eight tenths of the candle range rather than one and a half. At the wider
-            // reach a liquidation sitting five dollars under a six dollar range still
-            // pulled the floor down to meet it, and the price action — the reason the
-            // chart is there — was compressed into the top half with an empty band
-            // beneath it. Past this distance the guide clamps to the edge and keeps its
-            // arrow, which says "further than this" without costing the candles room.
-            let reach = candleSpread * 0.8
-            var low = candleLow, high = candleHigh
+            // A guide widens the axis only while the candles keep this share of the
+            // plot. Past that it clamps to the edge and keeps its arrow.
+            let candleShare = 0.72
+            let budget = candleSpread / candleShare - candleSpread
+            var below = 0.0, above = 0.0
             for guide in guides {
                 let value = Double(guide.raw) / scale
-                guard value >= candleLow - reach, value <= candleHigh + reach else { continue }
-                low = min(low, value)
-                high = max(high, value)
+                below = max(below, candleLow - value)
+                above = max(above, value - candleHigh)
             }
+            let needed = below + above
+            let granted = needed > budget ? budget / needed : 1
+            let low = candleLow - below * granted
+            let high = candleHigh + above * granted
             let spread = max(high - low, high * 0.0001)
 
             let plotWidth = size.width - 62
@@ -67,9 +60,7 @@ struct CandlestickChart: View {
             }
             func y(_ raw: UInt64) -> CGFloat { y(Double(raw) / scale) }
 
-            // Placed before the axis is drawn so a grid label can stand aside for a
-            // guide sitting on top of it. Two numbers in the same six points of gutter
-            // are unreadable, and the guide is the one the user came for.
+            // Resolved before the axis so a grid label can stand aside for a guide.
             let guidePositions = guides.map { guide -> (PriceGuide, CGFloat, Bool) in
                 let value = Double(guide.raw) / scale
                 let unclamped = y(value)
@@ -78,14 +69,8 @@ struct CandlestickChart: View {
             }
 
             for row in 0...3 {
-                // Placed by the same mapping the candles and guides use, rather than by
-                // an even division of the plot. `y` compresses the data to 0.90 of the
-                // height and offsets it by seven points; the grid did neither, so every
-                // label sat up to twelve points away from its own price. That is how
-                // 92.74 came to be drawn twice on one chart — once as a liquidation
-                // guide at its true height, and once as an axis label well below it,
-                // far enough apart that the nine-point guard below could not tell they
-                // were the same number.
+                // Placed by the same mapping as the candles and guides, so a label and a
+                // guide carrying the same price land together.
                 let price = high - spread * Double(row) / 3
                 let rowY = y(price)
                 var grid = Path()
@@ -110,9 +95,7 @@ struct CandlestickChart: View {
                 wick.move(to: CGPoint(x: x, y: y(candle.h)))
                 wick.addLine(to: CGPoint(x: x, y: y(candle.l)))
                 context.stroke(wick, with: .color(color), lineWidth: 0.7)
-                // Narrow bodies with air between them. A fat candle reads as a bar chart
-                // and hides the wicks, which are the part that says how far price
-                // actually travelled inside the period.
+                // Narrow bodies: a fat candle hides the wick, which is the telling part.
                 let halfBody = max(1, xStep * 0.16)
                 let body = CGRect(x: x - halfBody, y: top,
                                   width: halfBody * 2, height: max(1, bottom - top))
@@ -144,8 +127,8 @@ struct CandlestickChart: View {
                 context.stroke(line, with: .color(guide.tint.opacity(isOffPlot ? 0.4 : 0.85)),
                                style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
 
-                // An arrow when the price is outside the window, because a line pinned
-                // to the edge otherwise reads as a price that is right there.
+                // An arrow when the price is off-window: a line pinned to the edge
+                // otherwise reads as a price that is right there.
                 let caption = isOffPlot
                     ? guide.label + (guideY <= 7 ? " ↑" : " ↓")
                     : guide.label
