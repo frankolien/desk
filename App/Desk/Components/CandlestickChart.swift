@@ -32,57 +32,32 @@ struct CandlestickChart: View {
                   let lowRaw = samples.map(\.l).min(),
                   let highRaw = samples.map(\.h).max() else { return }
             let scale = pow(10.0, Double(priceDecimals))
-            let candleLow = Double(lowRaw) / scale, candleHigh = Double(highRaw) / scale
-            let candleSpread = max(candleHigh - candleLow, candleHigh * 0.0001)
-
-            // A guide widens the axis only while the candles keep this share of the
-            // plot. Past that it clamps to the edge and keeps its arrow.
-            let candleShare = 0.72
-            let budget = candleSpread / candleShare - candleSpread
-            var below = 0.0, above = 0.0
-            for guide in guides {
-                let value = Double(guide.raw) / scale
-                below = max(below, candleLow - value)
-                above = max(above, value - candleHigh)
-            }
-            let needed = below + above
-            let granted = needed > budget ? budget / needed : 1
-            let low = candleLow - below * granted
-            let high = candleHigh + above * granted
-            let spread = max(high - low, high * 0.0001)
-
             let plotWidth = size.width - 62
             let priceHeight = size.height * 0.76
             let volumeTop = size.height * 0.80
             let xStep = plotWidth / CGFloat(samples.count)
-            func y(_ value: Double) -> CGFloat {
-                priceHeight * CGFloat(1 - (value - low) / spread) * 0.90 + 7
-            }
-            func y(_ raw: UInt64) -> CGFloat { y(Double(raw) / scale) }
 
-            // Resolved before the axis so a grid label can stand aside for a guide.
-            let guidePositions = guides.map { guide -> (PriceGuide, CGFloat, Bool) in
-                let value = Double(guide.raw) / scale
-                let unclamped = y(value)
-                let clamped = min(max(unclamped, 7), priceHeight)
-                return (guide, clamped, abs(unclamped - clamped) > 0.5)
-            }
+            let guideValues = guides.map { Double($0.raw) / scale }
+            let axis = PriceAxis(
+                candleLow: Double(lowRaw) / scale,
+                candleHigh: Double(highRaw) / scale,
+                guides: guideValues,
+                height: priceHeight,
+                topInset: 7,
+                bottomInset: 7)
+            func y(_ raw: UInt64) -> CGFloat { axis.y(Double(raw) / scale) }
+            let placements = Array(zip(guides, guideValues.map(axis.place)))
 
-            for row in 0...3 {
-                // Placed by the same mapping as the candles and guides, so a label and a
-                // guide carrying the same price land together.
-                let price = high - spread * Double(row) / 3
-                let rowY = y(price)
+            for tick in axis.ticks(clearOf: guideValues, within: 11) {
                 var grid = Path()
-                grid.move(to: CGPoint(x: 0, y: rowY))
-                grid.addLine(to: CGPoint(x: plotWidth, y: rowY))
+                grid.move(to: CGPoint(x: 0, y: tick.y))
+                grid.addLine(to: CGPoint(x: plotWidth, y: tick.y))
                 context.stroke(grid, with: .color(.white.opacity(0.07)),
                                style: StrokeStyle(lineWidth: 0.6, dash: [3, 5]))
-                guard !guidePositions.contains(where: { abs($0.1 - rowY) < 9 }) else { continue }
                 context.draw(
-                    Text(Self.axis(price)).font(.system(size: 10, weight: .semibold))
+                    Text(Self.axis(tick.value)).font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.gray),
-                    at: CGPoint(x: plotWidth + 31, y: rowY))
+                    at: CGPoint(x: plotWidth + 31, y: tick.y))
             }
 
             let maxVolume = samples.compactMap { Double($0.v) }.max() ?? 1
@@ -120,18 +95,22 @@ struct CandlestickChart: View {
                     lineWidth: 0.8)
             }
 
-            for (guide, guideY, isOffPlot) in guidePositions {
+            for (guide, placement) in placements {
+                let guideY = placement.y
                 var line = Path()
                 line.move(to: CGPoint(x: 0, y: guideY))
                 line.addLine(to: CGPoint(x: plotWidth, y: guideY))
-                context.stroke(line, with: .color(guide.tint.opacity(isOffPlot ? 0.4 : 0.85)),
-                               style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                context.stroke(
+                    line, with: .color(guide.tint.opacity(placement.isOffScale ? 0.4 : 0.85)),
+                    style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
 
-                // An arrow when the price is off-window: a line pinned to the edge
+                // An arrow when the price is off-scale: a line pinned to the edge
                 // otherwise reads as a price that is right there.
-                let caption = isOffPlot
-                    ? guide.label + (guideY <= 7 ? " ↑" : " ↓")
-                    : guide.label
+                let caption = switch placement.offScale {
+                case .above: guide.label + " ↑"
+                case .below: guide.label + " ↓"
+                case nil: guide.label
+                }
                 let resolved = context.resolve(
                     Text(caption).font(.system(size: 10, weight: .bold, design: .rounded))
                         .foregroundStyle(guide.tint))
