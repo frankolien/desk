@@ -85,6 +85,27 @@ test("requests are refused before touching the chain", async () => {
   assert.equal(get.status, 405);
 });
 
+test("a wallet that hit Agora's cooldown may ask again at once", async () => {
+  const memory = new Map();
+  const chain = fakeChain(
+    { recipientMON: 0n, recipientAUSD: 0n, faucetMON: FULL_FAUCET },
+    { simulateClaim: async () => ({ ok: false, reason: "cooldown" }) });
+  const handler = createHandler(() => chain, memory);
+  const first = await handler({ method: "POST", body: { address: WALLET } }, recorder());
+  assert.equal(first.body.mon.status, "sent");
+  assert.equal(first.body.ausd.reason, "cooldown");
+  const again = await handler({ method: "POST", body: { address: WALLET } }, recorder());
+  assert.equal(again.status, 200);
+});
+
+test("a fully delivered wallet is throttled", async () => {
+  const handler = createHandler(
+    () => fakeChain({ recipientMON: 0n, recipientAUSD: 0n, faucetMON: FULL_FAUCET }), new Map());
+  await handler({ method: "POST", body: { address: WALLET } }, recorder());
+  const again = await handler({ method: "POST", body: { address: WALLET } }, recorder());
+  assert.equal(again.status, 429);
+});
+
 test("a chain failure answers 502 and frees the wallet to retry", async () => {
   const memory = new Map();
   const failing = fakeChain({}, { balances: async () => { throw new Error("rpc down"); } });

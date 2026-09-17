@@ -200,6 +200,11 @@ export function createHandler(resolveDependencies, memory = recent) {
           result[asset] = { status: "unavailable", reason: "faucet-empty" };
         }
       }
+      // Anything undelivered may be asked for again straight away: Agora's cooldown is
+      // shared by every caller, so the wallet should not also wait out Desk's.
+      if (result.mon.status === "unavailable" || result.ausd.status === "unavailable") {
+        memory.delete(recipient.toLowerCase());
+      }
       return res.status(200).json(result);
     } catch {
       memory.delete(recipient.toLowerCase());

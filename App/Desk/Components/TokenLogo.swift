@@ -259,6 +259,11 @@ struct AddFundsSheet: View {
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundStyle(.green)
                 }
+                if let sentence = model.fundingStatus {
+                    Label(sentence, systemImage: "hourglass")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
                 if let sentence = model.fundingProblem {
                     Label(sentence, systemImage: "exclamationmark.circle.fill")
                         .font(.caption.weight(.medium))

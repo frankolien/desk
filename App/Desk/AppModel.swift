@@ -69,6 +69,8 @@ final class AppModel {
     private(set) var fundingProblem: String?
     /// Set when Desk's faucet cannot help, so setup offers Monad's own instead.
     private(set) var needsManualFaucet = false
+    /// What the faucet is waiting on, while it waits.
+    private(set) var fundingStatus: String?
     private let faucet = DeskFaucet()
     /// Which of the four steps is running, for the Fund screen to render.
     private(set) var openingStep: OpeningSequence.Progress?
@@ -349,8 +351,18 @@ final class AppModel {
         guard let address, !isWorking else { return }
         isWorking = true
         fundingProblem = nil
+        defer { fundingStatus = nil }
         do {
-            let outcome = try await faucet.fund(address)
+            var outcome = try await faucet.fund(address)
+            // Agora allows one claim a minute across every caller, so a busy faucet is
+            // waited out here rather than handed back as a second tap.
+            for _ in 0..<5 where outcome.ausd.reason == "cooldown" {
+                if outcome.mon.arrived { await refreshUntilChanged() }
+                fundingStatus = "Agora's faucet is busy. Your AUSD is next in line…"
+                try await Task.sleep(for: .seconds(15))
+                outcome = try await faucet.fund(address)
+            }
+            fundingStatus = nil
             fundingProblem = DeskFaucet.problem(in: outcome)
             needsManualFaucet = outcome.mon.status == "unavailable"
             if outcome.mon.arrived || outcome.ausd.arrived {
@@ -362,6 +374,8 @@ final class AppModel {
         } catch DeskFaucet.Failure.tooSoon {
             fundingProblem = "This wallet was just funded. Give it a minute."
             await refreshBalances()
+            isWorking = false
+        } catch is CancellationError {
             isWorking = false
         } catch {
             needsManualFaucet = true

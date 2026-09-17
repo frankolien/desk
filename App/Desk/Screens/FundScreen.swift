@@ -40,10 +40,10 @@ struct FundScreen: View {
                             .padding(.horizontal, 4)
                             .padding(.top, 13)
                     }
-                    if let progress = model.openingStep {
+                    if let sentence = model.fundingStatus ?? model.openingStep.map(Self.stepSentence) {
                         HStack(spacing: 8) {
                             ProgressView().controlSize(.small)
-                            Text(Self.stepSentence(progress))
+                            Text(sentence)
                         }
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
