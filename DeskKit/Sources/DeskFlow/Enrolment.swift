@@ -47,6 +47,29 @@ public struct Enrolment: Sendable {
         case scopeOutOfRange(Int)
         case labelTooLong(Int)
         case apiKeyMissing
+        case noCandidateKeys
+    }
+
+    /// Enrols the first trading key in `indices` that Perpl has not registered.
+    ///
+    /// Perpl answers 409 for a public key it has seen and never issues that key's token
+    /// again, so a wallet whose token was lost can only recover with a different key.
+    /// Keys are derived, so the next one is always to hand, and every other failure is
+    /// raised as itself rather than walked past.
+    public func enrolFirstUnregistered(
+        address: EthereumAddress,
+        label: String,
+        indices: Range<UInt32>,
+        signers: @Sendable (UInt32) throws -> EnrolmentSigners
+    ) async throws -> (apiKey: APIKey, index: UInt32) {
+        for index in indices {
+            do {
+                return (try await enrol(address: address, label: label, signers: try signers(index)), index)
+            } catch PerplREST.Failure.rejected(status: 409, _) where index + 1 < indices.upperBound {
+                continue
+            }
+        }
+        throw Failure.noCandidateKeys
     }
 
     /// Read and trade. The mask Perpl's own client sends.

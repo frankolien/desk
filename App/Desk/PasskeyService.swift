@@ -18,11 +18,13 @@ protocol PasskeyService: Sendable {
     /// Signs in with an existing passkey. Never creates one — creating is
     /// `createAccounts()`, and the separation is load-bearing: a passkey created by
     /// accident is a different wallet, and the funded one becomes unreachable.
-    func deriveAccounts() async throws -> DerivedAccounts
+    /// `tradingIndex` is asked once the address is known, because which trading key a
+    /// wallet uses is recorded against that address.
+    func deriveAccounts(tradingIndex: @Sendable (EthereumAddress) -> UInt32) async throws -> DerivedAccounts
 
     /// Creates a passkey and the wallet derived from it. Only ever from an explicit
     /// choice by the user.
-    func createAccounts() async throws -> DerivedAccounts
+    func createAccounts(tradingIndex: @Sendable (EthereumAddress) -> UInt32) async throws -> DerivedAccounts
 
     /// Borrows both keys for exactly one piece of work.
     ///
@@ -36,8 +38,64 @@ protocol PasskeyService: Sendable {
     /// deposits and withdrawals, which happen a handful of times in the life of an
     /// account and are exactly where a prompt feels earned.
     func withKeys<T: Sendable>(
-        _ body: @Sendable (WalletKey, TradingKey) async throws -> T
+        _ body: @Sendable (WalletKey, TradingKeys) async throws -> T
     ) async throws -> T
+}
+
+/// Which derived trading key a new desk tries first. Indexes 0 and 1 were enrolled by
+/// early builds whose tokens were lost, so every wallet starts here and moves on only if
+/// Perpl says a key is already registered.
+enum TradingKeyIndex {
+    static let initial: UInt32 = 2
+    /// How far enrolment walks before giving up; each step is one refused request.
+    static let attempts: UInt32 = 8
+}
+
+/// Trading keys by index, valid only inside the `withKeys` call that produced them.
+///
+/// Perpl never re-issues a token for a public key it has seen, so recovering from a lost
+/// token means enrolling the next derived key — and that has to happen inside the same
+/// Face ID prompt. The PRF bytes behind this are wiped when the call returns; a copy that
+/// escaped would derive nothing afterwards.
+struct TradingKeys: Sendable {
+    fileprivate let source: PRFSource
+
+    func key(at index: UInt32) throws -> TradingKey {
+        try PasskeyAccounts.deriveTradingKey(prfOutput: try source.bytes(), index: index)
+    }
+}
+
+final class PRFSource: @unchecked Sendable {
+    private let lock = NSLock()
+    private var output: Data?
+
+    init(_ output: Data) { self.output = output }
+
+    func bytes() throws -> Data {
+        try lock.withLock {
+            guard let output else { throw PasskeyFailure.prfReturnedNothing }
+            return output
+        }
+    }
+
+    func wipe() {
+        lock.withLock {
+            let count = output?.count ?? 0
+            output?.resetBytes(in: 0..<count)
+            output = nil
+        }
+    }
+}
+
+extension TradingKeys {
+    /// Runs `body` with keys from `prf`, then wipes the bytes whatever happens.
+    static func scoped<T: Sendable>(
+        prf: Data, _ body: @Sendable (TradingKeys) async throws -> T
+    ) async rethrows -> T {
+        let source = PRFSource(prf)
+        defer { source.wipe() }
+        return try await body(TradingKeys(source: source))
+    }
 }
 
 struct DerivedAccounts: Sendable {
@@ -57,30 +115,30 @@ struct DerivedAccounts: Sendable {
 /// `#if DEBUG` is the only thing standing between a convenience and that, which is why
 /// it wraps the type rather than a call site.
 struct StubPasskeyService: PasskeyService {
-    private let tradingKeyIndex: UInt32 = 2
     var lastSeenAddress: EthereumAddress? { nil }
 
-    func deriveAccounts() async throws -> DerivedAccounts {
+    func deriveAccounts(tradingIndex: @Sendable (EthereumAddress) -> UInt32) async throws -> DerivedAccounts {
         try await Task.sleep(for: .milliseconds(600))
         let pretendPRF = Data(repeating: 0x2A, count: 32)
+        let address = try PasskeyAccounts.deriveAddress(prfOutput: pretendPRF)
         return DerivedAccounts(
-            address: try PasskeyAccounts.deriveAddress(prfOutput: pretendPRF),
+            address: address,
             trading: try PasskeyAccounts.deriveTradingKey(
-                prfOutput: pretendPRF, index: tradingKeyIndex),
+                prfOutput: pretendPRF, index: tradingIndex(address)),
             hasDesk: false)
     }
 
-    func createAccounts() async throws -> DerivedAccounts { try await deriveAccounts() }
+    func createAccounts(tradingIndex: @Sendable (EthereumAddress) -> UInt32) async throws -> DerivedAccounts {
+        try await deriveAccounts(tradingIndex: tradingIndex)
+    }
 
     func withKeys<T: Sendable>(
-        _ body: @Sendable (WalletKey, TradingKey) async throws -> T
+        _ body: @Sendable (WalletKey, TradingKeys) async throws -> T
     ) async throws -> T {
         var prf = Data(repeating: 0x2A, count: 32)
         defer { prf.resetBytes(in: 0..<prf.count) }
-        return try await body(
-            try PasskeyAccounts.deriveWalletKey(prfOutput: prf),
-            try PasskeyAccounts.deriveTradingKey(
-                prfOutput: prf, index: tradingKeyIndex))
+        let wallet = try PasskeyAccounts.deriveWalletKey(prfOutput: prf)
+        return try await TradingKeys.scoped(prf: prf) { try await body(wallet, $0) }
     }
 }
 #endif
@@ -90,16 +148,16 @@ struct StubPasskeyService: PasskeyService {
 struct UnavailablePasskeyService: PasskeyService {
     var lastSeenAddress: EthereumAddress? { nil }
 
-    func deriveAccounts() async throws -> DerivedAccounts {
+    func deriveAccounts(tradingIndex: @Sendable (EthereumAddress) -> UInt32) async throws -> DerivedAccounts {
         throw PasskeyFailure.relyingPartyNotAssociated(try RelyingParty("desk.invalid"))
     }
 
-    func createAccounts() async throws -> DerivedAccounts {
+    func createAccounts(tradingIndex: @Sendable (EthereumAddress) -> UInt32) async throws -> DerivedAccounts {
         throw PasskeyFailure.relyingPartyNotAssociated(try RelyingParty("desk.invalid"))
     }
 
     func withKeys<T: Sendable>(
-        _ body: @Sendable (WalletKey, TradingKey) async throws -> T
+        _ body: @Sendable (WalletKey, TradingKeys) async throws -> T
     ) async throws -> T {
         throw PasskeyFailure.relyingPartyNotAssociated(try RelyingParty("desk.invalid"))
     }

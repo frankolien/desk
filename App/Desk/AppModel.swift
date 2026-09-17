@@ -80,6 +80,10 @@ final class AppModel {
     /// Separate from `stage`: an account missing on one network is a card on Home, not a
     /// trip back through onboarding.
     private(set) var hasTradingAccount = false
+    /// Which derived trading key the signing session holds. Each network's Perpl token
+    /// belongs to one index, so a switch to a network whose token uses another index has to
+    /// drop the key and derive the right one at the next Face ID prompt.
+    private var sessionTradingIndex: UInt32?
 
     /// True once a desk has been opened on any network. After that, onboarding never
     /// returns; a network without an account is set up from inside the app.
@@ -255,9 +259,10 @@ final class AppModel {
         signInProblem = nil
         defer { isWorking = false }
         do {
+            let store = apiKeys
             let keys = creating
-                ? try await passkey.createAccounts()
-                : try await passkey.deriveAccounts()
+                ? try await passkey.createAccounts(tradingIndex: { store.tradingIndex(for: $0) })
+                : try await passkey.deriveAccounts(tradingIndex: { store.tradingIndex(for: $0) })
             // The address guard runs before any balance is shown: Apple's synced-passkey
             // bug derives a different address on a second device, and rendering that
             // account's zero would read as theft.
@@ -269,19 +274,20 @@ final class AppModel {
             }
             address = keys.address
             await session.open(keys.trading)
+            sessionTradingIndex = store.tradingIndex(for: keys.address)
             isKeyUnlocked = true
             // `hasDesk` is an on-chain fact. Passkey derivation deliberately cannot
             // answer it, so checking `keys.hasDesk` here always sent returning users
             // back to setup. Read the account before choosing the destination.
             await refreshBalances()
             startPollingBalances()
-            if hasDesk.value == true, let apiKey = apiKeys.load(for: keys.address) {
+            if hasDesk.value == true, let stored = apiKeys.load(for: keys.address) {
                 // A returning user used to jump straight to the trading UI without
                 // rebuilding the authenticated socket. The ticket then had no desk and
                 // could only answer “not connected”. Sign-in now restores the complete
                 // trading session before the first order can be opened.
                 let context = try await PerplREST(configuration: network.perpl()).context()
-                await enterTrading(apiKey: apiKey, context: context)
+                await enterTrading(stored, context: context)
             } else {
                 stage = hasOnboarded(keys.address) ? .trading : .needsDesk
             }
@@ -324,8 +330,8 @@ final class AppModel {
             let rest = PerplREST(configuration: try network.perpl())
             let context = try await rest.context()
             let addresses = try ExchangeAddresses(context: context)
-            if let address, let apiKey = apiKeys.load(for: address) {
-                await enterTrading(apiKey: apiKey, context: context)
+            if let address, let stored = apiKeys.load(for: address) {
+                await enterTrading(stored, context: context)
                 return
             }
             let rpc = MonadRPC(configuration: try network.rpc())
@@ -335,30 +341,46 @@ final class AppModel {
                 enrolment: Enrolment(rest: rest, chainID: context.chain.chainID),
                 addresses: addresses)
 
-            let apiKey = try await passkey.withKeys { [weak self] wallet, trading in
-                try await sequence.open(
+            let session = session
+            let enrolled = try await passkey.withKeys { [weak self] wallet, tradingKeys in
+                // A token lost to a reinstall or a wiped keychain can never be reissued for
+                // the same key, so enrolment moves on to the next derived key inside this
+                // one prompt. The on-chain steps before it check themselves first.
+                let opened = try await sequence.open(
                     wallet: wallet,
-                    trading: trading,
+                    tradingKeys: { try tradingKeys.key(at: $0) },
+                    indices: TradingKeyIndex.initial..<(TradingKeyIndex.initial + TradingKeyIndex.attempts),
                     deposit: deposit,
                     label: "Desk on iPhone",
                     report: { progress in
                         Task { @MainActor in self?.openingStep = progress }
                     })
+                await session.open(try tradingKeys.key(at: opened.index))
+                return APIKeyStore.Stored(apiKey: opened.apiKey, tradingIndex: opened.index)
             }
-            if let address { try apiKeys.save(apiKey, for: address) }
+            if let address { try apiKeys.save(enrolled.apiKey, tradingIndex: enrolled.tradingIndex, for: address) }
+            sessionTradingIndex = enrolled.tradingIndex
+            isKeyUnlocked = true
 
             // The key exists only now. Handing it to the session is what turns the
             // ticket's confirm button from a sentence into an order.
-            await enterTrading(apiKey: apiKey, context: context)
+            await enterTrading(enrolled, context: context)
         } catch {
             openingProblem = Self.openingSentence(for: error)
             openingStep = nil
         }
     }
 
-    private func enterTrading(apiKey: APIKey, context: PerplContext) async {
+    private func enterTrading(_ stored: APIKeyStore.Stored, context: PerplContext) async {
         guard let market = context.market(id: network.defaultMarketID) ?? context.markets.first else { return }
-        trading.adopt(apiKey: apiKey, session: session, market: market)
+        if sessionTradingIndex != stored.tradingIndex {
+            // The key in the session is not the one this token was issued for. Signing
+            // with it would be refused, so it goes, and connecting asks for Face ID once.
+            await session.end()
+            sessionTradingIndex = nil
+            isKeyUnlocked = false
+        }
+        trading.adopt(apiKey: stored.apiKey, session: session, market: market)
         hasTradingAccount = true
         if let head = context.chain.gas?.headBlock { trading.noteHeadBlock(head) }
         // The account and API key already exist at this point. A live-stream outage is
@@ -395,14 +417,12 @@ final class AppModel {
         guard let address else { return }
         await refreshBalances()
         startPollingBalances()
-        if hasDesk.value == true, let apiKey = apiKeys.load(for: address),
+        if hasDesk.value == true, let stored = apiKeys.load(for: address),
            let context = try? await PerplREST(configuration: network.perpl()).context() {
-            await enterTrading(apiKey: apiKey, context: context)
-        } else if !hasOnboarded(address) {
-            stage = .needsDesk
+            await enterTrading(stored, context: context)
         }
-        // Otherwise the stage stays where it was: switching networks keeps you in the app,
-        // and Home offers to open this network's account.
+        // A switch never moves the screen. Without an account on this network, Home and
+        // Perps offer to open one where the person already is.
     }
 
     /// Asks Desk's faucet for whatever this wallet lacks: MON for gas and test AUSD to
@@ -816,13 +836,15 @@ final class AppModel {
         unlockProblem = nil
         defer { isUnlocking = false }
         do {
-            let keys = try await passkey.deriveAccounts()
+            let store = apiKeys
+            let keys = try await passkey.deriveAccounts(tradingIndex: { store.tradingIndex(for: $0) })
             guard keys.address == address else {
                 unlockProblem = "That passkey belongs to a different wallet, so Desk stayed "
                     + "locked. Sign out to switch accounts."
                 return false
             }
             await session.open(keys.trading)
+            sessionTradingIndex = store.tradingIndex(for: address)
             isKeyUnlocked = true
             await trading.reconnect()
             return true

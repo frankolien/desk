@@ -19,6 +19,10 @@ final class RoutingTransport: HTTPTransport, @unchecked Sendable {
         self.routes = routes.mapValues { $0.map { HTTPResponse(status: 200, body: Data($0.utf8)) } }
     }
 
+    init(responses: [String: [HTTPResponse]]) {
+        self.routes = responses
+    }
+
     var requests: [(path: String, body: Data)] { lock.withLock { seen } }
 
     func bodies(for path: String) -> [Data] {
@@ -59,6 +63,15 @@ private let signerAddress = EthereumAddress(bytes: Data(hex: "50b240678777451bef
 private func fakeSigners() -> EnrolmentSigners {
     EnrolmentSigners(
         ed25519PublicKeyHex: { "0x" + String(repeating: "11", count: 32) },
+        signWalletDigest: { _ in
+            EthereumSignature(r: Data(repeating: 0xaa, count: 32), s: Data(repeating: 0xbb, count: 32), yParity: 1)
+        },
+        proveEd25519Possession: { _ in Data(repeating: 0xcc, count: 64) })
+}
+
+private func signers(publicKeyByte: UInt8) -> EnrolmentSigners {
+    EnrolmentSigners(
+        ed25519PublicKeyHex: { "0x" + String(repeating: String(format: "%02x", publicKeyByte), count: 32) },
         signWalletDigest: { _ in
             EthereumSignature(r: Data(repeating: 0xaa, count: 32), s: Data(repeating: 0xbb, count: 32), yParity: 1)
         },
@@ -130,6 +143,60 @@ struct EnrolmentTests {
         #expect(sent["scope_mask"] as? Int == 3)
         #expect(sent["label"] as? String == "desk")
         #expect(sent["public_key"] as? String == "0x" + String(repeating: "11", count: 32))
+    }
+
+    @Test("A key Perpl already registered is passed over for the next derived key")
+    func movesPastRegisteredKey() async throws {
+        let payload = HTTPResponse(status: 200, body: try payloadJSON())
+        let transport = RoutingTransport(responses: [
+            "/api/v1/api-key/payload": [payload, payload],
+            "/api/v1/api-key/enroll": [
+                HTTPResponse(status: 409, body: Data(#"{"error":"Conflict"}"#.utf8)),
+                HTTPResponse(status: 200, body: Data(#"{"api_key":"pk_fresh"}"#.utf8)),
+            ],
+        ])
+        let enrolled = try await Enrolment(rest: try rest(transport), chainID: 10143)
+            .enrolFirstUnregistered(address: signerAddress, label: "desk", indices: 2..<10) { index in
+                signers(publicKeyByte: UInt8(index))
+            }
+        #expect(enrolled.index == 3)
+        #expect(enrolled.apiKey.withValue { $0 } == "pk_fresh")
+        let keys = try transport.bodies(for: "/api/v1/api-key/payload").map {
+            try #require(try JSONSerialization.jsonObject(with: $0) as? [String: Any])["public_key"] as? String
+        }
+        #expect(keys == ["0x" + String(repeating: "02", count: 32), "0x" + String(repeating: "03", count: 32)])
+    }
+
+    @Test("Running out of candidate keys raises Perpl's own refusal")
+    func exhaustsCandidates() async throws {
+        let payload = HTTPResponse(status: 200, body: try payloadJSON())
+        let conflict = HTTPResponse(status: 409, body: Data(#"{"error":"Conflict"}"#.utf8))
+        let transport = RoutingTransport(responses: [
+            "/api/v1/api-key/payload": [payload, payload],
+            "/api/v1/api-key/enroll": [conflict, conflict],
+        ])
+        await #expect(throws: PerplREST.Failure.self) {
+            try await Enrolment(rest: try rest(transport), chainID: 10143)
+                .enrolFirstUnregistered(address: signerAddress, label: "desk", indices: 2..<4) {
+                    signers(publicKeyByte: UInt8($0))
+                }
+        }
+    }
+
+    @Test("Any refusal other than already-registered is not retried")
+    func otherRefusalsStop() async throws {
+        let payload = HTTPResponse(status: 200, body: try payloadJSON())
+        let transport = RoutingTransport(responses: [
+            "/api/v1/api-key/payload": [payload, payload],
+            "/api/v1/api-key/enroll": [HTTPResponse(status: 400, body: Data(#"{"error":"bad"}"#.utf8))],
+        ])
+        await #expect(throws: PerplREST.Failure.self) {
+            try await Enrolment(rest: try rest(transport), chainID: 10143)
+                .enrolFirstUnregistered(address: signerAddress, label: "desk", indices: 2..<10) {
+                    signers(publicKeyByte: UInt8($0))
+                }
+        }
+        #expect(transport.bodies(for: "/api/v1/api-key/payload").count == 1)
     }
 
     @Test("The current nested API-key response is accepted")

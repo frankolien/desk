@@ -19,19 +19,40 @@ struct APIKeyStore: Sendable {
 
     init(service: String) { self.service = service }
 
-    func load(for address: EthereumAddress) -> APIKey? {
+    /// Perpl's token and the index of the trading key it was issued for. The two only
+    /// work together: a session opened with any other derived key is refused.
+    struct Stored: Sendable {
+        let apiKey: APIKey
+        let tradingIndex: UInt32
+    }
+
+    private struct Record: Codable {
+        let token: String
+        let tradingIndex: UInt32
+    }
+
+    func load(for address: EthereumAddress) -> Stored? {
         var query = baseQuery(for: address)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data,
-              let token = String(data: data, encoding: .utf8), !token.isEmpty else { return nil }
-        return APIKey(token)
+              let data = result as? Data else { return nil }
+        if let record = try? JSONDecoder().decode(Record.self, from: data), !record.token.isEmpty {
+            return Stored(apiKey: APIKey(record.token), tradingIndex: record.tradingIndex)
+        }
+        // Entries written before the index was recorded hold the bare token, and every
+        // one of them was enrolled with the key at the initial index.
+        guard let token = String(data: data, encoding: .utf8), !token.isEmpty else { return nil }
+        return Stored(apiKey: APIKey(token), tradingIndex: TradingKeyIndex.initial)
     }
 
-    func save(_ key: APIKey, for address: EthereumAddress) throws {
-        let data = key.withValue { Data($0.utf8) }
+    func tradingIndex(for address: EthereumAddress) -> UInt32 {
+        load(for: address)?.tradingIndex ?? TradingKeyIndex.initial
+    }
+
+    func save(_ key: APIKey, tradingIndex: UInt32, for address: EthereumAddress) throws {
+        let data = try key.withValue { try JSONEncoder().encode(Record(token: $0, tradingIndex: tradingIndex)) }
         let query = baseQuery(for: address)
         let attributes = [kSecValueData as String: data]
         let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)

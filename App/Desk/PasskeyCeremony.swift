@@ -32,10 +32,6 @@ final class PasskeyCeremony: NSObject, PasskeyService {
     /// 18.4 is the first version whose PRF output can be trusted. Below it the ceremony
     /// refuses rather than deriving an address that will not reproduce.
     static let minimumSystemVersion = OperatingSystemVersion(majorVersion: 18, minorVersion: 4, patchVersion: 0)
-    /// Version 0 was successfully enrolled once but its nested response token was
-    /// discarded by the old decoder. A fresh trading-only derivation recovers without
-    /// changing the wallet address or moving any funds.
-    static let tradingKeyIndex: UInt32 = 2
 
     private let relyingParty: RelyingParty
     private let displayName: String
@@ -61,9 +57,9 @@ final class PasskeyCeremony: NSObject, PasskeyService {
     ///
     /// Creating a credential is now `createAccounts()`, reached only by a person choosing
     /// it. Cancellation is cancellation.
-    func deriveAccounts() async throws -> DerivedAccounts {
+    func deriveAccounts(tradingIndex: @Sendable (EthereumAddress) -> UInt32) async throws -> DerivedAccounts {
         try requireSupportedSystem()
-        return try await derive(from: try await assertExisting())
+        return try await derive(from: try await assertExisting(), tradingIndex: tradingIndex)
     }
 
     /// Creates a passkey, and with it a new wallet.
@@ -73,7 +69,7 @@ final class PasskeyCeremony: NSObject, PasskeyService {
     /// second wallet: the first one keeps the funds and nothing in the app can reach them
     /// again. Refusing is the only safe answer, and it is a refusal rather than a warning
     /// because a warning is something people tap through.
-    func createAccounts() async throws -> DerivedAccounts {
+    func createAccounts(tradingIndex: @Sendable (EthereumAddress) -> UInt32) async throws -> DerivedAccounts {
         try requireSupportedSystem()
         if let existing = store.address {
             throw PasskeyFailure.platformRefused(
@@ -81,7 +77,7 @@ final class PasskeyCeremony: NSObject, PasskeyService {
                     + "a second passkey would make a different wallet and leave that one "
                     + "unreachable. Use Face ID to sign in instead.")
         }
-        return try await derive(from: try await createNew())
+        return try await derive(from: try await createNew(), tradingIndex: tradingIndex)
     }
 
     private func requireSupportedSystem() throws {
@@ -90,7 +86,9 @@ final class PasskeyCeremony: NSObject, PasskeyService {
         }
     }
 
-    private func derive(from output: Data) async throws -> DerivedAccounts {
+    private func derive(
+        from output: Data, tradingIndex: @Sendable (EthereumAddress) -> UInt32
+    ) async throws -> DerivedAccounts {
         var prf = output
         // The bytes exist for exactly as long as the two derivations take.
         defer { prf.resetBytes(in: 0..<prf.count) }
@@ -98,7 +96,7 @@ final class PasskeyCeremony: NSObject, PasskeyService {
 
         let address = try PasskeyAccounts.deriveAddress(prfOutput: prf)
         let trading = try PasskeyAccounts.deriveTradingKey(
-            prfOutput: prf, index: Self.tradingKeyIndex)
+            prfOutput: prf, index: tradingIndex(address))
         store.record(address)
         // `hasDesk` is a fact about the chain, not about the passkey. It is read by
         // `BalanceReader` after sign-in rather than guessed here.
@@ -111,7 +109,7 @@ final class PasskeyCeremony: NSObject, PasskeyService {
     }
 
     func withKeys<T: Sendable>(
-        _ body: @Sendable (WalletKey, TradingKey) async throws -> T
+        _ body: @Sendable (WalletKey, TradingKeys) async throws -> T
     ) async throws -> T {
         guard ProcessInfo.processInfo.isOperatingSystemAtLeast(Self.minimumSystemVersion) else {
             throw PasskeyFailure.prfUnsupported
@@ -121,11 +119,9 @@ final class PasskeyCeremony: NSObject, PasskeyService {
         guard prf.count == 32 else { throw PasskeyFailure.prfReturnedNothing }
 
         // Derived, used, and gone. Neither key leaves this scope and neither is
-        // returned, so there is no version of this call that leaves one lying around.
-        return try await body(
-            try PasskeyAccounts.deriveWalletKey(prfOutput: prf),
-            try PasskeyAccounts.deriveTradingKey(
-                prfOutput: prf, index: Self.tradingKeyIndex))
+        // returned, and the bytes trading keys come from are wiped when it closes.
+        let wallet = try PasskeyAccounts.deriveWalletKey(prfOutput: prf)
+        return try await TradingKeys.scoped(prf: prf) { try await body(wallet, $0) }
     }
 
     // MARK: - The two ceremonies

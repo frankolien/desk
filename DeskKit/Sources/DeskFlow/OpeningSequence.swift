@@ -96,6 +96,25 @@ public actor OpeningSequence {
         self.addresses = addresses
     }
 
+    /// Opens with the first of several derived trading keys Perpl will enrol, and says
+    /// which one it was: that index is what every later session has to derive.
+    public func open(
+        wallet: WalletKey,
+        tradingKeys: @escaping @Sendable (UInt32) throws -> TradingKey,
+        indices: Range<UInt32>,
+        deposit: Money,
+        label: String,
+        report: @Sendable (Progress) -> Void = { _ in }
+    ) async throws -> (apiKey: APIKey, index: UInt32) {
+        try await prepare(wallet: wallet, deposit: deposit, forwardingKnownEnabled: false, report: report)
+        report(Progress(step: .enrol, outcome: .started))
+        let enrolled = try await enrolment.enrolFirstUnregistered(
+            address: wallet.address, label: label, indices: indices,
+            signers: { .using(wallet: wallet, trading: try tradingKeys($0)) })
+        report(Progress(step: .enrol, outcome: .finished))
+        return enrolled
+    }
+
     public func open(
         wallet: WalletKey,
         trading: TradingKey,
@@ -108,6 +127,24 @@ public actor OpeningSequence {
         forwardingKnownEnabled: Bool = false,
         report: @Sendable (Progress) -> Void = { _ in }
     ) async throws -> APIKey {
+        try await prepare(wallet: wallet, deposit: deposit,
+                          forwardingKnownEnabled: forwardingKnownEnabled, report: report)
+        report(Progress(step: .enrol, outcome: .started))
+        let key = try await enrolment.enrol(
+            address: wallet.address,
+            label: label,
+            signers: .using(wallet: wallet, trading: trading))
+        report(Progress(step: .enrol, outcome: .finished))
+        return key
+    }
+
+    /// Every on-chain step before enrolment, each skipped when the chain says it is done.
+    private func prepare(
+        wallet: WalletKey,
+        deposit: Money,
+        forwardingKnownEnabled: Bool,
+        report: @Sendable (Progress) -> Void
+    ) async throws {
         guard deposit.raw >= addresses.minimumToOpen.raw else {
             throw Failure.belowMinimum(deposit: deposit, minimum: addresses.minimumToOpen)
         }
@@ -140,14 +177,6 @@ public actor OpeningSequence {
                 .allowOrderForwarding, from: wallet, to: addresses.exchange,
                 data: Calldata.allowOrderForwarding(true), report: report)
         }
-
-        report(Progress(step: .enrol, outcome: .started))
-        let key = try await enrolment.enrol(
-            address: wallet.address,
-            label: label,
-            signers: .using(wallet: wallet, trading: trading))
-        report(Progress(step: .enrol, outcome: .finished))
-        return key
     }
 
     // MARK: - Preconditions
