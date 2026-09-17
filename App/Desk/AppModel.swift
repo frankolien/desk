@@ -638,66 +638,100 @@ final class AppModel {
 
     func clearDeposit() { deposit = .idle }
 
-    enum Withdrawal: Equatable {
-        case idle
-        case sending
-        case sent(String)
-        case failed(String)
-
-        var isBusy: Bool { self == .sending }
+    enum WithdrawalSource: Equatable, Sendable {
+        /// Collateral held at the exchange.
+        case trading
+        /// AUSD already sitting in the wallet.
+        case wallet
     }
 
-    /// Moves collateral back out of the exchange to the derived address.
+    struct WithdrawalReceipt: Equatable, Sendable {
+        let amount: Money
+        /// Nil when the funds stopped in this wallet.
+        let recipient: EthereumAddress?
+        let transactions: [String]
+    }
+
+    enum Withdrawal: Equatable {
+        case idle
+        case confirming
+        case withdrawing
+        case sending
+        case sent(WithdrawalReceipt)
+        case failed(String)
+
+        var isBusy: Bool { self == .confirming || self == .withdrawing || self == .sending }
+    }
+
+    /// Moves AUSD out: from the exchange to this wallet, from the exchange on to another
+    /// address, or from the wallet to another address.
     ///
     /// Signed by the wallet key and never by the API key — the trading key exists so that
     /// a trading session cannot move money, and a withdrawal that the session could sign
-    /// would delete that distinction. So this is a fresh Face ID prompt, which is exactly
-    /// where one is earned.
-    func withdraw(_ amount: Money) async {
+    /// would delete that distinction. So this is a fresh Face ID prompt, and both
+    /// transactions of a withdrawal to another address sit inside that one prompt.
+    func withdraw(_ amount: Money, from source: WithdrawalSource, to recipient: EthereumAddress?) async {
         guard !withdrawal.isBusy else { return }
-        withdrawal = .sending
+        let destination = recipient == address ? nil : recipient
+        guard source == .trading || destination != nil else { return }
+        withdrawal = .confirming
         do {
             let rest = PerplREST(configuration: try network.perpl())
             let context = try await rest.context()
             let addresses = try ExchangeAddresses(context: context)
-            guard let minimum = context.instances.first?.minWithdraw, amount >= minimum else {
-                withdrawal = .failed(
-                    "Perpl's smallest withdrawal is "
-                        + "\(context.instances.first?.minWithdraw?.display() ?? "—") AUSD.")
+            if source == .trading,
+               let minimum = context.instances.first?.minWithdraw, amount < minimum {
+                withdrawal = .failed("Perpl's smallest withdrawal is \(minimum.display()) AUSD.")
                 return
             }
 
             let rpc = MonadRPC(configuration: try network.rpc())
             let sender = TransactionSender(rpc: rpc)
-            let hash = try await passkey.withKeys { wallet, _ in
-                let signed = try await sender.send(
-                    to: addresses.exchange,
-                    data: try Calldata.withdrawCollateral(amount: amount),
-                    from: wallet)
-                // Waited for rather than assumed: a send returns a hash, and a hash is
-                // not a receipt. Reporting success on the hash would tell the user their
-                // money had moved while the transaction could still revert.
-                _ = try await sender.wait(for: signed)
-                return signed.hashHex
+            let hashes = try await passkey.withKeys { [weak self] wallet, _ in
+                var hashes: [String] = []
+                if source == .trading {
+                    await MainActor.run { self?.withdrawal = .withdrawing }
+                    let signed = try await sender.send(
+                        to: addresses.exchange,
+                        data: try Calldata.withdrawCollateral(amount: amount),
+                        from: wallet)
+                    // Waited for rather than assumed: a hash is not a receipt, and the
+                    // transfer below would spend AUSD the wallet does not hold yet.
+                    _ = try await sender.wait(for: signed)
+                    hashes.append(signed.hashHex)
+                }
+                if let destination {
+                    await MainActor.run { self?.withdrawal = .sending }
+                    let signed = try await sender.send(
+                        to: addresses.collateralToken,
+                        data: try Calldata.transfer(to: destination, amount: amount),
+                        from: wallet)
+                    _ = try await sender.wait(for: signed)
+                    hashes.append(signed.hashHex)
+                }
+                return hashes
             }
-            withdrawal = .sent(hash)
+            withdrawal = .sent(WithdrawalReceipt(amount: amount, recipient: destination, transactions: hashes))
             await refreshBalances()
-            await trading.reconnect()
+            if source == .trading { await trading.reconnect() }
         } catch {
-            withdrawal = .failed(Self.withdrawSentence(for: error))
+            withdrawal = .failed(Self.withdrawSentence(for: error, stage: withdrawal))
         }
     }
 
-    func clearWithdrawal() { withdrawal = .idle }
-
-    static func withdrawSentence(for error: any Error) -> String {
-        switch error {
-        case let failure as PasskeyFailure:
-            return failure.sentence
+    /// Which half failed matters: after the exchange step the AUSD is safe in this wallet,
+    /// and saying "nothing moved" then would be wrong.
+    static func withdrawSentence(for error: any Error, stage: Withdrawal = .confirming) -> String {
+        if let failure = error as? PasskeyFailure { return failure.sentence }
+        switch stage {
+        case .sending:
+            return "The AUSD reached your wallet but could not be sent on. It is still in your wallet."
         default:
             return "The withdrawal could not be sent. Your collateral has not moved."
         }
     }
+
+    func clearWithdrawal() { withdrawal = .idle }
 
     /// Signs out: the key, the connection and the account on screen all go.
     func endSession() async {

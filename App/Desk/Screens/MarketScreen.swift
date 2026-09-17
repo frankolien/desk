@@ -55,6 +55,9 @@ struct MarketScreen: View {
                     })
                     .toolbar(.hidden, for: .tabBar)
             }
+            #if DEBUG
+            .task { if ProcessInfo.processInfo.arguments.contains("-open-withdraw") { showsWithdraw = true } }
+            #endif
             .sheet(isPresented: $showsWithdraw) {
                 WithdrawSheet(model: model) { showsWithdraw = false }
                     .presentationDetents([.large])

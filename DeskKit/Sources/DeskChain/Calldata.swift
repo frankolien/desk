@@ -47,6 +47,13 @@ public enum Calldata {
         selector("allowOrderForwarding(bool)") + ABIWord.bool(allow)
     }
 
+    /// AUSD out of the wallet, for a withdrawal that ends at someone else's address.
+    public static func transfer(to recipient: EthereumAddress, amount: Money) throws -> Data {
+        selector("transfer(address,uint256)")
+            + (try ABIWord.address(recipient.checksummed))
+            + (try ABIWord.uint(String(amount.raw)))
+    }
+
     /// Withdrawals are contract calls the wallet signs, never the API key.
     public static func withdrawCollateral(amount: Money) throws -> Data {
         selector("withdrawCollateral(uint256)") + (try ABIWord.uint(String(amount.raw)))

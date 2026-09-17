@@ -19,6 +19,7 @@ struct CalldataTests {
             "createAccount(uint256)": "cab13915",
             "depositCollateral(uint256)": "bad4a01f",
             "withdrawCollateral(uint256)": "6112fe2e",
+            "transfer(address,uint256)": "a9059cbb",
             "allowOrderForwarding(bool)": "7962f910",
             "getAccountByAddr(address)": "12e8eb2c",
             "requestFunds(address)": "544c7cf9",

@@ -22,4 +22,28 @@ public struct EthereumAddress: Hashable, Sendable, CustomStringConvertible {
     }
 
     public var description: String { checksummed }
+
+    /// An address someone typed or pasted. All-lowercase and all-uppercase are accepted as
+    /// unchecksummed; mixed case must be a correct EIP-55 checksum, because a mixed-case
+    /// address with one wrong letter is a typo that would otherwise send funds nowhere.
+    public init?(text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count == 42, trimmed.hasPrefix("0x") else { return nil }
+        let hex = trimmed.dropFirst(2)
+        var bytes = Data(capacity: 20)
+        var index = hex.startIndex
+        while index < hex.endIndex {
+            let next = hex.index(index, offsetBy: 2)
+            guard let byte = UInt8(hex[index..<next], radix: 16) else { return nil }
+            bytes.append(byte)
+            index = next
+        }
+        guard let address = EthereumAddress(bytes: bytes) else { return nil }
+        let letters = hex.filter(\.isLetter)
+        let isSingleCase = letters == letters.lowercased() || letters == letters.uppercased()
+        guard isSingleCase || address.checksummed == trimmed else { return nil }
+        self = address
+    }
+
+    public var isZero: Bool { bytes.allSatisfy { $0 == 0 } }
 }
