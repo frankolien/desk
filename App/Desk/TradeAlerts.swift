@@ -64,6 +64,9 @@ final class TradeAlerts {
     var problem: String?
     /// The alert the person tapped, waiting for the trading shell to open it.
     var opened: TradeAlert?
+    /// Whether it was opened with the notification's Copy button, which goes straight to
+    /// the ticket instead of the alert sheet.
+    var openedToCopy = false
 
     private var deviceToken: String?
     private var confirmOnSync = false
@@ -73,9 +76,34 @@ final class TradeAlerts {
     private static let nicknameKey = "desk.traderNicknames"
     private static let primerKey = "desk.alertsPrimerShown"
     private static let endpoint = URL(string: "https://web-lovat-nine-49.vercel.app/api/alerts")!
+    private static let tokenKey = "desk.alertsDeviceToken"
+
+    nonisolated static let copyAction = "desk.copy"
+    nonisolated static let viewAction = "desk.view"
+    nonisolated static let muteAction = "desk.mute"
 
     private init() {
         alerted = UserDefaults.standard.stringArray(forKey: Self.storageKey) ?? []
+        // Cached so a Mute pressed from the lock screen can reach the server before iOS
+        // hands a background launch a fresh token.
+        deviceToken = UserDefaults.standard.string(forKey: Self.tokenKey)
+    }
+
+    /// The buttons a trade alert carries when pressed and held.
+    static func registerCategories() {
+        let copy = UNNotificationAction(
+            identifier: copyAction, title: "Copy Trade", options: [.foreground, .authenticationRequired],
+            icon: UNNotificationActionIcon(systemImageName: "doc.on.doc"))
+        let view = UNNotificationAction(
+            identifier: viewAction, title: "View Trader", options: [.foreground],
+            icon: UNNotificationActionIcon(systemImageName: "person.crop.circle"))
+        let mute = UNNotificationAction(
+            identifier: muteAction, title: "Mute This Trader", options: [.destructive, .authenticationRequired],
+            icon: UNNotificationActionIcon(systemImageName: "bell.slash"))
+        UNUserNotificationCenter.current().setNotificationCategories([
+            UNNotificationCategory(identifier: "desk.trade", actions: [copy, view, mute], intentIdentifiers: []),
+            UNNotificationCategory(identifier: "desk.trade.closed", actions: [view, mute], intentIdentifiers: []),
+        ])
     }
 
     var hasSeenPrimer: Bool {
@@ -129,8 +157,20 @@ final class TradeAlerts {
         scheduleSync()
     }
 
+    /// Mute from a notification, where Desk may only be awake for a few seconds: the
+    /// server is told before this returns.
+    func mute(_ address: String) async {
+        guard isOn(for: address) else { return }
+        alerted.removeAll { $0.caseInsensitiveCompare(address) == .orderedSame }
+        persist()
+        syncTask?.cancel()
+        await sync()
+    }
+
     func didRegister(deviceToken data: Data) {
-        deviceToken = data.map { String(format: "%02x", $0) }.joined()
+        let token = data.map { String(format: "%02x", $0) }.joined()
+        deviceToken = token
+        UserDefaults.standard.set(token, forKey: Self.tokenKey)
         scheduleSync()
     }
 
@@ -229,6 +269,7 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        TradeAlerts.registerCategories()
         Task { await TradeAlerts.shared.resume() }
         return true
     }
@@ -251,6 +292,14 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
         guard let alert = TradeAlert(userInfo: response.notification.request.content.userInfo) else { return }
-        await MainActor.run { TradeAlerts.shared.opened = alert }
+        let action = response.actionIdentifier
+        if action == TradeAlerts.muteAction {
+            await TradeAlerts.shared.mute(alert.trader)
+            return
+        }
+        await MainActor.run {
+            TradeAlerts.shared.openedToCopy = action == TradeAlerts.copyAction && alert.canCopy
+            TradeAlerts.shared.opened = alert
+        }
     }
 }

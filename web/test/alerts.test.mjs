@@ -71,6 +71,8 @@ test("an alert reads like a sentence and carries what the app needs to copy", ()
   assert.equal(payload.aps.alert.title, "Whale opened a long");
   assert.equal(payload.aps.alert.body, "ETH 4× at $1,847.99, $12K position. Tap to copy.");
   assert.deepEqual([payload.desk.market, payload.desk.side, payload.desk.leverage], ["ETH", "long", 4]);
+  assert.equal(payload.aps.category, "desk.trade");
+  assert.equal(alertPayload(ALICE, "Whale", { kind: "closed", position }).aps.category, "desk.trade.closed");
   assert.equal(alertPayload(ALICE, undefined, { kind: "closed", position }).aps.alert.title, "0x95d2…a648 closed their ETH long");
   assert.equal(compactDollars("-1234.5"), "−$1.2K");
 });

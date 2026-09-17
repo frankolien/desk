@@ -132,14 +132,21 @@ struct SignalsScreen: View {
         #endif
         .onChange(of: TradeAlerts.shared.opened, initial: true) { _, opened in
             guard let opened else { return }
+            let straightToCopy = TradeAlerts.shared.openedToCopy
             TradeAlerts.shared.opened = nil
+            TradeAlerts.shared.openedToCopy = false
             section = .traders
             copyOrder = nil
             pendingCopy = nil
             // Lets any sheet the tap interrupted finish leaving before this one arrives.
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(450))
-                tradeAlert = opened
+                if straightToCopy {
+                    for _ in 0..<50 where market.allMarkets.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
+                    copy(market: opened.market, isLong: opened.isLong, leverage: opened.leverage)
+                } else {
+                    tradeAlert = opened
+                }
             }
         }
         .sheet(item: $tradeAlert, onDismiss: {

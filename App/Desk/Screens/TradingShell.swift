@@ -147,8 +147,10 @@ struct TradingShell: View {
         }
         #if DEBUG
         .task {
-            guard ProcessInfo.processInfo.arguments.contains("-alert-demo") else { return }
+            let arguments = ProcessInfo.processInfo.arguments
+            guard arguments.contains("-alert-demo") || arguments.contains("-alert-copy-demo") else { return }
             try? await Task.sleep(for: .seconds(1))
+            TradeAlerts.shared.openedToCopy = arguments.contains("-alert-copy-demo")
             TradeAlerts.shared.opened = TradeAlert(
                 event: .opened, trader: "0x95D2602d30DA1179fd13274839e60345857ca648", market: "ETH", side: "long",
                 leverage: 4, entry: "1847.99", value: "12236.1", observedAt: .now.addingTimeInterval(-95))

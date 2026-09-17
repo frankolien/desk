@@ -126,6 +126,8 @@ export function alertPayload(address, name, event) {
       alert: { title, body },
       sound: "default",
       "thread-id": `trader-${address}`,
+      // The app registers Copy, View and Mute buttons under these; a close offers no Copy.
+      category: event.kind === "closed" ? "desk.trade.closed" : "desk.trade",
       "relevance-score": event.kind === "closed" ? 0.4 : 0.8,
     },
     desk: {
