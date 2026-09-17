@@ -18,16 +18,28 @@ private struct CopyRulesSections: View {
     var body: some View {
         GlassSection("Strategy", footer: strategyFooter) {
             GlassRow("Mode") {
-                DeskSegmented(options: [(CopyMode.shadow, "Shadow"), (CopyMode.live, "Live")],
-                              selection: $rules.mode.animation())
+                Picker("Mode", selection: $rules.mode.animation()) {
+                    Text("Shadow").tag(CopyMode.shadow)
+                    Text("Live").tag(CopyMode.live)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
             }
             GlassRow("Direction") {
-                DeskSegmented(options: [(CopyDirection.follow, "Follow"), (CopyDirection.fade, "Fade")],
-                              selection: $rules.direction.animation())
+                Picker("Direction", selection: $rules.direction.animation()) {
+                    Text("Follow").tag(CopyDirection.follow)
+                    Text("Fade").tag(CopyDirection.fade)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
             }
             GlassRow("Sizing") {
-                DeskSegmented(options: [(CopySizing.fixed, "Fixed"), (CopySizing.conviction, "Conviction")],
-                              selection: $rules.sizing.animation())
+                Picker("Sizing", selection: $rules.sizing.animation()) {
+                    Text("Fixed").tag(CopySizing.fixed)
+                    Text("Conviction").tag(CopySizing.conviction)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
             }
         }
 
@@ -383,8 +395,11 @@ struct CopyActivityScreen: View {
 
     var body: some View {
         GlassPage {
-            DeskSegmented(options: [(true, "Shadow"), (false, "Live")],
-                          selection: $showsShadow.animation(.snappy(duration: 0.2)), fitted: false)
+            Picker("Results", selection: $showsShadow.animation(.snappy(duration: 0.2))) {
+                Text("Shadow").tag(true)
+                Text("Live").tag(false)
+            }
+            .pickerStyle(.segmented)
 
             summary
 
