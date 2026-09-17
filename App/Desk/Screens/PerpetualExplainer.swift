@@ -78,8 +78,8 @@ struct PerpetualExplainer: View {
                     // know the word is exactly the person who should be told this plainly,
                     // and burying it would be the trick this app is supposed to not play.
                     Text("Most people who trade perpetuals with leverage lose money. "
-                         + "Desk runs on testnet, so nothing here is real — but the "
-                         + "arithmetic is the same one that applies to real funds.")
+                         + "On testnet nothing is real; on mainnet it is, and the "
+                         + "arithmetic is the same on both.")
                         .font(.system(size: 13, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
                         .fixedSize(horizontal: false, vertical: true)

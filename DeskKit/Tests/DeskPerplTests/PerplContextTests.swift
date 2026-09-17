@@ -174,3 +174,27 @@ struct LiveContextTests {
         #expect(btc.orderTTLBlocks == 20)
     }
 }
+
+/// Pinned to a payload captured from https://app.perpl.xyz on 17 September 2026.
+@Suite("Perpl mainnet context")
+struct PerplMainnetContextTests {
+    let context: PerplContext
+
+    init() throws {
+        let url = try #require(Bundle.module.url(forResource: "Context-mainnet", withExtension: "json"))
+        context = try JSONDecoder().decode(PerplContext.self, from: Data(contentsOf: url))
+    }
+
+    @Test("the mainnet payload decodes and satisfies every invariant")
+    func decodes() throws {
+        try context.validated()
+        #expect(context.chain.chainID == 143)
+    }
+
+    @Test("markets with an empty symbol take their ticker from the name")
+    func symbols() throws {
+        #expect(try #require(context.market(id: 1)).symbol == "BTC")
+        #expect(try #require(context.market(id: 10)).symbol == "MON")
+        #expect(try #require(context.market(id: 20)).symbol == "ETH")
+    }
+}

@@ -111,7 +111,7 @@ struct SignalsScreen: View {
         )) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("\(unlistedMarket ?? "This market") isn't listed on Perpl testnet, so it can't be copied here.")
+            Text("\(unlistedMarket ?? "This market") isn't listed on Perpl \(model.network.shortName.lowercased()), so it can't be copied here.")
         }
     }
 

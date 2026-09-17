@@ -142,13 +142,34 @@ public struct Market: Decodable, Sendable {
     public let funding: MarketFunding?
 
     enum CodingKeys: String, CodingKey {
-        case id, symbol, config, state, funding
+        case id, symbol, name, config, state, funding
         case instanceID = "instance_id"
         case sizeUnits = "size_units"
         case fundingIntervalSeconds = "funding_interval_sec"
         case orderTTLBlocks = "order_ttl_blocks"
         case maxMarketSlippageBps = "order_max_market_slippage_bps"
         case maxNegativePnLCollateralBps = "order_max_neg_pnl_collat_bps"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        id = try box.decode(UInt32.self, forKey: .id)
+        instanceID = try box.decode(UInt32.self, forKey: .instanceID)
+        // Mainnet leaves `symbol` empty for its oldest markets (BTC, MON) and carries the
+        // ticker in `name`; testnet fills both, with `name` as "BTC Perp".
+        let symbol = try box.decodeIfPresent(String.self, forKey: .symbol) ?? ""
+        let name = try box.decodeIfPresent(String.self, forKey: .name) ?? ""
+        self.symbol = symbol.isEmpty
+            ? String(name.split(separator: " ").first ?? Substring(name))
+            : symbol
+        sizeUnits = try box.decode(String.self, forKey: .sizeUnits)
+        fundingIntervalSeconds = try box.decode(Int.self, forKey: .fundingIntervalSeconds)
+        orderTTLBlocks = try box.decode(UInt32.self, forKey: .orderTTLBlocks)
+        maxMarketSlippageBps = try box.decode(Int.self, forKey: .maxMarketSlippageBps)
+        maxNegativePnLCollateralBps = try box.decode(Int.self, forKey: .maxNegativePnLCollateralBps)
+        config = try box.decode(MarketConfig.self, forKey: .config)
+        state = try box.decode(MarketState.self, forKey: .state)
+        funding = try box.decodeIfPresent(MarketFunding.self, forKey: .funding)
     }
 
     public func price(_ raw: Int64) -> Price? { Price(raw: raw, decimals: config.priceDecimals) }

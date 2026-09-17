@@ -61,9 +61,12 @@ final class MarketModel {
     private var liveSocket: URLSessionWebSocket?
     private var lastCandleFetch: Date?
 
-    init(marketID: UInt32 = 16) {
-        self.marketID = marketID
-        rest = PerplREST(configuration: try! .testnet())
+    let network: DeskNetwork
+
+    init(network: DeskNetwork) {
+        self.network = network
+        marketID = network.defaultMarketID
+        rest = PerplREST(configuration: try! network.perpl())
     }
 
     /// Green while the series is up over its own window, red while it is down. Direction,
@@ -231,11 +234,10 @@ final class MarketModel {
             while !Task.isCancelled {
                 do {
                     guard let self else { return }
-                    let socket = try URLSessionWebSocket(
-                        url: URL(string: "wss://testnet.perpl.xyz/ws/v1/market-data")!)
+                    let socket = try URLSessionWebSocket(url: network.marketDataURL)
                     liveSocket = socket
-                    let ids = allMarkets.isEmpty ? [16, 32, 48, 64, 256] : allMarkets.map(\.id)
-                    let subscriptions = (["heartbeat@10143"] + ids.map { "market-state@\($0)" })
+                    let ids = allMarkets.isEmpty ? [marketID] : allMarkets.map(\.id)
+                    let subscriptions = (["heartbeat@\(network.chainID)"] + ids.map { "market-state@\($0)" })
                         .map { ["stream": $0, "subscribe": true] as [String: Any] }
                     let payload: [String: Any] = ["mt": 5, "subs": subscriptions]
                     let data = try JSONSerialization.data(withJSONObject: payload)

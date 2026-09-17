@@ -99,7 +99,10 @@ struct RootView: View {
                 case .needsDesk:
                     FundScreen(model: model)
                 case .trading:
+                    // Rebuilt on a network switch, so no market or socket from the other
+                    // network survives inside it.
                     TradingShell(model: model)
+                        .id(model.network)
                 }
             }
 

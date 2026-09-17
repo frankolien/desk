@@ -314,7 +314,7 @@ struct MarketSearchScreen: View {
                         .padding(.top, 20)
                     }
 
-                    Text("Perpl testnet currently exposes these seven perpetual markets. "
+                    Text("Perpl \(model.network.shortName.lowercased()) lists these \(market.allMarkets.count) perpetual markets. "
                          + "Discovery tokens from other networks are separate from tradeable Perpl contracts.")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color.opacity(0.8))

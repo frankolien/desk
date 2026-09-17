@@ -67,6 +67,15 @@ public actor PerplSocket {
             makeChannel: makeChannel)
     }
 
+    public static func mainnet(makeChannel: @escaping ChannelFactory = { try URLSessionWebSocket(url: $0) }) -> PerplSocket {
+        PerplSocket(
+            url: URL(string: "wss://app.perpl.xyz/ws/v1/trading")!,
+            chainID: 143,
+            makeChannel: makeChannel)
+    }
+
+    public nonisolated var chainIdentifier: UInt64 { chainID }
+
     /// True only after the wallet snapshot. A socket that is open but unauthenticated
     /// will answer an order by closing 3401, which the app would then report as a
     /// refused key rather than its own mistake.

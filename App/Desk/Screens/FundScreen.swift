@@ -12,7 +12,12 @@ struct FundScreen: View {
     @State private var didCopy = false
     @State private var faucetPage: FaucetPage?
 
-    private let minimum = Money(text: "100") ?? .zero
+    @State private var showsNetwork = false
+    @State private var didCopyForDeposit = false
+
+    /// Perpl's `min_account_open_amount`: 100 AUSD on testnet, 10 on mainnet, read from
+    /// each context on 17 September.
+    private var minimum: Money { Money(text: model.network.hasFaucet ? "100" : "10") ?? .zero }
 
     var body: some View {
         ZStack {
@@ -50,7 +55,7 @@ struct FundScreen: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, 14)
                     }
-                    Text("Monad testnet · No real funds")
+                    Text(model.network.holdsRealFunds ? "Monad mainnet · Real funds" : "Monad testnet · No real funds")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color.opacity(0.62))
                         .frame(maxWidth: .infinity)
@@ -63,6 +68,11 @@ struct FundScreen: View {
             .refreshable { await model.refreshBalances() }
         }
         .task { await model.refreshBalances() }
+        .sheet(isPresented: $showsNetwork) {
+            NetworkSheet(model: model)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
         .sheet(item: $faucetPage, onDismiss: {
             Task { await model.refreshBalances() }
         }) { page in
@@ -76,6 +86,20 @@ struct FundScreen: View {
             Text("Setup")
                 .font(.system(size: 15, weight: .bold, design: .rounded))
                 .foregroundStyle(DeskColor.nightText.color)
+            Button { showsNetwork = true } label: {
+                HStack(spacing: 4) {
+                    Text(model.network.shortName)
+                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+                }
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .foregroundStyle(model.network.holdsRealFunds ? DeskColor.night.color : DeskColor.nightText.color)
+                .padding(.horizontal, 9)
+                .frame(height: 24)
+                .background(model.network.holdsRealFunds ? DeskColor.action.color : Color.white.opacity(0.14), in: Capsule())
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Network, \(model.network.name)")
             Spacer()
             Button {
                 model.copyAddress()
@@ -102,10 +126,11 @@ struct FundScreen: View {
             Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 42)
             SetupStatusRow(title: "Network fees", detail: monDetail, complete: hasMON,
                            isPending: isFunding && !hasMON,
-                           actionTitle: model.needsManualFaucet && !hasMON ? "Monad faucet" : nil,
+                           actionTitle: model.network.hasFaucet && model.needsManualFaucet && !hasMON ? "Monad faucet" : nil,
                            action: openMONFaucet)
             Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 42)
-            SetupStatusRow(title: "Test collateral", detail: ausdDetail, complete: hasMinimumAUSD,
+            SetupStatusRow(title: model.network.hasFaucet ? "Test collateral" : "Collateral",
+                           detail: ausdDetail, complete: hasMinimumAUSD,
                            isPending: isFunding && !hasMinimumAUSD,
                            actionTitle: nil, action: {})
         }
@@ -131,7 +156,13 @@ struct FundScreen: View {
                     .foregroundStyle(DeskColor.nightMuted.color)
             }
             Button {
-                Task { needsFunds ? await model.fundWallet() : await model.openDesk() }
+                if needsFunds && !model.network.hasFaucet {
+                    // No faucet on mainnet: the next step is someone sending funds here.
+                    model.copyAddress()
+                    didCopyForDeposit = true
+                } else {
+                    Task { needsFunds ? await model.fundWallet() : await model.openDesk() }
+                }
             } label: {
                 HStack {
                     Text(primaryTitle)
@@ -148,7 +179,9 @@ struct FundScreen: View {
             .buttonStyle(.plain)
             .disabled(!canOpen)
             if needsFunds {
-                Text("Free test MON for fees and 10,000 test AUSD, sent straight to this wallet.")
+                Text(model.network.hasFaucet
+                     ? "Free test MON for fees and 10,000 test AUSD, sent straight to this wallet."
+                     : "Send MON for fees and at least \(minimum.display(fractionDigits: 0)) AUSD to this address on Monad mainnet. Balances update on their own.")
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color.opacity(0.78))
             }
@@ -166,7 +199,7 @@ struct FundScreen: View {
     private var primaryTitle: String {
         switch (needsFunds, model.isWorking) {
         case (true, true): "Funding your wallet…"
-        case (true, false): "Fund my wallet"
+        case (true, false): model.network.hasFaucet ? "Fund my wallet" : (didCopyForDeposit ? "Address copied" : "Copy address to deposit")
         case (false, true): "Checking…"
         case (false, false): "Open my desk"
         }

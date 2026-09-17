@@ -7,7 +7,7 @@ import SwiftUI
 struct TradingShell: View {
     let model: AppModel
 
-    @State private var market = MarketModel()
+    @State private var market: MarketModel
     /// The model's session, never one of our own. `openDesk` hands the enrolled key to
     /// `model.trading`, so a session created here would be a different object and the
     /// ticket would talk to one that had never been given a key.
@@ -23,6 +23,7 @@ struct TradingShell: View {
 
     init(model: AppModel) {
         self.model = model
+        _market = State(initialValue: MarketModel(network: model.network))
         _tab = State(initialValue: Self.startingTab())
     }
 

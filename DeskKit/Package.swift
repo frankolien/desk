@@ -71,7 +71,7 @@ let package = Package(
         .testTarget(
             name: "DeskPerplTests",
             dependencies: ["DeskPerpl", "DeskNet"],
-            resources: [.process("CanonicalVectors.json"), .process("Context-testnet.json")],
+            resources: [.process("CanonicalVectors.json"), .process("Context-testnet.json"), .process("Context-mainnet.json")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(

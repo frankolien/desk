@@ -85,9 +85,20 @@ final class TradingSession {
 
     /// Called once a desk has been opened and enrolled. Until then there is nothing to
     /// connect with, which is a state rather than a fault.
+    /// Set before a desk is adopted; every socket this session opens belongs to it.
+    var network: DeskNetwork = .testnet
+
     func adopt(apiKey: APIKey, session: SigningSession, market: Market) {
         credentials = PerplCredentials(apiKey: apiKey, session: session)
-        desk = OrderDesk(socket: .testnet(), market: market)
+        desk = OrderDesk(socket: network.tradingSocket(), market: market)
+    }
+
+    /// Forgets the enrolled key along with the socket, for a switch to another network
+    /// whose exchange has never seen that key.
+    func abandon() async {
+        await close()
+        credentials = nil
+        desk = nil
     }
 
     /// Rebuilds the order desk for the instrument the person selected. Market discovery
@@ -97,7 +108,7 @@ final class TradingSession {
         guard credentials != nil else { return }
         watching?.cancel()
         await desk?.close()
-        desk = OrderDesk(socket: .testnet(), market: market)
+        desk = OrderDesk(socket: network.tradingSocket(), market: market)
         isConnected = false
         try? await connect()
     }

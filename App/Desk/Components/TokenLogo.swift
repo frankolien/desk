@@ -197,7 +197,7 @@ struct AddFundsSheet: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Fund trading balance")
                             .font(.system(size: 24, weight: .bold, design: .rounded))
-                        Text("AUSD on Monad testnet").foregroundStyle(.secondary)
+                        Text("AUSD on \(model.network.name)").foregroundStyle(.secondary)
                     }
                 }
 
@@ -212,7 +212,7 @@ struct AddFundsSheet: View {
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
 
-                if walletAmount == .zero || !model.hasSetupGas {
+                if model.network.hasFaucet && (walletAmount == .zero || !model.hasSetupGas) {
                     Button { Task { await model.fundWallet() } } label: {
                         HStack {
                             if model.isWorking { ProgressView().tint(.black) }

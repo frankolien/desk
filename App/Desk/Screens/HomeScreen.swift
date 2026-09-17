@@ -96,6 +96,14 @@ struct HomeScreen: View {
                     Text(model.addressShort)
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .monospacedDigit()
+                    // Always in view, so nobody has to remember which network they left on.
+                    Text(model.network.shortName)
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .foregroundStyle(model.network.holdsRealFunds ? DeskColor.night.color : DeskColor.nightText.color)
+                        .padding(.horizontal, 7)
+                        .frame(height: 18)
+                        .background(model.network.holdsRealFunds ? DeskColor.action.color : Color.white.opacity(0.14),
+                                    in: Capsule())
                 }
                 .foregroundStyle(DeskColor.nightText.color)
                 .padding(.horizontal, 14)
@@ -184,7 +192,7 @@ struct HomeScreen: View {
             if positionContexts.isEmpty {
                 HomeAssetRow(
                     mark: { MonochromeSymbolMark(symbol: "chart.xyaxis.line") },
-                    title: "Open positions", subtitle: "Perpl testnet",
+                    title: "Open positions", subtitle: "Perpl \(model.network.shortName.lowercased())",
                     value: "None", change: "Ready", tint: DeskColor.nightMuted,
                     action: onTrade)
             } else {

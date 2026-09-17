@@ -1,4 +1,5 @@
 import DeskAuth
+import DeskFlow
 import DeskPerpl
 import Foundation
 import Security
@@ -7,6 +8,12 @@ import Security
 /// authenticated request still borrows the transient Face ID-derived trading key.
 struct APIKeyStore: Sendable {
     static let standard = APIKeyStore(service: "com.opia.desk.perpl-api-key.v2")
+
+    /// A Perpl API key is enrolled with one exchange on one chain, so each network keeps
+    /// its own. Testnet stays on the original service, where existing desks are stored.
+    static func forNetwork(_ network: DeskNetwork) -> APIKeyStore {
+        network == .testnet ? standard : APIKeyStore(service: "com.opia.desk.perpl-api-key.v2.\(network.rawValue)")
+    }
 
     private let service: String
 

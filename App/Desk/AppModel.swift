@@ -80,7 +80,12 @@ final class AppModel {
     var hasSeenLeverageExplainer = false
     private let session = SigningSession()
     private let passkey: any PasskeyService
-    private let apiKeys = APIKeyStore.standard
+    private var apiKeys: APIKeyStore { APIKeyStore.forNetwork(network) }
+    /// Testnet until the person chooses otherwise. Remembered, because waking up on a
+    /// different network than the one left is exactly the confusion the switch exists to
+    /// prevent.
+    private(set) var network: DeskNetwork = DeskNetwork(
+        rawValue: UserDefaults.standard.string(forKey: "desk.network") ?? "") ?? .testnet
     private var balancePoller: Task<Void, Never>?
     /// Built once, on the first refresh: it needs the venue's context to learn which
     /// contracts to read, and that is one network call rather than a constant.
@@ -92,6 +97,7 @@ final class AppModel {
 
     init(passkey: any PasskeyService) {
         self.passkey = passkey
+        trading.network = network
         trading.onAccount = { [weak self] account in
             guard let free = account.free else { return }
             self?.collateral.record(free)
@@ -262,7 +268,7 @@ final class AppModel {
                 // rebuilding the authenticated socket. The ticket then had no desk and
                 // could only answer “not connected”. Sign-in now restores the complete
                 // trading session before the first order can be opened.
-                let context = try await PerplREST(configuration: .testnet()).context()
+                let context = try await PerplREST(configuration: network.perpl()).context()
                 await enterTrading(apiKey: apiKey, context: context)
             } else {
                 stage = .needsDesk
@@ -303,14 +309,14 @@ final class AppModel {
                     ?? "Your AUSD balance is still loading. Try again in a moment."
                 return
             }
-            let rest = PerplREST(configuration: try .testnet())
+            let rest = PerplREST(configuration: try network.perpl())
             let context = try await rest.context()
             let addresses = try ExchangeAddresses(context: context)
             if let address, let apiKey = apiKeys.load(for: address) {
                 await enterTrading(apiKey: apiKey, context: context)
                 return
             }
-            let rpc = MonadRPC(configuration: try .testnet())
+            let rpc = MonadRPC(configuration: try network.rpc())
             let sequence = OpeningSequence(
                 rpc: rpc,
                 sender: TransactionSender(rpc: rpc),
@@ -339,7 +345,7 @@ final class AppModel {
     }
 
     private func enterTrading(apiKey: APIKey, context: PerplContext) async {
-        guard let market = context.market(id: 16) else { return }
+        guard let market = context.market(id: network.defaultMarketID) ?? context.markets.first else { return }
         trading.adopt(apiKey: apiKey, session: session, market: market)
         if let head = context.chain.gas?.headBlock { trading.noteHeadBlock(head) }
         // The account and API key already exist at this point. A live-stream outage is
@@ -349,10 +355,44 @@ final class AppModel {
         try? await trading.connect()
     }
 
+    /// Moves the whole app to another network: balances, account, positions, sockets and
+    /// the enrolled key all belong to one exchange, so none of them is carried across.
+    /// The address is the same on both, so no new passkey is involved.
+    func switchNetwork(to next: DeskNetwork) async {
+        guard next != network, !isWorking else { return }
+        isWorking = true
+        defer { isWorking = false }
+        balancePoller?.cancel()
+        await trading.abandon()
+        network = next
+        trading.network = next
+        UserDefaults.standard.set(next.rawValue, forKey: "desk.network")
+        balances = nil
+        collateral = LastGood()
+        walletAUSD = LastGood()
+        walletMON = LastGood()
+        hasDesk = LastGood()
+        openPosition = nil
+        openPositions = []
+        closedPositions = []
+        fundingProblem = nil
+        openingProblem = nil
+        needsManualFaucet = false
+        guard let address else { return }
+        await refreshBalances()
+        startPollingBalances()
+        if hasDesk.value == true, let apiKey = apiKeys.load(for: address),
+           let context = try? await PerplREST(configuration: network.perpl()).context() {
+            await enterTrading(apiKey: apiKey, context: context)
+        } else {
+            stage = .needsDesk
+        }
+    }
+
     /// Asks Desk's faucet for whatever this wallet lacks: MON for gas and test AUSD to
     /// trade. Neither needs the wallet to hold anything first, and neither needs Face ID.
     func fundWallet() async {
-        guard let address, !isWorking else { return }
+        guard let address, !isWorking, network.hasFaucet else { return }
         isWorking = true
         fundingProblem = nil
         defer { fundingStatus = nil }
@@ -436,7 +476,7 @@ final class AppModel {
     /// The wallet signs the faucet call because the caller pays its gas; the faucet pays
     /// the derived address supplied in calldata.
     func claimTestAUSD() async {
-        guard let address else { return }
+        guard let address, network.hasFaucet else { return }
         guard hasSetupGas else {
             fundingProblem = "Add at least 0.05 MON before claiming test AUSD. It pays for setup gas."
             return
@@ -446,7 +486,7 @@ final class AppModel {
         defer { isWorking = false }
         do {
             let faucet = try Self.ethereumAddress("d236c18d274e54faccc3dd9dda4b27965a73ee6c")
-            let rpc = MonadRPC(configuration: try .testnet())
+            let rpc = MonadRPC(configuration: try network.rpc())
             let sender = TransactionSender(rpc: rpc)
             let signed = try await passkey.withKeys { wallet, _ in
                 try await sender.send(
@@ -554,14 +594,14 @@ final class AppModel {
                 deposit = .failed("Your wallet does not hold that much AUSD.")
                 return
             }
-            let rest = PerplREST(configuration: try .testnet())
+            let rest = PerplREST(configuration: try network.perpl())
             let context = try await rest.context()
             let addresses = try ExchangeAddresses(context: context)
             guard let minimum = context.instances.first?.minDeposit, amount >= minimum else {
                 deposit = .failed("Perpl's minimum deposit is \(context.instances.first?.minDeposit?.display() ?? "—") AUSD.")
                 return
             }
-            let rpc = MonadRPC(configuration: try .testnet())
+            let rpc = MonadRPC(configuration: try network.rpc())
             let sender = TransactionSender(rpc: rpc)
             let hash = try await passkey.withKeys { [weak self] wallet, _ in
                 let allowanceData = try Calldata.allowance(
@@ -617,7 +657,7 @@ final class AppModel {
         guard !withdrawal.isBusy else { return }
         withdrawal = .sending
         do {
-            let rest = PerplREST(configuration: try .testnet())
+            let rest = PerplREST(configuration: try network.perpl())
             let context = try await rest.context()
             let addresses = try ExchangeAddresses(context: context)
             guard let minimum = context.instances.first?.minWithdraw, amount >= minimum else {
@@ -627,7 +667,7 @@ final class AppModel {
                 return
             }
 
-            let rpc = MonadRPC(configuration: try .testnet())
+            let rpc = MonadRPC(configuration: try network.rpc())
             let sender = TransactionSender(rpc: rpc)
             let hash = try await passkey.withKeys { wallet, _ in
                 let signed = try await sender.send(
@@ -800,9 +840,9 @@ final class AppModel {
     /// a context call before every balance poll would triple the traffic.
     private func balanceReader() async throws -> BalanceReader {
         if let balances { return balances }
-        let rest = PerplREST(configuration: try .testnet())
+        let rest = PerplREST(configuration: try network.perpl())
         let reader = BalanceReader(
-            rpc: MonadRPC(configuration: try .testnet()),
+            rpc: MonadRPC(configuration: try network.rpc()),
             addresses: try ExchangeAddresses(context: await rest.context()))
         balances = reader
         return reader

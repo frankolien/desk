@@ -1,4 +1,5 @@
 import DeskAuth
+import DeskFlow
 import DeskUI
 import SwiftUI
 import UIKit
@@ -9,6 +10,7 @@ struct AccountScreen: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showsWithdraw = false
     @State private var showsFunding = false
+    @State private var showsNetwork = false
     @State private var didCopyAddress = false
 
     private var versionDescription: String {
@@ -59,10 +61,11 @@ struct AccountScreen: View {
 
                             SettingsRow(
                                 icon: "network",
-                                tint: .purple,
+                                tint: model.network.holdsRealFunds ? .orange : .purple,
                                 title: "Network",
-                                subtitle: "Chain 10143",
-                                value: "Monad testnet"
+                                subtitle: model.network.holdsRealFunds ? "Real funds" : "Test funds only",
+                                value: model.network.name,
+                                action: { showsNetwork = true }
                             )
                         }
 
@@ -129,6 +132,11 @@ struct AccountScreen: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Color(.systemBackground))
+        }
+        .sheet(isPresented: $showsNetwork) {
+            NetworkSheet(model: model)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showsWithdraw) {
             WithdrawSheet(model: model) { showsWithdraw = false }
