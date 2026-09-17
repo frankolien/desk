@@ -495,6 +495,13 @@ struct TraderProfileScreen: View {
                 try? await Task.sleep(for: .seconds(15))
             }
         }
+        #if DEBUG
+        .task {
+            let arguments = ProcessInfo.processInfo.arguments
+            if arguments.contains("-profile-stats") { tab = .stats }
+            if arguments.contains("-profile-closed") { tab = .closed }
+        }
+        #endif
         .task {
             while !Task.isCancelled {
                 if let fresh = await directory.history(initial.address) { history = fresh }

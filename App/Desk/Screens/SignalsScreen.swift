@@ -108,7 +108,12 @@ struct SignalsScreen: View {
             debugPrimer = directory.top.first
         }
         .task {
-            guard ProcessInfo.processInfo.arguments.contains("-trader-profile") else { return }
+            let arguments = ProcessInfo.processInfo.arguments
+            guard let flag = arguments.firstIndex(of: "-trader-profile") else { return }
+            if arguments.indices.contains(flag + 1), arguments[flag + 1].hasPrefix("0x") {
+                selectedTrader = TraderSnapshot(accountId: nil, address: arguments[flag + 1], pnl: nil, balance: nil, positions: [])
+                return
+            }
             while directory.top.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
             selectedTrader = directory.top.first
         }
