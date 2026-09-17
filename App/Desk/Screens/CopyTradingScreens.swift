@@ -18,28 +18,16 @@ private struct CopyRulesSections: View {
     var body: some View {
         GlassSection("Strategy", footer: strategyFooter) {
             GlassRow("Mode") {
-                Picker("Mode", selection: $rules.mode.animation()) {
-                    Text("Shadow").tag(CopyMode.shadow)
-                    Text("Live").tag(CopyMode.live)
-                }
-                .pickerStyle(.segmented)
-                .fixedSize()
+                DeskSegmented(options: [(CopyMode.shadow, "Shadow"), (CopyMode.live, "Live")],
+                              selection: $rules.mode.animation())
             }
             GlassRow("Direction") {
-                Picker("Direction", selection: $rules.direction.animation()) {
-                    Text("Follow").tag(CopyDirection.follow)
-                    Text("Fade").tag(CopyDirection.fade)
-                }
-                .pickerStyle(.segmented)
-                .fixedSize()
+                DeskSegmented(options: [(CopyDirection.follow, "Follow"), (CopyDirection.fade, "Fade")],
+                              selection: $rules.direction.animation())
             }
             GlassRow("Sizing") {
-                Picker("Sizing", selection: $rules.sizing.animation()) {
-                    Text("Fixed").tag(CopySizing.fixed)
-                    Text("Conviction").tag(CopySizing.conviction)
-                }
-                .pickerStyle(.segmented)
-                .fixedSize()
+                DeskSegmented(options: [(CopySizing.fixed, "Fixed"), (CopySizing.conviction, "Conviction")],
+                              selection: $rules.sizing.animation())
             }
         }
 
@@ -395,11 +383,8 @@ struct CopyActivityScreen: View {
 
     var body: some View {
         GlassPage {
-            Picker("Results", selection: $showsShadow.animation(.snappy(duration: 0.2))) {
-                Text("Shadow").tag(true)
-                Text("Live").tag(false)
-            }
-            .pickerStyle(.segmented)
+            DeskSegmented(options: [(true, "Shadow"), (false, "Live")],
+                          selection: $showsShadow.animation(.snappy(duration: 0.2)), fitted: false)
 
             summary
 

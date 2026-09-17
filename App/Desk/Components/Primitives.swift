@@ -174,3 +174,56 @@ struct AmountKeypad: View {
         return text.distance(from: text.index(after: point), to: text.endIndex)
     }
 }
+
+/// A segmented control that belongs on glass: a clear track with a hairline, and the chosen
+/// segment lit by the brand's amber rather than the system's grey slab.
+///
+/// `Picker(.segmented)` paints an opaque grey capsule that reads as a different material
+/// from everything around it, which on a glass sheet looks like a patch rather than a
+/// control. This keeps the same shape, targets and animation and changes only the surface.
+struct DeskSegmented<Value: Hashable>: View {
+    let options: [(Value, String)]
+    @Binding var selection: Value
+    /// True inside a row, where the control sizes to its labels; false spans the width.
+    var fitted = true
+
+    @Namespace private var lens
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options, id: \.0) { option in
+                let isOn = option.0 == selection
+                Button {
+                    withAnimation(.snappy(duration: 0.26, extraBounce: 0.08)) { selection = option.0 }
+                } label: {
+                    Text(option.1)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(isOn ? DeskColor.onAction.color : Color.white.opacity(0.7))
+                        .lineLimit(1)
+                        .padding(.horizontal, 14)
+                        .frame(maxWidth: fitted ? nil : .infinity)
+                        .frame(height: 30)
+                        .background {
+                            if isOn {
+                                Capsule()
+                                    .fill(LinearGradient(
+                                        colors: [DeskColor.action.color, DeskColor.action.color.opacity(0.62)],
+                                        startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    .shadow(color: DeskColor.action.color.opacity(0.3), radius: 7, y: 2)
+                                    .matchedGeometryEffect(id: "deskSegmentedLens", in: lens)
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background {
+            Capsule()
+                .fill(Color.white.opacity(0.05))
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.6))
+        }
+        .animation(.snappy(duration: 0.26), value: selection)
+    }
+}
