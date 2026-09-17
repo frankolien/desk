@@ -729,12 +729,17 @@ private struct TradeShareSheet: View {
         NavigationStack {
             ZStack {
                 DeskColor.night.color.ignoresSafeArea()
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 18) {
-                        TradeShareCard(symbol: symbol, figures: figures, photo: photo)
-                            .aspectRatio(4 / 5, contentMode: .fit)
-                            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 26).stroke(Color.white.opacity(0.1)))
+                GeometryReader { proxy in
+                    let usableWidth = proxy.size.width - 28
+                    let controlsHeight: CGFloat = 174
+                    let cardHeight = min(usableWidth * 1.25, proxy.size.height - controlsHeight)
+                    let cardWidth = cardHeight * 0.8
+
+                    VStack(spacing: 10) {
+                        ShareCardPreview(
+                            symbol: symbol, figures: figures, photo: photo,
+                            width: cardWidth, height: cardHeight)
+                            .frame(maxWidth: .infinity)
 
                         backgroundPicker
 
@@ -744,13 +749,14 @@ private struct TradeShareSheet: View {
                         } label: {
                             Label("Share", systemImage: "square.and.arrow.up")
                                 .font(.system(size: 16, weight: .bold, design: .rounded))
-                                .frame(maxWidth: .infinity).frame(height: 52)
+                                .frame(maxWidth: .infinity).frame(height: 48)
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(DeskColor.night.color)
                         .background(DeskColor.action.color, in: Capsule())
                     }
-                    .padding(16)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
                 }
             }
             .navigationTitle("Share position")
@@ -799,7 +805,7 @@ private struct TradeShareSheet: View {
 
     private func backgroundTile(image: Image, selected: Bool) -> some View {
         image.resizable().scaledToFill()
-            .frame(width: 132, height: 92).clipped()
+            .frame(width: 106, height: 68).clipped()
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .overlay(RoundedRectangle(cornerRadius: 16)
                 .stroke(selected ? DeskColor.action.color : Color.white.opacity(0.1), lineWidth: 2))
@@ -812,6 +818,25 @@ private struct TradeShareSheet: View {
         renderer.scale = 1
         renderer.isOpaque = true
         return renderer.uiImage
+    }
+}
+
+/// Preview the exact export canvas instead of asking its large typography to reflow at
+/// phone width. Scaling the finished composition keeps every edge and baseline visible.
+private struct ShareCardPreview: View {
+    let symbol: String
+    let figures: PositionFigures
+    let photo: UIImage?
+    let width: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        TradeShareCard(symbol: symbol, figures: figures, photo: photo)
+            .frame(width: 900, height: 1125)
+            .scaleEffect(width / 900, anchor: .topLeading)
+            .frame(width: width, height: height, alignment: .topLeading)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.white.opacity(0.1)))
     }
 }
 
@@ -839,7 +864,7 @@ private struct SharePhotoTile: View {
                 .background(DeskColor.action.color, in: Circle())
                 .padding(7)
         }
-        .frame(width: 132, height: 92)
+        .frame(width: 106, height: 68)
     }
 }
 
