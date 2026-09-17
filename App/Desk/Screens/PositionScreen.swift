@@ -1,7 +1,9 @@
 import DeskPerpl
 import DeskMoney
 import DeskUI
+import PhotosUI
 import SwiftUI
+import UIKit
 
 /// One held position, in full.
 ///
@@ -17,6 +19,7 @@ struct PositionScreen: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showsClose = false
     @State private var showsProtection = false
+    @State private var showsShare = false
     @State private var tab: PositionTab = .positions
     /// Which position the screen is showing. Starts at the one that was tapped.
     @State private var focusedID: Int64?
@@ -58,6 +61,11 @@ struct PositionScreen: View {
                     PositionProtectionSheet(
                         position: active, figures: figures, market: selected,
                         session: session) { showsProtection = false }
+                }
+            }
+            .sheet(isPresented: $showsShare) {
+                if let figures {
+                    TradeShareSheet(symbol: market.symbol, figures: figures)
                 }
             }
         }
@@ -425,13 +433,16 @@ struct PositionScreen: View {
                 .frame(height: 24)
                 .background(sideTint(figures).color.opacity(0.14), in: Capsule())
             Spacer(minLength: 8)
-            // Not a button yet: a control that looks live and answers nothing is worse.
-            Image(systemName: "square.and.arrow.up")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(DeskColor.nightMuted.color)
-                .frame(width: 30, height: 30)
-                .background(Color.white.opacity(0.08), in: Circle())
-                .accessibilityHidden(true)
+            Button { showsShare = true } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .frame(width: 30, height: 30)
+                    .background(Color.white.opacity(0.08), in: Circle())
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Share position")
         }
     }
 
@@ -698,4 +709,250 @@ private struct PositionProtectionSheet: View {
 /// from the value itself rather than from a flag beside it.
 extension PerplPosition: @retroactive Identifiable {
     public var id: Int64 { positionID }
+}
+
+// MARK: - Position sharing
+
+/// A small editor rather than an immediate system sheet: the trade stays factual while
+/// the owner chooses whether it sits on Desk's house artwork or one of their photographs.
+private struct TradeShareSheet: View {
+    let symbol: String
+    let figures: PositionFigures
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var photoItem: PhotosPickerItem?
+    @State private var photo: UIImage?
+    @State private var rendered: UIImage?
+    @State private var presentsActivity = false
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                DeskColor.night.color.ignoresSafeArea()
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 18) {
+                        TradeShareCard(symbol: symbol, figures: figures, photo: photo)
+                            .aspectRatio(4 / 5, contentMode: .fit)
+                            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 26).stroke(Color.white.opacity(0.1)))
+
+                        backgroundPicker
+
+                        Button {
+                            rendered = render()
+                            presentsActivity = rendered != nil
+                        } label: {
+                            Label("Share", systemImage: "square.and.arrow.up")
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .frame(maxWidth: .infinity).frame(height: 52)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(DeskColor.night.color)
+                        .background(DeskColor.action.color, in: Capsule())
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle("Share position")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }.foregroundStyle(DeskColor.action.color)
+                }
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .onChange(of: photoItem) { _, item in
+            guard let item else { return }
+            Task {
+                guard let data = try? await item.loadTransferable(type: Data.self),
+                      let selected = UIImage(data: data) else { return }
+                photo = selected
+            }
+        }
+        .sheet(isPresented: $presentsActivity) {
+            if let rendered { ActivitySheet(items: [rendered]) }
+        }
+    }
+
+    private var backgroundPicker: some View {
+        let hasPhoto = photo != nil
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("BACKGROUND")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .tracking(1.1)
+                .foregroundStyle(DeskColor.nightMuted.color)
+            HStack(spacing: 12) {
+                Button { photo = nil; photoItem = nil } label: {
+                    backgroundTile(image: Image("TradeShareCardBackground"), selected: photo == nil)
+                }
+                .buttonStyle(.plain)
+
+                PhotosPicker(selection: $photoItem, matching: .images) {
+                    SharePhotoTile(selected: hasPhoto)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func backgroundTile(image: Image, selected: Bool) -> some View {
+        image.resizable().scaledToFill()
+            .frame(width: 132, height: 92).clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16)
+                .stroke(selected ? DeskColor.action.color : Color.white.opacity(0.1), lineWidth: 2))
+    }
+
+    @MainActor private func render() -> UIImage? {
+        let card = TradeShareCard(symbol: symbol, figures: figures, photo: photo)
+            .frame(width: 900, height: 1125)
+        let renderer = ImageRenderer(content: card)
+        renderer.scale = 1
+        renderer.isOpaque = true
+        return renderer.uiImage
+    }
+}
+
+private struct SharePhotoTile: View {
+    let selected: Bool
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            RoundedRectangle(cornerRadius: 16)
+                .fill(DeskColor.nightChip.color)
+                .overlay {
+                    VStack(spacing: 7) {
+                        Image(systemName: selected ? "photo.fill" : "photo.on.rectangle.angled")
+                        Text(selected ? "Photo selected" : "Your photo")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                    }
+                    .foregroundStyle(selected ? DeskColor.nightText.color : DeskColor.nightMuted.color)
+                }
+                .overlay(RoundedRectangle(cornerRadius: 16)
+                    .stroke(selected ? DeskColor.action.color : Color.white.opacity(0.1), lineWidth: 2))
+            Image(systemName: "pencil")
+                .font(.system(size: 11, weight: .bold))
+                .frame(width: 28, height: 28)
+                .foregroundStyle(DeskColor.night.color)
+                .background(DeskColor.action.color, in: Circle())
+                .padding(7)
+        }
+        .frame(width: 132, height: 92)
+    }
+}
+
+/// The exported image. All numbers are native text layered at render time; the bitmap
+/// underneath is decoration only, so stale examples can never leak into a real share.
+private struct TradeShareCard: View {
+    let symbol: String
+    let figures: PositionFigures
+    let photo: UIImage?
+
+    private var tint: Color { figures.isProfit ? DeskColor.rise.color : DeskColor.fall.color }
+    private var pnl: String {
+        (figures.unrealisedPnL.isNegative ? "" : "+") + figures.unrealisedPnL.display() + " AUSD"
+    }
+    private var notional: String {
+        Money.notional(price: figures.mark, size: figures.size, rounding: .towardZero)
+            .map { $0.display() + " AUSD" } ?? Unavailable.text
+    }
+
+    var body: some View {
+        ZStack {
+            if let photo {
+                Image(uiImage: photo).resizable().scaledToFill()
+                Color.black.opacity(0.58)
+                LinearGradient(colors: [.black.opacity(0.08), .black.opacity(0.84)],
+                               startPoint: .top, endPoint: .bottom)
+            } else {
+                Image("TradeShareCardBackground").resizable().scaledToFill()
+            }
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 18) {
+                    DeskBrandMark(size: 68)
+                    Text("DESK")
+                        .font(.system(size: 34, weight: .black, design: .rounded))
+                        .tracking(7)
+                    Spacer()
+                    Text(Date.now.formatted(date: .abbreviated, time: .omitted))
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.58))
+                }
+
+                Spacer().frame(height: 92)
+
+                HStack(spacing: 14) {
+                    MarketTokenLogo(symbol: symbol, size: 54)
+                    Text(symbol).font(.system(size: 36, weight: .black, design: .rounded))
+                    Text(figures.side == .long ? "LONG" : "SHORT")
+                        .font(.system(size: 18, weight: .black, design: .rounded))
+                        .foregroundStyle(tint)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(tint.opacity(0.16), in: Capsule())
+                    Text("\(figures.leverageHundredths / 100)×")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.72))
+                    Spacer()
+                }
+
+                Spacer().frame(height: 60)
+
+                Text(pnl)
+                    .font(.system(size: 74, weight: .black, design: .rounded).monospacedDigit())
+                    .foregroundStyle(tint).minimumScaleFactor(0.55).lineLimit(1)
+                Text(HomeScreen.percent(figures.returnOnMarginMicros) + " on margin")
+                    .font(.system(size: 32, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(tint.opacity(0.92))
+                    .padding(.top, 8)
+
+                Spacer()
+
+                HStack(spacing: 50) {
+                    shareFact("MARK PRICE", "$" + figures.mark.display(fractionDigits: figures.mark.decimals))
+                    shareFact("LEVERAGED SIZE", notional)
+                }
+
+                Rectangle().fill(DeskColor.action.color.opacity(0.6)).frame(height: 1)
+                    .padding(.top, 40)
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Trade from your desk.")
+                            .font(.system(size: 25, weight: .bold, design: .rounded))
+                        Text("Perpetuals secured by Face ID")
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color.white.opacity(0.56))
+                    }
+                    Spacer()
+                    Image(systemName: "qrcode")
+                        .resizable().interpolation(.none).frame(width: 88, height: 88)
+                        .foregroundStyle(.white)
+                }
+                .padding(.top, 34)
+            }
+            .padding(58)
+            .foregroundStyle(.white)
+        }
+        .clipped()
+    }
+
+    private func shareFact(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label).font(.system(size: 16, weight: .bold, design: .rounded))
+                .tracking(1).foregroundStyle(Color.white.opacity(0.5))
+            Text(value).font(.system(size: 27, weight: .bold, design: .rounded).monospacedDigit())
+                .lineLimit(1).minimumScaleFactor(0.7)
+        }
+    }
+}
+
+private struct ActivitySheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
