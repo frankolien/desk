@@ -27,6 +27,10 @@ struct HomeScreen: View {
         model.collateral.value?.display() ?? Unavailable.text
     }
 
+    private var collateralInCurrency: String {
+        model.collateral.value.map { DisplayCurrency.shared.format($0) } ?? Unavailable.text
+    }
+
     private var isEmpty: Bool {
         model.collateral.value.map(\.isZero) ?? true
     }
@@ -148,7 +152,7 @@ struct HomeScreen: View {
                     }
                     .frame(height: 48)
                 } else {
-                    AmountText("$" + collateralText, size: 46)
+                    AmountText(collateralInCurrency, size: 46)
                         .contentTransition(.numericText())
                 }
             }
@@ -182,7 +186,7 @@ struct HomeScreen: View {
                 mark: { TokenLogo(asset: .ausd, size: 38) },
                 title: "AUSD collateral",
                 subtitle: "Available to trade",
-                value: hidesBalance ? "•••••" : "$" + collateralText,
+                value: hidesBalance ? "•••••" : collateralInCurrency,
                 change: nil,
                 tint: DeskColor.action,
                 action: onFund)

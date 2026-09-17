@@ -364,7 +364,7 @@ struct PositionScreen: View {
 
             VStack(spacing: 16) {
                 HStack(alignment: .top, spacing: 12) {
-                    metric("Value", value(figures).map { "$" + $0.display() } ?? Unavailable.text,
+                    metric("Value", value(figures).map { DisplayCurrency.shared.format($0) } ?? Unavailable.text,
                            isDimmed: stale)
                     metric("PnL",
                            (figures.unrealisedPnL.isNegative ? "" : "+")

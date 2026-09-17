@@ -11,6 +11,7 @@ struct AccountScreen: View {
     @State private var showsWithdraw = false
     @State private var showsFunding = false
     @State private var showsNetwork = false
+    @State private var showsCurrency = false
     @State private var didCopyAddress = false
 
     private var versionDescription: String {
@@ -54,7 +55,9 @@ struct AccountScreen: View {
                                 icon: "dollarsign.circle.fill",
                                 tint: .green,
                                 title: "Currency",
-                                value: "🇺🇸  USD"
+                                subtitle: "Balances and profit",
+                                value: "\(DisplayCurrency.shared.option.flag)  \(DisplayCurrency.shared.code)",
+                                action: { showsCurrency = true }
                             )
 
                             sectionDivider
@@ -132,6 +135,11 @@ struct AccountScreen: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Color(.systemBackground))
+        }
+        .sheet(isPresented: $showsCurrency) {
+            CurrencySheet()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showsNetwork) {
             NetworkSheet(model: model)

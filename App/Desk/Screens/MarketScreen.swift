@@ -165,9 +165,7 @@ struct MarketScreen: View {
             // The header total is unrealised PnL, not notional. Notional is the number
             // that looks impressive and answers nothing; this is the one a person came
             // to see.
-            Text(totalPositionPnL.map { pnl in
-                (pnl.isNegative ? "" : "+") + "$" + pnl.display()
-            } ?? "$0.00")
+            Text(DisplayCurrency.shared.format(totalPositionPnL ?? .zero, signed: true))
                 .font(.system(size: 28, weight: .bold, design: .rounded).monospacedDigit())
                 .foregroundStyle((totalPositionPnL.map { !$0.isNegative && !$0.isZero ? DeskColor.rise : DeskColor.fall }
                                   ?? DeskColor.nightText).color)

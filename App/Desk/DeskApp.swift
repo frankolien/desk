@@ -112,6 +112,7 @@ struct RootView: View {
                     .zIndex(1)
             }
         }
+        .task { await DisplayCurrency.shared.refresh() }
         .task {
             guard showsLaunchMoment else { return }
             try? await Task.sleep(for: .milliseconds(3100))
