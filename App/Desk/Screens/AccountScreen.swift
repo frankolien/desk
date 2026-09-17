@@ -23,7 +23,7 @@ struct AccountScreen: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color(.systemBackground).ignoresSafeArea()
+                DeskBackground()
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 18) {
@@ -205,11 +205,8 @@ struct AccountScreen: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Color.white.opacity(0.06), lineWidth: 1)
-            }
+            .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .deskGlass(interactive: true, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityHint("Copies wallet address")
@@ -263,11 +260,7 @@ struct AccountScreen: View {
                 content()
             }
             .padding(.vertical, 3)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Color.white.opacity(0.05), lineWidth: 1)
-            }
+            .deskGlass(in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         }
     }
 

@@ -145,8 +145,8 @@ struct TradeAlertSheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
+            GlassPage {
+                GlassSection {
                     HStack(spacing: 14) {
                         TraderAvatar(address: alert.trader, size: 52)
                         VStack(alignment: .leading, spacing: 3) {
@@ -158,47 +158,30 @@ struct TradeAlertSheet: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .padding(.vertical, 4)
                 }
 
-                Section {
-                    LabeledContent {
+                GlassSection("Perpl mainnet", footer: closedSince ? "They've closed this since the alert."
+                             : (alert.canCopy ? "Copy opens your own ticket at the same market, side and leverage. You choose the amount." : nil)) {
+                    GlassRow("\(alert.market)-PERP") {
                         Text("\(alert.isLong ? "Long" : "Short") \(TraderFormat.leverage(alert.leverage))")
                             .font(.body.weight(.semibold))
                             .foregroundStyle(sideTint.color)
-                    } label: {
-                        Label {
-                            Text("\(alert.market)-PERP")
-                        } icon: {
-                            MarketTokenLogo(symbol: alert.market, size: 26)
-                        }
                     }
-                    LabeledContent("Their entry", value: TraderFormat.price(alert.entry))
-                    LabeledContent("Mark now") {
-                        Text(livePosition.map { TraderFormat.price($0.mark) } ?? (loaded ? Unavailable.text : "…"))
-                            .contentTransition(.numericText())
-                    }
-                    LabeledContent("Since entry") {
+                    GlassRow("Their entry", value: TraderFormat.price(alert.entry))
+                    GlassRow("Mark now", value: livePosition.map { TraderFormat.price($0.mark) } ?? (loaded ? Unavailable.text : "…"))
+                    GlassRow("Since entry") {
                         Text(move.map { String(format: "%@%.2f%%", $0 < 0 ? Direction.minus : "+", abs($0)) } ?? "…")
                             .foregroundStyle(move.map { ($0 < 0 ? DeskColor.fall : DeskColor.rise).color } ?? .secondary)
+                            .monospacedDigit()
                     }
-                    LabeledContent("Their position", value: TraderFormat.dollars(livePosition?.value ?? alert.value, signed: false))
-                    LabeledContent("Their open PnL") {
+                    GlassRow("Their position", value: TraderFormat.dollars(livePosition?.value ?? alert.value, signed: false))
+                    GlassRow("Their open PnL") {
                         Text(livePosition.map { TraderFormat.dollars($0.pnl) } ?? (loaded ? Unavailable.text : "…"))
                             .foregroundStyle(livePosition.map { ($0.isProfit ? DeskColor.rise : DeskColor.fall).color } ?? .secondary)
-                    }
-                } header: {
-                    Text("Perpl mainnet")
-                } footer: {
-                    if closedSince {
-                        Label("They've closed this since the alert.", systemImage: "info.circle")
-                    } else if alert.canCopy {
-                        Text("Copy opens your own ticket at the same market, side and leverage. You choose the amount.")
+                            .monospacedDigit()
                     }
                 }
             }
-            .listStyle(.insetGrouped)
-            .monospacedDigit()
             .navigationTitle("Trade Alert")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

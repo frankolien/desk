@@ -33,8 +33,8 @@ struct AutoCopySheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
+            GlassPage {
+                GlassSection {
                     HStack(spacing: 14) {
                         TraderAvatar(address: address, size: 52)
                         VStack(alignment: .leading, spacing: 3) {
@@ -46,63 +46,68 @@ struct AutoCopySheet: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .padding(.vertical, 4)
                 }
 
-                Section {
-                    Picker("Margin per trade", selection: $rules.marginPerTrade) {
-                        ForEach([5, 10, 25, 50, 100, 250], id: \.self) { Text("\($0) AUSD").tag($0) }
+                GlassSection("Size", footer: "Their size fits their account, not yours. Each copy uses your margin at their leverage, up to your cap.") {
+                    GlassRow("Margin per trade") {
+                        Picker("Margin per trade", selection: $rules.marginPerTrade) {
+                            ForEach([5, 10, 25, 50, 100, 250], id: \.self) { Text("\($0) AUSD").tag($0) }
+                        }
+                        .labelsHidden()
                     }
-                    Stepper(value: $rules.maxLeverage, in: 1...20) {
-                        LabeledContent("Leverage cap", value: "\(rules.maxLeverage)×")
+                    GlassRow("Leverage cap") {
+                        Text("\(rules.maxLeverage)×")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
+                        Stepper("Leverage cap", value: $rules.maxLeverage.animation(), in: 1...20)
+                            .labelsHidden()
                     }
-                    LabeledContent("Largest position", value: "\(rules.marginPerTrade * rules.maxLeverage) AUSD")
-                } header: {
-                    Text("Size")
-                } footer: {
-                    Text("Their size fits their account, not yours. Each copy uses your margin at their leverage, up to your cap.")
+                    GlassRow("Largest position", value: "\(rules.marginPerTrade * rules.maxLeverage) AUSD")
                 }
 
-                Section {
+                GlassSection("Protection", footer: protectionFooter) {
                     Toggle("Stop loss", isOn: stopLoss.animation())
                     if let stop = rules.stopLossPercent {
-                        Picker("Close at", selection: Binding(get: { stop }, set: { rules.stopLossPercent = $0 })) {
-                            ForEach([10, 15, 25, 35, 50], id: \.self) { Text("−\($0)% of margin").tag($0) }
+                        GlassRow("Loss of margin") {
+                            Picker("Stop loss", selection: Binding(get: { stop }, set: { rules.stopLossPercent = $0 })) {
+                                ForEach([10, 15, 25, 35, 50], id: \.self) { Text("−\($0)%").tag($0) }
+                            }
+                            .labelsHidden()
                         }
                     }
                     Toggle("Take profit", isOn: takeProfit.animation())
                     if let take = rules.takeProfitPercent {
-                        Picker("Close at", selection: Binding(get: { take }, set: { rules.takeProfitPercent = $0 })) {
-                            ForEach([25, 50, 100, 200], id: \.self) { Text("+\($0)% of margin").tag($0) }
+                        GlassRow("Gain on margin") {
+                            Picker("Take profit", selection: Binding(get: { take }, set: { rules.takeProfitPercent = $0 })) {
+                                ForEach([25, 50, 100, 200], id: \.self) { Text("+\($0)%").tag($0) }
+                            }
+                            .labelsHidden()
                         }
                     }
-                } header: {
-                    Text("Protection")
-                } footer: {
-                    Text(protectionFooter)
                 }
 
-                Section {
+                GlassSection("Execution", footer: "Skips a copy when the price has already moved that far past their entry. Copies are sent only while Desk is open and unlocked, signed on this iPhone.") {
                     Toggle("Close when they close", isOn: $rules.closeWithTrader)
-                    Picker("Skip if price ran", selection: $rules.maxChaseBps) {
-                        ForEach([25, 50, 100, 200], id: \.self) { Text(String(format: "%.2g%%", Double($0) / 100)).tag($0) }
+                    GlassRow("Skip if price ran") {
+                        Picker("Skip if price ran", selection: $rules.maxChaseBps) {
+                            ForEach([25, 50, 100, 200], id: \.self) { Text(String(format: "%.2g%%", Double($0) / 100)).tag($0) }
+                        }
+                        .labelsHidden()
                     }
-                } header: {
-                    Text("Execution")
-                } footer: {
-                    Text("Skips a copy when the price has already moved that far past their entry. Copies are sent only while Desk is open and unlocked, signed on this iPhone.")
                 }
 
                 if copier.network.holdsRealFunds {
-                    Section {
+                    GlassSection {
                         Label("Copies on mainnet use real AUSD.", systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                     }
                 }
 
                 if isActive {
-                    Section {
+                    GlassSection {
                         Button("Stop Copying", role: .destructive) { confirmsStop = true }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
@@ -255,8 +260,8 @@ struct CopyActivityScreen: View {
     @State private var editing: CopiedTrader?
 
     var body: some View {
-        List {
-            Section {
+        GlassPage {
+            GlassSection(footer: "Reads traders on Perpl mainnet every 4 seconds and copies to your Perpl \(copier.network.shortName.lowercased()) account. Pausing stops new copies; open ones keep their stops.") {
                 Toggle(isOn: Binding(get: { !copier.isPaused }, set: { copier.setPaused(!$0) })) {
                     Label {
                         VStack(alignment: .leading, spacing: 2) {
@@ -268,66 +273,60 @@ struct CopyActivityScreen: View {
                     } icon: {
                         Image(systemName: copier.isPaused ? "pause.fill" : "bolt.fill")
                             .foregroundStyle(copier.isPaused ? AnyShapeStyle(.secondary) : AnyShapeStyle(DeskColor.rise.color))
+                            .symbolEffect(.pulse, options: .repeating, isActive: !copier.isPaused)
                     }
                 }
-            } footer: {
-                Text("Reads traders on Perpl mainnet every 4 seconds and copies to your Perpl \(copier.network.shortName.lowercased()) account. Pausing stops new copies; open ones keep their stops.")
             }
 
-            Section("Performance") {
-                LabeledContent("Realised PnL") {
+            GlassSection("Performance") {
+                GlassRow("Realised PnL") {
                     Text(DisplayCurrency.shared.format(copier.realisedTotal, signed: true))
                         .foregroundStyle(pnlTint(copier.realisedTotal))
                         .monospacedDigit()
                 }
-                LabeledContent("Win rate") {
-                    Text(copier.winRate.map { String(format: "%.0f%% of %d", $0 * 100, copier.closedCount) } ?? "No closes yet")
-                        .monospacedDigit()
-                }
-                LabeledContent("Copies", value: "\(copier.copiedCount) · \(copier.open.count) open")
-                LabeledContent("Time to fill") {
-                    Text(copier.averageFillSeconds.map { String(format: "%.1f s after their move", $0) } ?? "—")
-                        .monospacedDigit()
-                }
+                GlassRow("Win rate", value: copier.winRate.map { String(format: "%.0f%% of %d", $0 * 100, copier.closedCount) } ?? "No closes yet")
+                GlassRow("Copies", value: "\(copier.copiedCount) · \(copier.open.count) open")
+                GlassRow("Time to fill", value: copier.averageFillSeconds.map { String(format: "%.1f s after their move", $0) } ?? "—")
             }
 
-            Section {
+            GlassSection("Copying", footer: copier.traders.isEmpty ? nil : "Touch and hold a trader to stop copying.") {
                 if copier.traders.isEmpty {
                     Text("Open a trader on Signals and turn on Auto-Copy.")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(copier.traders) { trader in
                         Button { editing = trader } label: { traderRow(trader) }
-                            .tint(.primary)
-                            .swipeActions {
-                                Button("Stop", role: .destructive) { copier.stop(trader.address) }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button("Edit Rules", systemImage: "slider.horizontal.3") { editing = trader }
+                                Button("Stop Copying", systemImage: "stop.circle", role: .destructive) { copier.stop(trader.address) }
                             }
                     }
                 }
-            } header: {
-                Text("Copying")
             }
 
-            Section {
-                Picker("Open copies at once", selection: Binding(
-                    get: { copier.guards.maxOpenCopies },
-                    set: { value in var next = copier.guards; next.maxOpenCopies = value; copier.updateGuards(next) }
-                )) {
-                    ForEach([1, 3, 5, 10], id: \.self) { Text("\($0)").tag($0) }
+            GlassSection("Limits", footer: "Auto-Copy pauses itself once today's closed copies have lost this much.") {
+                GlassRow("Open copies at once") {
+                    Picker("Open copies at once", selection: Binding(
+                        get: { copier.guards.maxOpenCopies },
+                        set: { value in var next = copier.guards; next.maxOpenCopies = value; copier.updateGuards(next) }
+                    )) {
+                        ForEach([1, 3, 5, 10], id: \.self) { Text("\($0)").tag($0) }
+                    }
+                    .labelsHidden()
                 }
-                Picker("Daily loss limit", selection: Binding(
-                    get: { copier.guards.dailyLossLimit },
-                    set: { value in var next = copier.guards; next.dailyLossLimit = value; copier.updateGuards(next) }
-                )) {
-                    ForEach([25, 50, 100, 250], id: \.self) { Text("\($0) AUSD").tag($0) }
+                GlassRow("Daily loss limit") {
+                    Picker("Daily loss limit", selection: Binding(
+                        get: { copier.guards.dailyLossLimit },
+                        set: { value in var next = copier.guards; next.dailyLossLimit = value; copier.updateGuards(next) }
+                    )) {
+                        ForEach([25, 50, 100, 250], id: \.self) { Text("\($0) AUSD").tag($0) }
+                    }
+                    .labelsHidden()
                 }
-            } header: {
-                Text("Limits")
-            } footer: {
-                Text("Auto-Copy pauses itself once today's closed copies have lost this much.")
             }
 
-            Section("Log") {
+            GlassSection("Log") {
                 if copier.log.isEmpty {
                     ContentUnavailableView(
                         "No Copies Yet",
@@ -340,7 +339,6 @@ struct CopyActivityScreen: View {
                 }
             }
         }
-        .listStyle(.insetGrouped)
         .tint(DeskColor.rise.color)
         .navigationTitle("Auto-Copy")
         .navigationBarTitleDisplayMode(.large)

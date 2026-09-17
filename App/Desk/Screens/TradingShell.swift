@@ -97,7 +97,6 @@ struct TradingShell: View {
             AccountScreen(model: model)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
-                .presentationBackground(Color(.systemBackground))
         }
         .sheet(isPresented: $showsFunding) { AddFundsSheet(model: model) }
         .sheet(isPresented: $showsNetwork) {
@@ -106,7 +105,11 @@ struct TradingShell: View {
                 .presentationDragIndicator(.visible)
         }
         #if DEBUG
-        .task { if ProcessInfo.processInfo.arguments.contains("-open-activity") { showsActivity = true } }
+        .task {
+            let arguments = ProcessInfo.processInfo.arguments
+            if arguments.contains("-open-activity") { showsActivity = true }
+            if arguments.contains("-open-settings") { showsAccount = true }
+        }
         #endif
         .sheet(isPresented: $showsActivity) {
             ActivityScreen(model: model)
