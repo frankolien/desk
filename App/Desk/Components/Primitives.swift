@@ -176,7 +176,7 @@ struct AmountKeypad: View {
 }
 
 /// A segmented control that belongs on glass: a clear track with a hairline, and the chosen
-/// segment lit by the brand's amber rather than the system's grey slab.
+/// segment drawn as an amber outline around glass rather than the system's grey slab.
 ///
 /// `Picker(.segmented)` paints an opaque grey capsule that reads as a different material
 /// from everything around it, which on a glass sheet looks like a patch rather than a
@@ -198,7 +198,7 @@ struct DeskSegmented<Value: Hashable>: View {
                 } label: {
                     Text(option.1)
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(isOn ? DeskColor.onAction.color : Color.white.opacity(0.7))
+                        .foregroundStyle(isOn ? DeskColor.action.color : Color.white.opacity(0.55))
                         .lineLimit(1)
                         .padding(.horizontal, 14)
                         .frame(maxWidth: fitted ? nil : .infinity)
@@ -206,10 +206,13 @@ struct DeskSegmented<Value: Hashable>: View {
                         .background {
                             if isOn {
                                 Capsule()
-                                    .fill(LinearGradient(
-                                        colors: [DeskColor.action.color, DeskColor.action.color.opacity(0.62)],
-                                        startPoint: .topLeading, endPoint: .bottomTrailing))
-                                    .shadow(color: DeskColor.action.color.opacity(0.3), radius: 7, y: 2)
+                                    .fill(DeskColor.action.color.opacity(0.10))
+                                    .overlay {
+                                        Capsule().strokeBorder(LinearGradient(
+                                            colors: [DeskColor.action.color, DeskColor.action.color.opacity(0.45)],
+                                            startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.2)
+                                    }
+                                    .shadow(color: DeskColor.action.color.opacity(0.25), radius: 6)
                                     .matchedGeometryEffect(id: "deskSegmentedLens", in: lens)
                             }
                         }
