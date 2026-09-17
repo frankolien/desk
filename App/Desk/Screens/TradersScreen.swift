@@ -101,7 +101,8 @@ final class TraderDirectory {
         while !Task.isCancelled {
             async let top: Void = refreshTop()
             async let following: Void = refreshFollowing()
-            _ = await (top, following)
+            async let scores: Void = refreshScores()
+            _ = await (top, following, scores)
             try? await Task.sleep(for: .seconds(20))
         }
     }
@@ -123,6 +124,36 @@ final class TraderDirectory {
 
     func trader(_ address: String) async -> TraderSnapshot? {
         await fetch(["view": "trader", "address": address])?.first
+    }
+
+    /// Scores from indexed history, by lowercased address.
+    private(set) var scores: [String: Int] = [:]
+    private var scoresFetchedAt: Date?
+
+    func refreshScores() async {
+        if let scoresFetchedAt, Date.now.timeIntervalSince(scoresFetchedAt) < 300 { return }
+        var components = URLComponents(string: Self.endpoint)!
+        components.queryItems = [URLQueryItem(name: "view", value: "scores")]
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let body = try? JSONDecoder().decode(ScoresResponse.self, from: data) else { return }
+        scores = Dictionary(body.traders.map { ($0.address.lowercased(), $0.score) }, uniquingKeysWith: max)
+        scoresFetchedAt = .now
+    }
+
+    func history(_ address: String) async -> TraderHistory? {
+        var components = URLComponents(string: Self.endpoint)!
+        components.queryItems = [URLQueryItem(name: "view", value: "history"), URLQueryItem(name: "address", value: address)]
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return try? JSONDecoder().decode(TraderHistory.self, from: data)
+    }
+
+    private struct ScoresResponse: Decodable {
+        struct Row: Decodable { let address: String; let score: Int }
+        let traders: [Row]
     }
 
     private func fetch(_ query: [String: String]) async -> [TraderSnapshot]? {
@@ -290,6 +321,7 @@ struct TradersFeed: View {
                         ForEach(Array(directory.top.enumerated()), id: \.element.id) { index, trader in
                             Button { onSelect(trader) } label: {
                                 LeaderRow(trader: trader, rank: index + 1, name: directory.name(for: trader.address),
+                                          score: directory.scores[trader.id],
                                           isFollowed: directory.isFollowing(trader.address),
                                           isLast: index == directory.top.count - 1)
                             }
@@ -364,13 +396,14 @@ private struct LeaderRow: View {
     let trader: TraderSnapshot
     let rank: Int
     let name: String
+    var score: Int? = nil
     var isFollowed = false
     let isLast: Bool
 
     private var detail: String {
         let count = trader.positions.count
         let noun = count == 1 ? "position" : "positions"
-        return "\(count) \(noun) · \(TraderFormat.compact(trader.positionValue))"
+        return "\(count) \(noun) · \(TraderFormat.compact(trader.positionValue))" + (score.map { " · Score \($0)" } ?? "")
     }
 
     var body: some View {
@@ -417,7 +450,7 @@ struct TraderProfileScreen: View {
     let copier: CopyTrader
     let onCopy: (TraderPosition) -> Void
 
-    private enum Tab: String, CaseIterable { case positions = "Positions", closed = "Closed", activity = "Activity" }
+    private enum Tab: String, CaseIterable { case positions = "Positions", closed = "Closed", stats = "Stats" }
 
     @Environment(\.dismiss) private var dismiss
     @State private var snapshot: TraderSnapshot?
@@ -427,6 +460,8 @@ struct TraderProfileScreen: View {
     @State private var pendingCopy: TraderPosition?
     @State private var showsAlertsPrimer = false
     @State private var showsAutoCopy = false
+    @State private var history: TraderHistory?
+    @State private var historyLoaded = false
     @State private var showsNotificationsOff = false
 
     private var alerts: TradeAlerts { .shared }
@@ -458,6 +493,13 @@ struct TraderProfileScreen: View {
             while !Task.isCancelled {
                 if let fresh = await directory.trader(initial.address) { snapshot = fresh }
                 try? await Task.sleep(for: .seconds(15))
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                if let fresh = await directory.history(initial.address) { history = fresh }
+                historyLoaded = true
+                try? await Task.sleep(for: .seconds(120))
             }
         }
         .alert("Name this trader", isPresented: $isNaming) {
@@ -593,10 +635,24 @@ struct TraderProfileScreen: View {
 
     private var nameBlock: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(directory.name(for: trader.address))
-                .font(.system(size: 19, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .lineLimit(1)
+            HStack(spacing: 7) {
+                Text(directory.name(for: trader.address))
+                    .font(.system(size: 19, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if let score = history?.stats?.score {
+                    Button { withAnimation(.snappy(duration: 0.22)) { tab = .stats } } label: {
+                        Label("\(score)", systemImage: "gauge.with.dots.needle.67percent")
+                            .font(.system(size: 11, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(score >= 70 ? DeskColor.rise.color : .white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .deskGlass(interactive: true, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Score \(score). Show stats")
+                }
+            }
             Button {
                 UIPasteboard.general.string = trader.address
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -714,11 +770,9 @@ struct TraderProfileScreen: View {
                 .padding(.top, 16)
             }
         case .closed:
-            emptyState("Closed trades aren't shown yet",
-                       detail: "Desk reads open positions straight from Perpl. Trade history needs an indexer, which is coming.")
-        case .activity:
-            emptyState("Activity isn't shown yet",
-                       detail: "Opens, adds and closes will appear here once trade history is indexed.")
+            TraderTradesList(history: history, loaded: historyLoaded)
+        case .stats:
+            TraderStatsView(history: history, loaded: historyLoaded)
         }
     }
 

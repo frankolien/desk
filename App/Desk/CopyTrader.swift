@@ -357,17 +357,17 @@ final class CopyTrader {
     private func rotateBasketIfDue() async {
         guard let basket else { return }
         if let last = basket.lastRotation, Date.now.timeIntervalSince(last) < Double(basket.rotateHours) * 3600 { return }
-        var components = URLComponents(string: Self.endpoint)!
-        components.queryItems = [URLQueryItem(name: "view", value: "top")]
-        guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              let body = try? JSONDecoder().decode(Books.self, from: data) else { return }
         let manual = Set(traders.filter { !$0.isFromBasket }.map(\.id))
-        let picked = body.traders
-            .filter { !manual.contains($0.id) && !$0.positions.isEmpty }
+        // Best by indexed score first, so the basket holds consistent traders rather than
+        // whoever is up most right now; open PnL only when no history exists yet.
+        var candidates = await basketCandidates(view: "scores")
+        if candidates.count < basket.size { candidates += await basketCandidates(view: "top") }
+        var seen = Set<String>()
+        let picked = candidates
+            .filter { !manual.contains($0.lowercased()) && seen.insert($0.lowercased()).inserted }
             .prefix(basket.size)
-            .map(\.address)
+            .map { $0 }
+        guard !picked.isEmpty else { return }
         let pickedIDs = Set(picked.map { $0.lowercased() })
         let leaving = traders.filter { $0.isFromBasket && !pickedIDs.contains($0.id) }.count
         let joining = picked.filter { address in !traders.contains { $0.id == address.lowercased() } }
@@ -383,6 +383,21 @@ final class CopyTrader {
                 isShadow: basket.rules.mode == .shadow))
         }
         persist()
+    }
+
+    private func basketCandidates(view: String) async -> [String] {
+        var components = URLComponents(string: Self.endpoint)!
+        components.queryItems = [URLQueryItem(name: "view", value: view)]
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let body = try? JSONDecoder().decode(Candidates.self, from: data) else { return [] }
+        return body.traders.filter { $0.score.map { $0 >= 50 } ?? !($0.positions ?? []).isEmpty }.map(\.address)
+    }
+
+    private struct Candidates: Decodable {
+        struct Row: Decodable { let address: String; let score: Int?; let positions: [TraderPosition]? }
+        let traders: [Row]
     }
 
     // MARK: - Shadow copies

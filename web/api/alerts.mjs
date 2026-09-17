@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
 import { apnsClient, isDeadToken } from "./_apns.mjs";
+import { hypersyncClient, indexHistory } from "./_history.mjs";
 import { redisStore } from "./_store.mjs";
 import { chainReader, describePosition, openMarkets, perpIdsFromBitmap } from "./traders.mjs";
 
@@ -253,6 +254,22 @@ function safeJSON(text) {
 export function createHandler(resolve) {
   return async function handler(req, res) {
     const deps = resolve();
+    if (req.query?.job === "index") {
+      if (!authorized(req, deps.secret)) return res.status(401).json({ error: "Unauthorized." });
+      if (!deps.store || !deps.hypersync) return res.status(503).json({ error: "History indexing isn't configured on this server." });
+      if (!await deps.store.set("hist:lock", "1", { ex: 58, nx: true })) return res.status(202).json({ skipped: true });
+      try {
+        const report = await indexHistory({
+          store: deps.store, hypersync: deps.hypersync, markets: await deps.markets(), deadline: Date.now() + 40_000,
+        });
+        return res.status(200).json(report);
+      } catch (error) {
+        return res.status(502).json({ error: "History could not be indexed.", detail: String(error?.message ?? error) });
+      } finally {
+        await deps.store.del("hist:lock").catch(() => {});
+      }
+    }
+
     if (!deps.store || !deps.apns) return res.status(503).json({ error: "Trade alerts aren't configured on this server." });
     const { store, apns } = deps;
 
@@ -266,7 +283,10 @@ export function createHandler(resolve) {
         const markets = await deps.markets();
         for (let round = 0; round < rounds; round += 1) {
           if (round > 0) await deps.sleep(ROUND_INTERVAL_MS);
-          reports.push(await scan({ store, chain: deps.chain, apns, markets }));
+          const report = await scan({ store, chain: deps.chain, apns, markets });
+          reports.push(report);
+          // Nobody to alert: later rounds would only spend commands.
+          if (report.subscriptions === 0) break;
         }
         return res.status(200).json({ rounds: reports });
       } catch {
@@ -338,6 +358,7 @@ let production;
 export default createHandler(() => (production ??= {
   store: redisStore(),
   apns: apnsClient(),
+  hypersync: hypersyncClient(),
   chain: chainReader(),
   markets: () => openMarkets(),
   secret: process.env.CRON_SECRET,

@@ -1,6 +1,8 @@
 import { createPublicClient, http } from "viem";
 
+import { describe, shardKey, shardOf, statistics, tradesKey } from "./_history.mjs";
 import { EXCHANGE_VIEWS } from "./_perpl-abi.mjs";
+import { redisStore } from "./_store.mjs";
 
 /// Perpl mainnet, read-only. Following is about real traders, so it reads the live venue
 /// even though Desk trades on testnet; nothing here signs or moves funds.
@@ -159,10 +161,77 @@ async function trader(chain, book, address) {
 
 const validAddress = (value) => /^0x[a-fA-F0-9]{40}$/.test(value);
 
-export function createHandler({ chain = chainReader(), fetchImpl = fetch } = {}) {
+/// One sentence from a language model, grounded only in the figures, when a key is set.
+/// Cached for a day so a popular profile costs one call, not one per view.
+async function styleSummary({ store, fetchImpl, account, stats, apiKey = process.env.ANTHROPIC_API_KEY }) {
+  if (!apiKey || !store || stats.trades < 5) return null;
+  const cacheKey = `hist:ai:${account}:${stats.trades}`;
+  const cached = await store.get(cacheKey).catch(() => null);
+  if (cached) return cached;
+  try {
+    const response = await fetchImpl("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5",
+        max_tokens: 120,
+        system: "You describe a perpetual futures trader's style for a mobile trading app, in one or two short plain sentences (max 35 words). Use only the statistics given. No advice, no hype, no emojis, no numbers that are not in the data.",
+        messages: [{ role: "user", content: JSON.stringify({
+          trades: stats.trades, winRate: stats.winRate, profitFactor: stats.profitFactor, realisedAUSD: stats.realised,
+          maxDrawdownAUSD: stats.maxDrawdown, averageHoldMinutes: stats.averageHoldSeconds && Math.round(stats.averageHoldSeconds / 60),
+          averageLeverage: stats.averageLeverage, bestMarket: stats.bestMarket?.symbol, worstMarket: stats.worstMarket?.symbol,
+          liquidations: stats.liquidations, tags: stats.tags,
+        }) }],
+      }),
+    });
+    if (!response.ok) return null;
+    const text = (await response.json()).content?.find((part) => part.type === "text")?.text?.trim();
+    if (text) await store.set(cacheKey, text, { ex: 24 * 3600 }).catch(() => {});
+    return text ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function createHandler({ chain = chainReader(), fetchImpl = fetch, store = redisStore() } = {}) {
   return async function handler(req, res) {
     if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
     const view = String(req.query.view || "top");
+
+    if (view === "history" || view === "scores") {
+      if (!store) return res.status(503).json({ error: "Trader history isn't configured on this server." });
+      try {
+        if (view === "scores") {
+          const leaders = JSON.parse(await store.get("hist:leaders") ?? "[]").slice(0, 25);
+          const accounts = await Promise.all(leaders.map((row) => chain.accountById(row.account).catch(() => null)));
+          res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=900");
+          return res.status(200).json({
+            traders: leaders.map((row, index) => ({ ...row, address: accounts[index]?.accountAddr ?? row.address }))
+              .filter((row) => row.address),
+          });
+        }
+        const address = String(req.query.address ?? "");
+        if (!validAddress(address)) return res.status(400).json({ error: "A wallet address is required." });
+        const account = await chain.accountByAddress(address);
+        if (!account || account.accountId === 0n) return res.status(200).json({ address, stats: null, trades: [] });
+        const id = account.accountId.toString();
+        const [shard, trades] = await store.mget([shardKey(shardOf(id)), tradesKey(id)]);
+        const record = shard ? JSON.parse(shard)[id] : null;
+        if (!record) return res.status(200).json({ address, accountId: id, stats: null, trades: [] });
+        const stats = statistics(record);
+        const ai = await styleSummary({ store, fetchImpl, account: id, stats });
+        res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=600");
+        return res.status(200).json({
+          address, accountId: id, stats, summary: ai ?? describe(stats), summarySource: ai ? "ai" : "figures",
+          trades: (trades ? JSON.parse(trades) : []).map(([time, market, long, entry, exit, pnl, hold, leverage, liquidated]) => ({
+            time, market, side: long ? "long" : "short", entry, exit, pnl, holdSeconds: hold, leverage, liquidated: Boolean(liquidated),
+          })),
+        });
+      } catch {
+        return res.status(502).json({ error: "Trader history could not be read right now." });
+      }
+    }
+
     let book;
     try {
       book = await openMarkets(fetchImpl);
