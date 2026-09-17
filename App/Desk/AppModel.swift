@@ -85,6 +85,10 @@ final class AppModel {
     /// Built once, on the first refresh: it needs the venue's context to learn which
     /// contracts to read, and that is one network call rather than a constant.
     private var balances: BalanceReader?
+    /// MON on Monad mainnet: real funds, spent only on spot purchases.
+    private(set) var mainnetMON = LastGood<NativeAmount>()
+    /// One sender for mainnet, so its nonces stay in order across purchases.
+    private var mainnetSender: TransactionSender?
 
     init(passkey: any PasskeyService) {
         self.passkey = passkey
@@ -387,6 +391,35 @@ final class AppModel {
                 fundingProblem = "Desk's faucet is unreachable. Use Monad's faucet for MON."
             }
         }
+    }
+
+    func refreshMainnetMON() async {
+        guard let address else { return }
+        do {
+            let rpc = MonadRPC(configuration: try .mainnet())
+            mainnetMON.record(NativeAmount(bigEndian: try await rpc.balance(of: address)))
+        } catch {
+            mainnetMON.recordFailure("Monad mainnet could not be reached.")
+        }
+    }
+
+    /// Signs and sends a checked Relay deposit on Monad mainnet with one Face ID prompt,
+    /// and returns once the deposit is mined. Filling it on the other chain is Relay's
+    /// part, tracked by the caller.
+    func buy(_ deposit: RelayDeposit) async throws {
+        let sender: TransactionSender
+        if let mainnetSender {
+            sender = mainnetSender
+        } else {
+            sender = TransactionSender(rpc: MonadRPC(configuration: try .mainnet()))
+            mainnetSender = sender
+        }
+        let signed = try await passkey.withKeys { wallet, _ in
+            try await sender.send(
+                to: deposit.to, data: deposit.data, value: deposit.value.bigEndianBytes, from: wallet)
+        }
+        _ = try await sender.wait(for: signed)
+        await refreshMainnetMON()
     }
 
     /// A mined receipt can reach the faucet before the balance view does.

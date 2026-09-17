@@ -1,3 +1,5 @@
+import DeskAuth
+import DeskChain
 import DeskMoney
 import DeskPerpl
 import DeskUI
@@ -129,7 +131,7 @@ struct WatchlistScreen: View {
                     .toolbar(.hidden, for: .tabBar)
             }
             .navigationDestination(item: $selectedSpot) { token in
-                SpotTokenDetailScreen(token: token)
+                SpotTokenDetailScreen(token: token, model: model)
                     .toolbar(.hidden, for: .tabBar)
             }
         }
@@ -333,7 +335,7 @@ struct MarketSearchScreen: View {
                     .toolbar(.hidden, for: .tabBar)
             }
             .navigationDestination(item: $selectedSpot) { token in
-                SpotTokenDetailScreen(token: token)
+                SpotTokenDetailScreen(token: token, model: model)
                     .toolbar(.hidden, for: .tabBar)
             }
             .task { await discovery.run() }
@@ -396,6 +398,7 @@ private struct TrendingSpotToken: Identifiable, Hashable, Codable, Sendable {
     let decimals: Double?
     /// Both optional: a build can meet a deployment that predates them.
     let quotable: Bool?
+    let buyable: Bool?
     let nativeSymbol: String?
     let explorerURL: String
     let price: Double?
@@ -745,6 +748,7 @@ private struct SpotTransaction: Identifiable, Sendable {
 
 private struct SpotTokenDetailScreen: View {
     let token: TrendingSpotToken
+    let model: AppModel
     @StateObject private var feed: SpotLiveFeed
     @Environment(\.dismiss) private var dismiss
     @State private var tab: SpotDetailTab = .transactions
@@ -757,8 +761,9 @@ private struct SpotTokenDetailScreen: View {
         SpotWatchlistStorage.contains(token, in: savedSpotData)
     }
 
-    init(token: TrendingSpotToken) {
+    init(token: TrendingSpotToken, model: AppModel) {
         self.token = token
+        self.model = model
         _feed = StateObject(wrappedValue: SpotLiveFeed(
             symbol: token.symbol, chainIndex: token.chainIndex, contract: token.contract
         ))
@@ -802,8 +807,8 @@ private struct SpotTokenDetailScreen: View {
             get: { tradeSide != nil },
             set: { if !$0 { tradeSide = nil } }
         )) {
-            SpotTradeTicket(token: token, side: tradeSide ?? "Buy")
-                .presentationDetents([.height(560)])
+            SpotTradeTicket(token: token, side: tradeSide ?? "Buy", model: model)
+                .presentationDetents([.height(tradeSide == "Buy" ? 640 : 560)])
                 .presentationDragIndicator(.visible)
         }
     }
@@ -1276,6 +1281,437 @@ private final class SpotLiveFeed: ObservableObject {
 }
 
 private struct SpotTradeTicket: View {
+    let token: TrendingSpotToken
+    let side: String
+    let model: AppModel
+
+    var body: some View {
+        if side == "Buy" {
+            SpotBuyTicket(token: token, model: model)
+        } else {
+            SpotSellQuote(token: token, side: side)
+        }
+    }
+}
+
+/// Buys a token on its own chain with MON on Monad mainnet, through one Relay deposit.
+///
+/// Real funds, unlike everything else in Desk, so the sheet says so and the deposit is
+/// checked by `RelayDeposit` before Face ID is asked for.
+private struct SpotBuyTicket: View {
+    let token: TrendingSpotToken
+    let model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var purchase = SpotPurchaseModel()
+    @State private var amount = ""
+    @State private var copiedAddress = false
+
+    /// Covers `depositNative`'s gas, about 38,000 at mainnet's fee, several times over.
+    private static let gasReserve = NativeAmount(decimalText: "0.01")!
+
+    private var typed: NativeAmount? { NativeAmount(decimalText: amount).flatMap { $0.isZero ? nil : $0 } }
+    private var balance: NativeAmount? { model.mainnetMON.value }
+    private var lacksFunds: Bool {
+        guard let typed, let balance else { return false }
+        return balance.raw < typed.raw + Self.gasReserve.raw
+    }
+    private var isBuyable: Bool { token.buyable ?? false }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            header
+            payCard
+            if purchase.phase.isActive || purchase.phase.isFinished {
+                progress
+            } else {
+                receipt
+                notices
+            }
+            Spacer(minLength: 0)
+            action
+            Label("Monad mainnet · real funds", systemImage: "exclamationmark.shield.fill")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(DeskColor.action.color)
+                .frame(maxWidth: .infinity)
+        }
+        .padding(24)
+        .preferredColorScheme(.dark)
+        .task { await model.refreshMainnetMON() }
+        .task(id: amount) {
+            guard isBuyable, !purchase.phase.isActive, let address = model.address else { return }
+            await purchase.quote(token: token, amount: amount, user: address)
+        }
+        .interactiveDismissDisabled(purchase.phase.isActive)
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            MarketTokenLogo(symbol: token.symbol, size: 42, remoteURL: token.artworkURL)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Buy \(token.symbol)").font(.system(size: 22, weight: .heavy, design: .rounded))
+                Text("Delivered on \(token.chainName)")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button { dismiss() } label: {
+                Image(systemName: "xmark.circle.fill").font(.title2).contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .disabled(purchase.phase.isActive)
+        }
+    }
+
+    private var payCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("YOU PAY").font(.system(size: 10, weight: .heavy, design: .rounded)).tracking(1.2).foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline) {
+                TextField("0", text: $amount)
+                    .keyboardType(.decimalPad)
+                    .font(.system(size: 34, weight: .bold, design: .rounded).monospacedDigit())
+                    .disabled(purchase.phase.isActive || purchase.phase.isFinished)
+                HStack(spacing: 6) {
+                    MarketTokenLogo(symbol: "MON", size: 20)
+                    Text("MON").font(.system(size: 16, weight: .bold, design: .rounded))
+                }
+                .foregroundStyle(.secondary)
+            }
+            HStack {
+                Text("Balance \(balance.map { $0.display() } ?? "—") MON")
+                    .foregroundStyle(lacksFunds ? DeskColor.fall.color : .secondary)
+                Spacer()
+                Text("Monad mainnet").foregroundStyle(.secondary)
+            }
+            .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
+        }
+        .padding(16)
+        .perpSearchGlass(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var receipt: some View {
+        VStack(spacing: 9) {
+            row("You receive", value: purchase.quoted.map { "≈ \(SpotFormat.amount($0.receive.amount)) \($0.receive.symbol ?? token.symbol)" },
+                emphasised: true)
+            row("At least", value: purchase.quoted.map { "\(SpotFormat.amount($0.receive.minimum)) \($0.receive.symbol ?? token.symbol)" })
+            row("Network and fill fees", value: purchase.quoted.map { "$\($0.feeUsd)" })
+            row("Arrives in", value: purchase.quoted.map { $0.seconds.map { "~\($0) s" } ?? "—" })
+        }
+        .font(.system(size: 13, design: .rounded))
+        .redacted(reason: purchase.isQuoting ? .placeholder : [])
+    }
+
+    private func row(_ title: String, value: String?, emphasised: Bool = false) -> some View {
+        HStack {
+            Text(title).foregroundStyle(.secondary)
+            Spacer()
+            Text(value ?? "—")
+                .fontWeight(emphasised ? .bold : .semibold)
+                .foregroundStyle(emphasised ? .primary : .secondary)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+    }
+
+    @ViewBuilder
+    private var notices: some View {
+        if let impact = purchase.quoted?.impactPercent.flatMap(Double.init), impact <= -5 {
+            Label("Fees and price impact take \(String(format: "%.1f", -impact))% of this buy. Larger amounts lose less.",
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.yellow)
+        }
+        if let error = purchase.quoteError {
+            Label(error, systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.yellow)
+        }
+        if token.communityRecognized == false || (token.liquidity ?? .greatestFiniteMagnitude) < 10_000 {
+            Text("Verify the contract and liquidity independently before trading.")
+                .font(.system(size: 11, weight: .semibold, design: .rounded)).foregroundStyle(.yellow)
+        }
+    }
+
+    private var progress: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            step("Confirm with Face ID", state: purchase.phase.stepState(0))
+            step("Deposit MON on Monad", state: purchase.phase.stepState(1))
+            step("Fill on \(token.chainName)", state: purchase.phase.stepState(2))
+            switch purchase.phase {
+            case .filled:
+                Text("Bought ≈ \(SpotFormat.amount(purchase.quoted?.receive.amount)) \(token.symbol)")
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .foregroundStyle(DeskColor.rise.color)
+                    .padding(.top, 4)
+            case .refunded:
+                Text("Relay could not fill this and refunded your MON.")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded)).foregroundStyle(.yellow)
+            case .failed(let sentence):
+                Text(sentence)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded)).foregroundStyle(DeskColor.fall.color)
+            default:
+                EmptyView()
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .perpSearchGlass(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private func step(_ title: String, state: SpotPurchaseModel.StepState) -> some View {
+        HStack(spacing: 10) {
+            Group {
+                switch state {
+                case .waiting: Image(systemName: "circle").foregroundStyle(.secondary)
+                case .running: ProgressView().controlSize(.small)
+                case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(DeskColor.rise.color)
+                case .stopped: Image(systemName: "xmark.circle.fill").foregroundStyle(DeskColor.fall.color)
+                }
+            }
+            .frame(width: 20)
+            Text(title)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(state == .waiting ? .secondary : .primary)
+        }
+    }
+
+    @ViewBuilder
+    private var action: some View {
+        if !isBuyable {
+            statusCapsule(token.chainIndex == "501"
+                ? "Buying Solana tokens is not available yet"
+                : "Buying on \(token.chainName) is not available yet")
+        } else if purchase.phase.isFinished {
+            HStack(spacing: 10) {
+                if let url = purchase.trackingURL {
+                    Link(destination: url) {
+                        Text("View on Relay").frame(maxWidth: .infinity).frame(height: 54).contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .background(Color.white.opacity(0.1), in: Capsule())
+                }
+                Button { dismiss() } label: {
+                    Text("Done").frame(maxWidth: .infinity).frame(height: 54).contentShape(Capsule())
+                }
+                .buttonStyle(.plain).foregroundStyle(.black).background(.white, in: Capsule())
+            }
+            .font(.system(size: 16, weight: .bold, design: .rounded))
+        } else if purchase.phase.isActive {
+            statusCapsule(purchase.phase.sentence(chain: token.chainName), spinning: true)
+        } else if lacksFunds {
+            VStack(spacing: 8) {
+                statusCapsule("Not enough MON on Monad mainnet")
+                Button {
+                    model.copyAddress()
+                    copiedAddress = true
+                } label: {
+                    Label(copiedAddress ? "Address copied" : "Copy address to add MON",
+                          systemImage: copiedAddress ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .frame(maxWidth: .infinity).frame(height: 36).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+            }
+        } else {
+            HoldToConfirm(
+                title: purchase.quoted == nil ? "Enter an amount" : "Hold to buy \(token.symbol)",
+                tint: DeskColor.rise,
+                isEnabled: purchase.quoted != nil && typed != nil && !purchase.isQuoting
+            ) {
+                guard let typed else { return }
+                Task { await purchase.buy(token: token, amount: amount, typed: typed, model: model) }
+            }
+        }
+    }
+
+    private func statusCapsule(_ text: String, spinning: Bool = false) -> some View {
+        HStack(spacing: 8) {
+            if spinning { ProgressView().controlSize(.small) }
+            Text(text).lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .font(.system(size: 14, weight: .semibold, design: .rounded))
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity).frame(height: 54)
+        .background(Color.white.opacity(0.06), in: Capsule())
+    }
+}
+
+private enum SpotFormat {
+    /// Quote amounts arrive with up to eighteen places; six significant digits is what a
+    /// person compares.
+    static func amount(_ text: String?) -> String {
+        guard let text, let value = Decimal(string: text, locale: Locale(identifier: "en_US_POSIX")) else { return "—" }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.usesSignificantDigits = true
+        formatter.maximumSignificantDigits = 6
+        return formatter.string(from: value as NSDecimalNumber) ?? text
+    }
+}
+
+private struct RelayQuote: Decodable, Sendable {
+    struct Side: Decodable, Sendable {
+        let amount: String?
+        let minimum: String?
+        let usd: String?
+        let symbol: String?
+    }
+    struct Transaction: Decodable, Sendable {
+        let chainId: UInt64
+        let to: String
+        let data: String
+        let value: String
+    }
+    let requestId: String
+    let receive: Side
+    let feeUsd: String
+    let impactPercent: String?
+    let seconds: Int?
+    let transaction: Transaction
+}
+
+@MainActor
+private final class SpotPurchaseModel: ObservableObject {
+    enum Phase: Equatable {
+        case idle, signing, filling, filled, refunded
+        case failed(String)
+
+        var isActive: Bool { self == .signing || self == .filling }
+        var isFinished: Bool {
+            switch self {
+            case .filled, .refunded, .failed: true
+            default: false
+            }
+        }
+
+        func stepState(_ index: Int) -> StepState {
+            switch (self, index) {
+            case (.signing, 0), (.signing, 1): .running
+            case (.filling, 0), (.filling, 1), (.filled, _), (.refunded, 0), (.refunded, 1): .done
+            case (.filling, 2): .running
+            case (.refunded, 2): .stopped
+            case (.failed, _): .stopped
+            default: .waiting
+            }
+        }
+
+        func sentence(chain: String) -> String {
+            self == .signing ? "Confirm with Face ID…" : "Filling on \(chain)…"
+        }
+    }
+
+    enum StepState { case waiting, running, done, stopped }
+
+    @Published private(set) var quoted: RelayQuote?
+    @Published private(set) var quoteError: String?
+    @Published private(set) var isQuoting = false
+    @Published private(set) var phase: Phase = .idle
+    private var quotedAt = Date.distantPast
+    private var requestId: String?
+
+    private static let host = "https://web-lovat-nine-49.vercel.app"
+
+    var trackingURL: URL? { requestId.flatMap { URL(string: "https://relay.link/transaction/\($0)") } }
+
+    func quote(token: TrendingSpotToken, amount: String, user: EthereumAddress, debounce: Bool = true) async {
+        quoteError = nil
+        guard let typed = NativeAmount(decimalText: amount), !typed.isZero else {
+            quoted = nil
+            return
+        }
+        isQuoting = true
+        defer { isQuoting = false }
+        if debounce {
+            try? await Task.sleep(for: .milliseconds(450))
+            guard !Task.isCancelled else { return }
+        }
+        var components = URLComponents(string: "\(Self.host)/api/relay-quote")!
+        components.queryItems = [
+            URLQueryItem(name: "user", value: user.checksummed),
+            URLQueryItem(name: "chainIndex", value: token.chainIndex),
+            URLQueryItem(name: "tokenAddress", value: token.contract),
+            URLQueryItem(name: "amount", value: amount),
+        ]
+        do {
+            let (data, response) = try await URLSession.shared.data(from: components.url!)
+            guard !Task.isCancelled else { return }
+            if (response as? HTTPURLResponse)?.statusCode == 200 {
+                quoted = try JSONDecoder().decode(RelayQuote.self, from: data)
+                quotedAt = .now
+            } else {
+                quoted = nil
+                let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                quoteError = body?["error"] as? String ?? "A live quote is unavailable right now."
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            quoted = nil
+            quoteError = "The quote service could not be reached."
+        }
+    }
+
+    func buy(token: TrendingSpotToken, amount: String, typed: NativeAmount, model: AppModel) async {
+        guard let wallet = model.address, !phase.isActive else { return }
+        // Relay prices hold for about thirty seconds; an older quote is refreshed rather
+        // than filled at a rate that has already moved.
+        if Date.now.timeIntervalSince(quotedAt) > 20 {
+            await quote(token: token, amount: amount, user: wallet, debounce: false)
+        }
+        guard let quoted else { return }
+        let deposit: RelayDeposit
+        do {
+            deposit = try RelayDeposit(
+                chainID: quoted.transaction.chainId, to: quoted.transaction.to,
+                data: quoted.transaction.data, value: quoted.transaction.value,
+                wallet: wallet, amount: typed)
+        } catch {
+            phase = .failed("This quote did not pass Desk's safety check, so nothing was signed.")
+            return
+        }
+
+        requestId = quoted.requestId
+        phase = .signing
+        do {
+            try await model.buy(deposit)
+        } catch PasskeyFailure.cancelledByUser {
+            phase = .idle
+            return
+        } catch let failure as PasskeyFailure {
+            phase = .failed(failure.sentence)
+            return
+        } catch TransactionSender.Failure.reverted {
+            phase = .failed("The deposit was rejected on Monad. Only gas was spent.")
+            return
+        } catch TransactionSender.Failure.notMinedInTime {
+            phase = .filling
+            await track(quoted.requestId)
+            return
+        } catch {
+            phase = .failed("The deposit could not be sent. No MON was taken.")
+            return
+        }
+        phase = .filling
+        await track(quoted.requestId)
+    }
+
+    private func track(_ requestId: String) async {
+        let deadline = Date.now.addingTimeInterval(120)
+        while Date.now < deadline, !Task.isCancelled {
+            if let url = URL(string: "\(Self.host)/api/relay-status?requestId=\(requestId)"),
+               let (data, _) = try? await URLSession.shared.data(from: url),
+               let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                switch body["phase"] as? String {
+                case "filled": phase = .filled; return
+                case "refunded": phase = .refunded; return
+                case "failed": phase = .failed("Relay could not fill this. Any MON not refunded shows on Relay."); return
+                default: break
+                }
+            }
+            try? await Task.sleep(for: .milliseconds(1500))
+        }
+        phase = .failed("Still filling. Check Relay for the latest status.")
+    }
+}
+
+private struct SpotSellQuote: View {
     let token: TrendingSpotToken
     let side: String
     @Environment(\.dismiss) private var dismiss
