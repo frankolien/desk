@@ -14,26 +14,19 @@ struct NetworkSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Your address is the same on both. Balances, positions and your trading account are not.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.bottom, 6)
+            GlassPage {
+                Text("Your address is the same on both. Balances, positions and your trading account are not.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
 
+                GlassSection(footer: "Spot buys and trader data always use mainnet, whichever you choose here.") {
                     option(.testnet, symbol: "testtube.2", tint: .teal,
-                           lines: ["Free test MON and AUSD from Desk's faucet", "Nothing you win or lose is real"])
+                           detail: "Free test MON and AUSD from Desk's faucet. Nothing you win or lose is real.")
                     option(.mainnet, symbol: "bolt.fill", tint: .orange,
-                           lines: ["Real MON and AUSD you deposit yourself", "Profits and losses are real"])
-
-                    Label("Spot buys and trader data always use mainnet, whichever you choose here.",
-                          systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 8)
+                           detail: "Real MON and AUSD you deposit yourself. Profits and losses are real.")
                 }
-                .padding(20)
             }
             .navigationTitle("Network")
             .navigationBarTitleDisplayMode(.inline)
@@ -44,12 +37,12 @@ struct NetworkSheet: View {
             }
             .overlay {
                 if model.isWorking {
-                    VStack(spacing: 12) {
-                        ProgressView().controlSize(.large)
-                        Text("Switching network…").font(.subheadline.weight(.semibold))
+                    VStack(spacing: 10) {
+                        ProgressView()
+                        Text("Switching network…").font(.footnote.weight(.semibold))
                     }
-                    .padding(28)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .padding(22)
+                    .deskGlass(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 }
             }
         }
@@ -62,40 +55,37 @@ struct NetworkSheet: View {
         }
     }
 
-    private func option(_ network: DeskNetwork, symbol: String, tint: Color, lines: [String]) -> some View {
+    private func option(_ network: DeskNetwork, symbol: String, tint: Color, detail: String) -> some View {
         let selected = model.network == network
         return Button {
             guard !selected else { return }
             if network.holdsRealFunds { confirmsMainnet = true } else { switchTo(network) }
         } label: {
-            HStack(alignment: .top, spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(tint.gradient)
-                    Image(systemName: symbol).font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
-                }
-                .frame(width: 42, height: 42)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
-                        Text(network.name).font(.headline)
+            HStack(spacing: 12) {
+                Image(systemName: symbol)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 30, height: 30)
+                    .background(tint.gradient, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(network.name).fontWeight(.semibold)
                         Text("Chain \(network.chainID)")
-                            .font(.caption2.weight(.semibold).monospacedDigit())
+                            .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
-                    ForEach(lines, id: \.self) { line in
-                        Text(line).font(.subheadline).foregroundStyle(.secondary)
-                    }
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22))
+                    .font(.body)
                     .foregroundStyle(selected ? tint : Color.secondary.opacity(0.5))
+                    .contentTransition(.symbolEffect(.replace))
             }
-            .padding(16)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(selected ? tint.opacity(0.7) : .clear, lineWidth: 1.5))
-            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(model.isWorking)

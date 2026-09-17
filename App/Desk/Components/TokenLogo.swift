@@ -191,93 +191,76 @@ struct AddFundsSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(spacing: 12) {
-                    TokenLogo(asset: .ausd, size: 42)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Fund trading balance")
-                            .font(.system(size: 24, weight: .bold, design: .rounded))
-                        Text("AUSD on \(model.network.name)").foregroundStyle(.secondary)
-                    }
-                }
-
-                VStack(spacing: 0) {
-                    balanceRow("Wallet", value: model.walletAUSD.value?.display() ?? "—")
-                    Divider().overlay(Color.white.opacity(0.1)).padding(.leading, 16)
-                    balanceRow("Available to trade", value: model.collateral.value?.display() ?? "—")
-                }
-                .perpGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-
-                Text("Move your wallet AUSD into Perpl collateral before placing an order.")
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
-
-                if model.network.hasFaucet && (walletAmount == .zero || !model.hasSetupGas) {
-                    Button { Task { await model.fundWallet() } } label: {
-                        HStack {
-                            if model.isWorking { ProgressView().tint(.black) }
-                            Text(model.isWorking ? "Sending test funds…" : "Get 10,000 test AUSD")
-                            Spacer()
-                            Image(systemName: "sparkles")
+            GlassPage {
+                GlassSection(footer: "Move your wallet AUSD into Perpl collateral before placing an order.") {
+                    HStack(spacing: 10) {
+                        TokenLogo(asset: .ausd, size: 30)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Fund trading balance").fontWeight(.semibold)
+                            Text("AUSD on \(model.network.name)").font(.caption).foregroundStyle(.secondary)
                         }
-                        .font(.headline)
-                        .frame(maxWidth: .infinity).frame(height: 52)
-                        .padding(.horizontal, 18)
-                        .contentShape(Capsule())
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.black)
-                    .background(.white, in: Capsule())
-                    .disabled(model.isWorking)
+                    GlassRow("Wallet", value: "\(model.walletAUSD.value?.display() ?? "—") AUSD")
+                    GlassRow("Available to trade", value: "\(model.collateral.value?.display() ?? "—") AUSD")
                 }
 
-                Button { Task { await model.depositAUSD(walletAmount) } } label: {
-                    HStack {
-                        if model.deposit.isBusy { ProgressView().tint(.black) }
-                        Text(model.deposit.isBusy ? "Moving AUSD…" : "Move \(walletAmount.display()) AUSD")
-                        Spacer()
-                        Image(systemName: "arrow.right")
-                    }
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .frame(maxWidth: .infinity).frame(height: 54)
-                    .padding(.horizontal, 18)
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.black)
-                .background(.white, in: Capsule())
-                .disabled(walletAmount == .zero || model.deposit.isBusy)
-                .opacity(walletAmount == .zero ? 0.35 : 1)
-
-                if case .failed(let sentence) = model.deposit {
-                    Label(sentence, systemImage: "exclamationmark.circle.fill")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundStyle(.red)
-                }
-                if case .sent = model.deposit {
-                    Label("AUSD is now available to trade.", systemImage: "checkmark.circle.fill")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.green)
-                }
-                if let sentence = model.fundingStatus {
-                    Label(sentence, systemImage: "hourglass")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
-                if let sentence = model.fundingProblem {
-                    Label(sentence, systemImage: "exclamationmark.circle.fill")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.red)
-                }
-
-                Button { model.copyAddress() } label: {
-                    Label("Copy wallet address", systemImage: "doc.on.doc")
+                VStack(spacing: 10) {
+                    Button { Task { await model.depositAUSD(walletAmount) } } label: {
+                        HStack(spacing: 8) {
+                            if model.deposit.isBusy { ProgressView().tint(.black).controlSize(.small) }
+                            Text(model.deposit.isBusy ? "Moving AUSD…" : "Move \(walletAmount.display()) AUSD to trading")
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.black)
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, 2)
+                    }
+                    .controlSize(.large)
+                    .deskProminentButton()
+                    .disabled(walletAmount == .zero || model.deposit.isBusy)
+
+                    if model.network.hasFaucet && (walletAmount == .zero || !model.hasSetupGas) {
+                        Button { Task { await model.fundWallet() } } label: {
+                            HStack(spacing: 8) {
+                                if model.isWorking { ProgressView().controlSize(.small) } else { Image(systemName: "sparkles") }
+                                Text(model.isWorking ? "Sending test funds…" : "Get 10,000 test AUSD")
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 2)
+                        }
+                        .controlSize(.large)
+                        .deskSecondaryButton()
+                        .disabled(model.isWorking)
+                    }
+
+                    Button { model.copyAddress() } label: {
+                        Label("Copy wallet address", systemImage: "doc.on.doc")
+                            .font(.footnote.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .controlSize(.regular)
+                    .deskSecondaryButton()
                 }
-                .buttonStyle(.bordered)
-                Spacer()
+                .tint(.white)
+
+                Group {
+                    if case .failed(let sentence) = model.deposit {
+                        Label(sentence, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
+                    }
+                    if case .sent = model.deposit {
+                        Label("AUSD is now available to trade.", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    }
+                    if let sentence = model.fundingStatus {
+                        Label(sentence, systemImage: "hourglass").foregroundStyle(.secondary)
+                    }
+                    if let sentence = model.fundingProblem {
+                        Label(sentence, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
+                    }
+                }
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 14)
             }
-            .padding(24)
             .navigationTitle("Add funds")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
@@ -287,15 +270,6 @@ struct AddFundsSheet: View {
         .onDisappear { model.clearDeposit() }
     }
 
-    private func balanceRow(_ title: String, value: String) -> some View {
-        HStack {
-            Text(title).foregroundStyle(.secondary)
-            Spacer()
-            Text("\(value) AUSD").fontWeight(.bold).monospacedDigit()
-        }
-        .font(.system(size: 15, design: .rounded))
-        .padding(16)
-    }
 }
 
 private extension View {

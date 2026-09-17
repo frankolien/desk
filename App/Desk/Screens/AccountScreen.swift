@@ -136,6 +136,9 @@ struct AccountScreen: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Color(.systemBackground))
         }
+        #if DEBUG
+        .task { if ProcessInfo.processInfo.arguments.contains("-open-currency") { showsCurrency = true } }
+        #endif
         .sheet(isPresented: $showsCurrency) {
             CurrencySheet()
                 .presentationDetents([.large])

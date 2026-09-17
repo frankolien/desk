@@ -62,19 +62,35 @@ struct WithdrawSheet: View {
     }
 
     var body: some View {
-        ZStack {
-            DeskBackground()
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                switch model.withdrawal {
-                case .sent(let receipt): done(receipt)
-                case .confirming, .withdrawing, .sending: progress
-                default: entry
+        NavigationStack {
+            ZStack {
+                DeskBackground()
+                Group {
+                    switch model.withdrawal {
+                    case .sent(let receipt): done(receipt)
+                    case .confirming, .withdrawing, .sending: progress
+                    default: entry
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 10)
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 0) {
+                        Text("Withdraw").font(.subheadline.weight(.semibold))
+                        if !model.network.holdsRealFunds {
+                            Text("Testnet").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close", action: close)
+                        .disabled(model.withdrawal.isBusy)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 12)
         }
         .interactiveDismissDisabled(model.withdrawal.isBusy)
         .onAppear {
@@ -90,84 +106,54 @@ struct WithdrawSheet: View {
 
     // MARK: Entry
 
-    private var header: some View {
-        HStack {
-            Text("Withdraw")
-                .font(.system(size: 22, weight: .bold, design: .rounded))
-                .foregroundStyle(DeskColor.nightText.color)
-            if !model.network.holdsRealFunds {
-                Text("Testnet")
-                    .font(.system(size: 10, weight: .heavy, design: .rounded))
-                    .foregroundStyle(DeskColor.nightText.color)
-                    .padding(.horizontal, 7)
-                    .frame(height: 18)
-                    .background(Color.white.opacity(0.14), in: Capsule())
-            }
-            Spacer()
-            Button(action: close) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-                    .frame(width: 32, height: 32)
-                    .background(DeskColor.nightChip.color, in: Circle())
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .disabled(model.withdrawal.isBusy)
-            .accessibilityLabel("Close")
-        }
-    }
-
     private var entry: some View {
         VStack(alignment: .leading, spacing: 0) {
-            route.padding(.top, 16)
+            route
 
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                AmountText(amount.isEmpty ? "0" : amount, size: 44,
+                AmountText(amount.isEmpty ? "0" : amount, size: 38,
                            colour: tooMuch ? DeskColor.fall : DeskColor.nightText)
                 Text("AUSD")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
-            .padding(.top, 16)
+            .padding(.top, 14)
 
             Text(tooMuch ? "More than the \(available.display()) AUSD available" : "\(available.display()) AUSD available")
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(tooMuch ? DeskColor.fall.color : DeskColor.nightMuted.color)
-                .padding(.top, 2)
+                .font(.caption)
+                .foregroundStyle(tooMuch ? DeskColor.fall.color : .secondary)
+                .monospacedDigit()
 
             HStack(spacing: 8) {
                 ForEach([25, 50, 75, 100], id: \.self) { percent in
                     Button { fill(percent) } label: {
                         Text(percent == 100 ? "Max" : "\(percent)%")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundStyle(DeskColor.nightText.color)
+                            .font(.footnote.weight(.semibold))
                             .frame(maxWidth: .infinity)
-                            .frame(height: 32)
-                            .background(Color.white.opacity(0.08), in: Capsule())
-                            .contentShape(Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .controlSize(.small)
+                    .deskSecondaryButton()
                 }
             }
-            .padding(.top, 12)
+            .tint(.white)
+            .padding(.top, 10)
 
             if !editingRecipient {
                 AmountKeypad(text: $amount)
-                    .padding(.top, 6)
+                    .padding(.top, 4)
                     .transition(.opacity)
             }
 
             Spacer(minLength: 8)
 
-            summary.padding(.bottom, 12)
+            summary.padding(.bottom, 10)
 
             if case .failed(let reason) = model.withdrawal {
                 Label(reason, systemImage: "exclamationmark.circle.fill")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(DeskColor.fall.color)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 10)
+                    .padding(.bottom, 8)
             }
 
             HoldToConfirm(
@@ -183,53 +169,42 @@ struct WithdrawSheet: View {
         .animation(.snappy(duration: 0.2), value: destination)
     }
 
-    /// From above, to below, the arrow between: the sentence "from my trading balance to
-    /// my wallet" drawn rather than written.
+    /// Where it comes from and where it goes, as two native segmented choices.
     private var route: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                label("From")
-                choice("Trading", detail: tradingBalance.display(), selected: source == .trading) { source = .trading }
-                choice("Wallet", detail: walletBalance.display(), selected: source == .wallet) { source = .wallet }
-            }
-            .padding(12)
-
-            HStack {
-                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
-                Image(systemName: "arrow.down")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-                    .frame(width: 24, height: 24)
-                    .background(DeskColor.nightChip.color, in: Circle())
-                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
-            }
-
-            VStack(spacing: 10) {
-                HStack(spacing: 8) {
-                    label("To")
-                    choice("My wallet", detail: model.addressShort, selected: destination == .wallet,
-                           enabled: source == .trading) { destination = .wallet }
-                    choice("Other address", detail: recipient.map { TraderSnapshot.short($0.checksummed) } ?? "Paste",
-                           selected: destination == .address) { destination = .address }
+        GlassSection {
+            GlassRow("From", subtitle: "\(available.display()) AUSD") {
+                Picker("From", selection: $source) {
+                    Text("Trading").tag(AppModel.WithdrawalSource.trading)
+                    Text("Wallet").tag(AppModel.WithdrawalSource.wallet)
                 }
-                if destination == .address { recipientField }
+                .pickerStyle(.segmented)
+                .fixedSize()
             }
-            .padding(12)
+            GlassRow("To", subtitle: destination == .wallet ? model.addressShort : "Any Monad address") {
+                if source == .trading {
+                    Picker("To", selection: $destination) {
+                        Text("My wallet").tag(Destination.wallet)
+                        Text("Address").tag(Destination.address)
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                } else {
+                    Text("Another address").foregroundStyle(.secondary)
+                }
+            }
+            if destination == .address { recipientField }
         }
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 0.5))
     }
 
     private var recipientField: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                TextField("0x… address on \(model.network.name)", text: $recipientText)
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                TextField("0x… on \(model.network.name)", text: $recipientText)
+                    .font(.footnote.monospaced())
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .submitLabel(.done)
                     .focused($editingRecipient)
-                    .foregroundStyle(DeskColor.nightText.color)
                 if recipient != nil && recipientProblem == nil {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(DeskColor.rise.color)
                 } else if recipientText.isEmpty {
@@ -237,43 +212,30 @@ struct WithdrawSheet: View {
                         recipientText = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                         editingRecipient = false
                     }
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(DeskColor.action.color)
-                    .buttonStyle(.plain)
+                    .font(.footnote.weight(.semibold))
+                    .controlSize(.mini)
+                    .deskSecondaryButton()
                 } else {
                     Button { recipientText = "" } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(DeskColor.nightMuted.color)
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Clear address")
                 }
             }
-            .padding(.horizontal, 12)
-            .frame(height: 42)
-            .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
             if let recipientProblem {
                 Text(recipientProblem)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(DeskColor.fall.color)
             }
         }
     }
 
     private var summary: some View {
-        VStack(spacing: 6) {
-            row("You send", requested.map { "\($0.display()) AUSD" } ?? "—")
-            row("Network fee", transactionCount == 2 ? "≈ 0.02 MON · 2 transactions" : "≈ 0.01 MON")
-            if lacksGas {
-                Label("Add MON to this wallet to pay the network fee.", systemImage: "fuelpump.fill")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(DeskColor.action.color)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Label("Signed by your wallet key with Face ID, not your trading session.", systemImage: "faceid")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+        GlassSection(footer: lacksGas ? "Add MON to this wallet to pay the network fee."
+                     : "Signed by your wallet key with Face ID, not your trading session.") {
+            GlassRow("You send", value: requested.map { "\($0.display()) AUSD" } ?? "—")
+            GlassRow("Network fee", value: transactionCount == 2 ? "≈ 0.02 MON · 2 transactions" : "≈ 0.01 MON")
         }
     }
 
@@ -281,50 +243,6 @@ struct WithdrawSheet: View {
         guard let requested else { return destination == .address && recipient == nil ? "Add an address" : "Enter an amount" }
         let target = destination == .address ? recipient.map { TraderSnapshot.short($0.checksummed) } ?? "address" : "wallet"
         return "Hold to send \(requested.display()) AUSD to \(target)"
-    }
-
-    private func label(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 12, weight: .semibold, design: .rounded))
-            .foregroundStyle(DeskColor.nightMuted.color)
-            .frame(width: 36, alignment: .leading)
-    }
-
-    private func choice(_ title: String, detail: String, selected: Bool, enabled: Bool = true,
-                        action: @escaping () -> Void) -> some View {
-        Button {
-            UISelectionFeedbackGenerator().selectionChanged()
-            action()
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(DeskColor.nightText.color)
-                Text(detail)
-                    .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
-                    .foregroundStyle(DeskColor.nightMuted.color)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .background(selected ? Color.white.opacity(0.12) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(selected ? Color.white.opacity(0.35) : Color.white.opacity(0.08), lineWidth: selected ? 1 : 0.5))
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.35)
-    }
-
-    private func row(_ title: String, _ value: String) -> some View {
-        HStack {
-            Text(title).foregroundStyle(DeskColor.nightMuted.color)
-            Spacer()
-            Text(value).foregroundStyle(DeskColor.nightText.color).fontWeight(.semibold).monospacedDigit()
-        }
-        .font(.system(size: 13, design: .rounded))
     }
 
     private func fill(_ percent: Int) {
@@ -338,21 +256,17 @@ struct WithdrawSheet: View {
     // MARK: Progress and done
 
     private var progress: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             Spacer()
             Text("Sending \(requested?.display() ?? amount) AUSD")
-                .font(.system(size: 26, weight: .bold, design: .rounded))
-                .foregroundStyle(DeskColor.nightText.color)
-            VStack(alignment: .leading, spacing: 14) {
+                .font(.title3.weight(.bold))
+            GlassSection {
                 step("Confirm with Face ID", state: stepState(0))
                 if source == .trading { step("Withdraw from Perpl", state: stepState(1)) }
                 if destination == .address, let recipient {
                     step("Send to \(TraderSnapshot.short(recipient.checksummed))", state: stepState(2))
                 }
             }
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             Spacer()
         }
     }
@@ -378,48 +292,53 @@ struct WithdrawSheet: View {
                 case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(DeskColor.rise.color)
                 }
             }
-            .frame(width: 22)
+            .frame(width: 20)
             Text(title)
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
-                .foregroundStyle(state == .waiting ? DeskColor.nightMuted.color : DeskColor.nightText.color)
+                .fontWeight(.medium)
+                .foregroundStyle(state == .waiting ? .secondary : .primary)
         }
     }
 
     private func done(_ receipt: AppModel.WithdrawalReceipt) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Spacer()
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 48, weight: .semibold))
+                .font(.system(size: 38, weight: .semibold))
                 .foregroundStyle(DeskColor.rise.color)
+                .symbolEffect(.bounce, value: receipt.amount.raw)
             Text("\(receipt.amount.display()) AUSD sent")
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-                .foregroundStyle(DeskColor.nightText.color)
+                .font(.title3.weight(.bold))
             // Only rendered after every receipt came back, so this is a fact, not a hope.
             Text(receipt.recipient.map { "Confirmed on \(model.network.name). It's at \(TraderSnapshot.short($0.checksummed)) now." }
                  ?? "Confirmed on \(model.network.name). It's in your wallet now.")
-                .font(DeskType.caption)
-                .foregroundStyle(DeskColor.nightMuted.color)
-            VStack(spacing: 8) {
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            GlassSection("Transactions") {
                 ForEach(receipt.transactions, id: \.self) { hash in
                     Link(destination: model.network.explorer.appending(path: "tx/\(hash)")) {
                         HStack {
                             Text(hash)
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .font(.caption.monospaced())
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                             Spacer(minLength: 12)
-                            Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .bold))
+                            Image(systemName: "arrow.up.right").font(.caption.weight(.bold))
                         }
-                        .foregroundStyle(DeskColor.nightMuted.color)
-                        .padding(.horizontal, 12)
-                        .frame(height: 38)
-                        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .foregroundStyle(.secondary)
                     }
                 }
             }
             .padding(.top, 6)
             Spacer()
-            PrimaryButton(title: "Done", tint: DeskColor.action) { close() }
+            Button(action: close) {
+                Text("Done")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 2)
+            }
+            .controlSize(.large)
+            .deskProminentButton()
         }
     }
 

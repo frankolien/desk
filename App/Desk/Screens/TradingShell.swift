@@ -109,6 +109,9 @@ struct TradingShell: View {
             let arguments = ProcessInfo.processInfo.arguments
             if arguments.contains("-open-activity") { showsActivity = true }
             if arguments.contains("-open-settings") { showsAccount = true }
+            if arguments.contains("-open-withdraw") { showsWithdraw = true }
+            if arguments.contains("-open-funds") { showsFunding = true }
+            if arguments.contains("-open-network") { showsNetwork = true }
         }
         #endif
         .sheet(isPresented: $showsActivity) {
