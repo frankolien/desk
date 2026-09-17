@@ -76,6 +76,22 @@ export function nativeToken(chainIndex) {
   };
 }
 
+/// EVM chains Relay fills to, from its /chains endpoint on 17 September 2026. Monad
+/// itself is excluded: a same-chain swap goes through Relay's router with free-form
+/// calldata the app cannot verify, where a cross-chain buy is one checkable deposit.
+export const RELAY_DESTINATIONS = new Set([
+  "1", "10", "25", "56", "100", "130", "137", "146", "169", "196", "288", "324", "360",
+  "480", "747", "988", "999", "1088", "1135", "1868", "2020", "2741", "2818", "4217",
+  "4326", "4663", "5000", "5031", "5042", "5330", "8453", "9745", "33139", "34443",
+  "42018", "42161", "42220", "43114", "48900", "57073", "59144", "60808", "80094",
+  "81457", "97477", "98866", "534352", "685689", "747474", "5064014", "7777777",
+]);
+
+/// Whether a token can be bought with MON on Monad mainnet, as opposed to only quoted.
+export function isBuyable(chainIndex) {
+  return RELAY_DESTINATIONS.has(chainIndex);
+}
+
 export function rpcEndpoint(chainIndex) {
   return CHAINS[chainIndex]?.rpc ?? null;
 }
