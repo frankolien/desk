@@ -237,6 +237,8 @@ struct TraderAvatar: View {
 
 struct TradersFeed: View {
     let directory: TraderDirectory
+    let copier: CopyTrader
+    let onOpenCopying: () -> Void
     let onSelect: (TraderSnapshot) -> Void
 
     private var followedSnapshots: [TraderSnapshot] {
@@ -248,6 +250,10 @@ struct TradersFeed: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if !copier.traders.isEmpty || !copier.log.isEmpty {
+                CopyStatusCard(copier: copier, onOpen: onOpenCopying)
+                    .padding(.bottom, 24)
+            }
             if !directory.followed.isEmpty {
                 header("Following", trailing: "\(directory.followed.count)")
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -408,6 +414,7 @@ private struct LeaderRow: View {
 struct TraderProfileScreen: View {
     let initial: TraderSnapshot
     let directory: TraderDirectory
+    let copier: CopyTrader
     let onCopy: (TraderPosition) -> Void
 
     private enum Tab: String, CaseIterable { case positions = "Positions", closed = "Closed", activity = "Activity" }
@@ -419,6 +426,7 @@ struct TraderProfileScreen: View {
     @State private var draftName = ""
     @State private var pendingCopy: TraderPosition?
     @State private var showsAlertsPrimer = false
+    @State private var showsAutoCopy = false
     @State private var showsNotificationsOff = false
     @Namespace private var underline
 
@@ -436,6 +444,9 @@ struct TraderProfileScreen: View {
                 VStack(alignment: .leading, spacing: 0) {
                     topBar.padding(.horizontal, 20)
                     identity.padding(.horizontal, 20).padding(.top, 20)
+                    AutoCopyButton(rules: copier.rules(for: trader.address)) { showsAutoCopy = true }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 18)
                     tabs.padding(.top, 24)
                     content
                 }
@@ -471,6 +482,11 @@ struct TraderProfileScreen: View {
             Text("Same market, side and leverage on your own account. You choose the amount.")
         }
         .task { await alerts.refreshPermission() }
+        .sheet(isPresented: $showsAutoCopy) {
+            AutoCopySheet(address: trader.address, name: directory.name(for: trader.address), copier: copier)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
         .sheet(isPresented: $showsAlertsPrimer) {
             AlertsPrimerSheet(
                 trader: trader, name: directory.name(for: trader.address),

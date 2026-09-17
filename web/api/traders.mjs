@@ -193,7 +193,9 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch } = {})
           return res.status(400).json({ error: `Between 1 and ${MAX_FOLLOWED} wallet addresses are required.` });
         }
         const traders = await Promise.all(addresses.map((address) => trader(chain, book, address)));
-        res.setHeader("Cache-Control", "public, s-maxage=10, stale-while-revalidate=60");
+        // Auto-copy asks for a reading no older than the request itself.
+        res.setHeader("Cache-Control", req.query.fresh === "1"
+          ? "no-store" : "public, s-maxage=10, stale-while-revalidate=60");
         return res.status(200).json({
           observedAt: Date.now(),
           traders: traders.map((found, index) => found ?? { address: addresses[index], accountId: null, positions: [] }),

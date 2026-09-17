@@ -8,6 +8,7 @@ struct TradingShell: View {
     let model: AppModel
 
     @State private var market: MarketModel
+    @State private var copier: CopyTrader
     /// The model's session, never one of our own. `openDesk` hands the enrolled key to
     /// `model.trading`, so a session created here would be a different object and the
     /// ticket would talk to one that had never been given a key.
@@ -28,6 +29,7 @@ struct TradingShell: View {
     init(model: AppModel) {
         self.model = model
         _market = State(initialValue: MarketModel(network: model.network))
+        _copier = State(initialValue: CopyTrader(network: model.network))
         _tab = State(initialValue: Self.startingTab())
     }
 
@@ -74,7 +76,7 @@ struct TradingShell: View {
 
             Tab("Signals", systemImage: "antenna.radiowaves.left.and.right", value: .signals) {
                 SignalsScreen(
-                    model: model, market: market, session: session,
+                    model: model, market: market, session: session, copier: copier,
                     onOrderFilled: orderFilled)
             }
 
@@ -120,6 +122,13 @@ struct TradingShell: View {
             FundScreen(model: model) { showsSetup = false }
         }
         .task { market.start() }
+        .task {
+            copier.onEvent = { message in toast(message) }
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-copy-demo") { copier.seedForReview() }
+            #endif
+            await copier.run(model: model, market: market, session: session)
+        }
         // A tapped trade alert opens on Signals, over whatever was in front.
         .onChange(of: TradeAlerts.shared.opened, initial: true) { _, opened in
             guard opened != nil else { return }
@@ -161,7 +170,10 @@ struct TradingShell: View {
 
     private func orderFilled(_ side: Direction, _ symbol: String) {
         tab = .perps
-        let message = "\(side.word()) \(symbol) filled"
+        toast("\(side.word()) \(symbol) filled")
+    }
+
+    private func toast(_ message: String) {
         fillConfirmation = message
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(2.4))

@@ -17,6 +17,7 @@ struct SignalsScreen: View {
     let model: AppModel
     let market: MarketModel
     let session: TradingSession
+    let copier: CopyTrader
     let onOrderFilled: (Direction, String) -> Void
 
     private enum Section: String, CaseIterable, Identifiable {
@@ -37,9 +38,11 @@ struct SignalsScreen: View {
     @State private var pendingCopy: CopyOrder?
     @State private var unlistedMarket: String?
     @State private var tradeAlert: TradeAlert?
+    @State private var showsCopying = false
     @State private var afterAlert: (() -> Void)?
     #if DEBUG
     @State private var debugPrimer: TraderSnapshot?
+    @State private var debugAutoCopy: TraderSnapshot?
     #endif
 
     private var signals: MarketSignals? {
@@ -67,7 +70,9 @@ struct SignalsScreen: View {
 
                         switch section {
                         case .traders:
-                            TradersFeed(directory: directory) { selectedTrader = $0 }
+                            TradersFeed(directory: directory, copier: copier, onOpenCopying: { showsCopying = true }) {
+                                selectedTrader = $0
+                            }
                                 .padding(.top, 20)
                                 .padding(.bottom, 130)
                         case .market:
@@ -84,16 +89,31 @@ struct SignalsScreen: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(item: $selectedTrader) { trader in
-                TraderProfileScreen(initial: trader, directory: directory) { copy($0) }
+                TraderProfileScreen(initial: trader, directory: directory, copier: copier) { copy($0) }
+                    .toolbar(.hidden, for: .tabBar)
+            }
+            .navigationDestination(isPresented: $showsCopying) {
+                CopyActivityScreen(copier: copier, directory: directory)
                     .toolbar(.hidden, for: .tabBar)
             }
         }
         .task { await directory.run() }
         #if DEBUG
+        .task { if ProcessInfo.processInfo.arguments.contains("-copy-activity") { showsCopying = true } }
+        #endif
+        #if DEBUG
         .task {
             guard ProcessInfo.processInfo.arguments.contains("-alerts-primer") else { return }
             while directory.top.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
             debugPrimer = directory.top.first
+        }
+        .task {
+            guard ProcessInfo.processInfo.arguments.contains("-auto-copy-sheet") else { return }
+            while directory.top.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
+            debugAutoCopy = directory.top.first
+        }
+        .sheet(item: $debugAutoCopy) { trader in
+            AutoCopySheet(address: trader.address, name: directory.name(for: trader.address), copier: copier)
         }
         .sheet(item: $debugPrimer) { trader in
             AlertsPrimerSheet(trader: trader, name: directory.name(for: trader.address), onEnable: {}, onLater: {})

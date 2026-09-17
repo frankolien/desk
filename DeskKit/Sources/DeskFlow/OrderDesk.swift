@@ -120,7 +120,15 @@ public actor OrderDesk {
     /// The head block comes from the caller rather than being read here, because the
     /// deadline has to be computed against the block the venue most recently reported and
     /// this type does not own the market-state stream.
-    public func place(_ draft: Draft, headBlock: Int64, ttlBlocks: UInt32 = 30) async throws -> Int64 {
+    ///
+    /// `other` sends on a market other than the one this desk was opened for. The account
+    /// belongs to the exchange instance rather than the market, and the request counter
+    /// must be shared by every order the account sends, so a second desk per market would
+    /// be the `sr: 32` race again.
+    public func place(
+        _ draft: Draft, headBlock: Int64, ttlBlocks: UInt32 = 30, in other: Market? = nil
+    ) async throws -> Int64 {
+        let market = try target(other)
         guard let account else { throw Failure.notConnected }
         guard let counter else { throw Failure.notConnected }
         guard allowsForwarding else { throw Failure.forwardingNotAllowed }
@@ -159,14 +167,20 @@ public actor OrderDesk {
         // Once this point is reached the opening order may fill. Never forget it if a
         // later protective send fails: losing correlation would make a live position
         // look as though it never existed.
-        try await sendProtection(for: draft, linkedTo: request.requestID)
+        try await sendProtection(for: draft, linkedTo: request.requestID, in: market)
         return frameID
+    }
+
+    private func target(_ other: Market?) throws -> Market {
+        guard let other else { return market }
+        guard other.instanceID == market.instanceID else { throw Failure.notConnected }
+        return other
     }
 
     /// Sends stop loss and take profit as Perpl trigger orders linked to the opening
     /// request. The venue owns these orders after admission, so they still protect the
     /// position if iOS suspends Desk or the app is closed.
-    private func sendProtection(for draft: Draft, linkedTo openingRequestID: Int64) async throws {
+    private func sendProtection(for draft: Draft, linkedTo openingRequestID: Int64, in market: Market) async throws {
         guard let protection = draft.protection, let account, let counter else { return }
         let triggers: [(Price?, TriggerPriceCondition)] = [
             (protection.stopLoss,
@@ -203,8 +217,10 @@ public actor OrderDesk {
         _ position: PerplPosition,
         size requestedSize: Size? = nil,
         slippageBps: Int,
-        headBlock: Int64
+        headBlock: Int64,
+        in other: Market? = nil
     ) async throws -> Int64 {
+        let market = try target(other)
         guard let account else { throw Failure.notConnected }
         guard let counter else { throw Failure.notConnected }
         guard allowsForwarding else { throw Failure.forwardingNotAllowed }

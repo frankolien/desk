@@ -105,6 +105,25 @@ struct OrderDeskTests {
         #expect(json["rq"] as? Int == 42)
     }
 
+    @Test("One desk sends on another market of its exchange with the same request counter")
+    func placesOnAnotherMarket() async throws {
+        let channel = ScriptedChannel(inbound: [snapshot(lastForwarded: 41)])
+        let subject = try desk(channel)
+        try await subject.open(credentials: credentials())
+        let url = try #require(Bundle.module.url(forResource: "Context-testnet", withExtension: "json"))
+        let eth = try #require(try JSONDecoder().decode(PerplContext.self, from: Data(contentsOf: url)).market(id: 32))
+        _ = try await subject.place(try draft(), headBlock: 1_000)
+        _ = try await subject.place(
+            OrderDesk.Draft(side: .short, size: try #require(eth.size(10)), leverageHundredths: 200, slippageBps: 50),
+            headBlock: 1_000, in: eth)
+
+        let orders = try channel.sent.filter { $0.contains("\"mt\":22") }.map {
+            try #require(JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any])
+        }
+        #expect(orders.map { $0["mkt"] as? Int } == [16, 32])
+        #expect(orders.map { $0["rq"] as? Int } == [42, 43])
+    }
+
     @Test("An order cannot be placed before the socket has signed in")
     func mustConnectFirst() async throws {
         let subject = try desk(ScriptedChannel(inbound: [snapshot]))

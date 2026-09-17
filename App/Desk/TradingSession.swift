@@ -247,6 +247,27 @@ final class TradingSession {
         }
     }
 
+    /// Sends a copied trade on any market without touching the ticket's own progress,
+    /// and never asks for Face ID: an automatic order that finds Desk locked is skipped,
+    /// not prompted for.
+    func placeCopy(_ draft: OrderDesk.Draft, in market: Market) async throws -> Int64 {
+        guard let desk else { throw OrderDesk.Failure.notEnrolled }
+        if !isConnected { try await connect() }
+        return try await desk.place(draft, headBlock: headBlock, in: market)
+    }
+
+    func closeCopy(_ position: PerplPosition, size: Size, in market: Market) async throws -> Int64 {
+        guard let desk else { throw OrderDesk.Failure.notEnrolled }
+        if !isConnected { try await connect() }
+        return try await desk.closePosition(
+            position, size: size, slippageBps: min(50, market.maxMarketSlippageBps),
+            headBlock: headBlock, in: market)
+    }
+
+    func phase(of frameID: Int64) async -> OrderPhase? {
+        await desk?.phase(of: frameID)
+    }
+
     func protectPosition(
         _ position: PerplPosition, stopLoss: Price?, takeProfit: Price?, slippageBps: Int
     ) async -> Bool {
