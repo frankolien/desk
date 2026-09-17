@@ -17,10 +17,12 @@ struct HomeScreen: View {
     let onFund: () -> Void
     var onSetup: () -> Void = {}
     var onWithdraw: () -> Void = {}
+    var onNetwork: () -> Void = {}
+    var onFollowing: () -> Void = {}
+    var onActivity: () -> Void = {}
     let onAccount: () -> Void
 
     @AppStorage("desk.hidesBalance") private var hidesBalance = false
-    @State private var showsMore = false
     @State private var selectedPosition: PerplPosition?
 
     private var collateralText: String {
@@ -75,12 +77,6 @@ struct HomeScreen: View {
                 .padding(.bottom, 116)
             }
         }
-        .confirmationDialog("More", isPresented: $showsMore, titleVisibility: .hidden) {
-            Button("Copy address") { model.copyAddress() }
-            Button("Account and session") { onAccount() }
-            Button("Lock now") { Task { await model.lock() } }
-            Button("Sign out", role: .destructive) { Task { await model.endSession() } }
-        }
         // See MarketScreen: presenting on a boolean let the content be built while
         // `selectedPosition` was still nil, so the sheet came up empty.
         .sheet(item: $selectedPosition) { held in
@@ -100,7 +96,7 @@ struct HomeScreen: View {
             HStack {
                 glassCircle(symbol: "gearshape.fill", label: "Account", action: onAccount)
                 Spacer()
-                glassCircle(symbol: "clock.fill", label: "Trading session", action: onAccount)
+                glassCircle(symbol: "clock.fill", label: "Activity", action: onActivity)
             }
 
             Button(action: onAccount) {
@@ -227,7 +223,27 @@ struct HomeScreen: View {
             HomeActionTile(symbol: "arrow.up.right", title: "Withdraw", isEnabled: canWithdraw, action: onWithdraw)
             HomeActionTile(symbol: "arrow.left.arrow.right", title: "Trade",
                            isEnabled: !isEmpty, action: onTrade)
-            HomeActionTile(symbol: "ellipsis", title: "More") { showsMore = true }
+            Menu {
+                Button { onNetwork() } label: { Label("Network", systemImage: "globe") }
+                Button { onFund() } label: { Label("Add funds", systemImage: "creditcard.fill") }
+                Button { onWithdraw() } label: { Label("Withdraw", systemImage: "building.columns") }
+                Button {
+                    withAnimation(.snappy) { hidesBalance.toggle() }
+                } label: {
+                    Label(hidesBalance ? "Show Balance" : "Hide Balance",
+                          systemImage: hidesBalance ? "eye" : "eye.slash")
+                }
+                Button { Task { await model.lock() } } label: {
+                    Label("Lock Trading Key", systemImage: "lock.shield")
+                }
+                Button { onFollowing() } label: { Label("Following", systemImage: "person.fill") }
+                Button { model.copyAddress() } label: { Label("Copy Address", systemImage: "doc.on.doc") }
+            } label: {
+                HomeActionTileLabel(symbol: "ellipsis", title: "More")
+            }
+            .buttonStyle(.plain)
+            .homeGlass(interactive: true, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+            .accessibilityLabel("More")
         }
     }
 
@@ -350,6 +366,31 @@ struct HomeScreen: View {
     }
 }
 
+/// The drawn tile, shared by the plain actions and the More menu.
+private struct HomeActionTileLabel: View {
+    let symbol: String
+    let title: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Image(systemName: symbol)
+                .font(.system(size: 20, weight: .semibold))
+            Spacer(minLength: 0)
+            Text(title)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .foregroundStyle(DeskColor.nightText.color)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 76)
+        // Without this the tile is tappable only where its glyph and label are
+        // drawn: the padding and the glass behind it are not part of the button.
+        .contentShape(Rectangle())
+    }
+}
+
 private struct HomeActionTile: View {
     let symbol: String
     let title: String
@@ -358,22 +399,7 @@ private struct HomeActionTile: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 9) {
-                Image(systemName: symbol)
-                    .font(.system(size: 20, weight: .semibold))
-                Spacer(minLength: 0)
-                Text(title)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-            }
-            .foregroundStyle(DeskColor.nightText.color)
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 76)
-            // Without this the tile is tappable only where its glyph and label are
-            // drawn: the padding and the glass behind it are not part of the button.
-            .contentShape(Rectangle())
+            HomeActionTileLabel(symbol: symbol, title: title)
         }
         .buttonStyle(.plain)
         .homeGlass(interactive: true,

@@ -17,6 +17,8 @@ struct TradingShell: View {
     @State private var showsFunding = false
     @State private var showsSetup = false
     @State private var showsWithdraw = false
+    @State private var showsNetwork = false
+    @State private var showsActivity = false
     @State private var fillConfirmation: String?
 
     enum Destination: Hashable {
@@ -58,6 +60,9 @@ struct TradingShell: View {
                     onFund: { if model.hasTradingAccount { showsFunding = true } else { showsSetup = true } },
                     onSetup: { showsSetup = true },
                     onWithdraw: { showsWithdraw = true },
+                    onNetwork: { showsNetwork = true },
+                    onFollowing: { tab = .signals },
+                    onActivity: { showsActivity = true },
                     onAccount: { showsAccount = true })
             }
 
@@ -93,6 +98,19 @@ struct TradingShell: View {
                 .presentationBackground(Color(.systemBackground))
         }
         .sheet(isPresented: $showsFunding) { AddFundsSheet(model: model) }
+        .sheet(isPresented: $showsNetwork) {
+            NetworkSheet(model: model)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        #if DEBUG
+        .task { if ProcessInfo.processInfo.arguments.contains("-open-activity") { showsActivity = true } }
+        #endif
+        .sheet(isPresented: $showsActivity) {
+            ActivityScreen(model: model)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
         .sheet(isPresented: $showsWithdraw) {
             WithdrawSheet(model: model) { showsWithdraw = false }
                 .presentationDetents([.large])
