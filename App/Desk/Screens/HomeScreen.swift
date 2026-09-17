@@ -16,6 +16,7 @@ struct HomeScreen: View {
     let onTrade: () -> Void
     let onFund: () -> Void
     var onSetup: () -> Void = {}
+    var onWithdraw: () -> Void = {}
     let onAccount: () -> Void
 
     @AppStorage("desk.hidesBalance") private var hidesBalance = false
@@ -30,6 +31,11 @@ struct HomeScreen: View {
 
     private var collateralInCurrency: String {
         model.collateral.value.map { DisplayCurrency.shared.format($0) } ?? Unavailable.text
+    }
+
+    /// Either balance can leave: collateral from the exchange, or AUSD already in the wallet.
+    private var canWithdraw: Bool {
+        !(model.collateral.value?.isZero ?? true) || !(model.walletAUSD.value?.isZero ?? true)
     }
 
     private var isEmpty: Bool {
@@ -104,14 +110,15 @@ struct HomeScreen: View {
                     Text(model.addressShort)
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .monospacedDigit()
-                    // Always in view, so nobody has to remember which network they left on.
-                    Text(model.network.shortName)
-                        .font(.system(size: 10, weight: .heavy, design: .rounded))
-                        .foregroundStyle(model.network.holdsRealFunds ? DeskColor.night.color : DeskColor.nightText.color)
-                        .padding(.horizontal, 7)
-                        .frame(height: 18)
-                        .background(model.network.holdsRealFunds ? DeskColor.action.color : Color.white.opacity(0.14),
-                                    in: Capsule())
+                    // Mainnet is the normal state and carries no label; only testnet is marked.
+                    if !model.network.holdsRealFunds {
+                        Text("Testnet")
+                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                            .foregroundStyle(DeskColor.nightText.color)
+                            .padding(.horizontal, 7)
+                            .frame(height: 18)
+                            .background(Color.white.opacity(0.14), in: Capsule())
+                    }
                 }
                 .foregroundStyle(DeskColor.nightText.color)
                 .padding(.horizontal, 14)
@@ -177,12 +184,8 @@ struct HomeScreen: View {
     private var setupCard: some View {
         let mainnet = model.network.holdsRealFunds
         return VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: mainnet ? "bolt.fill" : "testtube.2")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(mainnet ? DeskColor.night.color : DeskColor.nightText.color)
-                    .frame(width: 34, height: 34)
-                    .background(mainnet ? DeskColor.action.color : Color.white.opacity(0.14), in: Circle())
+            HStack(spacing: 12) {
+                DeskBrandMark(size: 38)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Start trading on \(model.network.shortName.lowercased())")
                         .font(.system(size: 16, weight: .bold, design: .rounded))
@@ -221,7 +224,7 @@ struct HomeScreen: View {
     private var actions: some View {
         HStack(spacing: 8) {
             HomeActionTile(symbol: "tray.and.arrow.down", title: "Add funds", action: onFund)
-            HomeActionTile(symbol: "arrow.up.right", title: "Withdraw", isEnabled: !isEmpty, action: onAccount)
+            HomeActionTile(symbol: "arrow.up.right", title: "Withdraw", isEnabled: canWithdraw, action: onWithdraw)
             HomeActionTile(symbol: "arrow.left.arrow.right", title: "Trade",
                            isEnabled: !isEmpty, action: onTrade)
             HomeActionTile(symbol: "ellipsis", title: "More") { showsMore = true }

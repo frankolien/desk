@@ -41,7 +41,7 @@ struct CurrencySheet: View {
                         .buttonStyle(.plain)
                     }
                 } footer: {
-                    Text("Balances and profit are shown in this currency. Orders, deposits and withdrawals stay in AUSD, and market prices stay in dollars.")
+                    Text((currency.ratesUnavailable ? "Exchange rates couldn't be reached, so balances stay in US dollars until they can. " : "") + "Balances and profit are shown in this currency. Orders, deposits and withdrawals stay in AUSD, and market prices stay in dollars.")
                 }
             }
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search currencies")
@@ -58,7 +58,9 @@ struct CurrencySheet: View {
     }
 
     private func sample(_ option: DisplayCurrency.Option) -> String {
-        guard let rate = currency.rate(for: option.code) else { return "Rate loading…" }
+        guard let rate = currency.rate(for: option.code) else {
+            return currency.ratesUnavailable ? "Rate unavailable right now" : "Rate loading…"
+        }
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.maximumFractionDigits = rate >= 100 ? 2 : 4

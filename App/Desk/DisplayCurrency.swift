@@ -52,6 +52,8 @@ final class DisplayCurrency {
     /// shows the chosen currency rather than silently falling back to dollars.
     private(set) var rates: [String: Double]
     private var fetchedAt: Date?
+    /// The last fetch failed and no rate is held for the choice, so figures stay in dollars.
+    private(set) var ratesUnavailable = false
 
     private init() {
         code = UserDefaults.standard.string(forKey: Self.codeKey) ?? "USD"
@@ -78,7 +80,11 @@ final class DisplayCurrency {
         guard let (data, response) = try? await URLSession.shared.data(from: Self.endpoint),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let body = try? JSONDecoder().decode(Rates.self, from: data),
-              body.rates["USD"] == 1 else { return }
+              body.rates["USD"] == 1 else {
+            ratesUnavailable = rates.count <= 1
+            return
+        }
+        ratesUnavailable = false
         rates = body.rates
         fetchedAt = .now
         UserDefaults.standard.set(body.rates, forKey: Self.ratesKey)

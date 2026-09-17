@@ -16,6 +16,7 @@ struct TradingShell: View {
     @State private var showsAccount = false
     @State private var showsFunding = false
     @State private var showsSetup = false
+    @State private var showsWithdraw = false
     @State private var fillConfirmation: String?
 
     enum Destination: Hashable {
@@ -56,6 +57,7 @@ struct TradingShell: View {
                     onTrade: { tab = .perps },
                     onFund: { if model.hasTradingAccount { showsFunding = true } else { showsSetup = true } },
                     onSetup: { showsSetup = true },
+                    onWithdraw: { showsWithdraw = true },
                     onAccount: { showsAccount = true })
             }
 
@@ -91,6 +93,11 @@ struct TradingShell: View {
                 .presentationBackground(Color(.systemBackground))
         }
         .sheet(isPresented: $showsFunding) { AddFundsSheet(model: model) }
+        .sheet(isPresented: $showsWithdraw) {
+            WithdrawSheet(model: model) { showsWithdraw = false }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
         .fullScreenCover(isPresented: $showsSetup) {
             FundScreen(model: model) { showsSetup = false }
         }

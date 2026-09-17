@@ -77,6 +77,10 @@ struct WithdrawSheet: View {
             .padding(.bottom, 12)
         }
         .interactiveDismissDisabled(model.withdrawal.isBusy)
+        .onAppear {
+            // Open on whichever balance actually holds something.
+            if tradingBalance.isZero && !walletBalance.isZero { source = .wallet }
+        }
         .onChange(of: source) { _, newValue in
             // Wallet AUSD can only go somewhere else; sending it to itself is nothing.
             if newValue == .wallet { destination = .address }
@@ -91,12 +95,14 @@ struct WithdrawSheet: View {
             Text("Withdraw")
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .foregroundStyle(DeskColor.nightText.color)
-            Text(model.network.shortName)
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
-                .foregroundStyle(model.network.holdsRealFunds ? DeskColor.night.color : DeskColor.nightText.color)
-                .padding(.horizontal, 7)
-                .frame(height: 18)
-                .background(model.network.holdsRealFunds ? DeskColor.action.color : Color.white.opacity(0.14), in: Capsule())
+            if !model.network.holdsRealFunds {
+                Text("Testnet")
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .padding(.horizontal, 7)
+                    .frame(height: 18)
+                    .background(Color.white.opacity(0.14), in: Capsule())
+            }
             Spacer()
             Button(action: close) {
                 Image(systemName: "xmark")
