@@ -2,6 +2,7 @@ import DeskFlow
 import DeskMoney
 import DeskPerpl
 import Foundation
+import WidgetKit
 import Observation
 
 struct CopiedTrader: Codable, Hashable, Identifiable {
@@ -110,6 +111,7 @@ final class CopyTrader {
     private var accounts: [UInt64: String] = [:]
     private var wokenAt: Date?
     private let stream = PositionStream()
+    private let glance = AutoCopyPublisher()
     private var mainnet = MainnetMarkets()
 
     private static let pollWhileStreaming: TimeInterval = 15
@@ -126,7 +128,7 @@ final class CopyTrader {
         log = Self.load([CopyLogEntry].self, key: "desk.copy.log", network: network) ?? []
         open = Self.load([OpenCopy].self, key: "desk.copy.open", network: network) ?? []
         basket = Self.load(CopyBasket.self, key: "desk.copy.basket", network: network)
-        isPaused = UserDefaults.standard.bool(forKey: "desk.copy.paused.\(network.rawValue)")
+        isPaused = AutoCopySwitch.isPaused
         stream.onMove = { [weak self] account in
             guard let self, self.accounts[account] != nil else { return }
             self.wokenAt = self.wokenAt ?? .now
@@ -165,7 +167,9 @@ final class CopyTrader {
 
     func setPaused(_ paused: Bool) {
         isPaused = paused
+        AutoCopySwitch.isPaused = paused
         persist()
+        ControlCenter.shared.reloadControls(ofKind: AutoCopyControl.controlKind)
     }
 
     func updateGuards(_ next: CopyGuards) {
@@ -238,6 +242,13 @@ final class CopyTrader {
         var lastCycle = Date.distantPast
         var streaming = false
         while !Task.isCancelled {
+            // Siri, Control Center, the widget or the Live Activity may have flipped it.
+            if AutoCopySwitch.isPaused != isPaused {
+                isPaused = AutoCopySwitch.isPaused
+                record(CopyLogEntry(
+                    id: UUID(), date: .now, trader: "", symbol: "", isLong: true, kind: .paused,
+                    detail: isPaused ? "Auto-copy paused from outside Desk." : "Auto-copy resumed from outside Desk."))
+            }
             let active = !traders.isEmpty || basket != nil || !open.isEmpty
             // The stream carries every position event on the exchange, so it runs only while
             // there is someone to copy.
@@ -259,6 +270,7 @@ final class CopyTrader {
                 baselines = [:]
                 readProblem = nil
             }
+            glance.follow(self)
             try? await Task.sleep(for: .milliseconds(200))
         }
     }
@@ -663,7 +675,6 @@ final class CopyTrader {
         Self.save(log, key: "desk.copy.log", network: network)
         Self.save(open, key: "desk.copy.open", network: network)
         Self.save(basket, key: "desk.copy.basket", network: network)
-        UserDefaults.standard.set(isPaused, forKey: "desk.copy.paused.\(network.rawValue)")
     }
 
     private static func load<T: Decodable>(_ type: T.Type, key: String, network: DeskNetwork) -> T? {

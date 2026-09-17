@@ -387,6 +387,7 @@ struct CopyActivityScreen: View {
     @State private var editing: CopiedTrader?
     @State private var showsBasket = false
     @State private var showsShadow = true
+    @AppStorage(AutoCopyPublisher.liveActivityKey) private var showsLiveActivity = true
 
     private var figures: CopyTrader.Figures { copier.figures(shadow: showsShadow) }
     private var openCopies: [OpenCopy] { copier.open.filter { $0.shadowed == showsShadow } }
@@ -413,6 +414,19 @@ struct CopyActivityScreen: View {
                         Image(systemName: copier.isStreaming ? "dot.radiowaves.left.and.right" : "bolt.fill")
                             .foregroundStyle(copier.isPaused ? AnyShapeStyle(.secondary) : AnyShapeStyle(DeskColor.rise.color))
                             .symbolEffect(.variableColor.iterative, options: .repeating, isActive: copier.isStreaming && !copier.isPaused)
+                    }
+                }
+                Toggle(isOn: $showsLiveActivity) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Live Activity")
+                            Text("Lock Screen and Dynamic Island")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "platter.filled.top.iphone")
+                            .foregroundStyle(DeskColor.action.color)
                     }
                 }
             }

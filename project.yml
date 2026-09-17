@@ -26,7 +26,9 @@ targets:
     platform: iOS
     sources:
       - path: App/Desk
+      - path: App/Shared
     dependencies:
+      - target: DeskWidgets
       - package: DeskKit
         product: DeskMoney
       - package: DeskKit
@@ -59,6 +61,9 @@ targets:
           - webcredentials:desk-trading-opia.vercel.app
         # Trade alerts. Automatic signing turns this into "production" for TestFlight.
         aps-environment: development
+        # Shared with the widget extension: auto-copy's switch and the glance it shows.
+        com.apple.security.application-groups:
+          - group.com.opia.desk
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
@@ -67,6 +72,7 @@ targets:
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_NSSupportsLiveActivities: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         # Dark only. A trading app on a near-black ground has no light mode to test, and
@@ -74,3 +80,35 @@ targets:
         INFOPLIST_KEY_UIUserInterfaceStyle: Dark
         INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: Desk saves the trade cards you choose to keep.
         INFOPLIST_KEY_NSFaceIDUsageDescription: Desk derives your trading key from your face. Nothing is stored.
+
+  # Home Screen and Lock Screen widget, the auto-copy Live Activity and the Control
+  # Center toggle.
+  DeskWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: App/DeskWidgets
+      - path: App/Shared
+    dependencies:
+      - package: DeskKit
+        product: DeskUI
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+    info:
+      path: App/DeskWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: Desk
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: App/DeskWidgets/DeskWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.opia.desk
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.opia.desk.widgets
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        SKIP_INSTALL: YES
