@@ -18,6 +18,8 @@ struct TicketSheet: View {
     /// Injected rather than built here: the ticket does not own a socket and must not
     /// decide whether an order can be sent. It asks, and is answered in a sentence.
     let session: TradingSession
+    /// Where the leverage rail starts, for a ticket opened from someone else's position.
+    var initialLeverage = 1
     let onDismiss: () -> Void
 
     @State private var amount = ""
@@ -134,6 +136,9 @@ struct TicketSheet: View {
                         leverage: $leverage,
                         maximum: max(1, market?.config.maxLeverage ?? 1)
                     )
+                    .onAppear {
+                        leverage = min(max(1, initialLeverage), max(1, market?.config.maxLeverage ?? 1))
+                    }
                     .padding(.top, 16)
 
                     VStack(spacing: 10) {

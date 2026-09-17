@@ -3,24 +3,39 @@ import DeskPerpl
 import DeskUI
 import SwiftUI
 
-/// What the market is doing, in sentences.
+/// Who is winning on Perpl, and what the market is doing, in sentences.
 ///
-/// The first version of this screen was a feed of invented trades from invented wallets
-/// with a Follow button that did nothing. The honest version of that feature — recent
-/// trades from wallets you follow — cannot be built from Perpl: its public trade stream
-/// carries a timestamp, a price, a size and a side, and no account identity at all.
-/// Attributing fills to addresses means indexing Monad itself.
+/// Traders come first. Perpl's public trade stream carries no account identity, but the
+/// exchange contract lists every open position with its account, so the leaderboard and
+/// the people you follow are read from mainnet positions rather than invented. Copying a
+/// position opens your own testnet ticket at their side and leverage.
 ///
-/// So this reads what the venue *does* publish. Every figure here comes off the same
-/// context call the price does — mark against oracle, bid against ask, last against mid,
-/// open interest — and each is a relationship rather than a number dressed up as an
-/// insight. A raw tape would be the pro-trader version and the wrong one: Desk is for
-/// someone who wants to trade without the ceremony, and a scrolling wall of anonymous
-/// fills is the ceremony.
-///
-/// Nothing is invented to fill the space. A reading that cannot be computed says so.
+/// The market readings come off the same context call the price does — mark against
+/// oracle, bid against ask, last against mid, open interest. A reading that cannot be
+/// computed says so.
 struct SignalsScreen: View {
+    let model: AppModel
     let market: MarketModel
+    let session: TradingSession
+    let onOrderFilled: (Direction, String) -> Void
+
+    private enum Section: String, CaseIterable, Identifiable {
+        case traders = "Traders", market = "Market"
+        var id: String { rawValue }
+    }
+
+    private struct CopyOrder: Identifiable {
+        let side: Direction
+        let leverage: Int
+        var id: String { "\(side)-\(leverage)" }
+    }
+
+    @State private var section: Section = .traders
+    @State private var directory = TraderDirectory()
+    @State private var selectedTrader: TraderSnapshot?
+    @State private var copyOrder: CopyOrder?
+    @State private var pendingCopy: CopyOrder?
+    @State private var unlistedMarket: String?
 
     private var signals: MarketSignals? {
         market.market.map {
@@ -32,46 +47,142 @@ struct SignalsScreen: View {
     }
 
     var body: some View {
-        ZStack {
-            DeskBackground()
+        NavigationStack {
+            ZStack {
+                DeskBackground()
 
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Signals")
-                        .font(.system(size: 30, weight: .heavy, design: .rounded))
-                        .foregroundStyle(DeskColor.nightText.color)
-                        .padding(.top, 10)
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Signals")
+                            .font(.system(size: 30, weight: .heavy, design: .rounded))
+                            .foregroundStyle(DeskColor.nightText.color)
+                            .padding(.top, 10)
 
-                    Text("\(market.symbol)-PERP, read live from Perpl")
-                        .font(DeskType.caption)
-                        .foregroundStyle(DeskColor.nightMuted.color)
-                        .padding(.top, 6)
+                        sectionPicker.padding(.top, 14)
 
-                    if let signals, !signals.isEmpty {
-                        premium(signals).padding(.top, 22)
-
-                        VStack(spacing: 10) {
-                            spread(signals)
-                            flow(signals)
-                            interest(signals)
+                        switch section {
+                        case .traders:
+                            TradersFeed(directory: directory) { selectedTrader = $0 }
+                                .padding(.top, 20)
+                                .padding(.bottom, 130)
+                        case .market:
+                            marketReadings
                         }
-                        .padding(.top, 12)
-                    } else {
-                        waiting.padding(.top, 30)
                     }
-
-                    Text("These come from the venue's own figures — the mark against the "
-                         + "index, the bid against the ask, the last trade against the "
-                         + "middle. They describe the market, not what you should do.")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(DeskColor.nightMuted.color.opacity(0.8))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 26)
-                        .padding(.bottom, 130)
+                    .padding(.horizontal, 20)
                 }
-                .padding(.horizontal, 20)
+                .refreshable {
+                    async let top: Void = directory.refreshTop()
+                    async let following: Void = directory.refreshFollowing()
+                    _ = await (top, following)
+                }
+            }
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(item: $selectedTrader) { trader in
+                TraderProfileScreen(initial: trader, directory: directory) { copy($0) }
+                    .toolbar(.hidden, for: .tabBar)
             }
         }
+        .task { await directory.run() }
+        .sheet(item: $copyOrder) { order in
+            TicketSheet(
+                side: order.side, market: market.market, mark: market.mark.value,
+                session: session, initialLeverage: order.leverage
+            ) {
+                session.clear()
+                copyOrder = nil
+                onOrderFilled(order.side, market.symbol)
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $pendingCopy) { order in
+            LeverageExplainer(
+                onAgree: {
+                    model.hasSeenLeverageExplainer = true
+                    pendingCopy = nil
+                    copyOrder = order
+                },
+                onBack: { pendingCopy = nil })
+        }
+        .alert("Not on Desk yet", isPresented: Binding(
+            get: { unlistedMarket != nil },
+            set: { if !$0 { unlistedMarket = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("\(unlistedMarket ?? "This market") isn't listed on Perpl testnet, so it can't be copied here.")
+        }
+    }
+
+    /// Their market, side and leverage on your own testnet ticket. The amount is yours to
+    /// choose: their size is sized to their account, not to this one.
+    private func copy(_ position: TraderPosition) {
+        guard let target = market.allMarkets.first(where: {
+            $0.symbol.caseInsensitiveCompare(position.market) == .orderedSame
+        }) else {
+            unlistedMarket = position.market
+            return
+        }
+        market.select(target)
+        let order = CopyOrder(
+            side: position.isLong ? .up : .down,
+            leverage: max(1, Int((position.leverage ?? 1).rounded())))
+        selectedTrader = nil
+        if order.leverage > 1 && !model.hasSeenLeverageExplainer {
+            pendingCopy = order
+        } else {
+            copyOrder = order
+        }
+    }
+
+    private var sectionPicker: some View {
+        HStack(spacing: 0) {
+            ForEach(Section.allCases) { item in
+                Button { withAnimation(.easeOut(duration: 0.18)) { section = item } } label: {
+                    Text(item.rawValue)
+                        .font(.system(size: 13, weight: section == item ? .bold : .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 36)
+                        .background(section == item ? Color.white.opacity(0.24) : .clear, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Color.white.opacity(0.11), in: Capsule())
+    }
+
+    @ViewBuilder
+    private var marketReadings: some View {
+        Text("\(market.symbol)-PERP, read live from Perpl")
+            .font(DeskType.caption)
+            .foregroundStyle(DeskColor.nightMuted.color)
+            .padding(.top, 16)
+
+        if let signals, !signals.isEmpty {
+            premium(signals).padding(.top, 22)
+
+            VStack(spacing: 10) {
+                spread(signals)
+                flow(signals)
+                interest(signals)
+            }
+            .padding(.top, 12)
+        } else {
+            waiting.padding(.top, 30)
+        }
+
+        Text("These come from the venue's own figures — the mark against the "
+             + "index, the bid against the ask, the last trade against the "
+             + "middle. They describe the market, not what you should do.")
+            .font(.system(size: 12, weight: .medium, design: .rounded))
+            .foregroundStyle(DeskColor.nightMuted.color.opacity(0.8))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 26)
+            .padding(.bottom, 130)
     }
 
     // MARK: - The headline
