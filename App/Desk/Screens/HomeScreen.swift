@@ -15,6 +15,7 @@ struct HomeScreen: View {
     let market: MarketModel
     let onTrade: () -> Void
     let onFund: () -> Void
+    var onSetup: () -> Void = {}
     let onAccount: () -> Void
 
     @AppStorage("desk.hidesBalance") private var hidesBalance = false
@@ -58,6 +59,9 @@ struct HomeScreen: View {
                     topBar
                     balance.padding(.top, 54)
                     actions.padding(.top, 42)
+                    if !model.hasTradingAccount {
+                        setupCard.padding(.top, 24)
+                    }
                     accountRows.padding(.top, 24)
                 }
                 .padding(.horizontal, 16)
@@ -164,6 +168,52 @@ struct HomeScreen: View {
         .accessibilityValue(hidesBalance ? "Hidden" : "\(collateralText) AUSD")
         .accessibilityHint("Double tap to \(hidesBalance ? "show" : "hide") your balance")
         .animation(.snappy, value: hidesBalance)
+    }
+
+    // MARK: Setup
+
+    /// Shown while this network has no Perpl account. The rest of Home stays usable, so a
+    /// switch to mainnet lands here rather than back at onboarding.
+    private var setupCard: some View {
+        let mainnet = model.network.holdsRealFunds
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: mainnet ? "bolt.fill" : "testtube.2")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(mainnet ? DeskColor.night.color : DeskColor.nightText.color)
+                    .frame(width: 34, height: 34)
+                    .background(mainnet ? DeskColor.action.color : Color.white.opacity(0.14), in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Start trading on \(model.network.shortName.lowercased())")
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                    Text(mainnet
+                         ? "Deposit MON and AUSD, then open your Perpl account."
+                         : "Get free test funds, then open your Perpl account.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Button(action: onSetup) {
+                HStack {
+                    Text(mainnet ? "Deposit and open account" : "Get test funds")
+                    Spacer()
+                    Image(systemName: "arrow.right")
+                }
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(DeskColor.night.color)
+                .padding(.horizontal, 18)
+                .frame(height: 46)
+                .background(DeskColor.nightText.color, in: Capsule())
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .stroke(mainnet ? DeskColor.action.color.opacity(0.35) : Color.white.opacity(0.08), lineWidth: 0.75))
     }
 
     // MARK: Actions

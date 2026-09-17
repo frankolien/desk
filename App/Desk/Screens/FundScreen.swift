@@ -9,6 +9,8 @@ import SwiftUI
 /// tapping a button never advances local presentation state by itself.
 struct FundScreen: View {
     let model: AppModel
+    /// Set when presented from inside the app for a network without an account.
+    var onClose: (() -> Void)? = nil
     @State private var didCopy = false
     @State private var faucetPage: FaucetPage?
 
@@ -26,7 +28,7 @@ struct FundScreen: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     topBar
-                    Text("One last step.")
+                    Text(onClose == nil ? "One last step." : "Trade on \(model.network.shortName.lowercased()).")
                         .font(.system(size: 34, weight: .heavy, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
                         .padding(.top, 32)
@@ -68,6 +70,9 @@ struct FundScreen: View {
             .refreshable { await model.refreshBalances() }
         }
         .task { await model.refreshBalances() }
+        .onChange(of: model.hasTradingAccount) { _, ready in
+            if ready { onClose?() }
+        }
         .sheet(isPresented: $showsNetwork) {
             NetworkSheet(model: model)
                 .presentationDetents([.medium, .large])
@@ -83,6 +88,18 @@ struct FundScreen: View {
 
     private var topBar: some View {
         HStack {
+            if let onClose {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .nativeGlass(interactive: true, in: Circle())
+                .accessibilityLabel("Close")
+            }
             Text("Setup")
                 .font(.system(size: 15, weight: .bold, design: .rounded))
                 .foregroundStyle(DeskColor.nightText.color)

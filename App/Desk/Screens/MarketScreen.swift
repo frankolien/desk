@@ -274,6 +274,7 @@ struct PerpDetailScreen: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var ticket: Direction?
+    @State private var showsSetup = false
     @State private var pendingSide: Direction?
 
     var body: some View {
@@ -307,6 +308,9 @@ struct PerpDetailScreen: View {
             // gets the same way in that `-stage` gives every other screen.
             if ProcessInfo.processInfo.arguments.contains("-open-ticket") { ticket = .up }
             #endif
+        }
+        .fullScreenCover(isPresented: $showsSetup) {
+            FundScreen(model: model) { showsSetup = false }
         }
         .sheet(item: $ticket) { side in
             TicketSheet(
@@ -406,7 +410,13 @@ struct PerpDetailScreen: View {
 
     private func tradeButton(_ side: Direction, title: String) -> some View {
         Button {
-            if model.hasSeenLeverageExplainer { ticket = side } else { pendingSide = side }
+            if !model.hasTradingAccount {
+                showsSetup = true
+            } else if model.hasSeenLeverageExplainer {
+                ticket = side
+            } else {
+                pendingSide = side
+            }
         } label: {
             Text(title)
                 .font(.system(size: 17, weight: .bold, design: .rounded))

@@ -76,6 +76,16 @@ final class AppModel {
     private(set) var openingStep: OpeningSequence.Progress?
     /// Handed the enrolled key the moment one exists.
     let trading = TradingSession()
+    /// Whether this network's Perpl account is open and its key is in the session.
+    /// Separate from `stage`: an account missing on one network is a card on Home, not a
+    /// trip back through onboarding.
+    private(set) var hasTradingAccount = false
+
+    /// True once a desk has been opened on any network. After that, onboarding never
+    /// returns; a network without an account is set up from inside the app.
+    private func hasOnboarded(_ address: EthereumAddress) -> Bool {
+        DeskNetwork.allCases.contains { APIKeyStore.forNetwork($0).load(for: address) != nil }
+    }
     /// Shown once, ever, the first time leverage is reached.
     var hasSeenLeverageExplainer = false
     private let session = SigningSession()
@@ -126,7 +136,7 @@ final class AppModel {
            index + 1 < ProcessInfo.processInfo.arguments.count {
             let name = ProcessInfo.processInfo.arguments[index + 1]
             stage = switch name {
-            case "market", "signals", "signal-detail", "empty", "watchlist", "search": .trading
+            case "market", "signals", "signal-detail", "empty", "watchlist", "search", "home", "home-setup": .trading
             case "fund", "fund-empty": .needsDesk
             default: .welcome
             }
@@ -154,6 +164,8 @@ final class AppModel {
                 openPositions = Self.reviewPosition.map { [$0] } ?? []
                 closedPositions = Self.reviewClosedPositions
                 isKeyUnlocked = true
+                // `home-setup` is a signed-in person on a network with no account yet.
+                hasTradingAccount = name != "home-setup"
             }
         }
         #endif
@@ -271,7 +283,7 @@ final class AppModel {
                 let context = try await PerplREST(configuration: network.perpl()).context()
                 await enterTrading(apiKey: apiKey, context: context)
             } else {
-                stage = .needsDesk
+                stage = hasOnboarded(keys.address) ? .trading : .needsDesk
             }
         } catch PasskeyFailure.cancelledByUser {
             // A dismissed sheet is not a failure and not a reason to offer anything. It
@@ -347,6 +359,7 @@ final class AppModel {
     private func enterTrading(apiKey: APIKey, context: PerplContext) async {
         guard let market = context.market(id: network.defaultMarketID) ?? context.markets.first else { return }
         trading.adopt(apiKey: apiKey, session: session, market: market)
+        hasTradingAccount = true
         if let head = context.chain.gas?.headBlock { trading.noteHeadBlock(head) }
         // The account and API key already exist at this point. A live-stream outage is
         // a connectivity state, not a reason to send the user back through onboarding.
@@ -364,6 +377,7 @@ final class AppModel {
         defer { isWorking = false }
         balancePoller?.cancel()
         await trading.abandon()
+        hasTradingAccount = false
         network = next
         trading.network = next
         UserDefaults.standard.set(next.rawValue, forKey: "desk.network")
@@ -384,9 +398,11 @@ final class AppModel {
         if hasDesk.value == true, let apiKey = apiKeys.load(for: address),
            let context = try? await PerplREST(configuration: network.perpl()).context() {
             await enterTrading(apiKey: apiKey, context: context)
-        } else {
+        } else if !hasOnboarded(address) {
             stage = .needsDesk
         }
+        // Otherwise the stage stays where it was: switching networks keeps you in the app,
+        // and Home offers to open this network's account.
     }
 
     /// Asks Desk's faucet for whatever this wallet lacks: MON for gas and test AUSD to

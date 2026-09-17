@@ -15,6 +15,7 @@ struct TradingShell: View {
     @State private var tab: Destination
     @State private var showsAccount = false
     @State private var showsFunding = false
+    @State private var showsSetup = false
     @State private var fillConfirmation: String?
 
     enum Destination: Hashable {
@@ -53,7 +54,8 @@ struct TradingShell: View {
                     model: model,
                     market: market,
                     onTrade: { tab = .perps },
-                    onFund: { showsFunding = true },
+                    onFund: { if model.hasTradingAccount { showsFunding = true } else { showsSetup = true } },
+                    onSetup: { showsSetup = true },
                     onAccount: { showsAccount = true })
             }
 
@@ -89,6 +91,9 @@ struct TradingShell: View {
                 .presentationBackground(Color(.systemBackground))
         }
         .sheet(isPresented: $showsFunding) { AddFundsSheet(model: model) }
+        .fullScreenCover(isPresented: $showsSetup) {
+            FundScreen(model: model) { showsSetup = false }
+        }
         .task { market.start() }
         // The head block arrives on the same context call the price does, and every
         // order's deadline is computed against it.
