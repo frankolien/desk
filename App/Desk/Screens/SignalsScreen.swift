@@ -209,22 +209,10 @@ struct SignalsScreen: View {
     }
 
     private var sectionPicker: some View {
-        HStack(spacing: 0) {
-            ForEach(Section.allCases) { item in
-                Button { withAnimation(.easeOut(duration: 0.18)) { section = item } } label: {
-                    Text(item.rawValue)
-                        .font(.system(size: 13, weight: section == item ? .bold : .medium, design: .rounded))
-                        .foregroundStyle(DeskColor.nightText.color)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 36)
-                        .background(section == item ? Color.white.opacity(0.24) : .clear, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-            }
+        Picker("Section", selection: $section.animation(.easeOut(duration: 0.18))) {
+            ForEach(Section.allCases) { Text($0.rawValue).tag($0) }
         }
-        .padding(3)
-        .background(Color.white.opacity(0.11), in: Capsule())
+        .pickerStyle(.segmented)
     }
 
     @ViewBuilder
@@ -301,13 +289,9 @@ struct SignalsScreen: View {
             }
             .padding(.top, 10)
         }
-        .padding(18)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DeskColor.nightChip.color.opacity(0.6),
-                    in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(DeskColor.nightLine.color, lineWidth: 0.5))
+        .deskGlass(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .animation(.snappy(duration: 0.3), value: micros)
     }
 
@@ -406,12 +390,8 @@ struct SignalsScreen: View {
                 .foregroundStyle(tint.color)
                 .contentTransition(.numericText())
         }
-        .padding(14)
-        .background(DeskColor.nightChip.color.opacity(0.45),
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(DeskColor.nightLine.color, lineWidth: 0.5))
+        .padding(12)
+        .deskGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 
@@ -423,9 +403,8 @@ struct SignalsScreen: View {
                 SkeletonRow(widthFraction: [0.9, 0.55, 0.75, 0.45][index])
             }
         }
-        .padding(18)
-        .background(DeskColor.nightChip.color.opacity(0.45),
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(16)
+        .deskGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     static func percent(_ micros: Int) -> String {

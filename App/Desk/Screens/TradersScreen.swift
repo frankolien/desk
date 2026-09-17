@@ -278,26 +278,25 @@ struct TradersFeed: View {
                     .foregroundStyle(DeskColor.nightMuted.color)
                     .padding(.top, 14)
             } else {
-                LazyVStack(spacing: 0) {
+                GlassSection {
                     if directory.top.isEmpty {
                         ForEach(0..<8, id: \.self) { index in
                             LeaderRow(trader: TraderSnapshot(accountId: nil, address: "0x00000000000000000000000000000000000000\(index)0",
                                                              pnl: "1000", balance: nil, positions: []),
-                                      rank: index + 1, name: "0x0000…0000", isLast: index == 7)
+                                      rank: index + 1, name: "0x0000…0000")
                                 .redacted(reason: .placeholder)
                         }
                     } else {
                         ForEach(Array(directory.top.enumerated()), id: \.element.id) { index, trader in
                             Button { onSelect(trader) } label: {
                                 LeaderRow(trader: trader, rank: index + 1, name: directory.name(for: trader.address),
-                                          isFollowed: directory.isFollowing(trader.address),
-                                          isLast: index == directory.top.count - 1)
+                                          isFollowed: directory.isFollowing(trader.address))
                             }
                             .buttonStyle(.plain)
                         }
                     }
                 }
-                .padding(.top, 6)
+                .padding(.top, 10)
             }
 
             Text("Live from Perpl mainnet. PnL is on open positions, funding included. Copying a trade opens your own ticket.")
@@ -351,12 +350,12 @@ private struct FollowedCard: View {
                                          : (trader.isProfit ? DeskColor.rise : DeskColor.fall).color)
                 }
             }
-            .padding(14)
-            .frame(width: 138, alignment: .leading)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(12)
+            .frame(width: 132, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
+        .deskGlass(interactive: true, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 
@@ -365,7 +364,6 @@ private struct LeaderRow: View {
     let rank: Int
     let name: String
     var isFollowed = false
-    let isLast: Bool
 
     private var detail: String {
         let count = trader.positions.count
@@ -374,16 +372,16 @@ private struct LeaderRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 11) {
             Text("\(rank)")
-                .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
                 .foregroundStyle(rank <= 3 ? DeskColor.nightText.color : DeskColor.nightMuted.color)
-                .frame(width: 20, alignment: .leading)
-            TraderAvatar(address: trader.address, size: 44)
-            VStack(alignment: .leading, spacing: 3) {
+                .frame(width: 18, alignment: .leading)
+            TraderAvatar(address: trader.address, size: 34)
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(name)
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
                         .lineLimit(1)
                     if isFollowed {
@@ -393,19 +391,13 @@ private struct LeaderRow: View {
                     }
                 }
                 Text(detail)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
             }
             Spacer(minLength: 8)
             Text(TraderFormat.compact(trader.pnl.flatMap(Double.init), signed: true))
-                .font(.system(size: 16, weight: .semibold, design: .rounded).monospacedDigit())
+                .font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit())
                 .foregroundStyle((trader.isProfit ? DeskColor.rise : DeskColor.fall).color)
-        }
-        .padding(.vertical, 13)
-        .overlay(alignment: .bottom) {
-            if !isLast {
-                Rectangle().fill(Color.white.opacity(0.07)).frame(height: 0.5).padding(.leading, 78)
-            }
         }
         .contentShape(Rectangle())
     }
