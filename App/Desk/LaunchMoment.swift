@@ -35,7 +35,7 @@ struct LaunchMoment: View {
                 .opacity(lightSweep ? 0 : 1)
 
             VStack(spacing: 0) {
-                DeskMark(size: 76)
+                DeskBrandMark(size: 76)
                     .scaleEffect(struck ? 1 : 0.62)
                     .rotation3DEffect(.degrees(struck ? 0 : -42), axis: (x: 0, y: 1, z: 0))
                     .blur(radius: struck ? 0 : 14)

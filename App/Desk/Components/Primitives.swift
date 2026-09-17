@@ -1,6 +1,30 @@
 import DeskUI
 import SwiftUI
 
+/// The approved Desk identity from the app asset catalog.
+///
+/// Keeping the crop, corner treatment and shadow here means launch, onboarding and any
+/// later branded surface cannot slowly turn into slightly different versions of the mark.
+struct DeskBrandMark: View {
+    let size: CGFloat
+
+    init(size: CGFloat = 64) {
+        self.size = size
+    }
+
+    var body: some View {
+        Image("DeskLogo")
+            .resizable()
+            .interpolation(.high)
+            .antialiased(true)
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.225, style: .continuous))
+            .shadow(color: DeskColor.action.color.opacity(0.28), radius: size * 0.16, y: size * 0.06)
+            .accessibilityHidden(true)
+    }
+}
+
 /// The one filled action on a screen. Pine, because green is reserved for actions and
 /// positive state, never decoration.
 struct PrimaryButton: View {

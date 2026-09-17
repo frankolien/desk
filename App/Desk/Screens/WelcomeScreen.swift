@@ -55,7 +55,7 @@ struct WelcomeScreen: View {
 
                     Spacer(minLength: 0)
 
-                    DeskMark(size: compact ? 48 : 52)
+                    DeskBrandMark(size: compact ? 48 : 52)
                         .padding(.horizontal, contentInset)
 
                     Text("Trade perps,\nwith your face")
