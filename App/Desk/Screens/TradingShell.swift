@@ -82,7 +82,7 @@ struct TradingShell: View {
 
             Tab("Perps", systemImage: "infinity", value: .perps) {
                 MarketScreen(
-                    model: model, market: market, session: session, copier: copier,
+                    model: model, market: market, session: session,
                     onOrderFilled: orderFilled)
             }
 

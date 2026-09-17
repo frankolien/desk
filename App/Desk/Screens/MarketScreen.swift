@@ -17,12 +17,10 @@ struct MarketScreen: View {
     let model: AppModel
     let market: MarketModel
     let session: TradingSession
-    let copier: CopyTrader
     let onOrderFilled: (Direction, String) -> Void
 
     @State private var query = ""
     @State private var showsMarket = false
-    @State private var showsRisk = false
     @State private var selectedPosition: PerplPosition?
     @State private var showsWithdraw = false
     @State private var showsFunding = false
@@ -48,10 +46,6 @@ struct MarketScreen: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(isPresented: $showsRisk) {
-                RiskScreen(model: model, market: market, copier: copier)
-                    .toolbar(.hidden, for: .tabBar)
-            }
             .navigationDestination(isPresented: $showsMarket) {
                 PerpDetailScreen(
                     model: model, market: market, session: session,
@@ -62,11 +56,7 @@ struct MarketScreen: View {
                     .toolbar(.hidden, for: .tabBar)
             }
             #if DEBUG
-            .task {
-                let arguments = ProcessInfo.processInfo.arguments
-                if arguments.contains("-open-withdraw") { showsWithdraw = true }
-                if arguments.contains("-open-risk") { showsRisk = true }
-            }
+            .task { if ProcessInfo.processInfo.arguments.contains("-open-withdraw") { showsWithdraw = true } }
             #endif
             .sheet(isPresented: $showsWithdraw) {
                 WithdrawSheet(model: model) { showsWithdraw = false }
@@ -168,26 +158,9 @@ struct MarketScreen: View {
 
     private var positions: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Open Positions")
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-                Spacer()
-                // Only once something is open: risk with nothing at risk is a screen that
-                // says nothing.
-                if !positionContexts.isEmpty {
-                    Button { showsRisk = true } label: {
-                        Label("Risk", systemImage: "shield.lefthalf.filled")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(DeskColor.nightText.color)
-                            .padding(.horizontal, 12)
-                            .frame(height: 30)
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .perpGlass(interactive: true, in: Capsule())
-                }
-            }
+            Text("Open Positions")
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundStyle(DeskColor.nightMuted.color)
 
             // The header total is unrealised PnL, not notional. Notional is the number
             // that looks impressive and answers nothing; this is the one a person came
