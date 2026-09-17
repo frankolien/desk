@@ -1534,16 +1534,21 @@ private struct SpotBuyTicket: View {
     }
 }
 
+@MainActor
 private enum SpotFormat {
-    /// Quote amounts arrive with up to eighteen places; six significant digits is what a
-    /// person compares.
-    static func amount(_ text: String?) -> String {
-        guard let text, let value = Decimal(string: text, locale: Locale(identifier: "en_US_POSIX")) else { return "—" }
+    private static let significant: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.usesSignificantDigits = true
         formatter.maximumSignificantDigits = 6
-        return formatter.string(from: value as NSDecimalNumber) ?? text
+        return formatter
+    }()
+
+    /// Quote amounts arrive with up to eighteen places; six significant digits is what a
+    /// person compares.
+    static func amount(_ text: String?) -> String {
+        guard let text, let value = Decimal(string: text, locale: Locale(identifier: "en_US_POSIX")) else { return "—" }
+        return significant.string(from: value as NSDecimalNumber) ?? text
     }
 }
 
