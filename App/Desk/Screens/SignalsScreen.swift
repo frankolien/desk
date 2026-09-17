@@ -108,6 +108,11 @@ struct SignalsScreen: View {
             debugPrimer = directory.top.first
         }
         .task {
+            guard ProcessInfo.processInfo.arguments.contains("-trader-profile") else { return }
+            while directory.top.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
+            selectedTrader = directory.top.first
+        }
+        .task {
             guard ProcessInfo.processInfo.arguments.contains("-auto-copy-sheet") else { return }
             while directory.top.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
             debugAutoCopy = directory.top.first

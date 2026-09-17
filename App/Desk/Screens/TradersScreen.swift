@@ -420,7 +420,6 @@ struct TraderProfileScreen: View {
     @State private var showsAlertsPrimer = false
     @State private var showsAutoCopy = false
     @State private var showsNotificationsOff = false
-    @Namespace private var underline
 
     private var alerts: TradeAlerts { .shared }
     private var alerting: Bool { alerts.isOn(for: trader.address) }
@@ -431,7 +430,7 @@ struct TraderProfileScreen: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            DeskBackground()
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     topBar.padding(.horizontal, 20)
@@ -627,12 +626,11 @@ struct TraderProfileScreen: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)
                         .contentTransition(.symbolEffect(.replace))
-                        .frame(width: 34, height: 30)
-                        .background(Color.white.opacity(alerting ? 0.14 : 0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color.white.opacity(0.14), lineWidth: 0.75))
-                        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .frame(width: 36, height: 30)
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .deskGlass(interactive: true, in: Capsule())
                 .accessibilityLabel(alerting ? "Turn off trade alerts" : "Turn on trade alerts")
                 .transition(.scale(scale: 0.8).combined(with: .opacity))
             }
@@ -667,38 +665,18 @@ struct TraderProfileScreen: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 13)
             .frame(height: 30)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color.white.opacity(0.14), lineWidth: 0.75))
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .deskGlass(interactive: true, in: Capsule())
     }
 
     private var tabs: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ForEach(Tab.allCases, id: \.self) { item in
-                    Button { withAnimation(.snappy(duration: 0.22)) { tab = item } } label: {
-                        VStack(spacing: 10) {
-                            Text(item.rawValue)
-                                .font(.system(size: 14, weight: tab == item ? .bold : .medium, design: .rounded))
-                                .foregroundStyle(tab == item ? Color.white : Color.white.opacity(0.5))
-                            ZStack {
-                                Capsule().fill(Color.clear).frame(width: 52, height: 2.5)
-                                if tab == item {
-                                    Capsule().fill(Color.white).frame(width: 52, height: 2.5)
-                                        .matchedGeometryEffect(id: "underline", in: underline)
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            Rectangle().fill(Color.white.opacity(0.1)).frame(height: 0.5)
+        Picker("Show", selection: $tab.animation(.snappy(duration: 0.22))) {
+            ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
         }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 20)
     }
 
     @ViewBuilder
@@ -821,10 +799,10 @@ private struct ProfilePositionCard: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 10)
                         .frame(height: 28)
-                        .background(Color.white.opacity(0.1), in: Capsule())
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .deskGlass(interactive: true, in: Capsule())
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -855,8 +833,7 @@ private struct ProfilePositionCard: View {
             }
         }
         .padding(14)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 0.5))
+        .deskGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func figure(_ title: String, _ value: String) -> some View {
