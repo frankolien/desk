@@ -44,111 +44,64 @@ struct ActivityScreen: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
+        NavigationStack {
             content
+                .navigationTitle("Activity")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { dismiss() }
+                    }
+                    ToolbarItem(placement: .primaryAction) {
+                        Menu {
+                            Picker("Show", selection: $filter) {
+                                ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
+                            }
+                        } label: {
+                            Image(systemName: filter == .all
+                                  ? "line.3.horizontal.decrease" : "line.3.horizontal.decrease.circle.fill")
+                        }
+                        .accessibilityLabel("Filter activity")
+                    }
+                }
         }
-        .background(Color(red: 0.11, green: 0.11, blue: 0.12).ignoresSafeArea())
         .preferredColorScheme(.dark)
         .task { await load() }
-    }
-
-    private var header: some View {
-        ZStack {
-            Text("Activity")
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-            HStack {
-                circleButton("xmark") { dismiss() }
-                Spacer()
-                Menu {
-                    Picker("Show", selection: $filter) {
-                        ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                } label: {
-                    Image(systemName: filter == .all
-                          ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
-                        .font(.system(size: 19, weight: .medium))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .deskGlass(interactive: true, in: Circle())
-                .accessibilityLabel("Filter activity")
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 18)
-        .padding(.bottom, 6)
-    }
-
-    private func circleButton(_ symbol: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .deskGlass(interactive: true, in: Circle())
-        .accessibilityLabel("Close")
     }
 
     @ViewBuilder
     private var content: some View {
         switch state {
         case .loading where entries.isEmpty:
-            Spacer()
-            ProgressView().controlSize(.large)
-            Spacer()
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background { DeskBackground() }
         case .unavailable(let sentence) where entries.isEmpty:
-            message(sentence, symbol: "exclamationmark.triangle")
+            ContentUnavailableView("Activity Unavailable", systemImage: "exclamationmark.triangle", description: Text(sentence))
+                .background { DeskBackground() }
         default:
             if shown.isEmpty {
-                message(filter == .all ? "No activity on \(model.network.name) yet."
-                                       : "Nothing \(filter.rawValue.lowercased()) yet.",
-                        symbol: "clock")
+                ContentUnavailableView(
+                    filter == .all ? "No Activity Yet" : "Nothing \(filter.rawValue)",
+                    systemImage: "clock",
+                    description: Text(filter == .all ? "Transfers on \(model.network.name) will appear here." : "Try another filter."))
+                    .background { DeskBackground() }
             } else {
-                ScrollView(showsIndicators: false) {
-                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) {
-                        ForEach(sections, id: \.title) { section in
-                            Text(section.title)
-                                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 20)
-                                .padding(.top, 22)
-                                .padding(.bottom, 4)
+                GlassPage {
+                    ForEach(sections, id: \.title) { section in
+                        GlassSection(section.title) {
                             ForEach(section.entries) { entry in
                                 Button { openURL(model.network.explorer.appending(path: "tx/\(entry.hash)")) } label: {
-                                    ActivityRow(entry: entry, network: model.network.holdsRealFunds ? "Monad" : "Monad testnet")
+                                    ActivityRow(entry: entry)
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
                     }
-                    .padding(.bottom, 40)
                 }
                 .refreshable { await load() }
             }
         }
-    }
-
-    private func message(_ text: String, symbol: String) -> some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: symbol)
-                .font(.system(size: 30, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.4))
-            Text(text)
-                .font(.system(size: 15, weight: .medium, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.6))
-                .multilineTextAlignment(.center)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 32)
     }
 
     private func load() async {
@@ -199,7 +152,6 @@ private struct ActivityResponse: Decodable { let entries: [ActivityEntry] }
 
 private struct ActivityRow: View {
     let entry: ActivityEntry
-    let network: String
 
     private var kind: String {
         switch (entry.label, entry.isReceived) {
@@ -236,41 +188,44 @@ private struct ActivityRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 11) {
             Group {
                 if entry.symbol.uppercased() == "AUSD" {
-                    TokenLogo(asset: .ausd, size: 48)
+                    TokenLogo(asset: .ausd, size: 32)
                 } else {
-                    MarketTokenLogo(symbol: entry.symbol, size: 48)
+                    MarketTokenLogo(symbol: entry.symbol, size: 32)
                 }
             }
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 5) {
-                    Image(systemName: entry.isReceived ? "arrow.down.left" : "arrow.up.right")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(entry.isReceived ? DeskColor.rise.color : Color.white.opacity(0.55))
-                    Text(kind)
-                        .font(.system(size: 15, weight: .medium, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.55))
-                }
+            .overlay(alignment: .bottomTrailing) {
+                Image(systemName: entry.isReceived ? "arrow.down.left" : "arrow.up.right")
+                    .font(.system(size: 8, weight: .heavy))
+                    .foregroundStyle(entry.isReceived ? DeskColor.rise.color : .white)
+                    .frame(width: 15, height: 15)
+                    .background(Color.black, in: Circle())
+                    .offset(x: 3, y: 3)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(kind)
+                    .fontWeight(.medium)
                 Text(party)
-                    .font(.system(size: 16, weight: .regular, design: .rounded))
-                    .foregroundStyle(.white)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 4) {
+            VStack(alignment: .trailing, spacing: 1) {
                 Text(amount)
-                    .font(.system(size: 15, weight: .regular, design: .rounded).monospacedDigit())
-                    .foregroundStyle(Color.white.opacity(0.75))
+                    .fontWeight(.medium)
+                    .monospacedDigit()
+                    .foregroundStyle(entry.isReceived ? DeskColor.rise.color : .primary)
                     .lineLimit(1)
-                Text(network)
-                    .font(.system(size: 15, weight: .regular, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.4))
+                Text(Calendar.current.isDateInToday(entry.date) || Calendar.current.isDateInYesterday(entry.date)
+                     ? entry.date.formatted(date: .omitted, time: .shortened)
+                     : entry.date.formatted(.dateTime.day().month(.abbreviated)))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
         .contentShape(Rectangle())
     }
 }
