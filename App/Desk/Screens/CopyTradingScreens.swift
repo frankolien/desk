@@ -498,12 +498,11 @@ struct CopyActivityScreen: View {
     // MARK: - Summary
 
     private var summary: some View {
-        VStack(spacing: 16) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 6) {
                 Circle()
                     .fill(statusTint)
                     .frame(width: 7, height: 7)
-                    .symbolEffect(.pulse, options: .repeating, isActive: isLive)
                 Text(statusText)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(statusTint)
@@ -511,9 +510,9 @@ struct CopyActivityScreen: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 24)
-            .background(statusTint.opacity(0.14), in: Capsule())
+            .background(.black.opacity(0.35), in: Capsule())
 
-            VStack(spacing: 2) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(DisplayCurrency.shared.format(figures.realised, signed: true))
                     .font(.system(size: 44, weight: .bold, design: .rounded))
                     .monospacedDigit()
@@ -523,16 +522,15 @@ struct CopyActivityScreen: View {
                     .lineLimit(1)
                 Text(showsShadow ? "Shadow result · no money moved" : "Live result on Perpl \(copier.network.shortName.lowercased())")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.62))
             }
 
-            HStack(spacing: 0) {
+            HStack(spacing: 22) {
                 stat(figures.winRate.map { String(format: "%.0f%%", $0 * 100) } ?? "—", "Win rate")
-                Divider().frame(height: 28)
                 stat("\(figures.copies)", "Copies")
-                Divider().frame(height: 28)
                 stat(figures.averageFillSeconds.map { String(format: "%.1fs", $0) } ?? "—", "To fill")
             }
+            .padding(.top, 2)
 
             Button { copier.setPaused(!copier.isPaused) } label: {
                 Label(copier.isPaused ? "Resume" : "Pause", systemImage: copier.isPaused ? "play.fill" : "pause.fill")
@@ -544,9 +542,32 @@ struct CopyActivityScreen: View {
             .controlSize(.large)
             .modifier(PauseButtonStyle(isPaused: copier.isPaused))
         }
-        .padding(16)
-        .frame(maxWidth: .infinity)
-        .deskGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // The share card's artwork, so the result reads like the card it can become: its D
+        // sits on the right, and the text keeps the dark side.
+        .background {
+            GeometryReader { proxy in
+                ZStack(alignment: .topTrailing) {
+                    DeskColor.night.color
+                    Image("TradeShareCardBackground")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: proxy.size.width * 0.95, height: proxy.size.width * 0.95 * 1402 / 1122)
+                        .offset(x: proxy.size.width * 0.06, y: -proxy.size.width * 0.05)
+                    LinearGradient(stops: [.init(color: .black.opacity(0.55), location: 0),
+                                           .init(color: .black.opacity(0.1), location: 0.6),
+                                           .init(color: .clear, location: 1)],
+                                   startPoint: .leading, endPoint: .trailing)
+                }
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topTrailing)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(DeskColor.action.color.opacity(0.28), lineWidth: 0.8)
+        }
     }
 
     private var isLive: Bool { !copier.isPaused && copier.readProblem == nil && !copier.traders.isEmpty }
@@ -564,14 +585,13 @@ struct CopyActivityScreen: View {
     }
 
     private func stat(_ value: String, _ label: String) -> some View {
-        VStack(spacing: 2) {
+        VStack(alignment: .leading, spacing: 1) {
             Text(value)
                 .font(.headline.monospacedDigit())
             Text(label)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.55))
         }
-        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Rows
