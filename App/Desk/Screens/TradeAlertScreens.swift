@@ -148,13 +148,13 @@ struct TradeAlertSheet: View {
             GlassPage {
                 GlassSection {
                     HStack(spacing: 14) {
-                        TraderAvatar(address: alert.trader, size: 52)
+                        TraderAvatar(address: alert.trader, size: 38)
                         VStack(alignment: .leading, spacing: 3) {
                             Text(name)
-                                .font(.title3.weight(.semibold))
+                                .font(.headline)
                                 .lineLimit(1)
                             Text("\(headline) · \(alert.observedAt.formatted(.relative(presentation: .named)))")
-                                .font(.subheadline)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -164,7 +164,7 @@ struct TradeAlertSheet: View {
                              : (alert.canCopy ? "Copy opens your own ticket at the same market, side and leverage. You choose the amount." : nil)) {
                     GlassRow("\(alert.market)-PERP") {
                         Text("\(alert.isLong ? "Long" : "Short") \(TraderFormat.leverage(alert.leverage))")
-                            .font(.body.weight(.semibold))
+                            .fontWeight(.semibold)
                             .foregroundStyle(sideTint.color)
                     }
                     GlassRow("Their entry", value: TraderFormat.price(alert.entry))
@@ -194,10 +194,10 @@ struct TradeAlertSheet: View {
                     if alert.canCopy {
                         Button { onCopy(alert) } label: {
                             Text("Copy \(alert.isLong ? "Long" : "Short") \(TraderFormat.leverage(alert.leverage))")
-                                .font(.headline)
+                                .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.black)
                                 .frame(maxWidth: .infinity)
-                                .padding(.vertical, 6)
+                                .padding(.vertical, 2)
                         }
                         .controlSize(.large)
                         .deskProminentButton()
@@ -205,9 +205,9 @@ struct TradeAlertSheet: View {
                     }
                     Button { onViewTrader(alert.trader) } label: {
                         Text("View \(name)")
-                            .font(.headline)
+                            .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
+                            .padding(.vertical, 2)
                     }
                     .controlSize(.large)
                     .deskSecondaryButton()

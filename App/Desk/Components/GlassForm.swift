@@ -18,34 +18,36 @@ struct GlassSection<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 6) {
             if let header {
                 Text(header)
-                    .font(.footnote.weight(.semibold))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .textCase(.uppercase)
-                    .padding(.horizontal, 18)
+                    .padding(.horizontal, 14)
             }
             Group(subviews: content) { rows in
                 VStack(spacing: 0) {
                     ForEach(rows) { row in
                         row
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 12)
-                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
                         if row.id != rows.last?.id {
-                            Divider().padding(.leading, 18)
+                            Divider().padding(.leading, 14)
                         }
                     }
                 }
             }
-            .deskGlass(in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .font(.subheadline)
+            .controlSize(.small)
+            .deskGlass(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             if let footer {
                 Text(footer)
-                    .font(.footnote)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 18)
+                    .padding(.horizontal, 14)
             }
         }
     }
@@ -69,7 +71,7 @@ struct GlassRow<Trailing: View>: View {
                 Text(title)
                 if let subtitle {
                     Text(subtitle)
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -92,11 +94,11 @@ struct GlassPage<Content: View>: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
+            VStack(alignment: .leading, spacing: 18) {
                 content
             }
             .padding(.horizontal, 16)
-            .padding(.top, 8)
+            .padding(.top, 6)
             .padding(.bottom, 32)
         }
         .scrollDismissesKeyboard(.interactively)

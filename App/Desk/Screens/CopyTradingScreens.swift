@@ -36,13 +36,13 @@ struct AutoCopySheet: View {
             GlassPage {
                 GlassSection {
                     HStack(spacing: 14) {
-                        TraderAvatar(address: address, size: 52)
+                        TraderAvatar(address: address, size: 38)
                         VStack(alignment: .leading, spacing: 3) {
                             Text(name)
-                                .font(.title3.weight(.semibold))
+                                .font(.headline)
                                 .lineLimit(1)
                             Text("Copied to your Perpl \(copier.network.shortName.lowercased()) account")
-                                .font(.subheadline)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -126,10 +126,10 @@ struct AutoCopySheet: View {
                     dismiss()
                 } label: {
                     Text(isActive ? "Save Rules" : "Start Copying")
-                        .font(.headline)
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.black)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
+                        .padding(.vertical, 2)
                 }
                 .controlSize(.large)
                 .deskProminentButton()
@@ -166,7 +166,7 @@ struct AutoCopyButton: View {
         Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: rules == nil ? "bolt.fill" : "bolt.circle.fill")
-                    .font(.title3)
+                    .font(.body)
                     .foregroundStyle(rules == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(DeskColor.rise.color))
                     .symbolEffect(.pulse, options: .repeating, isActive: rules != nil)
                     .frame(width: 28)
@@ -184,12 +184,12 @@ struct AutoCopyButton: View {
                     .foregroundStyle(.tertiary)
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
-        .deskGlass(interactive: true, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .deskGlass(interactive: true, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var summary: String {
@@ -209,7 +209,7 @@ struct CopyStatusCard: View {
         Button(action: onOpen) {
             HStack(spacing: 12) {
                 Image(systemName: copier.isPaused ? "pause.circle.fill" : "bolt.circle.fill")
-                    .font(.system(size: 30))
+                    .font(.system(size: 24))
                     .foregroundStyle(copier.isPaused ? AnyShapeStyle(.secondary) : AnyShapeStyle(DeskColor.rise.color))
                     .symbolEffect(.pulse, options: .repeating, isActive: !copier.isPaused && copier.readProblem == nil)
                 VStack(alignment: .leading, spacing: 2) {
@@ -232,12 +232,12 @@ struct CopyStatusCard: View {
                 }
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
-        .deskGlass(interactive: true, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .deskGlass(interactive: true, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var detail: String {
@@ -341,7 +341,7 @@ struct CopyActivityScreen: View {
         }
         .tint(DeskColor.rise.color)
         .navigationTitle("Auto-Copy")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .sheet(item: $editing) { trader in
             AutoCopySheet(address: trader.address, name: directory.name(for: trader.address), copier: copier)
@@ -356,7 +356,7 @@ struct CopyActivityScreen: View {
 
     private func traderRow(_ trader: CopiedTrader) -> some View {
         HStack(spacing: 12) {
-            TraderAvatar(address: trader.address, size: 36)
+            TraderAvatar(address: trader.address, size: 30)
             VStack(alignment: .leading, spacing: 2) {
                 Text(directory.name(for: trader.address))
                     .foregroundStyle(.primary)
@@ -402,22 +402,22 @@ private struct CopyLogRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Image(systemName: icon.name)
-                .font(.title3)
+                .font(.body)
                 .foregroundStyle(icon.tint)
                 .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 4 }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(title)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.footnote.weight(.semibold))
                     Spacer(minLength: 8)
                     if let pnl = entry.pnl {
                         Text(DisplayCurrency.shared.format(pnl, signed: true))
-                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                            .font(.footnote.weight(.semibold).monospacedDigit())
                             .foregroundStyle(pnlTint(pnl))
                     }
                 }
                 Text(entry.detail)
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                 Text(footnote)
                     .font(.caption2)
