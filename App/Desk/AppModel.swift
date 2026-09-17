@@ -67,6 +67,9 @@ final class AppModel {
     private(set) var openingProblem: String?
     /// A setup failure that happened before the exchange-opening sequence.
     private(set) var fundingProblem: String?
+    /// Set when Desk's faucet cannot help, so setup offers Monad's own instead.
+    private(set) var needsManualFaucet = false
+    private let faucet = DeskFaucet()
     /// Which of the four steps is running, for the Fund screen to render.
     private(set) var openingStep: OpeningSequence.Progress?
     /// Handed the enrolled key the moment one exists.
@@ -112,14 +115,16 @@ final class AppModel {
             let name = ProcessInfo.processInfo.arguments[index + 1]
             stage = switch name {
             case "market", "signals", "signal-detail", "empty", "watchlist", "search": .trading
-            case "fund": .needsDesk
+            case "fund", "fund-empty": .needsDesk
             default: .welcome
             }
             // `empty` is the state a real first run is actually in: signed in, funded by
             // nothing. It is the screen most likely to be wrong and the least likely to
             // be looked at, so it gets its own way in.
-            if name == "empty" {
-                address = try? PasskeyAccounts.deriveAddress(prfOutput: Data(repeating: 0x2A, count: 32))
+            if name == "empty" || name == "fund-empty" {
+                // Its own seed: the shared review wallet holds real testnet funds.
+                let seed: UInt8 = name == "fund-empty" ? 0x2B : 0x2A
+                address = try? PasskeyAccounts.deriveAddress(prfOutput: Data(repeating: seed, count: 32))
                 walletAUSD.record(.zero)
                 walletMON.record(.zero)
                 collateral.record(.zero)
@@ -336,6 +341,48 @@ final class AppModel {
         stage = .trading
         await refreshBalances()
         try? await trading.connect()
+    }
+
+    /// Asks Desk's faucet for whatever this wallet lacks: MON for gas and test AUSD to
+    /// trade. Neither needs the wallet to hold anything first, and neither needs Face ID.
+    func fundWallet() async {
+        guard let address, !isWorking else { return }
+        isWorking = true
+        fundingProblem = nil
+        do {
+            let outcome = try await faucet.fund(address)
+            fundingProblem = DeskFaucet.problem(in: outcome)
+            needsManualFaucet = outcome.mon.status == "unavailable"
+            if outcome.mon.arrived || outcome.ausd.arrived {
+                await refreshUntilChanged()
+            } else {
+                await refreshBalances()
+            }
+            isWorking = false
+        } catch DeskFaucet.Failure.tooSoon {
+            fundingProblem = "This wallet was just funded. Give it a minute."
+            await refreshBalances()
+            isWorking = false
+        } catch {
+            needsManualFaucet = true
+            isWorking = false
+            let lacksAUSD = (walletAUSD.value ?? .zero) < (Money(text: "100") ?? .zero)
+            if hasSetupGas && lacksAUSD {
+                await claimTestAUSD()
+            } else {
+                fundingProblem = "Desk's faucet is unreachable. Use Monad's faucet for MON."
+            }
+        }
+    }
+
+    /// A mined receipt can reach the faucet before the balance view does.
+    private func refreshUntilChanged() async {
+        let before = (walletMON.value?.raw, walletAUSD.value)
+        for _ in 0..<6 {
+            await refreshBalances()
+            if walletMON.value?.raw != before.0 || walletAUSD.value != before.1 { return }
+            try? await Task.sleep(for: .milliseconds(700))
+        }
     }
 
     /// Claims the real test collateral from Agora's Monad-testnet faucet.

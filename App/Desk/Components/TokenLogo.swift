@@ -212,11 +212,11 @@ struct AddFundsSheet: View {
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
 
-                if walletAmount == .zero {
-                    Button { Task { await model.claimTestAUSD() } } label: {
+                if walletAmount == .zero || !model.hasSetupGas {
+                    Button { Task { await model.fundWallet() } } label: {
                         HStack {
                             if model.isWorking { ProgressView().tint(.black) }
-                            Text(model.isWorking ? "Claiming test AUSD…" : "Claim 10,000 test AUSD")
+                            Text(model.isWorking ? "Sending test funds…" : "Get 10,000 test AUSD")
                             Spacer()
                             Image(systemName: "sparkles")
                         }
@@ -228,14 +228,7 @@ struct AddFundsSheet: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(.black)
                     .background(.white, in: Capsule())
-                    .disabled(model.isWorking || !model.hasSetupGas)
-                    .opacity(model.hasSetupGas ? 1 : 0.42)
-
-                    if !model.hasSetupGas {
-                        Label("Add at least 0.05 MON for faucet gas first.", systemImage: "fuelpump.fill")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.yellow)
-                    }
+                    .disabled(model.isWorking)
                 }
 
                 Button { Task { await model.depositAUSD(walletAmount) } } label: {

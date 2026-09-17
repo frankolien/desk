@@ -101,12 +101,13 @@ struct FundScreen: View {
                            actionTitle: nil, action: {})
             Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 42)
             SetupStatusRow(title: "Network fees", detail: monDetail, complete: hasMON,
-                           actionTitle: hasMON ? nil : "Get MON", action: openMONFaucet)
+                           isPending: isFunding && !hasMON,
+                           actionTitle: model.needsManualFaucet && !hasMON ? "Monad faucet" : nil,
+                           action: openMONFaucet)
             Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 42)
             SetupStatusRow(title: "Test collateral", detail: ausdDetail, complete: hasMinimumAUSD,
-                           actionTitle: hasMinimumAUSD ? nil : "Claim AUSD",
-                           actionEnabled: hasMON,
-                           action: { Task { await model.claimTestAUSD() } })
+                           isPending: isFunding && !hasMinimumAUSD,
+                           actionTitle: nil, action: {})
         }
         .padding(.horizontal, 16)
         .nativeGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
@@ -129,9 +130,11 @@ struct FundScreen: View {
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
             }
-            Button { Task { await model.openDesk() } } label: {
+            Button {
+                Task { needsFunds ? await model.fundWallet() : await model.openDesk() }
+            } label: {
                 HStack {
-                    Text(model.isWorking ? "Checking…" : "Open my desk")
+                    Text(primaryTitle)
                     Spacer()
                     Image(systemName: "arrow.right")
                 }
@@ -140,11 +143,12 @@ struct FundScreen: View {
                 .padding(.horizontal, 20)
                 .frame(maxWidth: .infinity, minHeight: 54)
                 .background(canOpen ? DeskColor.nightText.color : Color.white.opacity(0.08), in: Capsule())
+                .contentShape(Capsule())
             }
             .buttonStyle(.plain)
             .disabled(!canOpen)
-            if !hasMinimumAUSD {
-                Text("At least 100 AUSD is required.")
+            if needsFunds {
+                Text("Free test MON for fees and 10,000 test AUSD, sent straight to this wallet.")
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color.opacity(0.78))
             }
@@ -155,7 +159,18 @@ struct FundScreen: View {
 
     private var hasMON: Bool { model.hasSetupGas }
     private var hasMinimumAUSD: Bool { (model.walletAUSD.value ?? .zero) >= minimum }
-    private var canOpen: Bool { hasMON && hasMinimumAUSD && !model.isWorking }
+    private var needsFunds: Bool { !hasMON || !hasMinimumAUSD }
+    private var isFunding: Bool { model.isWorking && needsFunds }
+    private var balancesKnown: Bool { model.walletMON.value != nil && model.walletAUSD.value != nil }
+    private var canOpen: Bool { balancesKnown && !model.isWorking }
+    private var primaryTitle: String {
+        switch (needsFunds, model.isWorking) {
+        case (true, true): "Funding your wallet…"
+        case (true, false): "Fund my wallet"
+        case (false, true): "Checking…"
+        case (false, false): "Open my desk"
+        }
+    }
     private var ausdBalanceText: String { model.walletAUSD.value.map { $0.display() } ?? "—" }
     private var ausdDetail: String {
         guard let value = model.walletAUSD.value else { return "Checking balance…" }
@@ -211,16 +226,24 @@ private struct SetupStatusRow: View {
     let title: String
     let detail: String
     let complete: Bool
+    var isPending = false
     let actionTitle: String?
     var actionEnabled = true
     let action: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: complete ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 21, weight: .semibold))
-                .foregroundStyle(complete ? DeskColor.rise.color : DeskColor.nightMuted.color.opacity(0.55))
-                .frame(width: 28)
+            Group {
+                if isPending {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: complete ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 21, weight: .semibold))
+                        .foregroundStyle(complete ? DeskColor.rise.color : DeskColor.nightMuted.color.opacity(0.55))
+                        .contentTransition(.symbolEffect(.replace))
+                }
+            }
+            .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
