@@ -801,6 +801,17 @@ private struct TradeShareSheet: View {
                 photo = selected
             }
         }
+        #if DEBUG
+        .task {
+            // A portrait image, shaped like a phone photo, to check the card keeps its layout.
+            if ProcessInfo.processInfo.arguments.contains("-share-photo") {
+                photo = UIGraphicsImageRenderer(size: CGSize(width: 300, height: 700)).image { context in
+                    UIColor.systemTeal.setFill(); context.fill(CGRect(x: 0, y: 0, width: 300, height: 700))
+                    UIColor.systemOrange.setFill(); context.fill(CGRect(x: 0, y: 0, width: 300, height: 120))
+                }
+            }
+        }
+        #endif
         .sheet(isPresented: $presentsActivity) {
             if let rendered { ActivitySheet(items: [rendered]) }
         }
@@ -933,17 +944,10 @@ private struct TradeShareCard: View {
             .map { $0.display() + " AUSD" } ?? Unavailable.text
     }
 
+    static let size = CGSize(width: 900, height: 1125)
+
     var body: some View {
         ZStack {
-            if let photo {
-                Image(uiImage: photo).resizable().scaledToFill()
-                Color.black.opacity(0.58)
-                LinearGradient(colors: [.black.opacity(0.08), .black.opacity(0.84)],
-                               startPoint: .top, endPoint: .bottom)
-            } else {
-                Image("TradeShareCardBackground").resizable().scaledToFill()
-            }
-
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 18) {
                     DeskBrandMark(size: 68)
@@ -1009,6 +1013,26 @@ private struct TradeShareCard: View {
             }
             .padding(58)
             .foregroundStyle(.white)
+        }
+        // The card's size is fixed and the background fills it from behind. As a sibling in
+        // the ZStack, a photo shaped unlike the card set the stack's size instead, and every
+        // figure moved with it.
+        .frame(width: Self.size.width, height: Self.size.height)
+        .background {
+            if let photo {
+                Image(uiImage: photo).resizable().scaledToFill()
+                    .frame(width: Self.size.width, height: Self.size.height)
+                    .clipped()
+                    .overlay { Color.black.opacity(0.58) }
+                    .overlay {
+                        LinearGradient(colors: [.black.opacity(0.08), .black.opacity(0.84)],
+                                       startPoint: .top, endPoint: .bottom)
+                    }
+            } else {
+                Image("TradeShareCardBackground").resizable().scaledToFill()
+                    .frame(width: Self.size.width, height: Self.size.height)
+                    .clipped()
+            }
         }
         .clipped()
     }
