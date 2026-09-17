@@ -378,16 +378,16 @@ private func pnlTint(_ value: Double) -> Color {
     value < 0 ? DeskColor.fall.color : (value > 0 ? DeskColor.rise.color : .primary)
 }
 
-/// Everything auto-copy has done, split into shadow and live, with the limits across it
-/// and the switch that stops it.
+/// Auto-copy in one glance: the result, the switch, who is being copied and what just
+/// happened. Limits and the Live Activity live behind the settings button.
 struct CopyActivityScreen: View {
     let copier: CopyTrader
     let directory: TraderDirectory
 
     @State private var editing: CopiedTrader?
     @State private var showsBasket = false
+    @State private var showsSettings = false
     @State private var showsShadow = true
-    @AppStorage(AutoCopyPublisher.liveActivityKey) private var showsLiveActivity = true
 
     private var figures: CopyTrader.Figures { copier.figures(shadow: showsShadow) }
     private var openCopies: [OpenCopy] { copier.open.filter { $0.shadowed == showsShadow } }
@@ -401,51 +401,43 @@ struct CopyActivityScreen: View {
             }
             .pickerStyle(.segmented)
 
-            GlassSection(footer: "Reads traders on Perpl mainnet the moment they trade. Live copies go to your Perpl \(copier.network.shortName.lowercased()) account; shadow copies send nothing. Pausing stops new copies.") {
-                Toggle(isOn: Binding(get: { !copier.isPaused }, set: { copier.setPaused(!$0) })) {
-                    Label {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(copier.isPaused ? "Paused" : "Running")
-                            Text(copier.readProblem ?? (copier.isStreaming ? "Live from the chain" : "Checking every 4 seconds"))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } icon: {
-                        Image(systemName: copier.isStreaming ? "dot.radiowaves.left.and.right" : "bolt.fill")
-                            .foregroundStyle(copier.isPaused ? AnyShapeStyle(.secondary) : AnyShapeStyle(DeskColor.rise.color))
-                            .symbolEffect(.variableColor.iterative, options: .repeating, isActive: copier.isStreaming && !copier.isPaused)
-                    }
-                }
-                Toggle(isOn: $showsLiveActivity) {
-                    Label {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Live Activity")
-                            Text("Lock Screen and Dynamic Island")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } icon: {
-                        Image(systemName: "platter.filled.top.iphone")
-                            .foregroundStyle(DeskColor.action.color)
-                    }
-                }
-            }
+            summary
 
-            GlassSection(showsShadow ? "Shadow Performance" : "Live Performance",
-                         footer: showsShadow ? "Simulated at the mainnet mark with slippage and taker fees both ways. Nothing was sent." : nil) {
-                GlassRow("Realised PnL") {
-                    Text(DisplayCurrency.shared.format(figures.realised, signed: true))
-                        .foregroundStyle(pnlTint(figures.realised))
-                        .monospacedDigit()
+            GlassSection("Copying") {
+                ForEach(copier.traders) { trader in
+                    Button { editing = trader } label: { traderRow(trader) }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            if trader.rules.mode == .shadow {
+                                Button("Go Live", systemImage: "bolt.fill") { copier.setMode(.live, for: trader.address) }
+                            } else {
+                                Button("Back to Shadow", systemImage: "eye") { copier.setMode(.shadow, for: trader.address) }
+                            }
+                            Button("Edit Rules", systemImage: "slider.horizontal.3") { editing = trader }
+                            Button("Stop Copying", systemImage: "stop.circle", role: .destructive) { copier.stop(trader.address) }
+                        }
                 }
-                GlassRow("Win rate", value: figures.winRate.map { String(format: "%.0f%% of %d", $0 * 100, figures.closed) } ?? "No closes yet")
-                GlassRow("Copies", value: "\(figures.copies) · \(openCopies.count) open")
-                GlassRow("Time to fill", value: figures.averageFillSeconds.map { String(format: "%.1f s after their move", $0) } ?? "—")
-                GlassRow("Vs their entry", value: figures.averageSlippageBps.map { String(format: "%+.1f bps avg", $0) } ?? "—")
+                Button { showsBasket = true } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "square.stack.3d.up.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(DeskColor.action.color)
+                            .frame(width: 30, height: 30)
+                            .background(DeskColor.action.color.opacity(0.16), in: Circle())
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(copier.basket.map { "Top \($0.size) Basket" } ?? "Copy the Top Traders")
+                            Text(basketLine).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        chevron
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
 
             if !openCopies.isEmpty {
-                GlassSection("Open Copies") {
+                GlassSection("Open") {
                     ForEach(openCopies) { copy in
                         OpenCopyRow(copy: copy, name: directory.name(for: copy.trader),
                                     pnl: copy.shadowPnL(takerFeeMicros: copier.takerFee(for: copy.symbol)))
@@ -458,68 +450,28 @@ struct CopyActivityScreen: View {
                 }
             }
 
-            GlassSection("Copying", footer: copier.traders.isEmpty ? nil : "Touch and hold a trader to go live, edit or stop.") {
-                if copier.traders.isEmpty {
-                    Text("Open a trader on Signals and turn on Auto-Copy, or copy a basket below.")
+            GlassSection("Recent") {
+                if entries.isEmpty {
+                    Text("Copies show up here from your traders' next move.")
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(copier.traders) { trader in
-                        Button { editing = trader } label: { traderRow(trader) }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                if trader.rules.mode == .shadow {
-                                    Button("Go Live", systemImage: "bolt.fill") { copier.setMode(.live, for: trader.address) }
-                                } else {
-                                    Button("Back to Shadow", systemImage: "eye") { copier.setMode(.shadow, for: trader.address) }
-                                }
-                                Button("Edit Rules", systemImage: "slider.horizontal.3") { editing = trader }
-                                Button("Stop Copying", systemImage: "stop.circle", role: .destructive) { copier.stop(trader.address) }
+                    ForEach(entries.prefix(4)) { entry in
+                        CopyLogRow(entry: entry, name: name(for: entry), compact: true)
+                    }
+                    if entries.count > 4 {
+                        NavigationLink {
+                            CopyLogScreen(entries: entries, shadow: showsShadow, name: name(for:))
+                        } label: {
+                            HStack {
+                                Text("See All")
+                                Spacer()
+                                Text("\(entries.count)").foregroundStyle(.secondary).monospacedDigit()
+                                chevron
                             }
-                    }
-                }
-            }
-
-            GlassSection("Basket") {
-                Button { showsBasket = true } label: {
-                    GlassRow(copier.basket.map { "Top \($0.size) traders" } ?? "Copy a basket",
-                             subtitle: basketLine) {
-                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-
-            GlassSection("Limits", footer: "Auto-Copy pauses itself once today's closed copies have lost the daily limit. Exposure caps what copies hold on one side of one market, so two traders long BTC don't double your risk.") {
-                GlassRow("Open copies at once") {
-                    Picker("Open copies at once", selection: guardBinding(\.maxOpenCopies)) {
-                        ForEach([1, 3, 5, 10], id: \.self) { Text("\($0)").tag($0) }
-                    }
-                    .labelsHidden()
-                }
-                GlassRow("Daily loss limit") {
-                    Picker("Daily loss limit", selection: guardBinding(\.dailyLossLimit)) {
-                        ForEach([25, 50, 100, 250], id: \.self) { Text("\($0) AUSD").tag($0) }
-                    }
-                    .labelsHidden()
-                }
-                GlassRow("Exposure per market") {
-                    Picker("Exposure per market", selection: guardBinding(\.maxMarketExposure)) {
-                        ForEach([100, 250, 500, 1000], id: \.self) { Text("\($0) AUSD").tag($0) }
-                    }
-                    .labelsHidden()
-                }
-            }
-
-            GlassSection("Log") {
-                if entries.isEmpty {
-                    ContentUnavailableView(
-                        "No Copies Yet",
-                        systemImage: "bolt.horizontal",
-                        description: Text("The first reading of each trader is a baseline. Copies start from their next move."))
-                } else {
-                    ForEach(entries.prefix(100)) { entry in
-                        CopyLogRow(entry: entry, name: entry.trader.isEmpty ? "Basket" : directory.name(for: entry.trader))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -528,16 +480,199 @@ struct CopyActivityScreen: View {
         .navigationTitle("Auto-Copy")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Settings", systemImage: "slider.horizontal.3") { showsSettings = true }
+            }
+        }
         .sheet(item: $editing) { trader in
             AutoCopySheet(address: trader.address, name: directory.name(for: trader.address), copier: copier)
         }
         .sheet(isPresented: $showsBasket) { CopyBasketSheet(copier: copier) }
+        .sheet(isPresented: $showsSettings) { CopySettingsSheet(copier: copier) }
+        #if DEBUG
+        .task { if ProcessInfo.processInfo.arguments.contains("-copy-settings") { showsSettings = true } }
+        #endif
+    }
+
+    // MARK: - Summary
+
+    private var summary: some View {
+        VStack(spacing: 16) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(statusTint)
+                    .frame(width: 7, height: 7)
+                    .symbolEffect(.pulse, options: .repeating, isActive: isLive)
+                Text(statusText)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(statusTint)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 24)
+            .background(statusTint.opacity(0.14), in: Capsule())
+
+            VStack(spacing: 2) {
+                Text(DisplayCurrency.shared.format(figures.realised, signed: true))
+                    .font(.system(size: 44, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(pnlTint(figures.realised))
+                    .contentTransition(.numericText(value: figures.realised))
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+                Text(showsShadow ? "Shadow result · no money moved" : "Live result on Perpl \(copier.network.shortName.lowercased())")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 0) {
+                stat(figures.winRate.map { String(format: "%.0f%%", $0 * 100) } ?? "—", "Win rate")
+                Divider().frame(height: 28)
+                stat("\(figures.copies)", "Copies")
+                Divider().frame(height: 28)
+                stat(figures.averageFillSeconds.map { String(format: "%.1fs", $0) } ?? "—", "To fill")
+            }
+
+            Button { copier.setPaused(!copier.isPaused) } label: {
+                Label(copier.isPaused ? "Resume" : "Pause", systemImage: copier.isPaused ? "play.fill" : "pause.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(copier.isPaused ? DeskColor.onAction.color : .white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 2)
+            }
+            .controlSize(.large)
+            .modifier(PauseButtonStyle(isPaused: copier.isPaused))
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .deskGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var isLive: Bool { !copier.isPaused && copier.readProblem == nil && !copier.traders.isEmpty }
+
+    private var statusText: String {
+        if copier.isPaused { return "Paused" }
+        if copier.readProblem != nil { return "Reconnecting" }
+        if copier.traders.isEmpty { return "Nobody to copy yet" }
+        return copier.isStreaming ? "Copying live" : "Copying"
+    }
+
+    private var statusTint: Color {
+        if copier.isPaused || copier.readProblem != nil { return DeskColor.action.color }
+        return copier.traders.isEmpty ? .secondary : DeskColor.rise.color
+    }
+
+    private func stat(_ value: String, _ label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.headline.monospacedDigit())
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Rows
+
+    private var chevron: some View {
+        Image(systemName: "chevron.right")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.tertiary)
     }
 
     private var basketLine: String {
-        guard let basket = copier.basket else { return "The leaderboard's best as one portfolio" }
+        guard let basket = copier.basket else { return "The leaderboard's best, re-picked for you" }
         let every = basket.rotateHours == 168 ? "week" : "\(basket.rotateHours)h"
         return "\(basket.rules.mode == .shadow ? "Shadow" : "Live") · re-picked every \(every)"
+    }
+
+    private func name(for entry: CopyLogEntry) -> String {
+        entry.trader.isEmpty ? "Auto-Copy" : directory.name(for: entry.trader)
+    }
+
+    private func traderRow(_ trader: CopiedTrader) -> some View {
+        let record = copier.record(for: trader.address)
+        let result = trader.rules.mode == .shadow ? record.shadow : record.live
+        return HStack(spacing: 10) {
+            TraderAvatar(address: trader.address, size: 30)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(directory.name(for: trader.address)).lineLimit(1)
+                Text("\(trader.rules.mode == .shadow ? "Shadow" : "Live")\(trader.rules.direction == .fade ? " · Fade" : "") · \(trader.rules.marginPerTrade) AUSD · \(trader.rules.maxLeverage)×")
+                    .font(.caption)
+                    .foregroundStyle(trader.rules.mode == .shadow ? AnyShapeStyle(.secondary) : AnyShapeStyle(DeskColor.rise.color))
+            }
+            Spacer(minLength: 8)
+            if record.trades > 0 {
+                Text(DisplayCurrency.shared.format(result, signed: true))
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(pnlTint(result))
+            }
+            chevron
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+private struct PauseButtonStyle: ViewModifier {
+    let isPaused: Bool
+
+    func body(content: Content) -> some View {
+        if isPaused {
+            content.deskProminentButton()
+        } else {
+            content.deskSecondaryButton()
+        }
+    }
+}
+
+/// Limits and the Live Activity, out of the way of the result.
+struct CopySettingsSheet: View {
+    let copier: CopyTrader
+
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage(AutoCopyPublisher.liveActivityKey) private var showsLiveActivity = true
+
+    var body: some View {
+        NavigationStack {
+            GlassPage {
+                GlassSection("Limits", footer: "Auto-Copy pauses itself if today's copies lose the daily limit.") {
+                    GlassRow("Open copies at once") {
+                        Picker("Open copies at once", selection: guardBinding(\.maxOpenCopies)) {
+                            ForEach([1, 3, 5, 10], id: \.self) { Text("\($0)").tag($0) }
+                        }
+                        .labelsHidden()
+                    }
+                    GlassRow("Daily loss limit") {
+                        Picker("Daily loss limit", selection: guardBinding(\.dailyLossLimit)) {
+                            ForEach([25, 50, 100, 250], id: \.self) { Text("\($0) AUSD").tag($0) }
+                        }
+                        .labelsHidden()
+                    }
+                    GlassRow("Max per market") {
+                        Picker("Max per market", selection: guardBinding(\.maxMarketExposure)) {
+                            ForEach([100, 250, 500, 1000], id: \.self) { Text("\($0) AUSD").tag($0) }
+                        }
+                        .labelsHidden()
+                    }
+                }
+
+                GlassSection(footer: "Traders are read on Perpl mainnet the moment they trade. Copying runs while Desk is open.") {
+                    Toggle(isOn: $showsLiveActivity) {
+                        GlassRow("Live Activity", subtitle: "Lock Screen and Dynamic Island") { EmptyView() }
+                    }
+                }
+            }
+            .tint(DeskColor.rise.color)
+            .navigationTitle("Auto-Copy Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 
     private func guardBinding(_ keyPath: WritableKeyPath<CopyGuards, Int>) -> Binding<Int> {
@@ -548,30 +683,24 @@ struct CopyActivityScreen: View {
                     copier.updateGuards(next)
                 })
     }
+}
 
-    private func traderRow(_ trader: CopiedTrader) -> some View {
-        HStack(spacing: 10) {
-            TraderAvatar(address: trader.address, size: 30)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 5) {
-                    Text(directory.name(for: trader.address)).foregroundStyle(.primary)
-                    Text(trader.rules.mode == .shadow ? "SHADOW" : "LIVE")
-                        .font(.system(size: 9, weight: .heavy))
-                        .foregroundStyle(trader.rules.mode == .shadow ? Color.secondary : DeskColor.rise.color)
-                    if trader.isFromBasket {
-                        Image(systemName: "square.stack.3d.up.fill").font(.caption2).foregroundStyle(.secondary)
-                    }
+/// Every copy, skip and close, with the detail the summary leaves out.
+struct CopyLogScreen: View {
+    let entries: [CopyLogEntry]
+    let shadow: Bool
+    let name: (CopyLogEntry) -> String
+
+    var body: some View {
+        GlassPage {
+            GlassSection {
+                ForEach(entries.prefix(200)) { entry in
+                    CopyLogRow(entry: entry, name: name(entry), compact: false)
                 }
-                Text("\(trader.rules.direction == .fade ? "Fade · " : "")\(trader.rules.marginPerTrade) AUSD · up to \(trader.rules.maxLeverage)×\(trader.rules.sizing == .conviction ? " · conviction" : "")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.tertiary)
         }
-        .contentShape(Rectangle())
+        .navigationTitle(shadow ? "Shadow Activity" : "Live Activity")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -585,7 +714,7 @@ private struct OpenCopyRow: View {
             MarketTokenLogo(symbol: copy.symbol, size: 28)
             VStack(alignment: .leading, spacing: 1) {
                 Text("\(copy.isLong ? "Long" : "Short") \(copy.symbol) \(copy.leverage)×").fontWeight(.medium)
-                Text("\(name) · \(String(format: "%.2f", copy.margin)) AUSD · \(copy.openedAt.formatted(.relative(presentation: .named)))")
+                Text("\(name) · \(copy.openedAt.formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated)))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -607,6 +736,7 @@ private struct OpenCopyRow: View {
 private struct CopyLogRow: View {
     let entry: CopyLogEntry
     let name: String
+    var compact = false
 
     private var icon: (name: String, tint: Color) {
         switch entry.kind {
@@ -627,11 +757,37 @@ private struct CopyLogRow: View {
         case .protected: "\(side) closed by its trigger"
         case .skipped: "Skipped \(side)"
         case .failed: "Couldn't copy \(side)"
-        case .paused: entry.symbol.isEmpty ? "Basket updated" : "Auto-Copy paused"
+        case .paused: entry.detail.hasPrefix("Basket") ? "Basket updated"
+            : (entry.detail.contains("resumed") ? "Auto-Copy resumed" : "Auto-Copy paused")
         }
     }
 
     var body: some View {
+        if compact { compactBody } else { fullBody }
+    }
+
+    private var compactBody: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon.name)
+                .font(.body)
+                .foregroundStyle(icon.tint)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).lineLimit(1)
+                Text("\(name) · \(entry.date.formatted(.relative(presentation: .named)))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if let pnl = entry.pnl {
+                Text(DisplayCurrency.shared.format(pnl, signed: true))
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(pnlTint(pnl))
+            }
+        }
+    }
+
+    private var fullBody: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: icon.name)
                 .font(.body)
