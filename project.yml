@@ -105,6 +105,14 @@ targets:
       properties:
         com.apple.security.application-groups:
           - group.com.opia.desk
+    # Running this scheme asks the simulator to show one widget, and it refuses without
+    # being told which. `_XCWidgetKind` is the kind passed to StaticConfiguration; swap it
+    # for com.opia.desk.auto-copy-control to run the Control Center toggle instead.
+    scheme:
+      environmentVariables:
+        _XCWidgetKind: com.opia.desk.auto-copy
+        _XCWidgetFamily: systemMedium
+        _XCWidgetDefaultView: timeline
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
