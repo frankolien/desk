@@ -36,6 +36,11 @@ struct SignalsScreen: View {
     @State private var copyOrder: CopyOrder?
     @State private var pendingCopy: CopyOrder?
     @State private var unlistedMarket: String?
+    @State private var tradeAlert: TradeAlert?
+    @State private var afterAlert: (() -> Void)?
+    #if DEBUG
+    @State private var debugPrimer: TraderSnapshot?
+    #endif
 
     private var signals: MarketSignals? {
         market.market.map {
@@ -84,6 +89,49 @@ struct SignalsScreen: View {
             }
         }
         .task { await directory.run() }
+        #if DEBUG
+        .task {
+            guard ProcessInfo.processInfo.arguments.contains("-alerts-primer") else { return }
+            while directory.top.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
+            debugPrimer = directory.top.first
+        }
+        .sheet(item: $debugPrimer) { trader in
+            AlertsPrimerSheet(trader: trader, name: directory.name(for: trader.address), onEnable: {}, onLater: {})
+                .presentationDetents([.height(500)])
+        }
+        #endif
+        .onChange(of: TradeAlerts.shared.opened, initial: true) { _, opened in
+            guard let opened else { return }
+            TradeAlerts.shared.opened = nil
+            section = .traders
+            copyOrder = nil
+            pendingCopy = nil
+            // Lets any sheet the tap interrupted finish leaving before this one arrives.
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(450))
+                tradeAlert = opened
+            }
+        }
+        .sheet(item: $tradeAlert, onDismiss: {
+            afterAlert?()
+            afterAlert = nil
+        }) { alert in
+            TradeAlertSheet(
+                alert: alert, directory: directory,
+                onCopy: { alert in
+                    afterAlert = { copy(market: alert.market, isLong: alert.isLong, leverage: alert.leverage) }
+                    tradeAlert = nil
+                },
+                onViewTrader: { address in
+                    afterAlert = {
+                        selectedTrader = directory.following.first { $0.id == address.lowercased() }
+                            ?? TraderSnapshot(accountId: nil, address: address, pnl: nil, balance: nil, positions: [])
+                    }
+                    tradeAlert = nil
+                })
+                .presentationDetents([.height(alert.canCopy ? 470 : 400), .large])
+                .presentationDragIndicator(.visible)
+        }
         .sheet(item: $copyOrder) { order in
             TicketSheet(
                 side: order.side, market: market.market, mark: market.mark.value,
@@ -118,16 +166,20 @@ struct SignalsScreen: View {
     /// Their market, side and leverage on your own testnet ticket. The amount is yours to
     /// choose: their size is sized to their account, not to this one.
     private func copy(_ position: TraderPosition) {
+        copy(market: position.market, isLong: position.isLong, leverage: position.leverage)
+    }
+
+    private func copy(market symbol: String, isLong: Bool, leverage: Double?) {
         guard let target = market.allMarkets.first(where: {
-            $0.symbol.caseInsensitiveCompare(position.market) == .orderedSame
+            $0.symbol.caseInsensitiveCompare(symbol) == .orderedSame
         }) else {
-            unlistedMarket = position.market
+            unlistedMarket = symbol
             return
         }
         market.select(target)
         let order = CopyOrder(
-            side: position.isLong ? .up : .down,
-            leverage: max(1, Int((position.leverage ?? 1).rounded())))
+            side: isLong ? .up : .down,
+            leverage: max(1, Int((leverage ?? 1).rounded())))
         selectedTrader = nil
         if order.leverage > 1 && !model.hasSeenLeverageExplainer {
             pendingCopy = order

@@ -81,7 +81,7 @@ export function rankTraders(positions, limit = TOP) {
 
 let contextCache = { at: 0, markets: null };
 
-async function markets(fetchImpl) {
+export async function openMarkets(fetchImpl = fetch) {
   if (contextCache.markets && Date.now() - contextCache.at < 10 * 60_000) return contextCache.markets;
   const response = await fetchImpl(CONTEXT_URL);
   if (!response.ok) throw new Error("context");
@@ -133,6 +133,12 @@ export function chainReader(rpcURL = process.env.MONAD_MAINNET_RPC || "https://r
       const [row, mark, valid] = await read("getPositionV2", [BigInt(perpId), BigInt(accountId)]);
       return valid && row.lotLNS > 0n ? { row, mark } : null;
     },
+    /// Open whatever the mark says. A missing mark is not a closed position, and reading
+    /// it as one would tell every follower the trader had left.
+    async openPosition(perpId, accountId) {
+      const [row, mark, valid] = await read("getPositionV2", [BigInt(perpId), BigInt(accountId)]);
+      return row.lotLNS > 0n ? { row, mark: valid ? mark : row.pricePNS } : null;
+    },
   };
 }
 
@@ -159,7 +165,7 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch } = {})
     const view = String(req.query.view || "top");
     let book;
     try {
-      book = await markets(fetchImpl);
+      book = await openMarkets(fetchImpl);
     } catch {
       return res.status(502).json({ error: "Perpl's market list is unavailable." });
     }

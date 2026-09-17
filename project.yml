@@ -57,6 +57,8 @@ targets:
           # developer bypass would only add a requirement (a Settings toggle) without
           # fixing anything, and it must not ship.
           - webcredentials:desk-trading-opia.vercel.app
+        # Trade alerts. Automatic signing turns this into "production" for TestFlight.
+        aps-environment: development
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

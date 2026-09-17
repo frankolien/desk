@@ -120,6 +120,25 @@ struct TradingShell: View {
             FundScreen(model: model) { showsSetup = false }
         }
         .task { market.start() }
+        // A tapped trade alert opens on Signals, over whatever was in front.
+        .onChange(of: TradeAlerts.shared.opened, initial: true) { _, opened in
+            guard opened != nil else { return }
+            showsAccount = false
+            showsFunding = false
+            showsNetwork = false
+            showsActivity = false
+            showsWithdraw = false
+            tab = .signals
+        }
+        #if DEBUG
+        .task {
+            guard ProcessInfo.processInfo.arguments.contains("-alert-demo") else { return }
+            try? await Task.sleep(for: .seconds(1))
+            TradeAlerts.shared.opened = TradeAlert(
+                event: .opened, trader: "0x95D2602d30DA1179fd13274839e60345857ca648", market: "ETH", side: "long",
+                leverage: 4, entry: "1847.99", value: "12236.1", observedAt: .now.addingTimeInterval(-95))
+        }
+        #endif
         // The head block arrives on the same context call the price does, and every
         // order's deadline is computed against it.
         .onChange(of: market.headBlock) { _, block in session.noteHeadBlock(block) }

@@ -5,6 +5,7 @@ import UIKit
 
 @main
 struct DeskApp: App {
+    @UIApplicationDelegateAdaptor(DeskAppDelegate.self) private var appDelegate
     @State private var model = AppModel(passkey: DeskApp.passkeyService)
 
     /// The relying party every passkey binds to, permanently.

@@ -76,6 +76,7 @@ final class TraderDirectory {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         nicknames[address.lowercased()] = trimmed.isEmpty ? nil : String(trimmed.prefix(24))
         UserDefaults.standard.set(nicknames, forKey: Self.nicknameKey)
+        if TradeAlerts.shared.isOn(for: address) { TradeAlerts.shared.namesChanged() }
     }
 
     func isFollowing(_ address: String) -> Bool {
@@ -86,6 +87,7 @@ final class TraderDirectory {
         if isFollowing(address) {
             followed.removeAll { $0.caseInsensitiveCompare(address) == .orderedSame }
             following.removeAll { $0.id == address.lowercased() }
+            TradeAlerts.shared.turnOff(for: address)
         } else {
             guard followed.count < 20 else { return }
             followed.append(address)
@@ -146,16 +148,11 @@ enum TraderFormat {
         return formatter
     }
 
-    private static let wholeDollars = decimal(fractionDigits: 0...0)
-    private static let cents = decimal(fractionDigits: 2...2)
     private static let prices = [decimal(fractionDigits: 0...2), decimal(fractionDigits: 0...4), decimal(fractionDigits: 0...6)]
 
     static func dollars(_ text: String?, signed: Bool = true) -> String {
         guard let text, let value = Double(text) else { return Unavailable.text }
-        let formatter = abs(value) >= 1_000 ? wholeDollars : cents
-        let magnitude = formatter.string(from: NSNumber(value: abs(value))) ?? text
-        let sign = value < 0 ? Direction.minus : (signed ? "+" : "")
-        return "\(sign)$\(magnitude)"
+        return DisplayCurrency.shared.format(value, signed: signed)
     }
 
     static func price(_ text: String) -> String {
@@ -167,16 +164,7 @@ enum TraderFormat {
     /// $14.9K, $326K, $1.2M: the compact form for headline figures.
     static func compact(_ value: Double?, signed: Bool = false) -> String {
         guard let value else { return Unavailable.text }
-        let magnitude = abs(value)
-        let body: String = switch magnitude {
-        case 1_000_000...: String(format: "%.1fM", magnitude / 1_000_000)
-        case 10_000...: String(format: "%.0fK", magnitude / 1_000)
-        case 1_000...: String(format: "%.1fK", magnitude / 1_000)
-        case 100...: String(format: "%.0f", magnitude)
-        default: String(format: "%.2f", magnitude)
-        }
-        let sign = value < 0 ? Direction.minus : (signed ? "+" : "")
-        return "\(sign)$\(body)"
+        return DisplayCurrency.shared.format(value, signed: signed, compact: true)
     }
 
     static func assetName(_ symbol: String) -> String {
@@ -265,7 +253,8 @@ struct TradersFeed: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
                         ForEach(followedSnapshots) { trader in
-                            FollowedCard(trader: trader, name: directory.name(for: trader.address)) { onSelect(trader) }
+                            FollowedCard(trader: trader, name: directory.name(for: trader.address),
+                                         isAlerting: TradeAlerts.shared.isOn(for: trader.address)) { onSelect(trader) }
                         }
                     }
                     .padding(.horizontal, 20)
@@ -305,7 +294,7 @@ struct TradersFeed: View {
                 .padding(.top, 6)
             }
 
-            Text("Live from Perpl mainnet. PnL is on open positions, funding included. Copying a trade opens your own testnet ticket.")
+            Text("Live from Perpl mainnet. PnL is on open positions, funding included. Copying a trade opens your own ticket.")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(DeskColor.nightMuted.color.opacity(0.7))
                 .fixedSize(horizontal: false, vertical: true)
@@ -329,12 +318,22 @@ struct TradersFeed: View {
 private struct FollowedCard: View {
     let trader: TraderSnapshot
     let name: String
+    let isAlerting: Bool
     let onTap: () -> Void
 
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 10) {
-                TraderAvatar(address: trader.address, size: 36)
+                HStack(alignment: .top) {
+                    TraderAvatar(address: trader.address, size: 36)
+                    Spacer(minLength: 0)
+                    if isAlerting {
+                        Image(systemName: "bell.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.white.opacity(0.5))
+                            .accessibilityLabel("Alerts on")
+                    }
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name)
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
@@ -419,7 +418,12 @@ struct TraderProfileScreen: View {
     @State private var isNaming = false
     @State private var draftName = ""
     @State private var pendingCopy: TraderPosition?
+    @State private var showsAlertsPrimer = false
+    @State private var showsNotificationsOff = false
     @Namespace private var underline
+
+    private var alerts: TradeAlerts { .shared }
+    private var alerting: Bool { alerts.isOn(for: trader.address) }
 
     private var trader: TraderSnapshot { snapshot ?? initial }
     private var following: Bool { directory.isFollowing(trader.address) }
@@ -431,8 +435,8 @@ struct TraderProfileScreen: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     topBar.padding(.horizontal, 20)
-                    identity.padding(.horizontal, 20).padding(.top, 28)
-                    tabs.padding(.top, 34)
+                    identity.padding(.horizontal, 20).padding(.top, 20)
+                    tabs.padding(.top, 24)
                     content
                 }
                 .padding(.bottom, 60)
@@ -464,8 +468,57 @@ struct TraderProfileScreen: View {
             Button("Open ticket") { if let position = pendingCopy { onCopy(position) } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Same market, side and leverage on your testnet account. You choose the amount.")
+            Text("Same market, side and leverage on your own account. You choose the amount.")
         }
+        .task { await alerts.refreshPermission() }
+        .sheet(isPresented: $showsAlertsPrimer) {
+            AlertsPrimerSheet(
+                trader: trader, name: directory.name(for: trader.address),
+                onEnable: {
+                    alerts.hasSeenPrimer = true
+                    showsAlertsPrimer = false
+                    Task { await turnOnAlerts() }
+                },
+                onLater: {
+                    alerts.hasSeenPrimer = true
+                    showsAlertsPrimer = false
+                })
+                .presentationDetents([.height(500)])
+                .presentationDragIndicator(.visible)
+        }
+        .alert("Notifications are off for Desk", isPresented: $showsNotificationsOff) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(url) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Turn them on in Settings to hear when \(directory.name(for: trader.address)) trades.")
+        }
+        .alert("Alerts aren't saved", isPresented: Binding(
+            get: { alerts.problem != nil },
+            set: { if !$0 { alerts.problem = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(alerts.problem ?? "")
+        }
+    }
+
+    private func toggleAlerts() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if alerting {
+            withAnimation(.snappy(duration: 0.2)) { alerts.turnOff(for: trader.address) }
+        } else if alerts.permission == .denied {
+            showsNotificationsOff = true
+        } else if !alerts.hasSeenPrimer {
+            showsAlertsPrimer = true
+        } else {
+            Task { await turnOnAlerts() }
+        }
+    }
+
+    private func turnOnAlerts() async {
+        if !(await alerts.turnOn(for: trader.address)) { showsNotificationsOff = true }
     }
 
     private var topBar: some View {
@@ -474,9 +527,9 @@ struct TraderProfileScreen: View {
             Spacer()
             ShareLink(item: explorerURL, message: Text("\(directory.name(for: trader.address)) on Perpl")) {
                 Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 18, weight: .medium))
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(.white)
-                    .frame(width: 52, height: 52)
+                    .frame(width: 44, height: 44)
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
@@ -488,9 +541,9 @@ struct TraderProfileScreen: View {
     private func circleButton(_ symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 52, height: 52)
+                .frame(width: 44, height: 44)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -500,7 +553,7 @@ struct TraderProfileScreen: View {
     private var identity: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 0) {
-                TraderAvatar(address: trader.address, size: 92)
+                TraderAvatar(address: trader.address, size: 64)
                 Spacer(minLength: 12)
                 stat(TraderFormat.compact(trader.portfolio), label: "Portfolio")
                 Rectangle().fill(Color.white.opacity(0.1)).frame(width: 0.5, height: 40)
@@ -526,7 +579,7 @@ struct TraderProfileScreen: View {
     private var nameBlock: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(directory.name(for: trader.address))
-                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .font(.system(size: 19, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
                 .lineLimit(1)
             Button {
@@ -535,7 +588,7 @@ struct TraderProfileScreen: View {
             } label: {
                 Text(directory.hasNickname(trader.address) ? trader.shortAddress
                      : "Perpl account \(trader.accountId.map { "#\($0)" } ?? "")")
-                    .font(.system(size: 16, weight: .regular, design: .rounded))
+                    .font(.system(size: 13, weight: .regular, design: .rounded))
                     .foregroundStyle(Color.white.opacity(0.55))
                     .contentShape(Rectangle())
             }
@@ -543,9 +596,9 @@ struct TraderProfileScreen: View {
             HStack(spacing: 7) {
                 Circle()
                     .fill(trader.positions.isEmpty ? Color.white.opacity(0.35) : DeskColor.rise.color)
-                    .frame(width: 9, height: 9)
+                    .frame(width: 7, height: 7)
                 Text(trader.positions.isEmpty ? "No open positions" : "In the market")
-                    .font(.system(size: 16, weight: .regular, design: .rounded))
+                    .font(.system(size: 13, weight: .regular, design: .rounded))
                     .foregroundStyle(Color.white.opacity(0.55))
             }
             .padding(.top, 2)
@@ -556,7 +609,24 @@ struct TraderProfileScreen: View {
         HStack(spacing: 10) {
             outlineButton(following ? "Following" : "Follow", symbol: nil) {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                let starting = !following
                 withAnimation(.snappy(duration: 0.2)) { directory.toggle(trader.address) }
+                if starting && !alerts.hasSeenPrimer && alerts.permission != .denied { showsAlertsPrimer = true }
+            }
+            if following {
+                Button(action: toggleAlerts) {
+                    Image(systemName: alerting ? "bell.fill" : "bell")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .contentTransition(.symbolEffect(.replace))
+                        .frame(width: 34, height: 30)
+                        .background(Color.white.opacity(alerting ? 0.14 : 0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color.white.opacity(0.14), lineWidth: 0.75))
+                        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(alerting ? "Turn off trade alerts" : "Turn on trade alerts")
+                .transition(.scale(scale: 0.8).combined(with: .opacity))
             }
             outlineButton("Set Name", symbol: "pencil") {
                 draftName = directory.nicknames[trader.address.lowercased()] ?? ""
@@ -568,13 +638,13 @@ struct TraderProfileScreen: View {
     private func stat(_ value: String, label: String, tint: Color = .white) -> some View {
         VStack(spacing: 4) {
             Text(value)
-                .font(.system(size: 18, weight: .bold, design: .rounded).monospacedDigit())
+                .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
                 .foregroundStyle(tint)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 .contentTransition(.numericText())
             Text(label)
-                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(Color.white.opacity(0.55))
         }
         .frame(maxWidth: .infinity)
@@ -583,12 +653,12 @@ struct TraderProfileScreen: View {
     private func outlineButton(_ title: String, symbol: String?, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 7) {
-                if let symbol { Image(systemName: symbol).font(.system(size: 13, weight: .semibold)) }
-                Text(title).font(.system(size: 15, weight: .semibold, design: .rounded))
+                if let symbol { Image(systemName: symbol).font(.system(size: 11, weight: .semibold)) }
+                Text(title).font(.system(size: 13, weight: .semibold, design: .rounded))
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .frame(height: 34)
+            .padding(.horizontal, 13)
+            .frame(height: 30)
             .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color.white.opacity(0.14), lineWidth: 0.75))
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
@@ -601,14 +671,14 @@ struct TraderProfileScreen: View {
             HStack(spacing: 0) {
                 ForEach(Tab.allCases, id: \.self) { item in
                     Button { withAnimation(.snappy(duration: 0.22)) { tab = item } } label: {
-                        VStack(spacing: 12) {
+                        VStack(spacing: 10) {
                             Text(item.rawValue)
-                                .font(.system(size: 16, weight: tab == item ? .bold : .medium, design: .rounded))
+                                .font(.system(size: 14, weight: tab == item ? .bold : .medium, design: .rounded))
                                 .foregroundStyle(tab == item ? Color.white : Color.white.opacity(0.5))
                             ZStack {
-                                Capsule().fill(Color.clear).frame(width: 64, height: 3)
+                                Capsule().fill(Color.clear).frame(width: 52, height: 2.5)
                                 if tab == item {
-                                    Capsule().fill(Color.white).frame(width: 64, height: 3)
+                                    Capsule().fill(Color.white).frame(width: 52, height: 2.5)
                                         .matchedGeometryEffect(id: "underline", in: underline)
                                 }
                             }
@@ -631,15 +701,23 @@ struct TraderProfileScreen: View {
                 emptyState(snapshot == nil ? "Loading positions…" : "Nothing open right now.",
                            detail: snapshot == nil ? nil : "Positions appear here the moment this trader opens one.")
             } else {
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(trader.positions.enumerated()), id: \.element.id) { index, position in
-                        Button { pendingCopy = position } label: {
-                            ProfilePositionRow(position: position, isLast: index == trader.positions.count - 1)
-                        }
-                        .buttonStyle(.plain)
+                // Plain rows, the first version. Kept to compare against the cards below.
+                // LazyVStack(spacing: 0) {
+                //     ForEach(Array(trader.positions.enumerated()), id: \.element.id) { index, position in
+                //         Button { pendingCopy = position } label: {
+                //             ProfilePositionRow(position: position, isLast: index == trader.positions.count - 1)
+                //         }
+                //         .buttonStyle(.plain)
+                //     }
+                // }
+                // .padding(.top, 6)
+                LazyVStack(spacing: 10) {
+                    ForEach(trader.positions) { position in
+                        ProfilePositionCard(position: position) { pendingCopy = position }
                     }
                 }
-                .padding(.top, 6)
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
             }
         case .closed:
             emptyState("Closed trades aren't shown yet",
@@ -653,11 +731,11 @@ struct TraderProfileScreen: View {
     private func emptyState(_ title: String, detail: String?) -> some View {
         VStack(spacing: 6) {
             Text(title)
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white)
             if let detail {
                 Text(detail)
-                    .font(.system(size: 14, weight: .regular, design: .rounded))
+                    .font(.system(size: 13, weight: .regular, design: .rounded))
                     .foregroundStyle(Color.white.opacity(0.5))
                     .multilineTextAlignment(.center)
             }
@@ -703,5 +781,87 @@ private struct ProfilePositionRow: View {
             }
         }
         .contentShape(Rectangle())
+    }
+}
+
+/// A position with everything a copier weighs: side and leverage, PnL, what it is worth,
+/// the size and collateral behind it, and where it was entered against where it is now.
+private struct ProfilePositionCard: View {
+    let position: TraderPosition
+    let onCopy: () -> Void
+
+    private var sideTint: DeskRGB { position.isLong ? DeskColor.rise : DeskColor.fall }
+    private var pnlTint: DeskRGB { position.isProfit ? DeskColor.rise : DeskColor.fall }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 9) {
+                MarketTokenLogo(symbol: position.market, size: 28)
+                Text("\(position.market)-PERP")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                Text("\(position.isLong ? "Long" : "Short") \(TraderFormat.leverage(position.leverage))")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(sideTint.color)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(sideTint.color.opacity(0.14), in: Capsule())
+                Spacer(minLength: 6)
+                Button(action: onCopy) {
+                    Label("Copy", systemImage: "square.on.square")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                        .background(Color.white.opacity(0.1), in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(TraderFormat.dollars(position.pnl))
+                    .font(.system(size: 22, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(pnlTint.color)
+                    .contentTransition(.numericText())
+                if let percent = position.pnlPercent {
+                    Text(String(format: "%@%.1f%%", percent < 0 ? Direction.minus : "+", abs(percent)))
+                        .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(pnlTint.color.opacity(0.85))
+                }
+            }
+
+            Rectangle().fill(Color.white.opacity(0.07)).frame(height: 0.5)
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+                GridRow {
+                    figure("Value", TraderFormat.dollars(position.value, signed: false))
+                    figure("Size", "\(position.size) \(position.market)")
+                    figure("Collateral", TraderFormat.dollars(position.collateral, signed: false))
+                }
+                GridRow {
+                    figure("Entry", TraderFormat.price(position.entry))
+                    figure("Mark", TraderFormat.price(position.mark))
+                    figure("Leverage", TraderFormat.leverage(position.leverage))
+                }
+            }
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 0.5))
+    }
+
+    private func figure(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundStyle(Color.white.opacity(0.45))
+            Text(value)
+                .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
