@@ -1,11 +1,11 @@
-// node --test web/api/faucet.test.mjs
+// node --test web/test/faucet.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
   AUSD_MINIMUM, MON_DRIP, MON_RESERVE, MON_THRESHOLD,
   createHandler, plan, revertReason, throttled, validRecipient,
-} from "./faucet.mjs";
+} from "../api/faucet.mjs";
 
 const WALLET = "0x1111111111111111111111111111111111111111";
 const FULL_FAUCET = 10n ** 20n;

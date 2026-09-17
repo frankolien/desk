@@ -1,10 +1,10 @@
-// node --test web/api/traders.test.mjs
+// node --test web/test/traders.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
   createHandler, describePosition, formatFixed, perpIdsFromBitmap, rankTraders,
-} from "./traders.mjs";
+} from "../api/traders.mjs";
 
 const BTC = { id: 1, name: "BTC", config: { is_open: true, price_decimals: 1, size_decimals: 5 } };
 const ETH = { id: 20, name: "ETH", config: { is_open: true, price_decimals: 2, size_decimals: 0 } };

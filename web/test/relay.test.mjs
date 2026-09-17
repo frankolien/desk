@@ -1,10 +1,10 @@
-// node --test web/api/relay.test.mjs
+// node --test web/test/relay.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { isBuyable } from "./_chains.mjs";
-import { createHandler, depositTransaction } from "./relay-quote.mjs";
-import { createHandler as createStatus, phase } from "./relay-status.mjs";
+import { isBuyable } from "../api/_chains.mjs";
+import { createHandler, depositTransaction } from "../api/relay-quote.mjs";
+import { createHandler as createStatus, phase } from "../api/relay-status.mjs";
 
 const USER = "0x03508bb71268bba25ecacc8f620e01866650532c";
 const TOKEN = "0x532f27101965dd16442e59d40670faf5ebb142e4";

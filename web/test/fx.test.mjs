@@ -1,8 +1,8 @@
-// node --test web/api/fx.test.mjs
+// node --test web/test/fx.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { CURRENCIES, createHandler, pickRates } from "./fx.mjs";
+import { CURRENCIES, createHandler, pickRates } from "../api/fx.mjs";
 
 function recorder() {
   const out = { status: null, body: null, headers: {} };

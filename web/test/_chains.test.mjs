@@ -1,4 +1,4 @@
-// node --test web/api/_chains.test.mjs
+// node --test web/test/_chains.test.mjs
 //
 // The swap route had no test of any kind, which is how a stale seven-chain allowlist and
 // a required decimal the feed never supplies both survived in production.
@@ -7,10 +7,10 @@ import { test } from "node:test";
 
 import {
   CHAINS, ZEROX_CHAINS, chainName, isQuotable, nativeToken, rpcEndpoint,
-} from "./_chains.mjs";
+} from "../api/_chains.mjs";
 import handler, {
   baseUnits, readableUnits, resolveDecimals, validAddress,
-} from "./swap-quote.mjs";
+} from "../api/swap-quote.mjs";
 
 /// Enough of Vercel's response object to see which answer the route chose.
 function recorder() {
