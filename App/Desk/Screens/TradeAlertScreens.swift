@@ -52,12 +52,20 @@ struct AlertsPrimerSheet: View {
 
             Spacer(minLength: 24)
 
-            PrimaryButton(title: "Turn on alerts", action: onEnable)
-            Button("Not now", action: onLater)
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.65))
-                .frame(maxWidth: .infinity, minHeight: 48)
-                .padding(.top, 4)
+            Button(action: onEnable) {
+                Text("Turn On Alerts")
+                    .font(.headline)
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+            }
+            .controlSize(.large)
+            .deskProminentButton()
+            Button("Not Now", action: onLater)
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .padding(.top, 6)
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 8)
@@ -133,116 +141,101 @@ struct TradeAlertSheet: View {
         return alert.isLong ? change : -change
     }
 
+    @Environment(\.dismiss) private var dismiss
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
-                TraderAvatar(address: alert.trader, size: 44)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(name)
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    Text("\(headline) · \(alert.observedAt.formatted(.relative(presentation: .named)))")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.55))
-                        .lineLimit(1)
+        NavigationStack {
+            List {
+                Section {
+                    HStack(spacing: 14) {
+                        TraderAvatar(address: alert.trader, size: 52)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(name)
+                                .font(.title3.weight(.semibold))
+                                .lineLimit(1)
+                            Text("\(headline) · \(alert.observedAt.formatted(.relative(presentation: .named)))")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
                 }
-                Spacer(minLength: 0)
-            }
-            .padding(.top, 28)
 
-            card.padding(.top, 20)
-
-            if closedSince {
-                Label("They've closed this since the alert.", systemImage: "info.circle")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.6))
-                    .padding(.top, 12)
+                Section {
+                    LabeledContent {
+                        Text("\(alert.isLong ? "Long" : "Short") \(TraderFormat.leverage(alert.leverage))")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(sideTint.color)
+                    } label: {
+                        Label {
+                            Text("\(alert.market)-PERP")
+                        } icon: {
+                            MarketTokenLogo(symbol: alert.market, size: 26)
+                        }
+                    }
+                    LabeledContent("Their entry", value: TraderFormat.price(alert.entry))
+                    LabeledContent("Mark now") {
+                        Text(livePosition.map { TraderFormat.price($0.mark) } ?? (loaded ? Unavailable.text : "…"))
+                            .contentTransition(.numericText())
+                    }
+                    LabeledContent("Since entry") {
+                        Text(move.map { String(format: "%@%.2f%%", $0 < 0 ? Direction.minus : "+", abs($0)) } ?? "…")
+                            .foregroundStyle(move.map { ($0 < 0 ? DeskColor.fall : DeskColor.rise).color } ?? .secondary)
+                    }
+                    LabeledContent("Their position", value: TraderFormat.dollars(livePosition?.value ?? alert.value, signed: false))
+                    LabeledContent("Their open PnL") {
+                        Text(livePosition.map { TraderFormat.dollars($0.pnl) } ?? (loaded ? Unavailable.text : "…"))
+                            .foregroundStyle(livePosition.map { ($0.isProfit ? DeskColor.rise : DeskColor.fall).color } ?? .secondary)
+                    }
+                } header: {
+                    Text("Perpl mainnet")
+                } footer: {
+                    if closedSince {
+                        Label("They've closed this since the alert.", systemImage: "info.circle")
+                    } else if alert.canCopy {
+                        Text("Copy opens your own ticket at the same market, side and leverage. You choose the amount.")
+                    }
+                }
             }
-
-            Spacer(minLength: 20)
-
-            if alert.canCopy {
-                PrimaryButton(
-                    title: "Copy \(alert.side) \(TraderFormat.leverage(alert.leverage))",
-                    isEnabled: !closedSince
-                ) { onCopy(alert) }
-                Text("Opens your own ticket at the same market, side and leverage. You choose the amount.")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.45))
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 10)
+            .listStyle(.insetGrouped)
+            .monospacedDigit()
+            .navigationTitle("Trade Alert")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
             }
-            Button { onViewTrader(alert.trader) } label: {
-                Text("View \(name)")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(alert.canCopy ? 0.7 : 1))
-                    .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(alert.canCopy ? Color.clear : Color.white.opacity(0.1), in: Capsule())
-                    .contentShape(Capsule())
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 10) {
+                    if alert.canCopy {
+                        Button { onCopy(alert) } label: {
+                            Text("Copy \(alert.isLong ? "Long" : "Short") \(TraderFormat.leverage(alert.leverage))")
+                                .font(.headline)
+                                .foregroundStyle(.black)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 6)
+                        }
+                        .controlSize(.large)
+                        .deskProminentButton()
+                        .disabled(closedSince)
+                    }
+                    Button { onViewTrader(alert.trader) } label: {
+                        Text("View \(name)")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                    }
+                    .controlSize(.large)
+                    .deskSecondaryButton()
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 8)
             }
-            .buttonStyle(.plain)
-            .padding(.top, 6)
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 8)
-        .background(Color(red: 0.07, green: 0.07, blue: 0.08).ignoresSafeArea())
         .task {
             live = await directory.trader(alert.trader)
             loaded = live != nil
         }
-    }
-
-    private var card: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 9) {
-                MarketTokenLogo(symbol: alert.market, size: 30)
-                Text("\(alert.market)-PERP")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                Text("\(alert.isLong ? "Long" : "Short") \(TraderFormat.leverage(alert.leverage))")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(sideTint.color)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(sideTint.color.opacity(0.14), in: Capsule())
-                Spacer(minLength: 0)
-            }
-
-            Rectangle().fill(Color.white.opacity(0.07)).frame(height: 0.5)
-
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
-                GridRow {
-                    figure("Their entry", TraderFormat.price(alert.entry))
-                    figure("Mark now", livePosition.map { TraderFormat.price($0.mark) } ?? (loaded ? Unavailable.text : "…"))
-                    figure("Since entry", move.map { String(format: "%@%.2f%%", $0 < 0 ? Direction.minus : "+", abs($0)) } ?? "…",
-                           tint: move.map { ($0 < 0 ? DeskColor.fall : DeskColor.rise).color } ?? .white)
-                }
-                GridRow {
-                    figure("Their position", TraderFormat.dollars(livePosition?.value ?? alert.value, signed: false))
-                    figure("Open PnL", livePosition.map { TraderFormat.dollars($0.pnl) } ?? (loaded ? Unavailable.text : "…"),
-                           tint: livePosition.map { ($0.isProfit ? DeskColor.rise : DeskColor.fall).color } ?? .white)
-                    figure("Network", "Perpl mainnet")
-                }
-            }
-        }
-        .padding(14)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 0.5))
-    }
-
-    private func figure(_ title: String, _ value: String, tint: Color = .white) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.45))
-            Text(value)
-                .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundStyle(tint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

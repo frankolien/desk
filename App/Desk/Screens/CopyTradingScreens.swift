@@ -21,190 +21,175 @@ struct AutoCopySheet: View {
 
     private var isActive: Bool { copier.rules(for: address) != nil }
 
+    private var stopLoss: Binding<Bool> {
+        Binding(get: { rules.stopLossPercent != nil },
+                set: { rules.stopLossPercent = $0 ? 25 : nil })
+    }
+
+    private var takeProfit: Binding<Bool> {
+        Binding(get: { rules.takeProfitPercent != nil },
+                set: { rules.takeProfitPercent = $0 ? 50 : nil })
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 12) {
-                        TraderAvatar(address: address, size: 44)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Auto-copy \(name)")
-                                .font(.system(size: 20, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-                            Text("Their entries and exits, on your Perpl \(copier.network.shortName.lowercased()) account")
-                                .font(.system(size: 13, weight: .medium, design: .rounded))
-                                .foregroundStyle(Color.white.opacity(0.55))
-                                .lineLimit(2)
-                        }
-                    }
-                    .padding(.top, 28)
-
-                    section("Margin per trade (AUSD)", detail: "What each copy puts at risk, whatever size they trade.") {
-                        chips([5, 10, 25, 50, 100], selection: $rules.marginPerTrade) { "\($0)" }
-                    }
-                    section("Leverage cap", detail: "Their leverage is followed up to this, never past it.") {
-                        chips([2, 3, 5, 10], selection: $rules.maxLeverage) { "\($0)×" }
-                    }
-                    section("Stop loss", detail: stopDetail) {
-                        chips([nil, 10, 25, 50], selection: $rules.stopLossPercent) { $0.map { "−\($0)%" } ?? "Off" }
-                    }
-                    section("Take profit", detail: "Of the margin. Also held on Perpl.") {
-                        chips([nil, 25, 50, 100], selection: $rules.takeProfitPercent) { $0.map { "+\($0)%" } ?? "Off" }
-                    }
-                    section("Don't chase", detail: "Skip a copy if the price has already run this far past their entry.") {
-                        chips([50, 100, 200], selection: $rules.maxChaseBps) { String(format: "%.1f%%", Double($0) / 100) }
-                    }
-
-                    Toggle(isOn: $rules.closeWithTrader) {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: 14) {
+                        TraderAvatar(address: address, size: 52)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Close when they close")
-                                .font(.system(size: 15, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.white)
-                            Text("Flips close your copy before opening the new side.")
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .foregroundStyle(Color.white.opacity(0.5))
+                            Text(name)
+                                .font(.title3.weight(.semibold))
+                                .lineLimit(1)
+                            Text("Copied to your Perpl \(copier.network.shortName.lowercased()) account")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
                         }
                     }
-                    .tint(DeskColor.rise.color)
-                    .padding(.top, 24)
+                    .padding(.vertical, 4)
+                }
 
-                    Label {
-                        Text("New copies are sent only while Desk is open and unlocked, signed on this phone. Stops and take profits live on Perpl, so they protect you after Desk closes.")
-                    } icon: {
-                        Image(systemName: "lock.shield")
+                Section {
+                    Picker("Margin per trade", selection: $rules.marginPerTrade) {
+                        ForEach([5, 10, 25, 50, 100, 250], id: \.self) { Text("\($0) AUSD").tag($0) }
                     }
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.5))
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .padding(.top, 22)
+                    Stepper(value: $rules.maxLeverage, in: 1...20) {
+                        LabeledContent("Leverage cap", value: "\(rules.maxLeverage)×")
+                    }
+                    LabeledContent("Largest position", value: "\(rules.marginPerTrade * rules.maxLeverage) AUSD")
+                } header: {
+                    Text("Size")
+                } footer: {
+                    Text("Their size fits their account, not yours. Each copy uses your margin at their leverage, up to your cap.")
+                }
 
-                    if copier.network.holdsRealFunds {
-                        Label("Mainnet copies use real AUSD.", systemImage: "exclamationmark.triangle.fill")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundStyle(DeskColor.action.color)
-                            .padding(.top, 12)
+                Section {
+                    Toggle("Stop loss", isOn: stopLoss.animation())
+                    if let stop = rules.stopLossPercent {
+                        Picker("Close at", selection: Binding(get: { stop }, set: { rules.stopLossPercent = $0 })) {
+                            ForEach([10, 15, 25, 35, 50], id: \.self) { Text("−\($0)% of margin").tag($0) }
+                        }
+                    }
+                    Toggle("Take profit", isOn: takeProfit.animation())
+                    if let take = rules.takeProfitPercent {
+                        Picker("Close at", selection: Binding(get: { take }, set: { rules.takeProfitPercent = $0 })) {
+                            ForEach([25, 50, 100, 200], id: \.self) { Text("+\($0)% of margin").tag($0) }
+                        }
+                    }
+                } header: {
+                    Text("Protection")
+                } footer: {
+                    Text(protectionFooter)
+                }
+
+                Section {
+                    Toggle("Close when they close", isOn: $rules.closeWithTrader)
+                    Picker("Skip if price ran", selection: $rules.maxChaseBps) {
+                        ForEach([25, 50, 100, 200], id: \.self) { Text(String(format: "%.2g%%", Double($0) / 100)).tag($0) }
+                    }
+                } header: {
+                    Text("Execution")
+                } footer: {
+                    Text("Skips a copy when the price has already moved that far past their entry. Copies are sent only while Desk is open and unlocked, signed on this iPhone.")
+                }
+
+                if copier.network.holdsRealFunds {
+                    Section {
+                        Label("Copies on mainnet use real AUSD.", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
-            }
 
-            VStack(spacing: 4) {
-                PrimaryButton(title: isActive ? "Save rules" : "Start copying") {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                if isActive {
+                    Section {
+                        Button("Stop Copying", role: .destructive) { confirmsStop = true }
+                    }
+                }
+            }
+            .tint(DeskColor.rise.color)
+            .navigationTitle(isActive ? "Copy Rules" : "Auto-Copy")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Button {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
                     copier.start(address, rules: rules)
                     dismiss()
-                }
-                if isActive {
-                    Button("Stop copying", role: .destructive) { confirmsStop = true }
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 10)
-            .padding(.bottom, 6)
-        }
-        .background(Color(red: 0.07, green: 0.07, blue: 0.08).ignoresSafeArea())
-        .confirmationDialog("Stop copying \(name)?", isPresented: $confirmsStop, titleVisibility: .visible) {
-            Button("Stop copying", role: .destructive) {
-                copier.stop(address)
-                dismiss()
-            }
-        } message: {
-            Text("Copies already open stay open, with their stops, until you close them.")
-        }
-    }
-
-    private var stopDetail: String {
-        guard let stop = rules.stopLossPercent else { return "No stop. A copy runs until they close or you do." }
-        let move = Double(stop) / Double(rules.maxLeverage)
-        return String(format: "Of the margin. At %d×, that is a %.1f%% move against you.", rules.maxLeverage, move)
-    }
-
-    private func section(_ title: String, detail: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                Text(detail)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.5))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            content()
-        }
-        .padding(.top, 24)
-    }
-
-    private func chips<Value: Hashable>(
-        _ values: [Value], selection: Binding<Value>, label: @escaping (Value) -> String
-    ) -> some View {
-        HStack(spacing: 8) {
-            ForEach(values, id: \.self) { value in
-                let selected = selection.wrappedValue == value
-                Button {
-                    UISelectionFeedbackGenerator().selectionChanged()
-                    withAnimation(.snappy(duration: 0.18)) { selection.wrappedValue = value }
                 } label: {
-                    Text(label(value))
-                        .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(selected ? Color.black : Color.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .frame(maxWidth: .infinity, minHeight: 36)
-                        .background(selected ? Color.white : Color.white.opacity(0.08), in: Capsule())
-                        .contentShape(Capsule())
+                    Text(isActive ? "Save Rules" : "Start Copying")
+                        .font(.headline)
+                        .foregroundStyle(.black)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
                 }
-                .buttonStyle(.plain)
+                .controlSize(.large)
+                .deskProminentButton()
+                .padding(.horizontal, 20)
+                .padding(.bottom, 8)
+            }
+            .confirmationDialog("Stop copying \(name)?", isPresented: $confirmsStop, titleVisibility: .visible) {
+                Button("Stop Copying", role: .destructive) {
+                    copier.stop(address)
+                    dismiss()
+                }
+            } message: {
+                Text("Copies already open stay open, with their stops, until you close them.")
             }
         }
+    }
+
+    private var protectionFooter: String {
+        guard let stop = rules.stopLossPercent else {
+            return "Without a stop, a copy stays open until they close or you do."
+        }
+        let move = Double(stop) / Double(rules.maxLeverage)
+        return String(format: "At %d×, a −%d%% stop is a %.1f%% price move against you. Stops and take profits are placed on Perpl, so they hold after Desk closes.",
+                      rules.maxLeverage, stop, move)
     }
 }
 
-/// The line on a trader's profile that starts auto-copy, or says it is running.
+/// Starts auto-copy from a trader's profile, or shows it is running.
 struct AutoCopyButton: View {
     let rules: CopyRules?
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: rules == nil ? "bolt" : "bolt.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(rules == nil ? Color.white : DeskColor.rise.color)
-                    .frame(width: 30, height: 30)
-                    .background((rules == nil ? Color.white : DeskColor.rise.color).opacity(0.1), in: Circle())
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(rules == nil ? "Auto-copy this trader" : "Auto-copying")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white)
+            HStack(spacing: 12) {
+                Image(systemName: rules == nil ? "bolt.fill" : "bolt.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(rules == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(DeskColor.rise.color))
+                    .symbolEffect(.pulse, options: .repeating, isActive: rules != nil)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(rules == nil ? "Auto-Copy" : "Auto-Copying")
+                        .font(.subheadline.weight(.semibold))
                     Text(summary)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.5))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                Spacer(minLength: 6)
+                Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.35))
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 0.5))
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
         .buttonStyle(.plain)
+        .deskGlass(interactive: true, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     private var summary: String {
-        guard let rules else { return "Mirror their entries and exits with your own limits" }
-        var parts = ["\(rules.marginPerTrade) AUSD per trade", "max \(rules.maxLeverage)×"]
+        guard let rules else { return "Mirror their trades with your own limits" }
+        var parts = ["\(rules.marginPerTrade) AUSD", "up to \(rules.maxLeverage)×"]
         if let stop = rules.stopLossPercent { parts.append("stop −\(stop)%") }
         return parts.joined(separator: " · ")
     }
@@ -218,48 +203,48 @@ struct CopyStatusCard: View {
     var body: some View {
         Button(action: onOpen) {
             HStack(spacing: 12) {
-                ZStack {
-                    Circle().fill((copier.isPaused ? Color.white : DeskColor.rise.color).opacity(0.12))
-                    Image(systemName: copier.isPaused ? "pause.fill" : "bolt.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(copier.isPaused ? Color.white.opacity(0.7) : DeskColor.rise.color)
-                }
-                .frame(width: 40, height: 40)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(copier.isPaused ? "Auto-copy paused" : "Auto-copying \(copier.traders.count) \(copier.traders.count == 1 ? "trader" : "traders")")
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white)
+                Image(systemName: copier.isPaused ? "pause.circle.fill" : "bolt.circle.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(copier.isPaused ? AnyShapeStyle(.secondary) : AnyShapeStyle(DeskColor.rise.color))
+                    .symbolEffect(.pulse, options: .repeating, isActive: !copier.isPaused && copier.readProblem == nil)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(copier.isPaused ? "Auto-Copy Paused" : "Auto-Copying \(copier.traders.count) \(copier.traders.count == 1 ? "Trader" : "Traders")")
+                        .font(.subheadline.weight(.semibold))
                     Text(detail)
-                        .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
-                        .foregroundStyle(Color.white.opacity(0.5))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                Spacer(minLength: 6)
-                VStack(alignment: .trailing, spacing: 3) {
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 2) {
                     Text(DisplayCurrency.shared.format(copier.realisedToday, signed: true))
-                        .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(copier.realisedToday < 0 ? DeskColor.fall.color
-                                         : (copier.realisedToday > 0 ? DeskColor.rise.color : .white))
+                        .font(.subheadline.weight(.bold).monospacedDigit())
+                        .foregroundStyle(pnlTint(copier.realisedToday))
+                        .contentTransition(.numericText())
                     Text("Today")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.45))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .padding(14)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 0.5))
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
         .buttonStyle(.plain)
+        .deskGlass(interactive: true, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     private var detail: String {
         if let problem = copier.readProblem { return problem }
         let open = "\(copier.open.count) open"
         guard let read = copier.lastRead else { return "\(open) · starting" }
-        return "\(open) · read \(read.formatted(.relative(presentation: .numeric)))"
+        return "\(open) · updated \(read.formatted(.relative(presentation: .numeric)))"
     }
+}
+
+private func pnlTint(_ value: Double) -> Color {
+    value < 0 ? DeskColor.fall.color : (value > 0 ? DeskColor.rise.color : .primary)
 }
 
 /// Everything auto-copy has done, the limits across it, and the switch that stops it.
@@ -267,212 +252,125 @@ struct CopyActivityScreen: View {
     let copier: CopyTrader
     let directory: TraderDirectory
 
-    @Environment(\.dismiss) private var dismiss
     @State private var editing: CopiedTrader?
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack {
-                        Button { dismiss() } label: {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .frame(width: 44, height: 44)
-                                .contentShape(Circle())
+        List {
+            Section {
+                Toggle(isOn: Binding(get: { !copier.isPaused }, set: { copier.setPaused(!$0) })) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(copier.isPaused ? "Paused" : "Running")
+                            Text(statusLine)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.plain)
-                        .deskGlass(interactive: true, in: Circle())
-                        Spacer()
-                    }
-                    .padding(.top, 6)
-
-                    Text("Auto-copy")
-                        .font(.system(size: 28, weight: .heavy, design: .rounded))
-                        .foregroundStyle(.white)
-                        .padding(.top, 14)
-                    Text("Reads traders on Perpl mainnet every few seconds. Copies go to your Perpl \(copier.network.shortName.lowercased()) account.")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.5))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 4)
-
-                    pauseRow.padding(.top, 18)
-                    stats.padding(.top, 12)
-
-                    header("Copying")
-                    if copier.traders.isEmpty {
-                        empty("No one yet. Open a trader on Signals and turn on auto-copy.")
-                    } else {
-                        VStack(spacing: 0) {
-                            ForEach(copier.traders) { trader in
-                                Button { editing = trader } label: { traderRow(trader) }
-                                    .buttonStyle(.plain)
-                            }
-                        }
-                    }
-
-                    header("Limits")
-                    limits
-
-                    header("Log")
-                    if copier.log.isEmpty {
-                        empty("Nothing yet. The first reading of each trader is a baseline; copies start from their next move.")
-                    } else {
-                        LazyVStack(spacing: 0) {
-                            ForEach(copier.log) { entry in
-                                CopyLogRow(entry: entry, name: directory.name(for: entry.trader))
-                            }
-                        }
+                    } icon: {
+                        Image(systemName: copier.isPaused ? "pause.fill" : "bolt.fill")
+                            .foregroundStyle(copier.isPaused ? AnyShapeStyle(.secondary) : AnyShapeStyle(DeskColor.rise.color))
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 60)
+            } footer: {
+                Text("Reads traders on Perpl mainnet every 4 seconds and copies to your Perpl \(copier.network.shortName.lowercased()) account. Pausing stops new copies; open ones keep their stops.")
+            }
+
+            Section("Performance") {
+                LabeledContent("Realised PnL") {
+                    Text(DisplayCurrency.shared.format(copier.realisedTotal, signed: true))
+                        .foregroundStyle(pnlTint(copier.realisedTotal))
+                        .monospacedDigit()
+                }
+                LabeledContent("Win rate") {
+                    Text(copier.winRate.map { String(format: "%.0f%% of %d", $0 * 100, copier.closedCount) } ?? "No closes yet")
+                        .monospacedDigit()
+                }
+                LabeledContent("Copies", value: "\(copier.copiedCount) · \(copier.open.count) open")
+                LabeledContent("Time to fill") {
+                    Text(copier.averageFillSeconds.map { String(format: "%.1f s after their move", $0) } ?? "—")
+                        .monospacedDigit()
+                }
+            }
+
+            Section {
+                if copier.traders.isEmpty {
+                    Text("Open a trader on Signals and turn on Auto-Copy.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(copier.traders) { trader in
+                        Button { editing = trader } label: { traderRow(trader) }
+                            .tint(.primary)
+                            .swipeActions {
+                                Button("Stop", role: .destructive) { copier.stop(trader.address) }
+                            }
+                    }
+                }
+            } header: {
+                Text("Copying")
+            }
+
+            Section {
+                Picker("Open copies at once", selection: Binding(
+                    get: { copier.guards.maxOpenCopies },
+                    set: { value in var next = copier.guards; next.maxOpenCopies = value; copier.updateGuards(next) }
+                )) {
+                    ForEach([1, 3, 5, 10], id: \.self) { Text("\($0)").tag($0) }
+                }
+                Picker("Daily loss limit", selection: Binding(
+                    get: { copier.guards.dailyLossLimit },
+                    set: { value in var next = copier.guards; next.dailyLossLimit = value; copier.updateGuards(next) }
+                )) {
+                    ForEach([25, 50, 100, 250], id: \.self) { Text("\($0) AUSD").tag($0) }
+                }
+            } header: {
+                Text("Limits")
+            } footer: {
+                Text("Auto-Copy pauses itself once today's closed copies have lost this much.")
+            }
+
+            Section("Log") {
+                if copier.log.isEmpty {
+                    ContentUnavailableView(
+                        "No Copies Yet",
+                        systemImage: "bolt.horizontal",
+                        description: Text("The first reading of each trader is a baseline. Copies start from their next move."))
+                } else {
+                    ForEach(copier.log) { entry in
+                        CopyLogRow(entry: entry, name: directory.name(for: entry.trader))
+                    }
+                }
             }
         }
-        .toolbar(.hidden, for: .navigationBar)
+        .listStyle(.insetGrouped)
+        .tint(DeskColor.rise.color)
+        .navigationTitle("Auto-Copy")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar(.visible, for: .navigationBar)
         .sheet(item: $editing) { trader in
             AutoCopySheet(address: trader.address, name: directory.name(for: trader.address), copier: copier)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
         }
     }
 
-    private var pauseRow: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(copier.isPaused ? Color.white.opacity(0.35) : DeskColor.rise.color)
-                .frame(width: 8, height: 8)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(copier.isPaused ? "Paused" : "Running")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                Text(copier.isPaused ? "No new copies. Open copies keep their stops." : "\(copier.open.count) open · last read \(copier.lastRead.map { $0.formatted(date: .omitted, time: .standard) } ?? "not yet")")
-                    .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
-                    .foregroundStyle(Color.white.opacity(0.5))
-            }
-            Spacer()
-            Toggle("Running", isOn: Binding(get: { !copier.isPaused }, set: { copier.setPaused(!$0) }))
-                .labelsHidden()
-                .tint(DeskColor.rise.color)
-        }
-        .padding(14)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private var stats: some View {
-        Grid(horizontalSpacing: 10, verticalSpacing: 10) {
-            GridRow {
-                stat("Realised PnL", DisplayCurrency.shared.format(copier.realisedTotal, signed: true),
-                     tint: copier.realisedTotal < 0 ? DeskColor.fall.color : (copier.realisedTotal > 0 ? DeskColor.rise.color : .white))
-                stat("Win rate", copier.winRate.map { String(format: "%.0f%%", $0 * 100) } ?? Unavailable.text,
-                     detail: "\(copier.closedCount) closed")
-            }
-            GridRow {
-                stat("Copies", "\(copier.copiedCount)", detail: "\(copier.open.count) open")
-                stat("Time to fill", copier.averageFillSeconds.map { String(format: "%.1fs", $0) } ?? Unavailable.text,
-                     detail: "from their move")
-            }
-        }
-    }
-
-    private func stat(_ title: String, _ value: String, detail: String? = nil, tint: Color = .white) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.5))
-            Text(value)
-                .font(.system(size: 20, weight: .bold, design: .rounded).monospacedDigit())
-                .foregroundStyle(tint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(detail ?? " ")
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.4))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private var limits: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            limitRow("Open copies at once", values: [1, 3, 5, 10], selected: copier.guards.maxOpenCopies, label: { "\($0)" }) { value in
-                var next = copier.guards
-                next.maxOpenCopies = value
-                copier.updateGuards(next)
-            }
-            limitRow("Pause after losing today", values: [25, 50, 100, 250], selected: copier.guards.dailyLossLimit, label: { "\($0)" }) { value in
-                var next = copier.guards
-                next.dailyLossLimit = value
-                copier.updateGuards(next)
-            }
-        }
-        .padding(14)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private func limitRow(
-        _ title: String, values: [Int], selected: Int, label: @escaping (Int) -> String, onSelect: @escaping (Int) -> Void
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title + (title.hasPrefix("Pause") ? " (AUSD)" : ""))
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.8))
-            HStack(spacing: 8) {
-                ForEach(values, id: \.self) { value in
-                    Button {
-                        UISelectionFeedbackGenerator().selectionChanged()
-                        onSelect(value)
-                    } label: {
-                        Text(label(value))
-                            .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
-                            .foregroundStyle(value == selected ? Color.black : Color.white)
-                            .frame(maxWidth: .infinity, minHeight: 32)
-                            .background(value == selected ? Color.white : Color.white.opacity(0.08), in: Capsule())
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
+    private var statusLine: String {
+        if let problem = copier.readProblem { return problem }
+        guard let read = copier.lastRead else { return copier.isPaused ? "No new copies" : "Starting" }
+        return "Updated \(read.formatted(date: .omitted, time: .standard))"
     }
 
     private func traderRow(_ trader: CopiedTrader) -> some View {
         HStack(spacing: 12) {
-            TraderAvatar(address: trader.address, size: 38)
+            TraderAvatar(address: trader.address, size: 36)
             VStack(alignment: .leading, spacing: 2) {
                 Text(directory.name(for: trader.address))
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                Text("\(trader.rules.marginPerTrade) AUSD · max \(trader.rules.maxLeverage)× · \(trader.rules.stopLossPercent.map { "stop −\($0)%" } ?? "no stop")")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.5))
+                    .foregroundStyle(.primary)
+                Text("\(trader.rules.marginPerTrade) AUSD · up to \(trader.rules.maxLeverage)× · \(trader.rules.stopLossPercent.map { "stop −\($0)%" } ?? "no stop")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
-            Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.white.opacity(0.4))
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 10)
-        .contentShape(Rectangle())
-    }
-
-    private func header(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 18, weight: .bold, design: .rounded))
-            .foregroundStyle(.white)
-            .padding(.top, 28)
-            .padding(.bottom, 8)
-    }
-
-    private func empty(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 13, weight: .medium, design: .rounded))
-            .foregroundStyle(Color.white.opacity(0.5))
-            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -480,61 +378,61 @@ private struct CopyLogRow: View {
     let entry: CopyLogEntry
     let name: String
 
-    private var symbol: (name: String, tint: Color) {
+    private var icon: (name: String, tint: Color) {
         switch entry.kind {
-        case .opened: ("arrow.up.right", DeskColor.rise.color)
-        case .closed: ("checkmark", Color.white)
-        case .protected: ("shield.lefthalf.filled", Color.white)
-        case .skipped: ("forward.end", Color.white.opacity(0.5))
-        case .failed: ("exclamationmark", DeskColor.fall.color)
-        case .paused: ("pause", DeskColor.action.color)
+        case .opened: ("arrow.up.right.circle.fill", DeskColor.rise.color)
+        case .closed: ("checkmark.circle.fill", .secondary)
+        case .protected: ("shield.lefthalf.filled", .blue)
+        case .skipped: ("forward.circle.fill", .secondary)
+        case .failed: ("exclamationmark.circle.fill", DeskColor.fall.color)
+        case .paused: ("pause.circle.fill", .orange)
         }
     }
 
     private var title: String {
-        let side = "\(entry.isLong ? "long" : "short") \(entry.symbol)\(entry.leverage.map { " \($0)×" } ?? "")"
+        let side = "\(entry.isLong ? "Long" : "Short") \(entry.symbol)\(entry.leverage.map { " \($0)×" } ?? "")"
         return switch entry.kind {
-        case .opened: "Copied \(name)'s \(side)"
+        case .opened: "Copied \(side)"
         case .closed: "Closed \(side)"
-        case .protected: "\(side.prefix(1).uppercased() + side.dropFirst()) closed on Perpl"
-        case .skipped: "Skipped \(name)'s \(side)"
-        case .failed: "Couldn't copy \(name)'s \(side)"
-        case .paused: "Auto-copy paused"
+        case .protected: "\(side) closed on Perpl"
+        case .skipped: "Skipped \(side)"
+        case .failed: "Couldn't copy \(side)"
+        case .paused: "Auto-Copy paused"
         }
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbol.name)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(symbol.tint)
-                .frame(width: 30, height: 30)
-                .background(Color.white.opacity(0.07), in: Circle())
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Image(systemName: icon.name)
+                .font(.title3)
+                .foregroundStyle(icon.tint)
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 4 }
             VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 8)
+                    if let pnl = entry.pnl {
+                        Text(DisplayCurrency.shared.format(pnl, signed: true))
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(pnlTint(pnl))
+                    }
+                }
                 Text(entry.detail)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.5))
-                    .fixedSize(horizontal: false, vertical: true)
-                Text([entry.date.formatted(.relative(presentation: .named)),
-                      entry.fillSeconds.map { String(format: "filled %.1fs after their move", $0) }]
-                    .compactMap { $0 }.joined(separator: " · "))
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.35))
-            }
-            Spacer(minLength: 8)
-            if let pnl = entry.pnl {
-                Text(DisplayCurrency.shared.format(pnl, signed: true))
-                    .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(pnl < 0 ? DeskColor.fall.color : DeskColor.rise.color)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(footnote)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
-        .padding(.vertical, 11)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.white.opacity(0.06)).frame(height: 0.5).padding(.leading, 42)
-        }
+        .padding(.vertical, 2)
+    }
+
+    private var footnote: String {
+        [name,
+         entry.date.formatted(.relative(presentation: .named)),
+         entry.fillSeconds.map { String(format: "filled in %.1f s", $0) }]
+            .compactMap { $0 }.joined(separator: " · ")
     }
 }

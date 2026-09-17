@@ -149,7 +149,7 @@ struct SignalsScreen: View {
                     }
                     tradeAlert = nil
                 })
-                .presentationDetents([.height(alert.canCopy ? 470 : 400), .large])
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $copyOrder) { order in

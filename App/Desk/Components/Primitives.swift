@@ -99,6 +99,28 @@ extension View {
     }
 }
 
+extension View {
+    /// The one filled action in a native sheet: Liquid Glass tinted where the system has
+    /// it, the standard prominent button where it does not.
+    @ViewBuilder
+    func deskProminentButton(tint: Color = DeskColor.action.color) -> some View {
+        if #available(iOS 26.0, *) {
+            buttonStyle(.glassProminent).tint(tint)
+        } else {
+            buttonStyle(.borderedProminent).tint(tint)
+        }
+    }
+
+    @ViewBuilder
+    func deskSecondaryButton() -> some View {
+        if #available(iOS 26.0, *) {
+            buttonStyle(.glass)
+        } else {
+            buttonStyle(.bordered)
+        }
+    }
+}
+
 /// Only ever on something tappable. Dark means flat: a chip is a hint, not a card.
 struct Chip<Content: View>: View {
     @ViewBuilder var content: Content
