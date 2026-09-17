@@ -34,6 +34,41 @@ public struct NativeAmount: Sendable, Hashable, Comparable {
 
     public var isZero: Bool { raw == 0 }
 
+    /// A typed amount such as `1.5`. Nil for anything that is not plain digits with at
+    /// most eighteen places, rather than a rounded guess at what was meant.
+    public init?(decimalText text: String) {
+        let parts = text.split(separator: ".", omittingEmptySubsequences: false)
+        guard (1...2).contains(parts.count),
+              let whole = parts.first, !whole.isEmpty || parts.count == 2,
+              whole.allSatisfy(\.isASCIIDigit) else { return nil }
+        let fraction = parts.count == 2 ? parts[1] : ""
+        guard fraction.count <= Int(NativeAmount.decimals), fraction.allSatisfy(\.isASCIIDigit),
+              !(whole.isEmpty && fraction.isEmpty) else { return nil }
+        let digits = String(whole) + fraction + String(repeating: "0", count: Int(NativeAmount.decimals) - fraction.count)
+        var value: Int128 = 0
+        for character in digits {
+            let (shifted, overflow) = value.multipliedReportingOverflow(by: 10)
+            guard !overflow else { return nil }
+            value = shifted + Int128(character.wholeNumberValue!)
+            guard value <= NativeAmount.maxRaw else { return nil }
+        }
+        self.init(unchecked: value)
+    }
+
+    /// Wei as a decimal string, the form quote APIs and JSON carry without precision loss.
+    public var weiText: String { String(describing: raw) }
+
+    /// Big-endian with leading zeros stripped, the shape a transaction's value takes.
+    public var bigEndianBytes: Data {
+        var bytes: [UInt8] = []
+        var rest = raw
+        while rest > 0 {
+            bytes.insert(UInt8(rest & 0xff), at: 0)
+            rest >>= 8
+        }
+        return Data(bytes)
+    }
+
     public static func < (lhs: NativeAmount, rhs: NativeAmount) -> Bool { lhs.raw < rhs.raw }
 
     /// What `eth_getBalance` returns: a big-endian quantity, already stripped of leading
@@ -98,4 +133,9 @@ enum DecimalGrouping {
         }
         return out
     }
+}
+
+extension Character {
+    /// `isNumber` also accepts other scripts' digits and fractions, which are not wei.
+    var isASCIIDigit: Bool { ("0"..."9").contains(self) }
 }

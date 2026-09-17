@@ -19,6 +19,11 @@ public actor MonadRPC {
         public static func testnet() throws -> Configuration {
             try Configuration(url: URL(string: "https://testnet-rpc.monad.xyz")!, chainID: 10143)
         }
+
+        /// Real funds. Only spot purchases use it; the exchange and faucet stay on testnet.
+        public static func mainnet() throws -> Configuration {
+            try Configuration(url: URL(string: "https://rpc.monad.xyz")!, chainID: 143)
+        }
     }
 
     public enum Failure: Error, Sendable, Equatable {
@@ -92,12 +97,16 @@ public actor MonadRPC {
         }
     }
 
-    public func estimateGas(to: EthereumAddress, data: Data, from: EthereumAddress) async throws -> UInt64 {
-        let request: [String: JSONValue] = [
+    public func estimateGas(
+        to: EthereumAddress, data: Data, value: Data = Data(), from: EthereumAddress
+    ) async throws -> UInt64 {
+        var request: [String: JSONValue] = [
             "from": .string(from.checksummed),
             "to": .string(to.checksummed),
             "data": .string("0x" + data.map { String(format: "%02x", $0) }.joined()),
         ]
+        // A payable call estimated without its value can revert, or price a different path.
+        if value.contains(where: { $0 != 0 }) { request["value"] = .string(Quantity.encode(value)) }
         return try await quantity("eth_estimateGas", [.object(request)])
     }
 

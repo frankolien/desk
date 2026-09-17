@@ -29,7 +29,7 @@ public actor TransactionSender {
         value: Data = Data(),
         from key: WalletKey
     ) async throws -> SignedTransaction {
-        let estimate = try await rpc.estimateGas(to: to, data: data, from: key.address)
+        let estimate = try await rpc.estimateGas(to: to, data: data, value: value, from: key.address)
         let gasLimit = try GasPolicy.gasLimit(estimate: estimate)
         let maxFee = GasPolicy.maxFeePerGas(baseFeeWei: try await rpc.baseFeePerGas())
         let chainCount = try await rpc.transactionCount(of: key.address)
