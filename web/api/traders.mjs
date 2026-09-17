@@ -1,0 +1,207 @@
+import { createPublicClient, http } from "viem";
+
+import { EXCHANGE_VIEWS } from "./_perpl-abi.mjs";
+
+/// Perpl mainnet, read-only. Following is about real traders, so it reads the live venue
+/// even though Desk trades on testnet; nothing here signs or moves funds.
+export const EXCHANGE = "0x34B6552d57a35a1D042CcAe1951BD1C370112a6F";
+const CONTEXT_URL = "https://app.perpl.xyz/api/v1/pub/context";
+const COLLATERAL_DECIMALS = 6;
+const PAGE = 50n;
+const MAX_PAGES = 30;
+const TOP = 25;
+const MAX_FOLLOWED = 20;
+
+export function formatFixed(raw, decimals, places = decimals) {
+  const value = BigInt(raw);
+  const negative = value < 0n;
+  const digits = (negative ? -value : value).toString().padStart(decimals + 1, "0");
+  const whole = digits.slice(0, digits.length - decimals);
+  const fraction = digits.slice(digits.length - decimals, digits.length - decimals + places).replace(/0+$/, "");
+  return `${negative ? "-" : ""}${whole}${fraction ? `.${fraction}` : ""}`;
+}
+
+/// Perp ids with a position, from the account's four 256-bit banks.
+export function perpIdsFromBitmap(positions) {
+  const ids = [];
+  ["bank1", "bank2", "bank3", "bank4"].forEach((bank, index) => {
+    let bits = BigInt(positions?.[bank] ?? 0n);
+    for (let bit = 0n; bits > 0n; bit += 1n, bits >>= 1n) {
+      if (bits & 1n) ids.push(Number(BigInt(index * 256) + bit));
+    }
+  });
+  return ids;
+}
+
+/// One open position as a person reads it. Leverage is entry notional over the
+/// collateral posted, which is what the venue sized the position with.
+export function describePosition(position, mark, market) {
+  const { price_decimals: priceDecimals, size_decimals: sizeDecimals } = market.config;
+  const lot = BigInt(position.lotLNS);
+  const entry = BigInt(position.pricePNS);
+  const deposit = BigInt(position.depositCNS);
+  const pnl = BigInt(position.pnlCNS);
+  // price * lot carries price + size decimals; collateral carries six.
+  const shift = priceDecimals + sizeDecimals - COLLATERAL_DECIMALS;
+  const notional = (price) => (shift >= 0
+    ? (price * lot) / 10n ** BigInt(shift)
+    : price * lot * 10n ** BigInt(-shift));
+  const entryNotional = notional(entry);
+  return {
+    market: market.name,
+    marketId: market.id,
+    side: Number(position.positionType) === 1 ? "short" : "long",
+    entry: formatFixed(entry, priceDecimals),
+    mark: formatFixed(mark, priceDecimals),
+    size: formatFixed(lot, sizeDecimals),
+    collateral: formatFixed(deposit, COLLATERAL_DECIMALS, 2),
+    value: formatFixed(notional(BigInt(mark)), COLLATERAL_DECIMALS, 2),
+    pnl: formatFixed(pnl, COLLATERAL_DECIMALS, 2),
+    pnlPercent: deposit > 0n ? Number((pnl * 10000n) / deposit) / 100 : null,
+    leverage: deposit > 0n ? Number((entryNotional * 10n) / deposit) / 10 : null,
+    entryBlock: Number(position.entryBlock),
+  };
+}
+
+/// Traders ranked by what their open positions are making right now. Ties and empty
+/// books are ordered by value so the list is stable between refreshes.
+export function rankTraders(positions, limit = TOP) {
+  const byAccount = new Map();
+  for (const { accountId, raw, described } of positions) {
+    const entry = byAccount.get(accountId) ?? { accountId, pnl: 0n, value: 0n, positions: [] };
+    entry.pnl += BigInt(raw.pnlCNS);
+    entry.value += BigInt(Math.round(Number(described.value) * 1e6));
+    entry.positions.push(described);
+    byAccount.set(accountId, entry);
+  }
+  return [...byAccount.values()]
+    .sort((a, b) => (b.pnl === a.pnl ? Number(b.value - a.value) : (b.pnl > a.pnl ? 1 : -1)))
+    .slice(0, limit);
+}
+
+let contextCache = { at: 0, markets: null };
+
+async function markets(fetchImpl) {
+  if (contextCache.markets && Date.now() - contextCache.at < 10 * 60_000) return contextCache.markets;
+  const response = await fetchImpl(CONTEXT_URL);
+  if (!response.ok) throw new Error("context");
+  const body = await response.json();
+  const open = new Map(body.markets.filter((m) => m.config?.is_open).map((m) => [m.id, m]));
+  contextCache = { at: Date.now(), markets: open };
+  return open;
+}
+
+function summary(accountId, address, pnl, positions, balance = null) {
+  return {
+    accountId: String(accountId),
+    address,
+    pnl: formatFixed(pnl, COLLATERAL_DECIMALS, 2),
+    balance: balance === null ? null : formatFixed(balance, COLLATERAL_DECIMALS, 2),
+    positions: positions.sort((a, b) => Number(b.value) - Number(a.value)),
+  };
+}
+
+export function chainReader(rpcURL = process.env.MONAD_MAINNET_RPC || "https://rpc.monad.xyz") {
+  const client = createPublicClient({ transport: http(rpcURL, { timeout: 10_000, batch: true }) });
+  const read = (functionName, args) => client.readContract({ address: EXCHANGE, abi: EXCHANGE_VIEWS, functionName, args });
+
+  return {
+    async allPositions(market) {
+      const out = [];
+      let start = 0n;
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const [rows, count, mark, valid] = await read("getPositionsV2", [BigInt(market.id), start, PAGE]);
+        if (!valid) return out;
+        for (const row of rows.slice(0, Number(count))) out.push({ row, mark });
+        const last = rows[Number(count) - 1];
+        if (BigInt(count) < PAGE || !last || last.nextNodeId === 0n) return out;
+        start = last.nextNodeId;
+      }
+      return out;
+    },
+    async accountById(id) {
+      return read("getAccountById", [BigInt(id)]);
+    },
+    async accountByAddress(address) {
+      try {
+        return await read("getAccountByAddr", [address]);
+      } catch {
+        return null;
+      }
+    },
+    async position(perpId, accountId) {
+      const [row, mark, valid] = await read("getPositionV2", [BigInt(perpId), BigInt(accountId)]);
+      return valid && row.lotLNS > 0n ? { row, mark } : null;
+    },
+  };
+}
+
+async function trader(chain, book, address) {
+  const account = await chain.accountByAddress(address);
+  if (!account || account.accountId === 0n) return null;
+  const ids = perpIdsFromBitmap(account.positions).filter((id) => book.has(id));
+  const found = await Promise.all(ids.map((id) => chain.position(id, account.accountId)));
+  let pnl = 0n;
+  const positions = [];
+  found.forEach((entry, index) => {
+    if (!entry) return;
+    pnl += BigInt(entry.row.pnlCNS);
+    positions.push(describePosition(entry.row, entry.mark, book.get(ids[index])));
+  });
+  return summary(account.accountId, account.accountAddr, pnl, positions, account.balanceCNS);
+}
+
+const validAddress = (value) => /^0x[a-fA-F0-9]{40}$/.test(value);
+
+export function createHandler({ chain = chainReader(), fetchImpl = fetch } = {}) {
+  return async function handler(req, res) {
+    if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
+    const view = String(req.query.view || "top");
+    let book;
+    try {
+      book = await markets(fetchImpl);
+    } catch {
+      return res.status(502).json({ error: "Perpl's market list is unavailable." });
+    }
+
+    try {
+      if (view === "top") {
+        const scanned = await Promise.all([...book.values()].map(async (market) =>
+          (await chain.allPositions(market)).map(({ row, mark }) => ({
+            accountId: row.accountId, raw: row, described: describePosition(row, mark, market),
+          }))));
+        const ranked = rankTraders(scanned.flat());
+        const accounts = await Promise.all(ranked.map((entry) => chain.accountById(entry.accountId)));
+        res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
+        return res.status(200).json({
+          observedAt: Date.now(),
+          traders: ranked.map((entry, index) =>
+            summary(entry.accountId, accounts[index].accountAddr, entry.pnl, entry.positions)),
+        });
+      }
+
+      if (view === "trader" || view === "following") {
+        const addresses = String(req.query.addresses ?? req.query.address ?? "")
+          .split(",").map((value) => value.trim()).filter(Boolean);
+        if (addresses.length === 0 || addresses.length > MAX_FOLLOWED || !addresses.every(validAddress)) {
+          return res.status(400).json({ error: `Between 1 and ${MAX_FOLLOWED} wallet addresses are required.` });
+        }
+        const traders = await Promise.all(addresses.map((address) => trader(chain, book, address)));
+        res.setHeader("Cache-Control", "public, s-maxage=10, stale-while-revalidate=60");
+        return res.status(200).json({
+          observedAt: Date.now(),
+          traders: traders.map((found, index) => found ?? { address: addresses[index], accountId: null, positions: [] }),
+        });
+      }
+      return res.status(400).json({ error: "Unknown view." });
+    } catch {
+      return res.status(502).json({ error: "Perpl mainnet could not be read right now." });
+    }
+  };
+}
+
+let defaultHandler;
+export default function handler(req, res) {
+  defaultHandler ??= createHandler();
+  return defaultHandler(req, res);
+}
