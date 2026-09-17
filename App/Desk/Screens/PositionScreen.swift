@@ -4,6 +4,7 @@ import DeskUI
 import PhotosUI
 import SwiftUI
 import UIKit
+import CoreImage.CIFilterBuiltins
 
 /// One held position, in full.
 ///
@@ -63,9 +64,18 @@ struct PositionScreen: View {
                         session: session) { showsProtection = false }
                 }
             }
-            .sheet(isPresented: $showsShare) {
+            #if DEBUG
+            .task {
+                if ProcessInfo.processInfo.arguments.contains("-open-share") {
+                    try? await Task.sleep(for: .seconds(2))
+                    showsShare = true
+                }
+            }
+            #endif
+            .fullScreenCover(isPresented: $showsShare) {
                 if let figures {
                     TradeShareSheet(symbol: market.symbol, figures: figures)
+                        .presentationBackground(.clear)
                 }
             }
         }
@@ -713,8 +723,9 @@ extension PerplPosition: @retroactive Identifiable {
 
 // MARK: - Position sharing
 
-/// A small editor rather than an immediate system sheet: the trade stays factual while
-/// the owner chooses whether it sits on Desk's house artwork or one of their photographs.
+/// The share editor: the card as it will be exported, two backgrounds to choose from, and
+/// Save or Share. Everything on the card is live text drawn over the chosen background, so a
+/// stale number can never ride along inside an image.
 private struct TradeShareSheet: View {
     let symbol: String
     let figures: PositionFigures
@@ -722,59 +733,68 @@ private struct TradeShareSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var photoItem: PhotosPickerItem?
     @State private var photo: UIImage?
+    @State private var usesPhoto = false
     @State private var rendered: UIImage?
     @State private var presentsActivity = false
+    @State private var saveNotice: String?
+    @State private var saver = PhotoSaver()
+
+    static let cardWidth: CGFloat = 340
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                DeskColor.night.color.ignoresSafeArea()
-                GeometryReader { proxy in
-                    let usableWidth = proxy.size.width - 28
-                    let controlsHeight: CGFloat = 174
-                    let cardHeight = min(usableWidth * 1.25, proxy.size.height - controlsHeight)
-                    let cardWidth = cardHeight * 0.8
-
-                    VStack(spacing: 10) {
-                        ShareCardPreview(
-                            symbol: symbol, figures: figures, photo: photo,
-                            width: cardWidth, height: cardHeight)
-                            .frame(maxWidth: .infinity)
-
-                        backgroundPicker
-
-                        Button {
-                            rendered = render()
-                            presentsActivity = rendered != nil
-                        } label: {
-                            Label("Share", systemImage: "square.and.arrow.up")
-                                .font(.system(size: 16, weight: .bold, design: .rounded))
-                                .frame(maxWidth: .infinity).frame(height: 48)
+        ZStack {
+            backdrop
+            GeometryReader { proxy in
+                let cardHeight = TradeShareCard.height
+                let reserved: CGFloat = 60 + 96 + 80
+                let scale = min(1, (proxy.size.height - reserved) / cardHeight,
+                                (proxy.size.width - 32) / Self.cardWidth)
+                VStack(spacing: 0) {
+                    HStack {
+                        Spacer()
+                        Button { dismiss() } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 46, height: 46)
+                                .contentShape(Circle())
                         }
                         .buttonStyle(.plain)
-                        .foregroundStyle(DeskColor.night.color)
-                        .background(DeskColor.action.color, in: Capsule())
+                        .deskGlass(interactive: true, in: Circle())
+                        .accessibilityLabel("Close")
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
+                    .frame(height: 60)
+
+                    Spacer(minLength: 0)
+                    card
+                        .scaleEffect(scale)
+                        .frame(width: Self.cardWidth * scale, height: cardHeight * scale)
+                    Spacer(minLength: 0)
+
+                    backgrounds.frame(height: 96)
+                    actions.frame(height: 80)
                 }
+                .padding(.horizontal, 24)
             }
-            .navigationTitle("Share position")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }.foregroundStyle(DeskColor.action.color)
-                }
+            if let saveNotice {
+                Label(saveNotice, systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .frame(height: 40)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 8)
             }
         }
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
             Task {
                 guard let data = try? await item.loadTransferable(type: Data.self),
                       let selected = UIImage(data: data) else { return }
                 photo = selected
+                usesPhoto = true
             }
         }
         .sheet(isPresented: $presentsActivity) {
@@ -782,195 +802,339 @@ private struct TradeShareSheet: View {
         }
     }
 
-    private var backgroundPicker: some View {
-        let hasPhoto = photo != nil
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("BACKGROUND")
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .tracking(1.1)
-                .foregroundStyle(DeskColor.nightMuted.color)
-            HStack(spacing: 12) {
-                Button { photo = nil; photoItem = nil } label: {
-                    backgroundTile(image: Image("TradeShareCardBackground"), selected: photo == nil)
-                }
-                .buttonStyle(.plain)
+    private var card: some View {
+        TradeShareCard(symbol: symbol, figures: figures, photo: usesPhoto ? photo : nil)
+    }
 
-                PhotosPicker(selection: $photoItem, matching: .images) {
-                    SharePhotoTile(selected: hasPhoto)
+    /// The card, blurred behind itself, so the editor sits in the trade's own light.
+    private var backdrop: some View {
+        // An overlay takes its size from the colour beneath it, so the artwork can fill
+        // without widening the layout it sits behind.
+        Color.black
+            .overlay {
+                Image("TradeShareCardBackground")
+                    .resizable().scaledToFill()
+                    .blur(radius: 60)
+                    .opacity(0.45)
+            }
+            .overlay { Color.black.opacity(0.35) }
+            .clipped()
+            .ignoresSafeArea()
+    }
+
+    private var backgrounds: some View {
+        HStack(spacing: 14) {
+            Button {
+                withAnimation(.snappy(duration: 0.2)) { usesPhoto = false }
+            } label: {
+                ShareBackgroundTile(selected: !usesPhoto) {
+                    Image("TradeShareCardBackground").resizable().scaledToFill()
                 }
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Desk background")
+
+            ZStack(alignment: .bottomTrailing) {
+                if let photo {
+                    Button {
+                        withAnimation(.snappy(duration: 0.2)) { usesPhoto = true }
+                    } label: {
+                        ShareBackgroundTile(selected: usesPhoto) {
+                            Image(uiImage: photo).resizable().scaledToFill()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Your photo background")
+                } else {
+                    PhotosPicker(selection: $photoItem, matching: .images) {
+                        ShareBackgroundTile(selected: false) {
+                            ZStack {
+                                Color.white.opacity(0.06)
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.system(size: 22, weight: .medium))
+                                    .foregroundStyle(Color.white.opacity(0.6))
+                            }
+                        }
+                    }
+                    .accessibilityLabel("Choose a photo")
+                }
+                PhotosPicker(selection: $photoItem, matching: .images) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(DeskColor.rise.color)
+                        .frame(width: 34, height: 34)
+                        .background(Color(white: 0.12), in: Circle())
+                        .overlay(Circle().stroke(Color.black.opacity(0.6), lineWidth: 3))
+                }
+                .offset(x: 10, y: 10)
+                .accessibilityLabel("Change photo")
+            }
+            Spacer()
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func backgroundTile(image: Image, selected: Bool) -> some View {
-        image.resizable().scaledToFill()
-            .frame(width: 106, height: 68).clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16)
-                .stroke(selected ? DeskColor.action.color : Color.white.opacity(0.1), lineWidth: 2))
+
+    private var actions: some View {
+        HStack(spacing: 12) {
+            Button(action: save) {
+                Label("Save", systemImage: "square.and.arrow.down")
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 56)
+                    .background(Color(white: 0.08), in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                rendered = render()
+                presentsActivity = rendered != nil
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundStyle(DeskColor.rise.color)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 56)
+                    .background(DeskColor.rise.color.opacity(0.2), in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .background {
+            HStack(spacing: 60) {
+                Ellipse().fill(DeskColor.rise.color.opacity(0.22))
+                Ellipse().fill((figures.isProfit ? DeskColor.rise : DeskColor.fall).color.opacity(0.18))
+            }
+            .blur(radius: 30)
+            .offset(y: -8)
+            .allowsHitTesting(false)
+        }
     }
 
+    private func save() {
+        guard let image = render() else { return }
+        saver.save(image) { saved in
+            withAnimation(.snappy) {
+                saveNotice = saved ? "Saved to Photos" : "Allow Photos access in Settings to save"
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                withAnimation(.snappy) { saveNotice = nil }
+            }
+        }
+    }
+
+    /// Three times the on-screen size, so the saved image is sharp at full width.
     @MainActor private func render() -> UIImage? {
-        let card = TradeShareCard(symbol: symbol, figures: figures, photo: photo)
-            .frame(width: 900, height: 1125)
-        let renderer = ImageRenderer(content: card)
-        renderer.scale = 1
-        renderer.isOpaque = true
+        let renderer = ImageRenderer(content: card.frame(width: Self.cardWidth, height: TradeShareCard.height))
+        renderer.scale = 3
         return renderer.uiImage
     }
 }
 
-/// Preview the exact export canvas instead of asking its large typography to reflow at
-/// phone width. Scaling the finished composition keeps every edge and baseline visible.
-private struct ShareCardPreview: View {
-    let symbol: String
-    let figures: PositionFigures
-    let photo: UIImage?
-    let width: CGFloat
-    let height: CGFloat
-
-    var body: some View {
-        TradeShareCard(symbol: symbol, figures: figures, photo: photo)
-            .frame(width: 900, height: 1125)
-            .scaleEffect(width / 900, anchor: .topLeading)
-            .frame(width: width, height: height, alignment: .topLeading)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.white.opacity(0.1)))
-    }
-}
-
-private struct SharePhotoTile: View {
+private struct ShareBackgroundTile<Content: View>: View {
     let selected: Bool
+    @ViewBuilder let content: () -> Content
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            RoundedRectangle(cornerRadius: 16)
-                .fill(DeskColor.nightChip.color)
-                .overlay {
-                    VStack(spacing: 7) {
-                        Image(systemName: selected ? "photo.fill" : "photo.on.rectangle.angled")
-                        Text(selected ? "Photo selected" : "Your photo")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                    }
-                    .foregroundStyle(selected ? DeskColor.nightText.color : DeskColor.nightMuted.color)
-                }
-                .overlay(RoundedRectangle(cornerRadius: 16)
-                    .stroke(selected ? DeskColor.action.color : Color.white.opacity(0.1), lineWidth: 2))
-            Image(systemName: "pencil")
-                .font(.system(size: 11, weight: .bold))
-                .frame(width: 28, height: 28)
-                .foregroundStyle(DeskColor.night.color)
-                .background(DeskColor.action.color, in: Circle())
-                .padding(7)
-        }
-        .frame(width: 106, height: 68)
+        content()
+            .frame(width: 116, height: 76)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(selected ? DeskColor.rise.color : Color.white.opacity(0.1), lineWidth: selected ? 2 : 1))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
-/// The exported image. All numbers are native text layered at render time; the bitmap
-/// underneath is decoration only, so stale examples can never leak into a real share.
+/// Writes to the photo library and reports back on the main actor.
+@MainActor
+private final class PhotoSaver: NSObject {
+    private var completion: ((Bool) -> Void)?
+
+    func save(_ image: UIImage, completion: @escaping (Bool) -> Void) {
+        self.completion = completion
+        UIImageWriteToSavedPhotosAlbum(image, self, #selector(finished(_:didFinishSavingWithError:contextInfo:)), nil)
+    }
+
+    @objc nonisolated private func finished(
+        _ image: UIImage, didFinishSavingWithError error: Error?, contextInfo: UnsafeRawPointer
+    ) {
+        let saved = error == nil
+        Task { @MainActor in self.completion?(saved) }
+    }
+}
+
+/// The exported card: the trade on its background, then Desk's footer with a QR code
+/// that opens Desk.
 private struct TradeShareCard: View {
     let symbol: String
     let figures: PositionFigures
     let photo: UIImage?
 
+    static let panelHeight: CGFloat = 420
+    static let footerHeight: CGFloat = 96
+    static let height: CGFloat = panelHeight + footerHeight + 10
+    static let link = "desk-trading-opia.vercel.app"
+
     private var tint: Color { figures.isProfit ? DeskColor.rise.color : DeskColor.fall.color }
+    private var sideTint: Color { figures.side == .long ? DeskColor.rise.color : DeskColor.fall.color }
+
     private var pnl: String {
-        (figures.unrealisedPnL.isNegative ? "" : "+") + figures.unrealisedPnL.display() + " AUSD"
+        DisplayCurrency.shared.format(figures.unrealisedPnL, signed: true)
     }
-    private var notional: String {
+
+    private var size: String {
         Money.notional(price: figures.mark, size: figures.size, rounding: .towardZero)
-            .map { $0.display() + " AUSD" } ?? Unavailable.text
+            .map { DisplayCurrency.shared.format($0) } ?? Unavailable.text
     }
 
     var body: some View {
-        ZStack {
-            if let photo {
-                Image(uiImage: photo).resizable().scaledToFill()
-                Color.black.opacity(0.58)
-                LinearGradient(colors: [.black.opacity(0.08), .black.opacity(0.84)],
-                               startPoint: .top, endPoint: .bottom)
-            } else {
-                Image("TradeShareCardBackground").resizable().scaledToFill()
-            }
+        VStack(spacing: 0) {
+            panel
+                .frame(height: Self.panelHeight)
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.white.opacity(0.06), lineWidth: 1))
+                .padding([.horizontal, .top], 10)
+            footer.frame(height: Self.footerHeight)
+        }
+        .frame(width: TradeShareSheet.cardWidth)
+        .background(Color(white: 0.075), in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 32, style: .continuous).stroke(Color.white.opacity(0.07), lineWidth: 1))
+        .environment(\.colorScheme, .dark)
+    }
 
+    private var panel: some View {
+        ZStack {
+            background
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 18) {
-                    DeskBrandMark(size: 68)
-                    Text("DESK")
-                        .font(.system(size: 34, weight: .black, design: .rounded))
-                        .tracking(7)
+                HStack(spacing: 9) {
+                    MarketTokenLogo(symbol: symbol, size: 26)
+                    Text(symbol)
+                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text("\(figures.side == .long ? "Long" : "Short") \(figures.leverageHundredths / 100)×")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(sideTint)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(sideTint.opacity(0.16), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                     Spacer()
                     Text(Date.now.formatted(date: .abbreviated, time: .omitted))
-                        .font(.system(size: 20, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.58))
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.55))
                 }
-
-                Spacer().frame(height: 92)
-
-                HStack(spacing: 14) {
-                    MarketTokenLogo(symbol: symbol, size: 54)
-                    Text(symbol).font(.system(size: 36, weight: .black, design: .rounded))
-                    Text(figures.side == .long ? "LONG" : "SHORT")
-                        .font(.system(size: 18, weight: .black, design: .rounded))
-                        .foregroundStyle(tint)
-                        .padding(.horizontal, 14).padding(.vertical, 8)
-                        .background(tint.opacity(0.16), in: Capsule())
-                    Text("\(figures.leverageHundredths / 100)×")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.72))
-                    Spacer()
-                }
-
-                Spacer().frame(height: 60)
-
-                Text(pnl)
-                    .font(.system(size: 74, weight: .black, design: .rounded).monospacedDigit())
-                    .foregroundStyle(tint).minimumScaleFactor(0.55).lineLimit(1)
-                Text(HomeScreen.percent(figures.returnOnMarginMicros) + " on margin")
-                    .font(.system(size: 32, weight: .bold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(tint.opacity(0.92))
-                    .padding(.top, 8)
 
                 Spacer()
 
-                HStack(spacing: 50) {
-                    shareFact("MARK PRICE", "$" + figures.mark.display(fractionDigits: figures.mark.decimals))
-                    shareFact("LEVERAGED SIZE", notional)
-                }
+                Text(pnl)
+                    .font(.system(size: 44, weight: .heavy, design: .rounded).monospacedDigit())
+                    .foregroundStyle(tint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                Text(HomeScreen.percent(figures.returnOnMarginMicros))
+                    .font(.system(size: 24, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(tint)
+                    .padding(.top, 2)
 
-                Rectangle().fill(DeskColor.action.color.opacity(0.6)).frame(height: 1)
-                    .padding(.top, 40)
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Trade from your desk.")
-                            .font(.system(size: 25, weight: .bold, design: .rounded))
-                        Text("Perpetuals secured by Face ID")
-                            .font(.system(size: 18, weight: .semibold, design: .rounded))
-                            .foregroundStyle(Color.white.opacity(0.56))
-                    }
-                    Spacer()
-                    Image(systemName: "qrcode")
-                        .resizable().interpolation(.none).frame(width: 88, height: 88)
-                        .foregroundStyle(.white)
+                HStack(alignment: .top, spacing: 28) {
+                    fact("Mark Price", "$" + figures.mark.display(fractionDigits: figures.mark.decimals))
+                    fact("Size", size)
                 }
-                .padding(.top, 34)
+                .padding(.top, 26)
+
+                Text("Entry $\(figures.entry.display(fractionDigits: figures.entry.decimals)) · open on Perpl")
+                    .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
+                    .foregroundStyle(Color.white.opacity(0.5))
+                    .padding(.top, 18)
+
+                Spacer().frame(height: 26)
+
+                HStack(spacing: 6) {
+                    Image(systemName: "globe").font(.system(size: 11, weight: .semibold))
+                    Text("Trade perps on Desk today.")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(Color.white.opacity(0.7))
             }
-            .padding(58)
-            .foregroundStyle(.white)
+            .padding(22)
         }
-        .clipped()
     }
 
-    private func shareFact(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(label).font(.system(size: 16, weight: .bold, design: .rounded))
-                .tracking(1).foregroundStyle(Color.white.opacity(0.5))
-            Text(value).font(.system(size: 27, weight: .bold, design: .rounded).monospacedDigit())
-                .lineLimit(1).minimumScaleFactor(0.7)
+    @ViewBuilder
+    private var background: some View {
+        if let photo {
+            Image(uiImage: photo).resizable().scaledToFill()
+                .frame(width: TradeShareSheet.cardWidth - 20, height: Self.panelHeight)
+                .clipped()
+            LinearGradient(colors: [.black.opacity(0.35), .black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
+        } else {
+            // The artwork's own frame and QR bracket sit in its lower fifth, so only the
+            // upper part is shown here; the footer below is drawn, not borrowed.
+            Image("TradeShareCardBackground").resizable().scaledToFill()
+                .frame(width: TradeShareSheet.cardWidth - 20, height: Self.panelHeight * 1.28, alignment: .top)
+                .frame(width: TradeShareSheet.cardWidth - 20, height: Self.panelHeight, alignment: .top)
+                .clipped()
+            LinearGradient(colors: [.black.opacity(0.1), .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
         }
+    }
+
+    private var footer: some View {
+        HStack(spacing: 10) {
+            DeskBrandMark(size: 30)
+            Text("Desk")
+                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+            Spacer()
+            Text("Download app")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+            QRCode(text: "https://" + Self.link)
+                .frame(width: 58, height: 58)
+        }
+        .padding(.horizontal, 26)
+    }
+
+    private func fact(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(Color.white.opacity(0.55))
+            Text(value)
+                .font(.system(size: 18, weight: .bold, design: .rounded).monospacedDigit())
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+    }
+}
+
+/// A real, scannable code, drawn white on the card's dark ground.
+private struct QRCode: View {
+    let text: String
+
+    var body: some View {
+        if let image = Self.image(for: text) {
+            Image(uiImage: image)
+                .interpolation(.none)
+                .resizable()
+                .scaledToFit()
+        }
+    }
+
+    private static func image(for text: String) -> UIImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(text.utf8)
+        filter.correctionLevel = "M"
+        guard let code = filter.outputImage else { return nil }
+        let colored = code.applyingFilter("CIFalseColor", parameters: [
+            "inputColor0": CIColor(red: 1, green: 1, blue: 1),
+            "inputColor1": CIColor(red: 0, green: 0, blue: 0, alpha: 0),
+        ])
+        let scaled = colored.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
+        guard let cgImage = CIContext().createCGImage(scaled, from: scaled.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
     }
 }
 
