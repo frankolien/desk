@@ -46,6 +46,9 @@ export function decodeEvent(log, timestamps) {
   const base = {
     kind,
     block: Number(log.block_number),
+    // Position within the block, so a range read twice can be told from two real events in
+    // the same block.
+    logIndex: Number(log.log_index ?? log.logIndex ?? 0),
     time: timestamps.get(Number(log.block_number)) ?? null,
     perp: Number(word(data, 0)),
     account: word(data, 1).toString(),
@@ -71,6 +74,11 @@ export function emptyRecord() {
     addr: null, open: {}, n: 0, w: 0, l: 0, gp: 0, gl: 0, cum: 0, peak: 0, dd: 0,
     streak: 0, bestStreak: 0, worstStreak: 0, hold: 0, holdN: 0, lev: 0, levN: 0,
     longs: 0, shorts: 0, liq: 0, vol: 0, funding: 0, first: null, last: null, markets: {},
+    // The last block folded into this record. Every figure here is an accumulation, so an
+    // event applied twice counts twice and there is no way to notice afterwards — and a
+    // replay is not hypothetical: the shards and the cursor are written in one Upstash
+    // pipeline, which is not a transaction, so the cursor can fail after the shards land.
+    block: 0, logIndex: -1,
   };
 }
 
@@ -88,16 +96,30 @@ function realise(record, pnl, time) {
 /// Folds one event into an account's record, and returns the trade it completed, if any.
 /// `market` supplies the symbol and decimals.
 export function applyEvent(record, event, market) {
+  // Already folded in. Every figure here is an accumulation, so an event applied twice
+  // counts twice with no way to notice afterwards — and a replay is not hypothetical: the
+  // shards and the cursor are written in one Upstash pipeline, which is not a transaction,
+  // so the cursor can fail after the shards have landed.
+  if (event.block != null) {
+    const index = event.logIndex ?? 0;
+    if (event.block < record.block || (event.block === record.block && index <= record.logIndex)) return null;
+    record.block = event.block;
+    record.logIndex = index;
+  }
   const symbol = market?.name ?? `#${event.perp}`;
-  const priceScale = 10 ** (market?.config?.price_decimals ?? 0);
-  const sizeScale = 10 ** (market?.config?.size_decimals ?? 0);
+  // A market this build has never seen cannot be priced. Scaling by one reported a BTC
+  // entry ten times too large and a volume a million times too large, which then fed the
+  // score; the trade still counts, its prices do not.
+  const known = Number.isInteger(market?.config?.price_decimals) && Number.isInteger(market?.config?.size_decimals);
+  const priceScale = known ? 10 ** market.config.price_decimals : null;
+  const sizeScale = known ? 10 ** market.config.size_decimals : null;
   const key = `${event.perp}:${event.isLong ? "L" : "S"}`;
   if (event.time) record.first = Math.min(record.first ?? event.time, event.time);
 
   if (event.kind === "opened") {
-    const price = Number(event.priceRaw) / priceScale;
+    const price = priceScale ? Number(event.priceRaw) / priceScale : null;
     record.open[key] = { t: event.time, entry: price, lev: event.leverage, r: 0 };
-    record.vol = round(record.vol + price * (Number(event.lotsRaw) / sizeScale), 2);
+    if (price != null) record.vol = round(record.vol + price * (Number(event.lotsRaw) / sizeScale), 2);
     record.lev += event.leverage;
     record.levN += 1;
     if (event.isLong) record.longs += 1; else record.shorts += 1;
@@ -115,12 +137,12 @@ export function applyEvent(record, event, market) {
 
   // closed or liquidated: the round trip ends here.
   const total = round((position?.r ?? 0) + event.pnl);
-  const exit = event.priceRaw != null ? Number(event.priceRaw) / priceScale : null;
+  const exit = event.priceRaw != null && priceScale ? Number(event.priceRaw) / priceScale : null;
   const holdSeconds = position?.t && event.time ? Math.max(0, event.time - position.t) : null;
   delete record.open[key];
 
   record.n += 1;
-  if (total > 0) {
+  if (total >= 0) {
     record.w += 1;
     record.gp = round(record.gp + total);
     record.streak = record.streak > 0 ? record.streak + 1 : 1;
@@ -193,7 +215,16 @@ export function score(record) {
   const profitFactor = record.gl > 0 ? Math.min(record.gp / record.gl, 3) : (record.gp > 0 ? 3 : 0);
   const drawdown = Math.min(record.dd / Math.max(record.gp, 1), 1);
   const raw = 45 * winRate + 35 * (profitFactor / 3) + 20 * (1 - drawdown);
-  const confidence = Math.min(1, record.n / 20) * Math.min(1, (record.gp + record.gl) / 250);
+  // Three things have to be true before a record is believed: enough trades, enough money
+  // moved through them, and more than one market. This raises the cost of a manufactured
+  // record — two accounts crossing each other on the book can hand one of them a perfect
+  // one for the price of the taker fee — without pretending to detect it: telling wash
+  // trading from real trading needs the counterparty, which these events do not carry.
+  const markets = Object.keys(record.markets ?? {}).length;
+  const confidence = Math.min(1, record.n / 20)
+    * Math.min(1, (record.gp + record.gl) / 250)
+    * Math.min(1, record.vol / 25_000)
+    * (markets > 1 ? 1 : 0.6);
   return Math.max(0, Math.min(100, Math.round(raw * confidence - Math.min(record.liq * 5, 25))));
 }
 
@@ -297,7 +328,7 @@ export function hypersyncClient({ token = process.env.HYPERSYNC_TOKEN, url = "ht
           from_block: from,
           to_block: to,
           logs: [{ address: [exchange], topics: [topics] }],
-          field_selection: { log: ["block_number", "data", "topic0"], block: ["number", "timestamp"] },
+          field_selection: { log: ["block_number", "log_index", "data", "topic0"], block: ["number", "timestamp"] },
         }),
       });
       if (!response.ok) throw new Error(`hypersync ${response.status}`);

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { isBuyable } from "../api/_chains.mjs";
-import { createHandler, depositTransaction } from "../api/relay-quote.mjs";
+import { createHandler, depositTransaction, matchesRoute } from "../api/relay-quote.mjs";
 import { createHandler as createStatus, phase } from "../api/relay-status.mjs";
 
 const USER = "0x03508bb71268bba25ecacc8f620e01866650532c";
@@ -28,8 +28,10 @@ function relayQuote(overrides = {}) {
     }],
     fees: { gas: { amountUsd: "0.0001" }, relayer: { amountUsd: "0.0974" } },
     details: {
-      currencyIn: { amountFormatted: "20.0", amountUsd: "0.45" },
-      currencyOut: { amountFormatted: "77.2", amountUsd: "0.37", minimumAmount: "73678516499071562493", currency: { symbol: "BRETT", decimals: 18 } },
+      currencyIn: { amountFormatted: "20.0", amountUsd: "0.45",
+        currency: { chainId: 143, address: "0x0000000000000000000000000000000000000000", symbol: "MON", decimals: 18 } },
+      currencyOut: { amountFormatted: "77.2", amountUsd: "0.37", minimumAmount: "73678516499071562493",
+        currency: { chainId: 8453, address: TOKEN, symbol: "BRETT", decimals: 18 } },
       totalImpact: { percent: "-18.97" }, timeEstimate: 2,
     },
   };
@@ -39,12 +41,36 @@ const respond = (status, body) => async () => ({ ok: status < 300, status, json:
 const quote = (fetchImpl, query = {}) => createHandler(fetchImpl)(
   { method: "GET", query: { user: USER, chainIndex: "8453", tokenAddress: TOKEN, amount: "20", ...query } }, recorder());
 
+test("a quote that pays out a different token or chain is refused", () => {
+  const routed = (currencyOut, currencyIn) => ({ details: { currencyOut: { currency: currencyOut }, currencyIn: { currency: currencyIn } } });
+  const native = { chainId: 143, address: "0x0000000000000000000000000000000000000000" };
+  const want = { chainId: 8453, address: "0xAbCdef0000000000000000000000000000000001" };
+
+  assert.equal(matchesRoute(routed(want, native), "8453", want.address), true);
+  // Case is not identity: the same token in a different spelling still matches.
+  assert.equal(matchesRoute(routed(want, native), "8453", want.address.toLowerCase()), true);
+  // A different token on the right chain, and the right token on a different chain.
+  assert.equal(matchesRoute(routed({ ...want, address: "0x9999999999999999999999999999999999999999" }, native), "8453", want.address), false);
+  assert.equal(matchesRoute(routed({ ...want, chainId: 1 }, native), "8453", want.address), false);
+  // Paying with something other than MON on Monad.
+  assert.equal(matchesRoute(routed(want, { chainId: 1, address: native.address }), "8453", want.address), false);
+  assert.equal(matchesRoute({ details: {} }, "8453", want.address), false);
+});
+
 test("a single native deposit crediting the user is summarised", async () => {
   const result = await quote(respond(200, relayQuote()));
   assert.equal(result.status, 200);
   assert.equal(result.body.receive.minimum, "73.678516499071562493");
   assert.equal(result.body.feeUsd, "0.1");
   assert.deepEqual(result.body.transaction, { chainId: 143, to: "0x4cD00E387622C35bDDB9b4c962C136462338BC31", data: DATA, value: WEI });
+});
+
+test("a quote whose payout is not the token that was asked for is refused end to end", async () => {
+  const wrongToken = relayQuote();
+  wrongToken.details.currencyOut.currency.address = "0x9999999999999999999999999999999999999999";
+  const result = await quote(respond(200, wrongToken));
+  assert.equal(result.status, 422);
+  assert.equal(result.body.reason, "unsupported-route");
 });
 
 test("any other transaction shape is refused before it reaches the app", () => {

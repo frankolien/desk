@@ -50,14 +50,60 @@ test("a round trip folds partial closes into one trade with hold time, market an
 });
 
 test("scores need trades and real money behind them, and liquidations cost", () => {
-  const steady = { ...emptyRecord(), n: 40, w: 28, l: 12, gp: 900, gl: 300, dd: 120, liq: 0 };
-  const dust = { ...steady, gp: 0.02, gl: 0.01, dd: 0 };
+  const steady = { ...emptyRecord(), n: 40, w: 28, l: 12, gp: 900, gl: 300, dd: 120, liq: 0,
+    vol: 80_000, markets: { BTC: [600, 20], ETH: [300, 20] } };
+  const dust = { ...steady, gp: 0.02, gl: 0.01, dd: 0, vol: 40 };
   const lucky = { ...steady, n: 3, w: 3, l: 0, gl: 0 };
   assert.ok(score(steady) > 60);
   assert.ok(score(dust) < 5);
   assert.ok(score(lucky) < score(steady));
   assert.equal(score({ ...steady, liq: 2 }), score(steady) - 10);
   assert.equal(score(emptyRecord()), null);
+
+  // A perfect record on one market, with little notional behind it, is the cheap shape to
+  // manufacture. It must not outrank a real one.
+  const thin = { ...emptyRecord(), n: 20, w: 20, l: 0, gp: 300, gl: 0, dd: 0, vol: 1_200,
+    markets: { BTC: [300, 20] } };
+  assert.ok(score(thin) < score(steady));
+  assert.ok(score(thin) < 20);
+});
+
+test("a replayed block range does not count twice", () => {
+  const market = { name: "BTC", config: { price_decimals: 1, size_decimals: 5 } };
+  const open = { block: 10, logIndex: 0, time: 100, perp: 1, isLong: true, kind: "opened", priceRaw: 600_000n, lotsRaw: 100_000n, leverage: 5 };
+  const close = { block: 11, logIndex: 3, time: 400, perp: 1, isLong: true, kind: "closed", priceRaw: 610_000n, pnl: 25, funding: 0 };
+
+  const once = emptyRecord();
+  applyEvent(once, open, market);
+  applyEvent(once, close, market);
+
+  const twice = emptyRecord();
+  applyEvent(twice, open, market);
+  applyEvent(twice, close, market);
+  // The pipeline that writes the shards and the cursor is not a transaction, so the same
+  // range can be read again after a partial write.
+  applyEvent(twice, open, market);
+  applyEvent(twice, close, market);
+
+  assert.equal(twice.n, once.n);
+  // Two real events in the same block are still two events.
+  const sameBlock = emptyRecord();
+  applyEvent(sameBlock, { ...open, block: 20, logIndex: 1 }, market);
+  applyEvent(sameBlock, { ...close, block: 20, logIndex: 2 }, market);
+  assert.equal(sameBlock.n, 1);
+  assert.equal(twice.gp, once.gp);
+  assert.equal(twice.cum, once.cum);
+  assert.equal(twice.vol, once.vol);
+});
+
+test("a market this build has never seen counts the trade but not its prices", () => {
+  const record = emptyRecord();
+  applyEvent(record, { block: 5, logIndex: 0, time: 10, perp: 99, isLong: true, kind: "opened", priceRaw: 600_000n, lotsRaw: 100_000n, leverage: 5 }, undefined);
+  const trade = applyEvent(record, { block: 6, logIndex: 1, time: 20, perp: 99, isLong: true, kind: "closed", priceRaw: 610_000n, pnl: 5, funding: 0 }, undefined);
+  assert.equal(record.n, 1);
+  assert.equal(record.vol, 0);
+  assert.equal(trade[3], null);
+  assert.equal(trade[4], null);
 });
 
 test("tags and the sentence come only from the figures", () => {

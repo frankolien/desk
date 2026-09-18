@@ -34,6 +34,24 @@ export function depositTransaction(quote, user, wei) {
   return ok ? { chainId: MONAD, to: tx.to, data: tx.data, value: String(tx.value) } : null;
 }
 
+/// The quote has to describe the route that was asked for.
+///
+/// `depositTransaction` checks what leaves the wallet — chain, depository, selector,
+/// depositor and value — and is airtight on that. It says nothing about what arrives,
+/// because the only thing binding this deposit to a destination is Relay's own request id
+/// inside the calldata. So the figures the sheet shows are checked against the route the
+/// caller asked for: a quote that pays out a different token, or on a different chain, is
+/// refused rather than displayed.
+export function matchesRoute(quote, chainIndex, token) {
+  const out = quote?.details?.currencyOut?.currency;
+  const into = quote?.details?.currencyIn?.currency;
+  if (!out || !into) return false;
+  if (Number(out.chainId) !== Number(chainIndex)) return false;
+  if (String(out.address ?? "").toLowerCase() !== String(token).toLowerCase()) return false;
+  if (Number(into.chainId) !== MONAD) return false;
+  return String(into.address ?? "").toLowerCase() === NATIVE.toLowerCase();
+}
+
 export function summarize(quote, transaction) {
   const details = quote.details ?? {};
   const fees = quote.fees ?? {};
@@ -111,7 +129,7 @@ export function createHandler(fetchImpl = fetch) {
     }
 
     const transaction = depositTransaction(quote, user, wei);
-    if (!transaction) {
+    if (!transaction || !matchesRoute(quote, chainIndex, token)) {
       return res.status(422).json({ error: "This route needs a transaction Desk does not sign.", reason: "unsupported-route" });
     }
     return res.status(200).json(summarize(quote, transaction));
