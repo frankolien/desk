@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 import { apnsClient, isDeadToken } from "./_apns.mjs";
 import { hypersyncClient, indexHistory } from "./_history.mjs";
@@ -97,6 +97,18 @@ const leverageText = (value) => (value == null ? "" : `${Number.isInteger(value)
 const shortAddress = (address) => `${address.slice(0, 6)}…${address.slice(-4)}`;
 
 /// The notification a follower reads, and the fields the app needs to open the copy.
+const lockToken = () => randomBytes(16).toString("hex");
+
+/// Releases a lock only if this run still holds it. A run that overran its lease used to
+/// delete the next run's lock on its way out, which let a third run in alongside it.
+async function release(store, key, token) {
+  try {
+    if (await store.get(key) === token) await store.del(key);
+  } catch {
+    // A lock nobody released expires on its own.
+  }
+}
+
 export function alertPayload(address, name, event) {
   const who = name || shortAddress(address);
   const { position } = event;
@@ -170,6 +182,31 @@ export async function readBook(chain, markets, address) {
   return book;
 }
 
+/// Each subscription's first address, then each one's second, and so on until the budget is
+/// spent. Every subscriber is served before anyone is served twice.
+export function shareBudget(followers, budget) {
+  const queues = new Map();
+  for (const [address, watchers] of followers) {
+    for (const watcher of watchers) {
+      if (!queues.has(watcher.id)) queues.set(watcher.id, []);
+      queues.get(watcher.id).push(address);
+    }
+  }
+  const chosen = new Set();
+  const lists = [...queues.values()];
+  for (let rank = 0; chosen.size < budget; rank += 1) {
+    let reached = false;
+    for (const list of lists) {
+      if (rank >= list.length) continue;
+      reached = true;
+      chosen.add(list[rank]);
+      if (chosen.size >= budget) break;
+    }
+    if (!reached) break;
+  }
+  return [...chosen];
+}
+
 async function inBatches(items, size, work) {
   const out = [];
   for (let index = 0; index < items.length; index += size) {
@@ -194,7 +231,10 @@ export async function scan({ store, chain, apns, markets }) {
   });
   await store.srem(SUBSCRIPTIONS, ...expired);
 
-  const addresses = [...followers.keys()].slice(0, MAX_SCANNED);
+  // Round-robin across subscriptions rather than a flat slice: a flat one let fifteen junk
+  // subscriptions, twenty addresses each, fill the whole budget and silently stop every real
+  // follower's alerts.
+  const addresses = shareBudget(followers, MAX_SCANNED);
   const previous = await store.mget(addresses.map(snapshotKey));
   const books = await inBatches(addresses, 20, (address) => readBook(chain, markets, address).catch(() => null));
 
@@ -259,7 +299,8 @@ export function createHandler(resolve) {
     if (req.query?.job === "index") {
       if (!authorized(req, deps.secret)) return res.status(401).json({ error: "Unauthorized." });
       if (!deps.store || !deps.hypersync) return res.status(503).json({ error: "History indexing isn't configured on this server." });
-      if (!await deps.store.set("hist:lock", "1", { ex: 58, nx: true })) return res.status(202).json({ skipped: true });
+      const historyToken = lockToken();
+      if (!await deps.store.set("hist:lock", historyToken, { ex: 58, nx: true })) return res.status(202).json({ skipped: true });
       try {
         const report = await indexHistory({
           store: deps.store, hypersync: deps.hypersync, markets: await deps.markets(), deadline: Date.now() + 40_000,
@@ -268,7 +309,7 @@ export function createHandler(resolve) {
       } catch (error) {
         return res.status(502).json({ error: "History could not be indexed.", detail: String(error?.message ?? error) });
       } finally {
-        await deps.store.del("hist:lock").catch(() => {});
+        await release(deps.store, "hist:lock", historyToken);
       }
     }
 
@@ -278,7 +319,8 @@ export function createHandler(resolve) {
     if (req.query?.job === "scan") {
       if (!authorized(req, deps.secret)) return res.status(401).json({ error: "Unauthorized." });
       // Schedulers overlap when a scan runs long; only one may read and deliver at a time.
-      if (!await store.set("alerts:lock", "1", { ex: 58, nx: true })) return res.status(202).json({ skipped: true });
+      const scanToken = lockToken();
+      if (!await store.set("alerts:lock", scanToken, { ex: 90, nx: true })) return res.status(202).json({ skipped: true });
       const rounds = Math.min(MAX_ROUNDS, Math.max(1, Number(req.query.rounds ?? MAX_ROUNDS) || 1));
       const reports = [];
       try {
@@ -295,7 +337,7 @@ export function createHandler(resolve) {
         return res.status(502).json({ error: "The scan could not finish.", rounds: reports });
       } finally {
         apns.close();
-        await store.del("alerts:lock").catch(() => {});
+        await release(store, "alerts:lock", scanToken);
       }
     }
 
@@ -325,13 +367,15 @@ export function createHandler(resolve) {
     if (!known && await store.scard(SUBSCRIPTIONS) >= MAX_SUBSCRIPTIONS) {
       return res.status(503).json({ error: "Trade alerts are full right now." });
     }
-    await store.set(subscriptionKey(id), JSON.stringify(record), { ex: SUBSCRIPTION_TTL });
-    await store.sadd(SUBSCRIPTIONS, id);
 
-    // A confirmation the first time alerts are turned on, so the person sees the whole
-    // path work instead of waiting for a trader to move.
+    // A subscription nobody can deliver to is not a subscription, it is a seat taken from
+    // someone who can. A first registration is only written once Apple has accepted a push
+    // for that token, which costs an attacker a real device and a real token per seat.
+    // The confirmation the person sees is the same push, so this proves the whole path.
     let confirmed = false;
-    if (body.confirm === true && await store.set(`alerts:confirm:${id}`, "1", { ex: 60, nx: true })) {
+    let environment = record.environment;
+    const announcing = !known || body.confirm === true;
+    if (announcing && await store.set(`alerts:confirm:${id}`, "1", { ex: 60, nx: true })) {
       const first = record.traders[0];
       const who = record.names[first] || shortAddress(first);
       const result = await apns.send(record, {
@@ -348,10 +392,18 @@ export function createHandler(resolve) {
       });
       apns.close();
       confirmed = result.status === 200;
-      if (confirmed && result.environment !== record.environment) {
-        await store.set(subscriptionKey(id), JSON.stringify({ ...record, environment: result.environment }), { ex: SUBSCRIPTION_TTL });
+      if (confirmed) environment = result.environment ?? environment;
+      if (!confirmed && !known) {
+        return res.status(400).json({ error: "This iPhone couldn't be reached by Apple, so alerts weren't saved." });
       }
+    } else if (!known) {
+      // A repeat registration inside the confirmation window, before the first one was
+      // written. Nothing is stored on this path either.
+      return res.status(429).json({ error: "Trade alerts are still being set up. Try again in a moment." });
     }
+
+    await store.set(subscriptionKey(id), JSON.stringify({ ...record, environment }), { ex: SUBSCRIPTION_TTL });
+    await store.sadd(SUBSCRIPTIONS, id);
     return res.status(200).json({ traders: record.traders.length, confirmed });
   };
 }

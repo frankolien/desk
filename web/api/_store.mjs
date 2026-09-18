@@ -14,9 +14,8 @@ export function redisStore({
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    const parsed = await response.json();
     if (!response.ok) throw new Error(`redis ${response.status}`);
-    return parsed;
+    return response.json();
   }
 
   async function command(...args) {
@@ -39,6 +38,8 @@ export function redisStore({
     sadd: (key, member) => command("SADD", key, member),
     srem: (key, ...members) => (members.length ? command("SREM", key, ...members) : 0),
     scard: (key) => command("SCARD", key),
+    incr: (key) => command("INCR", key),
+    expire: (key, seconds) => command("EXPIRE", key, String(seconds)),
     async setMany(entries, ex) {
       if (!entries.length) return;
       const results = await call("/pipeline", entries.map(([key, value]) => ["SET", key, value, "EX", String(ex)]));
@@ -73,6 +74,12 @@ export function memoryStore() {
       return members.length;
     },
     scard: async (key) => sets.get(key)?.size ?? 0,
+    async incr(key) {
+      const next = Number(values.get(key) ?? 0) + 1;
+      values.set(key, String(next));
+      return next;
+    },
+    async expire() { return 1; },
     async setMany(entries) {
       entries.forEach(([key, value]) => values.set(key, value));
     },

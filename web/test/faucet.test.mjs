@@ -4,8 +4,9 @@ import { test } from "node:test";
 
 import {
   AUSD_MINIMUM, MON_DRIP, MON_RESERVE, MON_THRESHOLD,
-  createHandler, plan, revertReason, throttled, validRecipient,
+  createHandler, limited, plan, revertReason, throttled, validRecipient,
 } from "../api/faucet.mjs";
+import { memoryStore } from "../api/_store.mjs";
 
 const WALLET = "0x1111111111111111111111111111111111111111";
 const FULL_FAUCET = 10n ** 20n;
@@ -36,6 +37,30 @@ function fakeChain(balances, overrides = {}) {
 
 const fund = (chain, body = { address: WALLET }) =>
   createHandler(() => chain, new Map())({ method: "POST", body }, recorder());
+
+test("shared limits stop one caller bringing a hundred fresh wallets", async () => {
+  const store = memoryStore();
+  const headers = { "x-forwarded-for": "203.0.113.9" };
+  const wallet = (index) => `0x${String(index).padStart(40, "b")}`;
+
+  // Ten wallets from one caller are allowed; the eleventh is not.
+  for (let index = 0; index < 10; index += 1) {
+    assert.equal(await limited(store, wallet(index), headers), null);
+  }
+  const refused = await limited(store, wallet(99), headers);
+  assert.equal(refused?.reason, "too-soon");
+
+  // A different caller is unaffected, but a wallet already funded today is refused again.
+  assert.equal(await limited(store, wallet(50), { "x-forwarded-for": "198.51.100.4" }), null);
+  const repeat = await limited(store, wallet(0), { "x-forwarded-for": "198.51.100.4" });
+  assert.equal(repeat?.reason, "too-soon");
+
+  // A store that cannot answer refuses rather than waving everyone through.
+  const broken = { set: async () => { throw new Error("redis"); } };
+  assert.equal((await limited(broken, wallet(1), headers))?.reason, "unavailable");
+  // No store configured at all keeps the in-memory behaviour.
+  assert.equal(await limited(null, wallet(1), headers), null);
+});
 
 test("an empty wallet gets MON and AUSD on consecutive nonces", async () => {
   const chain = fakeChain({ recipientMON: 0n, recipientAUSD: 0n, faucetMON: FULL_FAUCET });

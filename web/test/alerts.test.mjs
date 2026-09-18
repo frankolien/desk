@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { isDeadToken, providerToken, readPrivateKey } from "../api/_apns.mjs";
 import { memoryStore } from "../api/_store.mjs";
 import {
-  alertPayload, compactDollars, createHandler, parseSubscription, readBook, scan, subscriptionId, tradeEvents,
+  alertPayload, compactDollars, createHandler, parseSubscription, readBook, scan, shareBudget, subscriptionId, tradeEvents,
 } from "../api/alerts.mjs";
 
 const ALICE = "0x95d2602d30da1179fd13274839e60345857ca648";
@@ -91,6 +91,10 @@ test("the first scan sets a baseline, the next one pushes what changed to every 
 
   const subscribed = await handler({ method: "POST", query: {}, body: subscribe() }, recorder());
   assert.equal(subscribed.status, 200);
+  // Registering pushes the confirmation, which is also the proof the token is real.
+  assert.equal(apns.sent.length, 1);
+  assert.equal(apns.sent[0].payload.desk.type, "confirmation");
+  apns.sent.length = 0;
 
   const first = await scan({ store, chain: fakeChain(state), apns, markets });
   assert.deepEqual([first.traders, first.sent], [1, 0]);
@@ -108,6 +112,29 @@ test("the first scan sets a baseline, the next one pushes what changed to every 
   const closed = await scan({ store, chain: fakeChain(state), apns, markets });
   assert.equal(closed.sent, 1);
   assert.match(apns.sent[1].payload.aps.alert.title, /closed their ETH short/);
+});
+
+test("a subscription is only stored once Apple accepts a push for its token", async () => {
+  const store = memoryStore();
+  const refused = fakeAPNs({ status: 400, reason: "BadDeviceToken" });
+  const handler = createHandler(() => ({ store, apns: refused, chain: fakeChain({}), markets: async () => markets, secret: "s3cret", sleep: async () => {} }));
+
+  const rejected = await handler({ method: "POST", query: {}, body: subscribe() }, recorder());
+  assert.equal(rejected.status, 400);
+  assert.equal(await store.get(`alerts:sub:${subscriptionId(INSTALL)}`), null);
+  assert.equal(await store.scard("alerts:subs"), 0);
+});
+
+test("the scan budget is shared between subscriptions, not taken first-come", () => {
+  const flood = Array.from({ length: 30 }, (_, index) => `0x${String(index).padStart(40, "a")}`);
+  const followers = new Map();
+  // One subscription watching thirty addresses, and one watching a single real trader.
+  for (const address of flood) followers.set(address, [{ id: "attacker", record: {} }]);
+  followers.set(ALICE, [{ id: "victim", record: {} }]);
+
+  const chosen = shareBudget(followers, 10);
+  assert.equal(chosen.length, 10);
+  assert.ok(chosen.includes(ALICE), "the second subscription's trader must still be scanned");
 });
 
 test("a dead token removes its subscription; a token of the other kind is remembered", async () => {

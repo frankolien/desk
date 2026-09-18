@@ -1,8 +1,12 @@
+import { createHash } from "node:crypto";
+
 import {
   createPublicClient, createWalletClient, encodeFunctionData, http,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { monadTestnet } from "viem/chains";
+
+import { redisStore } from "./_store.mjs";
 
 export const AUSD = "0xa9012a055bd4e0eDfF8Ce09f960291C09D5322dC";
 export const AGORA_FAUCET = "0xd236c18D274E54FAccC3dd9DDA4b27965a73ee6C";
@@ -123,9 +127,41 @@ export function chainDependencies(privateKey, rpcURL = monadTestnet.rpcUrls.defa
   };
 }
 
-/// One wallet per minute per instance. Balance gating is the real limit: a wallet above
-/// the thresholds is never paid, so this only stops a burst from racing the first read.
+/// One wallet per minute per instance. Kept as the fallback for a deployment with no Redis;
+/// on its own it is per-instance, which on Vercel is not a limit at all.
 const recent = new Map();
+
+/// The shared limits, which is what actually bounds a drain: one claim per address per day,
+/// and a cap per caller per hour. Balance gating gives away nothing to a wallet that already
+/// holds funds, but nothing stopped a script from bringing fresh addresses.
+const ADDRESS_WINDOW_SECONDS = 24 * 3600;
+const CALLER_WINDOW_SECONDS = 3600;
+const CALLER_LIMIT = 10;
+
+export function callerKey(headers = {}) {
+  const forwarded = String(headers["x-forwarded-for"] ?? "").split(",")[0].trim();
+  const address = forwarded || String(headers["x-real-ip"] ?? "").trim();
+  return address ? `faucet:ip:${createHash("sha256").update(address).digest("hex").slice(0, 32)}` : null;
+}
+
+/// Nothing is dripped until both limits agree. A store that is down refuses rather than
+/// waving everyone through: a faucet is the one place where failing open costs real money.
+export async function limited(store, recipient, headers) {
+  if (!store) return null;
+  try {
+    if (!await store.set(`faucet:addr:${recipient}`, "1", { ex: ADDRESS_WINDOW_SECONDS, nx: true })) {
+      return { error: "This wallet was funded today.", reason: "too-soon" };
+    }
+    const caller = callerKey(headers);
+    if (!caller) return null;
+    const count = await store.incr(caller);
+    if (count === 1) await store.expire(caller, CALLER_WINDOW_SECONDS);
+    if (count > CALLER_LIMIT) return { error: "That is a lot of wallets. Try again later.", reason: "too-soon" };
+    return null;
+  } catch {
+    return { error: "The faucet could not check its limits.", reason: "unavailable" };
+  }
+}
 
 export function throttled(key, now = Date.now(), memory = recent) {
   for (const [entry, at] of memory) if (now - at > RECENT_WINDOW_MS) memory.delete(entry);
@@ -144,7 +180,7 @@ function serially(work) {
   return turn;
 }
 
-export function createHandler(resolveDependencies, memory = recent) {
+export function createHandler(resolveDependencies, memory = recent, resolveStore = () => redisStore()) {
   return async function handler(req, res) {
     res.setHeader("Cache-Control", "private, no-store");
     if (req.method !== "POST") return res.status(405).json({ error: "POST required" });
@@ -160,6 +196,11 @@ export function createHandler(resolveDependencies, memory = recent) {
     }
     if (throttled(recipient.toLowerCase(), Date.now(), memory)) {
       return res.status(429).json({ error: "This wallet was just funded.", reason: "too-soon" });
+    }
+    const refusal = await limited(resolveStore(), recipient.toLowerCase(), req.headers ?? {});
+    if (refusal) {
+      memory.delete(recipient.toLowerCase());
+      return res.status(refusal.reason === "unavailable" ? 503 : 429).json(refusal);
     }
 
     try {
