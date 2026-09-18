@@ -141,11 +141,22 @@ export function chainReader(rpcURL = process.env.MONAD_MAINNET_RPC || "https://r
 /// The distinction is the whole point: auto-copy diffs this against what it saw last time,
 /// so a read that failed must never arrive as a trader holding nothing. That is a wave of
 /// closes on positions the trader still holds.
+/// A wallet with no Perpl account reverts; a chain that would not answer throws something
+/// else. The first is a fact about the trader, the second is an absence of facts, and only
+/// the second must stop auto-copy from diffing.
+export function isRevert(error) {
+  for (let cause = error; cause; cause = cause.cause) {
+    if (cause.name === "ContractFunctionRevertedError" || cause.name === "ExecutionRevertedError") return true;
+  }
+  return false;
+}
+
 async function trader(chain, book, address) {
   let account;
   try {
     account = await chain.accountByAddress(address);
-  } catch {
+  } catch (error) {
+    if (isRevert(error)) return null;
     return { unreadable: true };
   }
   if (!account || account.accountId === 0n) return null;

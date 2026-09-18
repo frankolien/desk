@@ -101,6 +101,26 @@ test("a followed wallet shows its live positions, and an unknown one shows none"
   assert.deepEqual(result.body.traders[1], { address: other, accountId: null, positions: [] });
 });
 
+test("a wallet with no Perpl account is flat; a chain that will not answer is unreadable", async () => {
+  const revert = Object.assign(new Error("reverted"), {
+    name: "ContractFunctionExecutionError",
+    cause: Object.assign(new Error("reverted"), { name: "ContractFunctionRevertedError" }),
+  });
+  const chain = {
+    async accountByAddress(address) {
+      throw address === ALICE ? revert : new Error("fetch failed");
+    },
+    async openPosition() { return null; },
+  };
+  const other = "0x1111111111111111111111111111111111111111";
+  const result = await createHandler({ chain, fetchImpl: context })(
+    { method: "GET", query: { view: "following", addresses: `${ALICE},${other}` } }, recorder());
+  assert.equal(result.status, 200);
+  assert.equal(result.body.traders[0].unreadable, undefined);
+  assert.deepEqual(result.body.traders[0].positions, []);
+  assert.equal(result.body.traders[1].unreadable, true);
+});
+
 test("a trader whose book could not be read is marked unreadable, never flat", async () => {
   const chain = {
     async accountByAddress(address) {
