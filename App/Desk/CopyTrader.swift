@@ -62,7 +62,7 @@ struct CopyLogEntry: Codable, Hashable, Identifiable {
     let symbol: String
     let isLong: Bool
     let kind: Kind
-    let detail: String
+    var detail: String
     var leverage: Int?
     var margin: Double?
     /// From the moment the trader's move was seen to the fill.
@@ -110,6 +110,10 @@ final class CopyTrader {
     /// Traders whose book read as empty once. A second reading has to agree before the
     /// copies are closed.
     private var unconfirmedFlat: Set<String> = []
+    /// Log entries still waiting for the venue's realised figure, by the position it closed.
+    private var pendingRealised: [UUID: Int64] = [:]
+    /// When a basket re-pick that found nobody may be tried again.
+    private var basketRetry: Date?
     private var portfolios: [String: Double] = [:]
     private var accounts: [UInt64: String] = [:]
     private var wokenAt: Date?
@@ -313,6 +317,7 @@ final class CopyTrader {
         for (symbol, mark) in mainnet.marks where marks[symbol] == nil { marks[symbol] = mark }
 
         reconcileLive(model: model)
+        backfillRealised(model: model)
         priceShadows(marks)
 
         for trader in traders {
@@ -365,6 +370,7 @@ final class CopyTrader {
               (response as? HTTPURLResponse)?.statusCode == 200,
               let body = try? JSONDecoder().decode(Books.self, from: data) else { return nil }
         var books: [String: [String: ObservedPosition]] = [:]
+        var seen: Set<String> = []
         for trader in body.traders {
             // The server says so when the chain would not answer. Leaving the trader out of
             // `books` skips their diff entirely, which is what an unknown book deserves.
@@ -387,7 +393,15 @@ final class CopyTrader {
             books[trader.id] = book
             portfolios[trader.id] = trader.portfolio
             if let account = trader.accountId.flatMap(UInt64.init) { accounts[account] = trader.id }
+            seen.insert(trader.id)
         }
+        // Anything no longer being copied is dropped rather than accumulated: a stale entry
+        // here keeps waking the loop for a trader the person stopped following.
+        let live = Set(traders.map(\.id)).union(open.map { $0.trader.lowercased() })
+        accounts = accounts.filter { live.contains($0.value) }
+        portfolios = portfolios.filter { live.contains($0.key) }
+        baselines = baselines.filter { live.contains($0.key) }
+        unconfirmedFlat = unconfirmedFlat.intersection(seen)
         return books
     }
 
@@ -401,6 +415,7 @@ final class CopyTrader {
 
     private func rotateBasketIfDue() async {
         guard let basket else { return }
+        if let basketRetry, Date.now < basketRetry { return }
         if let last = basket.lastRotation, Date.now.timeIntervalSince(last) < Double(basket.rotateHours) * 3600 { return }
         let manual = Set(traders.filter { !$0.isFromBasket }.map(\.id))
         // Best by indexed score first, so the basket holds consistent traders rather than
@@ -412,7 +427,15 @@ final class CopyTrader {
             .filter { !manual.contains($0.lowercased()) && seen.insert($0.lowercased()).inserted }
             .prefix(basket.size)
             .map { $0 }
-        guard !picked.isEmpty else { return }
+        guard !picked.isEmpty else {
+            // Nothing to pick: the leaderboard is down, or everything it offered is already
+            // being copied. Waiting ten minutes rather than the whole rotation keeps a
+            // transient outage from costing a day of basket, and keeps a permanent one from
+            // costing a request every four seconds.
+            basketRetry = .now.addingTimeInterval(600)
+            return
+        }
+        basketRetry = nil
         let pickedIDs = Set(picked.map { $0.lowercased() })
         let leaving = traders.filter { $0.isFromBasket && !pickedIDs.contains($0.id) }.count
         let joining = picked.filter { address in !traders.contains { $0.id == address.lowercased() } }
@@ -571,7 +594,22 @@ final class CopyTrader {
             case .rejected(let code, let subReason, let error):
                 note(.failed, error ?? TradingSession.reason(code: code, subReason: subReason))
             default:
-                note(.failed, "The order expired before it filled. Nothing was opened.")
+                // The venue stopped answering, which is not the same as nothing happening.
+                // A fill that lands after the poll gives up is a real position: recording it
+                // is what keeps the open-copy limit, the exposure cap and closing with the
+                // trader true. Saying "nothing was opened" and walking away was a position
+                // the app then had no idea it held.
+                if let filled = await newPosition(marketID: target.id, isLong: side == .long, model: model) {
+                    open.append(OpenCopy(
+                        id: UUID(), trader: trader, marketID: target.id, symbol: symbol, isLong: side == .long,
+                        sizeRaw: plan.draft.size.raw, leverage: plan.leverage, margin: plan.margin,
+                        positionID: filled.positionID, openedAt: .now, theirEntry: theirs.entry))
+                    entry.detail += " · filled late"
+                    record(entry)
+                    onEvent?("Copied \(Self.name(for: trader)): \(label)")
+                } else {
+                    note(.failed, "The order expired before it filled. Nothing was opened.")
+                }
             }
         } catch {
             note(.failed, TradingSession.sentence(for: error))
@@ -614,7 +652,11 @@ final class CopyTrader {
             case .settled:
                 open.removeAll { $0.id == copy.id }
                 let pnl = await realised(positionID: position.positionID, model: model)
-                note(.closed, reason, pnl: pnl)
+                let entryID = UUID()
+                if pnl == nil { pendingRealised[entryID] = position.positionID }
+                record(CopyLogEntry(id: entryID, date: .now, trader: trader, symbol: symbol, isLong: copy.isLong,
+                                    kind: .closed, detail: reason, leverage: copy.leverage, margin: copy.margin,
+                                    pnl: pnl))
                 onEvent?("Closed copy of \(Self.name(for: trader)) \(symbol)")
             case .rejected(let code, let subReason, let error):
                 note(.failed, (error ?? TradingSession.reason(code: code, subReason: subReason)) + " Your copy is still open.")
@@ -631,7 +673,14 @@ final class CopyTrader {
     private func reconcileLive(model: AppModel) {
         guard model.trading.positions.value != nil else { return }
         for copy in open where !copy.shadowed {
-            guard let positionID = copy.positionID,
+            // A copy whose position id never arrived is matched on its market and side, the
+            // same fallback the close path uses. Without it such a copy stayed open forever
+            // and quietly consumed a slot against the open-copy and exposure limits.
+            let side: Side = copy.isLong ? .long : .short
+            let positionID = copy.positionID ?? model.closedPositions
+                .filter { $0.marketID == copy.marketID && $0.side == side }
+                .max { $0.positionID < $1.positionID }?.positionID
+            guard let positionID,
                   !model.openPositions.contains(where: { $0.positionID == positionID }) else { continue }
             let closed = model.closedPositions.first { $0.positionID == positionID }
             open.removeAll { $0.id == copy.id }
@@ -664,6 +713,23 @@ final class CopyTrader {
             try? await Task.sleep(for: .milliseconds(250))
         }
         return nil
+    }
+
+    /// Fills in a realised figure that arrived after the close was recorded.
+    ///
+    /// `compactMap(\.pnl)` drops entries with no figure, and the daily loss limit is built
+    /// from exactly that sum — so a close whose `dpnl` frame was late counted as zero
+    /// forever, and the limit the person set was quietly larger than they set it.
+    private func backfillRealised(model: AppModel) {
+        guard !pendingRealised.isEmpty, model.trading.positions.value != nil else { return }
+        for (entryID, positionID) in pendingRealised {
+            guard let raw = model.closedPositions.first(where: { $0.positionID == positionID })?.realisedPnLRaw
+            else { continue }
+            pendingRealised[entryID] = nil
+            guard let index = log.firstIndex(where: { $0.id == entryID }) else { continue }
+            log[index].pnl = Double(raw) / 1_000_000
+            persist()
+        }
     }
 
     private func realised(positionID: Int64, model: AppModel) async -> Double? {
@@ -800,8 +866,16 @@ final class PositionStream {
 
     private var watched: Set<UInt64> = []
     private var runner: Task<Void, Never>?
+    /// Held so `stop()` can close it. `URLSessionWebSocketTask.receive()` does not honour
+    /// task cancellation, so cancelling the runner alone left the socket — and its
+    /// exchange-wide subscription — open until the next frame happened to arrive.
+    private var socket: URLSessionWebSocketTask?
 
     func watch(_ accounts: Set<UInt64>) { watched = accounts }
+
+    private nonisolated static func account(inFrame text: String) async -> UInt64? {
+        await Task.detached(priority: .utility) { PositionEvents.account(inFrame: text) }.value
+    }
 
     func start(url: URL, exchange: String) {
         runner?.cancel()
@@ -809,6 +883,7 @@ final class PositionStream {
             var delay: Duration = .seconds(1)
             while !Task.isCancelled {
                 let task = URLSession.shared.webSocketTask(with: url)
+                self?.socket = task
                 task.resume()
                 do {
                     try await task.send(.string(PositionEvents.subscription(exchange: exchange)))
@@ -817,8 +892,10 @@ final class PositionStream {
                         let message = try await task.receive()
                         guard case .string(let text) = message else { continue }
                         if text.contains("\"id\":1"), text.contains("result") { self?.onState?(true); continue }
-                        guard let self, let account = PositionEvents.account(inFrame: text),
-                              self.watched.contains(account) else { continue }
+                        // Every position event on the exchange arrives here, not only the
+                        // copied traders', so the JSON parse runs off the main actor.
+                        guard let account = await Self.account(inFrame: text),
+                              let self, self.watched.contains(account) else { continue }
                         self.onMove?(account)
                     }
                 } catch {
@@ -832,6 +909,8 @@ final class PositionStream {
     }
 
     func stop() {
+        socket?.cancel(with: .goingAway, reason: nil)
+        socket = nil
         runner?.cancel()
         runner = nil
         onState?(false)

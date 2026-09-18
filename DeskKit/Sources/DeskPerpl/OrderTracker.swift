@@ -61,7 +61,26 @@ public actor OrderTracker {
             phase: .sent,
             requestID: requestID ?? frameID,
             deadlineBlock: deadlineBlock)
+        prune()
     }
+
+    /// Finished orders are kept only while something might still ask about them.
+    ///
+    /// Nothing forgot a settled order: `forget` is called when a send fails and never when
+    /// one succeeds, so auto-copy — which sends an order, a stop and a take profit per copy
+    /// — grew this map for the life of the session, and every socket frame and every head
+    /// block walked all of it.
+    private func prune() {
+        guard entries.count > Self.retained else { return }
+        let finished = entries.filter { $0.value.phase.isTerminal }.keys.sorted()
+        for frameID in finished.prefix(entries.count - Self.retained) {
+            entries.removeValue(forKey: frameID)
+        }
+    }
+
+    /// Enough to answer every caller that polls after a settlement, and to keep the map
+    /// small enough that scanning it stays free.
+    private static let retained = 64
 
     public func phase(of frameID: Int64) -> OrderPhase? { entries[frameID]?.phase }
 

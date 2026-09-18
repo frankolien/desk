@@ -100,6 +100,26 @@ struct OrderTrackerTests {
         #expect(await tracker.phase(of: 1) == .sent)
     }
 
+    @Test("Finished orders are forgotten in order, and orders still in flight are not")
+    func boundedMemory() async throws {
+        let tracker = OrderTracker()
+        // Auto-copy sends three frames per copy — the order, its stop and its take profit —
+        // and nothing forgot them, so the map grew for the life of the session.
+        for frameID in 1...200 {
+            try await tracker.track(frameID: Int64(frameID), deadlineBlock: 10_000)
+            _ = await tracker.apply(try frame(#"{"mt":24,"rq":\#(frameID),"pid":7}"#))
+        }
+        // One left in flight, which must survive however much settles after it.
+        try await tracker.track(frameID: 500, deadlineBlock: 10_000)
+        for frameID in 201...260 {
+            try await tracker.track(frameID: Int64(frameID), deadlineBlock: 10_000)
+            _ = await tracker.apply(try frame(#"{"mt":24,"rq":\#(frameID),"pid":7}"#))
+        }
+        #expect(await tracker.phase(of: 500) == .sent)
+        #expect(await tracker.phase(of: 1) == nil)
+        #expect(await tracker.phase(of: 260) == .settled)
+    }
+
     @Test("A zero frame id is refused, because it can never be correlated")
     func zeroFrameID() async {
         let tracker = OrderTracker()

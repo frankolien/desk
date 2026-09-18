@@ -79,7 +79,11 @@ public struct OrderProgress: Sendable, Equatable {
     /// One update from the socket.
     public mutating func apply(id: Int64, phase: OrderPhase) {
         guard let frameID else {
-            held.append(Held(id: id, phase: phase))
+            // Only while an order of this screen's is in flight. Auto-copy sends its orders
+            // through the same desk, and their frames were buffered here forever: the array
+            // grew for the life of the session and, being observed state, invalidated every
+            // view reading it on each one.
+            if outcome != nil { held.append(Held(id: id, phase: phase)) }
             return
         }
         guard id == frameID, outcome?.isTerminal != true else { return }
@@ -103,6 +107,7 @@ public struct OrderProgress: Sendable, Equatable {
     /// A failure raised before the order reached the desk at all.
     public mutating func failLocally() {
         outcome = .rejected(code: 0, subReason: nil, error: nil)
+        held.removeAll()
     }
 
     public mutating func reset() {
