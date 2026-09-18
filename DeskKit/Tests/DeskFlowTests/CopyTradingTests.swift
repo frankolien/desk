@@ -95,6 +95,20 @@ struct CopyTradingTests {
         #expect(CopyPlanner.chaseBps(entry: 59_000, mark: 60_000, side: .short) == -169)
     }
 
+    @Test("A figure the server should never send is clamped, not trapped")
+    func chaseSurvivesGarbage() {
+        // A denormal entry makes the ratio exceed every integer type. `Int(_:)` would trap,
+        // and the position it came from is persisted, so the crash would repeat every launch.
+        #expect(CopyPlanner.chaseBps(entry: 1e-300, mark: 60_000, side: .long) == Int.max)
+        #expect(CopyPlanner.chaseBps(entry: 1e-300, mark: 60_000, side: .short) == Int.min)
+        #expect(CopyPlanner.chaseBps(entry: .nan, mark: 60_000, side: .long) == 0)
+        #expect(CopyPlanner.chaseBps(entry: 60_000, mark: .infinity, side: .long) == 0)
+        #expect(CopyPlanner.chaseBps(entry: .infinity, mark: 60_000, side: .long) == 0)
+        #expect(CopyPlanner.clampedInt(.nan) == 0)
+        #expect(CopyPlanner.clampedInt(-.infinity) == Int.min)
+        #expect(CopyPlanner.clampedInt(12.4) == 12)
+    }
+
     @Test("A short's stop sits above the mark and every trigger rounds away from firing early")
     func triggers() throws {
         let mark = try #require(Price(raw: 600_001, decimals: 1))

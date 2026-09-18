@@ -260,13 +260,17 @@ final class AppModel {
         defer { isWorking = false }
         do {
             let store = apiKeys
+            // Read before deriving. `derive` records the address it just derived, so asking
+            // afterwards compares a value against itself and the guard can never fire — which
+            // is exactly the case it exists for.
+            let lastSeen = passkey.lastSeenAddress
             let keys = creating
                 ? try await passkey.createAccounts(tradingIndex: { store.tradingIndex(for: $0) })
                 : try await passkey.deriveAccounts(tradingIndex: { store.tradingIndex(for: $0) })
             // The address guard runs before any balance is shown: Apple's synced-passkey
             // bug derives a different address on a second device, and rendering that
             // account's zero would read as theft.
-            let verdict = AddressGuard.check(derived: keys.address, against: passkey.lastSeenAddress)
+            let verdict = AddressGuard.check(derived: keys.address, against: lastSeen)
             guard verdict.mayShowBalance else {
                 signInProblem = "This passkey derived a different address than last time. "
                     + "Your funds are safe — do not continue until this is sorted."

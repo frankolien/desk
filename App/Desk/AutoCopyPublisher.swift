@@ -20,11 +20,38 @@ final class AutoCopyPublisher {
     private var lastGlance: AutoCopyGlance?
     private var lastState: AutoCopyActivityAttributes.ContentState?
     private var lastPush = Date.distantPast
-    private var requesting = false
+    private var lastSignature: Signature?
+    private var lastPublished = Date.distantPast
+    private var lastRequest = Date.distantPast
 
     private static let staleAfter: TimeInterval = 90
+    /// How long a request that ActivityKit refused waits before being tried again. Without
+    /// it the copy loop's tick retries five times a second, forever.
+    private static let requestBackoff: TimeInterval = 60
+
+    /// What the glance is derived from, cheap enough to compute on every tick.
+    private struct Signature: Equatable {
+        let entries: Int
+        let newest: UUID?
+        let open: Int
+        let traders: Int
+        let paused: Bool
+        let streaming: Bool
+        let marks: Double
+    }
 
     func follow(_ copier: CopyTrader) {
+        // The log and the figures are only worth rebuilding when something moved. A heartbeat
+        // still runs every ten seconds, which is what keeps the Live Activity's stale date
+        // ahead of the clock.
+        let signature = Signature(
+            entries: copier.log.count, newest: copier.log.first?.id, open: copier.open.count,
+            traders: copier.traders.count, paused: copier.isPaused, streaming: copier.isStreaming,
+            marks: copier.open.compactMap(\.lastMark).reduce(0, +))
+        guard signature != lastSignature || Date.now.timeIntervalSince(lastPublished) > 10 else { return }
+        lastSignature = signature
+        lastPublished = .now
+
         let glance = Self.glance(of: copier)
         var comparable = glance
         comparable.updatedAt = lastGlance?.updatedAt ?? glance.updatedAt
@@ -52,10 +79,13 @@ final class AutoCopyPublisher {
         let content = ActivityContent(state: state, staleDate: .now.addingTimeInterval(Self.staleAfter))
 
         if activities.isEmpty {
-            guard !requesting, UIApplication.shared.applicationState == .active else { return }
-            requesting = true
-            defer { requesting = false }
-            _ = try? Activity.request(attributes: AutoCopyActivityAttributes(), content: content)
+            // ActivityKit refuses for reasons that do not clear immediately — the system limit,
+            // a focus mode, the user turning activities off — so a refusal waits rather than
+            // being retried on the next tick.
+            guard UIApplication.shared.applicationState == .active,
+                  Date.now.timeIntervalSince(lastRequest) > Self.requestBackoff else { return }
+            lastRequest = .now
+            guard (try? Activity.request(attributes: AutoCopyActivityAttributes(), content: content)) != nil else { return }
             lastState = state
             lastPush = .now
             return

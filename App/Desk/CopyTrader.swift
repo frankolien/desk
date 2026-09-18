@@ -210,13 +210,17 @@ final class CopyTrader {
     }
 
     func figures(shadow: Bool) -> Figures {
+        // One day boundary for the whole pass. `Calendar.current` copies the autoupdating
+        // calendar on every access, and this used to run per entry, per call, five times a
+        // second.
+        let dayStart = Calendar.current.startOfDay(for: .now)
         let entries = log.filter { $0.shadowed == shadow }
         let closed = entries.compactMap(\.pnl)
         let fills = entries.compactMap(\.fillSeconds)
         let slips = entries.compactMap(\.slippageBps)
         return Figures(
             realised: closed.reduce(0, +),
-            today: entries.filter { Calendar.current.isDateInToday($0.date) }.compactMap(\.pnl).reduce(0, +),
+            today: entries.filter { $0.date >= dayStart }.compactMap(\.pnl).reduce(0, +),
             winRate: closed.isEmpty ? nil : Double(closed.filter { $0 > 0 }.count) / Double(closed.count),
             closed: closed.count,
             copies: entries.filter { $0.kind == .opened }.count,
@@ -225,6 +229,13 @@ final class CopyTrader {
     }
 
     var realisedToday: Double { figures(shadow: false).today + figures(shadow: true).today }
+
+    /// AUSD micros from a figure that came off the network, clamped rather than trapped.
+    private static func microsClamping(_ value: Double) -> Int64 {
+        guard !value.isNaN else { return 0 }
+        let micros = (value * 1_000_000).rounded()
+        return Int64(exactly: micros) ?? (micros < 0 ? Int64.min / 2 : Int64.max / 2)
+    }
 
     func takerFee(for symbol: String) -> Int64 {
         mainnet.market(symbol)?.config.takerFeeMicros ?? Self.defaultTakerFeeMicros
@@ -357,11 +368,17 @@ final class CopyTrader {
             if trader.unreadable == true { continue }
             var book: [String: ObservedPosition] = [:]
             for position in trader.positions {
+                let size = Double(position.size) ?? 0
+                let entry = Double(position.entry) ?? 0
+                let mark = Double(position.mark) ?? 0
+                // A row that cannot be sized or priced is not copied and not counted. Letting
+                // it through means sizing and price protection run on a number that is not one.
+                guard size.isFinite, size > 0, entry.isFinite, entry > 0, mark.isFinite, mark >= 0 else { continue }
                 let observed = ObservedPosition(
                     symbol: position.market, side: position.isLong ? .long : .short,
-                    size: Double(position.size) ?? 0, entry: Double(position.entry) ?? 0,
-                    mark: Double(position.mark) ?? 0, collateral: Double(position.collateral) ?? 0,
-                    leverage: position.leverage)
+                    size: size, entry: entry, mark: mark,
+                    collateral: Double(position.collateral).flatMap { $0.isFinite ? $0 : nil } ?? 0,
+                    leverage: position.leverage.flatMap { $0.isFinite && $0 > 0 ? $0 : nil })
                 book[observed.symbol] = observed
             }
             books[trader.id] = book
@@ -488,7 +505,7 @@ final class CopyTrader {
         switch CopyPlanner.plan(
             copying: theirs, traderPortfolio: portfolios[trader.lowercased()], rules: rules, guards: guards,
             market: target, mark: mark, free: free, openCopies: exposure,
-            realisedToday: Money(raw: Int64((today * 1_000_000).rounded())) ?? .zero
+            realisedToday: Money(raw: Self.microsClamping(today)) ?? .zero
         ) {
         case .failure(let skip):
             if case .dailyLossLimit = skip {

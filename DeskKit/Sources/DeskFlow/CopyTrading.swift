@@ -263,10 +263,19 @@ public enum CopyPlanner {
 
     /// How far the market has moved against `side` since `entry`, in basis points.
     /// Negative when it has moved in the copy's favour.
+    /// Figures arrive from a server and a chain, so this cannot assume they are sane. A
+    /// denormal entry price makes the ratio exceed every integer type, and converting that
+    /// with `Int(_:)` traps — a crash on data the app does not control.
     public static func chaseBps(entry: Double, mark: Double, side: Side) -> Int {
-        guard entry > 0 else { return 0 }
+        guard entry > 0, entry.isFinite, mark.isFinite else { return 0 }
         let run = (mark - entry) / entry * 10_000
-        return Int((side == .long ? run : -run).rounded())
+        return clampedInt((side == .long ? run : -run).rounded())
+    }
+
+    /// The nearest `Int`, or the nearest bound. Never traps, never returns a wrong sign.
+    public static func clampedInt(_ value: Double) -> Int {
+        guard !value.isNaN else { return 0 }
+        return Int(exactly: value.rounded()) ?? (value < 0 ? Int.min : Int.max)
     }
 
     /// The price at which the position has gained (positive) or lost (negative) `percent`
