@@ -789,11 +789,14 @@ final class CopyTrader {
     }
 
     private static func load<T: Decodable>(_ type: T.Type, key: String, network: DeskNetwork) -> T? {
-        UserDefaults.standard.data(forKey: "\(key).\(network.rawValue)").flatMap { try? JSONDecoder().decode(type, from: $0) }
+        UserDefaults.standard.data(forKey: "\(key).\(network.rawValue)").flatMap { try? decoder.decode(type, from: $0) }
     }
 
+    private static let encoder = JSONEncoder()
+    private static let decoder = JSONDecoder()
+
     private static func save<T: Encodable>(_ value: T, key: String, network: DeskNetwork) {
-        UserDefaults.standard.set(try? JSONEncoder().encode(value), forKey: "\(key).\(network.rawValue)")
+        UserDefaults.standard.set(try? encoder.encode(value), forKey: "\(key).\(network.rawValue)")
     }
 
     #if DEBUG

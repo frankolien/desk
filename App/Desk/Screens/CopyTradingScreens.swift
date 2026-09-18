@@ -389,9 +389,23 @@ struct CopyActivityScreen: View {
     @State private var showsSettings = false
     @State private var showsShadow = true
 
+    /// Read several times each in one body pass, and each one walks the whole log — so they
+    /// are computed once per pass in `body` and handed down, not read as properties.
     private var figures: CopyTrader.Figures { copier.figures(shadow: showsShadow) }
     private var openCopies: [OpenCopy] { copier.open.filter { $0.shadowed == showsShadow } }
     private var entries: [CopyLogEntry] { copier.log.filter { $0.shadowed == showsShadow } }
+
+    /// Each copied trader's result, in one pass over the log rather than one pass per row.
+    private var records: [String: Double] {
+        var out: [String: Double] = [:]
+        for entry in copier.log {
+            guard let pnl = entry.pnl else { continue }
+            let shadow = entry.shadowed
+            let key = "\(entry.trader.lowercased())-\(shadow)"
+            out[key, default: 0] += pnl
+        }
+        return out
+    }
 
     var body: some View {
         GlassPage {
@@ -404,8 +418,9 @@ struct CopyActivityScreen: View {
             summary
 
             GlassSection("Copying") {
+                let records = records
                 ForEach(copier.traders) { trader in
-                    Button { editing = trader } label: { traderRow(trader) }
+                    Button { editing = trader } label: { traderRow(trader, records) }
                         .buttonStyle(.plain)
                         .contextMenu {
                             if trader.rules.mode == .shadow {
@@ -612,9 +627,9 @@ struct CopyActivityScreen: View {
         entry.trader.isEmpty ? "Auto-Copy" : directory.name(for: entry.trader)
     }
 
-    private func traderRow(_ trader: CopiedTrader) -> some View {
-        let record = copier.record(for: trader.address)
-        let result = trader.rules.mode == .shadow ? record.shadow : record.live
+    private func traderRow(_ trader: CopiedTrader, _ records: [String: Double]) -> some View {
+        let shadow = trader.rules.mode == .shadow
+        let result = records["\(trader.id)-\(shadow)"]
         return HStack(spacing: 10) {
             TraderAvatar(address: trader.address, size: 30)
             VStack(alignment: .leading, spacing: 1) {
@@ -624,7 +639,7 @@ struct CopyActivityScreen: View {
                     .foregroundStyle(trader.rules.mode == .shadow ? AnyShapeStyle(.secondary) : AnyShapeStyle(DeskColor.rise.color))
             }
             Spacer(minLength: 8)
-            if record.trades > 0 {
+            if let result {
                 Text(DisplayCurrency.shared.format(result, signed: true))
                     .font(.subheadline.weight(.semibold).monospacedDigit())
                     .foregroundStyle(pnlTint(result))

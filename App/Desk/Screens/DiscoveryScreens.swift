@@ -576,15 +576,35 @@ private struct SpotWatchlistCard: View {
     }
 }
 
+/// Three shapes of the same formatter, built once.
+///
+/// A `NumberFormatter` was constructed per value, including once per decoded trade inside a
+/// two-second poll — around thirty constructions a second while a spot screen is open, each
+/// pulling locale and ICU state.
+private let spotFormatters: [SpotPriceShape: NumberFormatter] = {
+    var out: [SpotPriceShape: NumberFormatter] = [:]
+    for shape in SpotPriceShape.allCases {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        formatter.currencySymbol = "$"
+        formatter.usesGroupingSeparator = true
+        formatter.minimumFractionDigits = shape == .small ? 4 : 2
+        formatter.maximumFractionDigits = switch shape {
+        case .large: 2
+        case .medium: 4
+        case .small: 8
+        }
+        out[shape] = formatter
+    }
+    return out
+}()
+
+private enum SpotPriceShape: CaseIterable { case large, medium, small }
+
 private func spotPrice(_ value: Double) -> String {
-    let formatter = NumberFormatter()
-    formatter.numberStyle = .currency
-    formatter.currencyCode = "USD"
-    formatter.currencySymbol = "$"
-    formatter.usesGroupingSeparator = true
-    formatter.minimumFractionDigits = value >= 1 ? 2 : 4
-    formatter.maximumFractionDigits = value >= 100 ? 2 : (value >= 1 ? 4 : 8)
-    return formatter.string(from: NSNumber(value: value)) ?? "$—"
+    let shape: SpotPriceShape = value >= 100 ? .large : (value >= 1 ? .medium : .small)
+    return spotFormatters[shape]?.string(from: NSNumber(value: value)) ?? "$—"
 }
 
 // MARK: - One market
@@ -743,7 +763,10 @@ private struct SpotTransaction: Identifiable, Sendable {
     let amount: String
     let value: String
     let wallet: SpotWallet
-    var id: String { age + amount + wallet.address }
+    /// The venue's own id for the trade. It used to include `age`, which changes on every
+    /// two-second poll, so every row under a minute old took a new identity and the whole
+    /// list was torn down and rebuilt rather than diffed.
+    let id: String
 }
 
 private struct SpotTokenDetailScreen: View {
@@ -1240,7 +1263,7 @@ private final class SpotLiveFeed: ObservableObject {
     }
 
     nonisolated private static func trade(_ row: [String: Any], symbol: String) -> SpotTransaction? {
-        guard row["id"] as? String != nil,
+        guard let identity = row["id"] as? String,
               let address = row["userAddress"] as? String,
               let kind = row["type"] as? String else { return nil }
         let milliseconds = (row["time"] as? String).flatMap(Int64.init) ?? 0
@@ -1254,7 +1277,8 @@ private final class SpotLiveFeed: ObservableObject {
         let volume = Double((row["volume"] as? String) ?? "") ?? 0
         let wallet = SpotWallet(address: address, emoji: "◉", portfolio: "—")
         return SpotTransaction(age: age < 60 ? "\(age)s" : "\(age / 60)m", isBuy: kind == "buy",
-                               amount: "\(amount) \(symbol)", value: spotPrice(volume), wallet: wallet)
+                               amount: "\(amount) \(symbol)", value: spotPrice(volume), wallet: wallet,
+                               id: identity)
     }
 
     nonisolated private static func number(_ value: Any?) -> Double? {

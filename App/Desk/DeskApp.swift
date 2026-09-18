@@ -116,7 +116,10 @@ struct RootView: View {
         .task { await DisplayCurrency.shared.refresh() }
         .task {
             guard showsLaunchMoment else { return }
-            try? await Task.sleep(for: .milliseconds(3100))
+            // The mark's own animation chain finishes at about 1.4 s. Waiting 3.1 s on top
+            // of iOS's launch frame held a working app behind a logo for nearly four
+            // seconds, on every launch, warm or cold.
+            try? await Task.sleep(for: .milliseconds(1_450))
             withAnimation(.easeInOut(duration: 0.62)) {
                 showsLaunchMoment = false
             }

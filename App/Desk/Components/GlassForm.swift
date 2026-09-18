@@ -94,7 +94,10 @@ struct GlassPage<Content: View>: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            // Lazy: the copy history pushes two hundred rows through here, each formatting a
+            // figure and a relative date, and a plain VStack builds every one of them before
+            // the screen appears.
+            LazyVStack(alignment: .leading, spacing: 18) {
                 content
             }
             .padding(.horizontal, 16)

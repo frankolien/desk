@@ -227,32 +227,45 @@ struct TraderAvatar: View {
     let address: String
     var size: CGFloat = 42
 
-    private var seed: [UInt8] {
-        let hex = address.lowercased().dropFirst(2)
-        return hex.compactMap { UInt8(String($0), radix: 16) }
+    /// Built once per draw rather than per cell.
+    ///
+    /// This was a computed property read by `filled` three times per cell and by `tint`
+    /// inside the innermost loop — around a hundred and forty rebuilds and several thousand
+    /// single-character Strings for one avatar, on a screen that draws twenty of them and
+    /// replaces them every twenty seconds.
+    private static func seed(of address: String) -> [UInt8] {
+        var out: [UInt8] = []
+        out.reserveCapacity(40)
+        for character in address.lowercased().dropFirst(2) {
+            guard let digit = character.hexDigitValue else { continue }
+            out.append(UInt8(digit))
+        }
+        return out
     }
 
     /// One bit per cell from the address's own nibbles, so the pattern is as varied as the
     /// address and never repeats a row.
-    private func filled(row: Int, column: Int) -> Bool {
+    private func filled(_ seed: [UInt8], row: Int, column: Int) -> Bool {
         guard !seed.isEmpty else { return false }
         let bit = row * 4 + column
         let nibble = seed[(6 + bit / 4 * 3 + column) % seed.count]
         return (nibble >> UInt8(bit % 4)) & 1 == 1
     }
 
-    private var tint: Color {
+    private func tint(_ seed: [UInt8]) -> Color {
         let hue = Double(seed.prefix(6).reduce(0) { ($0 * 16 + Int($1)) % 360 }) / 360
         return Color(hue: hue, saturation: 0.42, brightness: 0.82)
     }
 
     var body: some View {
-        Canvas { context, canvas in
+        let seed = Self.seed(of: address)
+        let tint = tint(seed)
+        return Canvas { context, canvas in
             let cells = 7
             let cell = canvas.width / CGFloat(cells + 3)
             let inset = cell * 1.5
             for row in 0..<cells {
-                for column in 0..<4 where filled(row: row, column: column) {
+                for column in 0..<4 where filled(seed, row: row, column: column) {
                     for mirrored in Set([column, cells - 1 - column]) {
                         let rect = CGRect(x: inset + cell * CGFloat(mirrored), y: inset + cell * CGFloat(row),
                                           width: cell + 0.5, height: cell + 0.5)

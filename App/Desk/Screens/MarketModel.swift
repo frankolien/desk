@@ -56,6 +56,9 @@ final class MarketModel {
 
     private let rest: PerplREST
     private var marketID: UInt32
+    /// When an unchanged price for each market was last stamped, so freshness keeps moving
+    /// without every repeated frame redrawing the screen.
+    private var restampedAt: [UInt32: ContinuousClock.Instant] = [:]
     private var poller: Task<Void, Never>?
     private var liveReader: Task<Void, Never>?
     private var liveSocket: URLSessionWebSocket?
@@ -279,6 +282,12 @@ final class MarketModel {
 
     private func ingestLiveQuotes(_ updates: [UInt32: Int64]) {
         for (id, raw) in updates {
+            // A frame that repeats the price it last carried is not news. Writing it anyway
+            // invalidated every view reading a mark — which drags whole position lists and
+            // a full chart redraw with it — several times a second, for no visible change.
+            // The freshness stamp still needs refreshing, so an unchanged price is recorded
+            // at most twice a second rather than never.
+            if quotes[id]?.markRaw == raw, !unchangedIsDue(id) { continue }
             let previous = quotes[id]?.previousRaw
                 ?? allMarkets.first(where: { $0.id == id })?.state.previousRaw
                 ?? raw
@@ -287,6 +296,14 @@ final class MarketModel {
                 applyQuote(for: selected)
             }
         }
+    }
+
+    /// Whether an unchanged price for this market is old enough to be stamped again.
+    private func unchangedIsDue(_ id: UInt32) -> Bool {
+        let now = ContinuousClock.now
+        if let last = restampedAt[id], now - last < .milliseconds(500) { return false }
+        restampedAt[id] = now
+        return true
     }
 
     private func applyQuote(for selected: Market) {
