@@ -5,6 +5,7 @@ import DeskMoney
 import DeskPerpl
 import Foundation
 import Observation
+import WidgetKit
 import UIKit
 
 /// Where the app is. Not a router: the state decides the screen, so there is no way to
@@ -783,6 +784,28 @@ final class AppModel {
         address = nil
         balancePoller?.cancel()
         balancePoller = nil
+        // Everything the last account put on screen goes with it. Leaving the balances and
+        // the positions behind meant the next person to sign in read someone else's book as
+        // their own until a socket snapshot replaced it — which needs their Face ID first.
+        balances = nil
+        collateral = LastGood()
+        walletAUSD = LastGood()
+        walletMON = LastGood()
+        hasDesk = LastGood()
+        openPosition = nil
+        openPositions = []
+        closedPositions = []
+        hasTradingAccount = false
+        sessionTradingIndex = nil
+        fundingProblem = nil
+        openingProblem = nil
+        needsManualFaucet = false
+        // And everything Desk told other people about them: the server's copy of the
+        // subscription, the follow list, the nicknames, and the glance the widget draws.
+        await TradeAlerts.shared.signOut()
+        UserDefaults.standard.removeObject(forKey: "desk.followedTraders")
+        AutoCopyGlance.forget()
+        WidgetCenter.shared.reloadTimelines(ofKind: AutoCopyControl.widgetKind)
     }
 
     // MARK: - The trading key

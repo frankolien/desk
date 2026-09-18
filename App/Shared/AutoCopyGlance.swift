@@ -57,6 +57,12 @@ struct AutoCopyGlance: Codable, Hashable, Sendable {
         DeskGroup.defaults.set(try? JSONEncoder().encode(self), forKey: Self.key)
     }
 
+    /// Signing out. The widget and the Live Activity read this, so leaving it behind shows
+    /// the previous account's traders and result on the Lock Screen of whoever signs in next.
+    static func forget() {
+        DeskGroup.defaults.removeObject(forKey: key)
+    }
+
     static func money(_ value: Double, signed: Bool = true) -> String {
         let magnitude = abs(value)
         let digits = magnitude >= 1_000 ? String(format: "%.1fK", magnitude / 1_000) : String(format: "%.2f", magnitude)

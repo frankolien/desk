@@ -167,6 +167,34 @@ final class TradeAlerts {
         await sync()
     }
 
+    /// Signing out: the server forgets the subscription, and so does this phone.
+    ///
+    /// The server holds the device token, the followed addresses and the names given to
+    /// them for sixty days, refreshed on every launch. Nothing called this, so signing out
+    /// left all of it in place and being renewed.
+    func signOut() async {
+        let hadSubscription = !alerted.isEmpty
+        alerted = []
+        persist()
+        syncTask?.cancel()
+        if hadSubscription, let install = InstallSecret.value() {
+            var request = URLRequest(url: Self.endpoint)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try? JSONSerialization.data(
+                withJSONObject: ["action": "unsubscribe", "install": install])
+            _ = try? await URLSession.shared.data(for: request)
+        }
+        confirmOnSync = false
+        problem = nil
+        opened = nil
+        openedToCopy = false
+        for key in [Self.storageKey, Self.nicknameKey, Self.tokenKey, Self.primerKey] {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        deviceToken = nil
+    }
+
     func didRegister(deviceToken data: Data) {
         let token = data.map { String(format: "%02x", $0) }.joined()
         deviceToken = token
@@ -292,6 +320,10 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
         guard let alert = TradeAlert(userInfo: response.notification.request.content.userInfo) else { return }
+        // A payload naming a trader this phone does not follow did not come from a
+        // subscription this phone made. Nothing here can trade, but it can put a stranger's
+        // position in front of someone with a Copy button beside it.
+        guard await TradeAlerts.shared.isOn(for: alert.trader) else { return }
         let action = response.actionIdentifier
         if action == TradeAlerts.muteAction {
             await TradeAlerts.shared.mute(alert.trader)

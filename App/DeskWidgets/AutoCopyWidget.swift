@@ -57,6 +57,7 @@ struct AutoCopyWidgetView: View {
             switch family {
             case .accessoryInline:
                 Label("Copy \(AutoCopyGlance.money(today)) today", systemImage: entry.isPaused ? "pause.fill" : "square.on.square")
+                    .privacySensitive()
             case .accessoryCircular:
                 circular(glance)
             case .accessoryRectangular:
@@ -165,6 +166,7 @@ struct AutoCopyWidgetView: View {
             Text(AutoCopyGlance.money(today) + " today")
                 .font(.system(size: 17, weight: .bold, design: .rounded))
                 .monospacedDigit()
+                .privacySensitive()
             Text("\(glance.openCopies) open · \(glance.traders) traders")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
@@ -183,6 +185,7 @@ struct AutoCopyWidgetView: View {
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .minimumScaleFactor(0.5)
                     .monospacedDigit()
+                    .privacySensitive()
             }
             .padding(4)
         }

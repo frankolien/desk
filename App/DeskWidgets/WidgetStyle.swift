@@ -10,11 +10,14 @@ extension AutoCopyGlance.Move {
     }
 }
 
+/// A figure worth money. Marked private so iOS redacts it on a locked screen: a widget and
+/// a Live Activity are read by whoever is looking at the phone, not only by its owner.
 struct PnLText: View {
     let value: Double
 
     var body: some View {
         Text(AutoCopyGlance.money(value))
+            .privacySensitive()
             .foregroundStyle(value < 0 ? DeskColor.fall.color : (value > 0 ? DeskColor.rise.color : DeskColor.nightText.color))
             .monospacedDigit()
             .contentTransition(.numericText(value: value))
@@ -66,6 +69,7 @@ struct MoveRow: View {
                 Text(move.trader)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(DeskColor.nightMuted.color)
+                    .privacySensitive()
             }
             .lineLimit(1)
             Spacer(minLength: 4)
