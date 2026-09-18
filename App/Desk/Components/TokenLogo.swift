@@ -50,6 +50,23 @@ struct TokenLogo: View {
     }
 }
 
+/// The hosts token artwork may be loaded from.
+enum TokenArtwork {
+    /// Matched on the registrable suffix, so a subdomain of a known CDN is allowed and a
+    /// host that merely ends in the same letters is not.
+    /// Checked against what the feed actually serves — the trending list's artwork comes
+    /// from static.oklink.com, and an allow-list written from the API's name alone would
+    /// have quietly removed every logo on the screen.
+    private static let hosts = ["coingecko.com", "oklink.com", "okx.com", "coinall.ltd"]
+
+    static func url(_ text: String?) -> URL? {
+        guard let text, let url = URL(string: text), url.scheme?.lowercased() == "https",
+              let host = url.host()?.lowercased() else { return nil }
+        let allowed = hosts.contains { host == $0 || host.hasSuffix(".\($0)") }
+        return allowed ? url : nil
+    }
+}
+
 struct MarketTokenLogo: View {
     let symbol: String
     var size: CGFloat = 38

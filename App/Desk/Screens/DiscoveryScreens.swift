@@ -410,7 +410,12 @@ private struct TrendingSpotToken: Identifiable, Hashable, Codable, Sendable {
     let communityRecognized: Bool?
     let riskLevel: String?
 
-    var artworkURL: URL? { URL(string: logoURL) }
+    /// Only from hosts that serve token artwork.
+    ///
+    /// The address comes from the discovery feed, which forwards whatever the upstream
+    /// listed. Following it anywhere told a host of someone else's choosing this device's
+    /// address and which tokens are being looked at, on every browse.
+    var artworkURL: URL? { TokenArtwork.url(logoURL) }
 }
 
 @MainActor

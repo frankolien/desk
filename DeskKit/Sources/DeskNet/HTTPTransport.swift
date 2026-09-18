@@ -58,6 +58,13 @@ public struct URLSessionTransport: HTTPTransport {
         session = URLSession(configuration: configuration)
     }
 
+    /// A `URLSession` retains itself until it is invalidated, so one built and dropped —
+    /// which a SwiftUI `State(initialValue:)` does on every body pass that rebuilds its
+    /// view — never goes away. This one does.
+    public func finish() {
+        session.invalidateAndCancel()
+    }
+
     public func send(_ request: URLRequest) async throws -> HTTPResponse {
         // Per-task delegate, so no session-wide delegate has to be retained and no
         // retain cycle exists to break.
