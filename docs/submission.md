@@ -158,6 +158,7 @@ Being explicit, because judges should not have to guess:
 ## 5. Links
 
 - Demo video: *(add link)*
+- Site: `https://desk.trade`
 - Server: `https://web-lovat-nine-49.vercel.app`
 - Exchange contract: `0x34B6552d57a35a1D042CcAe1951BD1C370112a6F` (Monad)
 - Build: `xcodegen generate && open Desk.xcodeproj`, scheme **Desk**, iOS 18.4+
