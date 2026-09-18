@@ -13,6 +13,30 @@ public enum DeskNetwork: String, CaseIterable, Sendable, Identifiable {
 
     public var id: String { rawValue }
 
+    /// Perpl's exchange, and the AUSD the venue takes as collateral, as this network's
+    /// context serves them today.
+    ///
+    /// Pinned because these two addresses are what the wallet key approves and deposits to.
+    /// Taking them from the venue's own response means a compromised gateway — or anyone
+    /// holding a certificate for it — can name a contract of their choosing and have the
+    /// deposit signed against it. Relay's depository is pinned for exactly this reason;
+    /// Perpl, which holds the collateral, was not.
+    ///
+    /// Lowercase, no `0x`, compared case-insensitively.
+    public var pinnedExchange: String {
+        switch self {
+        case .testnet: "1964c32f0be608e7d29302aff5e61268e72080cc"
+        case .mainnet: "34b6552d57a35a1d042ccae1951bd1c370112a6f"
+        }
+    }
+
+    public var pinnedCollateralToken: String {
+        switch self {
+        case .testnet: "a9012a055bd4e0edff8ce09f960291c09d5322dc"
+        case .mainnet: "00000000efe302beaa2b3e6e1b18d08d69a9012a"
+        }
+    }
+
     public var chainID: UInt64 {
         switch self {
         case .testnet: 10143

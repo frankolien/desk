@@ -323,10 +323,19 @@ struct OpeningSequenceTests {
 
     @Test("Both addresses come out of pub/context, not out of the source")
     func addressesFromContext() throws {
-        let addresses = try ExchangeAddresses(context: try context())
+        let addresses = try ExchangeAddresses(context: try context(), pinnedTo: .testnet)
         #expect(addresses.collateralToken.checksummed.lowercased() == "0xa9012a055bd4e0edff8ce09f960291c09d5322dc")
         #expect(addresses.exchange.checksummed.lowercased() == "0x1964c32f0be608e7d29302aff5e61268e72080cc")
         #expect(addresses.minimumToOpen.text == "100.000000")
+    }
+
+    @Test("A venue naming a contract this build does not pin is refused before anything is signed")
+    func pinnedAddresses() throws {
+        // The fixture is testnet's own context, so testnet's pins match and mainnet's do not.
+        #expect(throws: Never.self) { try ExchangeAddresses(context: try context(), pinnedTo: .testnet) }
+        #expect(throws: ExchangeAddresses.Failure.self) {
+            try ExchangeAddresses(context: try context(), pinnedTo: .mainnet)
+        }
     }
 
     @Test("A deposit under the exchange's own minimum never reaches the chain")

@@ -103,7 +103,7 @@ private struct CopyRulesSections: View {
 
     private var strategyFooter: String {
         let mode = rules.mode == .shadow
-            ? "Shadow sends nothing: each copy fills at the live mainnet price with fees, so you see what it would have made."
+            ? "Shadow sends nothing: each copy fills at the live mainnet price with fees, against a 1,000 AUSD paper balance, and is liquidated where the venue would liquidate it."
             : "Live sends real orders to your Perpl \(network.shortName.lowercased()) account, signed on this iPhone."
         let direction = rules.direction == .fade ? " Fade takes the opposite side of every trade they make." : ""
         return mode + direction

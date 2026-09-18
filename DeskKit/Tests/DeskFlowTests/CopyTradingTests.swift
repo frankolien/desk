@@ -109,6 +109,12 @@ struct CopyTradingTests {
         #expect(CopyPlanner.clampedInt(12.4) == 12)
     }
 
+    private func shadowFill(rules: CopyRules) throws -> ShadowFill {
+        // 2500 is the venue's maintenance fraction for BTC: a 4% maintenance margin.
+        ShadowFill(mark: 60_000, plan: try plan(btc(), rules: rules).get(), takerFeeMicros: 345,
+                   maintenanceMarginFraction: 2_500, rules: rules)
+    }
+
     @Test("A short's stop sits above the mark and every trigger rounds away from firing early")
     func triggers() throws {
         let mark = try #require(Price(raw: 600_001, decimals: 1))
@@ -135,19 +141,51 @@ struct CopyTradingTests {
         #expect(CopyPlanner.leverage(for: btc(leverage: nil), rules: CopyRules(), market: btcMarket) == 1)
     }
 
-    @Test("A shadow fill pays slippage and fees both ways and fires the stop a live copy would")
+    @Test("A shadow fill pays slippage and its fee, and fires the stop a live copy would")
     func shadow() throws {
         let rules = CopyRules(marginPerTrade: 10, maxLeverage: 5, stopLossPercent: 25, takeProfitPercent: 50)
-        let fill = ShadowFill(mark: 60_000, plan: try plan(btc(), rules: rules).get(), takerFeeMicros: 345, rules: rules)
+        let fill = try shadowFill(rules: rules)
         #expect(abs(fill.entry - 60_018) < 0.001)
         #expect(abs(fill.fees - 0.01725) < 0.00001)
-        // Flat price: the round trip costs slippage and two fees.
+        // Flat price: the round trip costs slippage and the opening fee.
         #expect(fill.pnl(at: 60_000, takerFeeMicros: 345) < 0)
-        #expect(fill.trigger(at: 57_000) == fill.stop)
-        #expect(fill.trigger(at: 66_100) == fill.take)
-        #expect(fill.trigger(at: 60_500) == nil)
+        #expect(fill.triggered(at: 57_000)?.exit == .stop)
+        #expect(fill.triggered(at: 66_100)?.exit == .take)
+        #expect(fill.triggered(at: 60_500) == nil)
         // A loss is never more than the margin behind it.
         #expect(fill.pnl(at: 1, takerFeeMicros: 345) == -10)
+    }
+
+    @Test("A shadow copy is liquidated where the venue would liquidate it, and cannot recover")
+    func shadowLiquidates() throws {
+        // No stop at all: without a liquidation price this copy would ride to zero and then
+        // recover, reporting a profit the real position could never have made.
+        let rules = CopyRules(marginPerTrade: 10, maxLeverage: 5, stopLossPercent: nil, takeProfitPercent: nil)
+        let fill = try shadowFill(rules: rules)
+        let liquidation = try #require(fill.liquidation)
+        // 5x with a 4% maintenance margin liquidates 16% below the entry.
+        #expect(abs(liquidation - fill.entry * 0.84) < 1)
+        #expect(fill.triggered(at: liquidation - 1)?.exit == .liquidation)
+        #expect(fill.triggered(at: liquidation + 1) == nil)
+        // Liquidated is the whole margin, not the arithmetic of a close at that price.
+        #expect(fill.pnl(at: liquidation, takerFeeMicros: 345) == -10)
+        #expect(fill.pnl(at: liquidation - 5_000, takerFeeMicros: 345) == -10)
+        // And it cannot recover: the copy is gone at that point, not floored.
+        #expect(fill.pnl(at: fill.entry, takerFeeMicros: 345) < 0)
+    }
+
+    @Test("A gap through a stop costs the gap, and an overshot take profit does not pay for it")
+    func shadowGaps() throws {
+        let rules = CopyRules(marginPerTrade: 10, maxLeverage: 5, stopLossPercent: 25, takeProfitPercent: 50)
+        let fill = try shadowFill(rules: rules)
+        let stop = try #require(fill.stop)
+        let take = try #require(fill.take)
+        // Between the stop and liquidation, a long fills at the mark that broke it.
+        let gapped = try #require(fill.triggered(at: stop - 50))
+        #expect(gapped.exit == .stop)
+        #expect(gapped.price == stop - 50)
+        // A take profit keeps its own price however far the market overshot.
+        #expect(fill.triggered(at: take + 5_000)?.price == take)
     }
 
     @Test("Rules saved before modes existed stay live, followed and fixed")

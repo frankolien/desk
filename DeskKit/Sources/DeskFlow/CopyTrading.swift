@@ -297,6 +297,11 @@ public enum CopyPlanner {
 
 /// A copy simulated rather than sent: the fill, the fees and the exits a live copy would
 /// have had, priced from the mainnet mark.
+/// Why a simulated copy ended.
+public enum ShadowExit: String, Sendable, Hashable, Codable {
+    case stop, take, liquidation
+}
+
 public struct ShadowFill: Sendable, Hashable, Codable {
     public let entry: Double
     public let units: Double
@@ -306,12 +311,17 @@ public struct ShadowFill: Sendable, Hashable, Codable {
     public let stop: Double?
     public let take: Double?
     public let fees: Double
+    /// The price at which the venue would have taken the collateral. A simulation without
+    /// one cannot be compared to a live copy: it floors at the margin and then *recovers*,
+    /// which is a profit the real position could never have made.
+    public var liquidation: Double?
 
     /// Slippage assumed on a simulated market fill, in basis points against the copy.
     public static let slippageBps = 3.0
 
     public init(entry: Double, units: Double, margin: Double, leverage: Int, isLong: Bool,
-                stop: Double?, take: Double?, fees: Double) {
+                stop: Double?, take: Double?, fees: Double, liquidation: Double? = nil) {
+        self.liquidation = liquidation
         self.entry = entry
         self.units = units
         self.margin = margin
@@ -322,7 +332,8 @@ public struct ShadowFill: Sendable, Hashable, Codable {
         self.fees = fees
     }
 
-    public init(mark: Double, plan: CopyPlan, takerFeeMicros: Int64, rules: CopyRules) {
+    public init(mark: Double, plan: CopyPlan, takerFeeMicros: Int64, maintenanceMarginFraction: Int,
+                rules: CopyRules) {
         let isLong = plan.side == .long
         let entry = mark * (1 + (isLong ? 1 : -1) * Self.slippageBps / 10_000)
         let notional = plan.margin * Double(plan.leverage)
@@ -335,20 +346,42 @@ public struct ShadowFill: Sendable, Hashable, Codable {
         self.stop = rules.stopLossPercent.map { entry * (1 + (isLong ? -1 : 1) * move($0)) }
         self.take = rules.takeProfitPercent.map { entry * (1 + (isLong ? 1 : -1) * move($0)) }
         self.fees = notional * Double(takerFeeMicros) / 1_000_000
+        // The same distance the venue would liquidate a live copy at: 1/leverage, less the
+        // maintenance margin it keeps.
+        self.liquidation = Margin
+            .liquidationDistanceMicros(leverageHundredths: plan.leverage * 100,
+                                       maintenanceMarginFraction: maintenanceMarginFraction)
+            .map { entry * (1 + (isLong ? -1 : 1) * Double($0) / 1_000_000) }
     }
 
-    /// Profit at `mark` if closed there, after both sides' fees.
+    /// Profit at `mark` if closed there.
+    ///
+    /// Only the opening fee is charged: the venue takes a fee on size that opens or increases
+    /// a position and nothing on the way out, so charging an exit fee understated the result
+    /// of every simulated round trip.
     public func pnl(at mark: Double, takerFeeMicros: Int64) -> Double {
+        // Past its liquidation price the collateral is the venue's, whatever the arithmetic
+        // of the close would have said.
+        if let liquidation, isLong ? mark <= liquidation : mark >= liquidation { return -margin }
         let exit = mark * (1 + (isLong ? -1 : 1) * Self.slippageBps / 10_000)
         let gross = (exit - entry) * units * (isLong ? 1 : -1)
-        let exitFee = exit * units * Double(takerFeeMicros) / 1_000_000
-        return max(gross - fees - exitFee, -margin)
+        return max(gross - fees, -margin)
     }
 
-    /// The trigger a live copy's venue order would have fired at this mark, if any.
-    public func trigger(at mark: Double) -> Double? {
-        if let stop, isLong ? mark <= stop : mark >= stop { return stop }
-        if let take, isLong ? mark >= take : mark <= take { return take }
+    /// What would have ended this copy at `mark`, and the price it would have ended at.
+    ///
+    /// Liquidation is tested first, because a move that reaches it has already passed
+    /// anything beyond. A stop fills at the mark that broke it rather than at the stop
+    /// itself, since a gap through a stop costs the difference; a take-profit keeps its own
+    /// price, which is the conservative reading of an overshoot.
+    public func triggered(at mark: Double) -> (exit: ShadowExit, price: Double)? {
+        if let liquidation, isLong ? mark <= liquidation : mark >= liquidation {
+            return (.liquidation, liquidation)
+        }
+        if let stop, isLong ? mark <= stop : mark >= stop {
+            return (.stop, isLong ? min(mark, stop) : max(mark, stop))
+        }
+        if let take, isLong ? mark >= take : mark <= take { return (.take, take) }
         return nil
     }
 }

@@ -14,6 +14,8 @@ public struct ExchangeAddresses: Sendable, Hashable {
         case collateralTokenMissing
         case instanceMissing
         case addressMalformed(String)
+        /// The venue named a contract this build does not pin. Nothing is signed.
+        case addressNotPinned(String)
     }
 
     /// The addresses directly. The context-derived initialiser below is what production
@@ -25,13 +27,26 @@ public struct ExchangeAddresses: Sendable, Hashable {
         self.minimumToOpen = minimumToOpen
     }
 
-    public init(context: PerplContext) throws {
+    /// The addresses this venue names, checked against the ones this build pins.
+    ///
+    /// `pinnedTo` is nil only in tests and in code that never signs; every path that reaches
+    /// the wallet key passes the network it is trading on.
+    public init(context: PerplContext, pinnedTo network: DeskNetwork? = nil) throws {
         guard let token = context.collateralToken else { throw Failure.collateralTokenMissing }
         guard let instance = context.instances.first else { throw Failure.instanceMissing }
         collateralToken = try Self.address(token.address)
         exchange = try Self.address(instance.address)
+        if let network {
+            try Self.match(exchange, network.pinnedExchange, "exchange")
+            try Self.match(collateralToken, network.pinnedCollateralToken, "collateral token")
+        }
         guard let minimum = instance.minAccountOpen else { throw Failure.instanceMissing }
         minimumToOpen = minimum
+    }
+
+    private static func match(_ address: EthereumAddress, _ pinned: String, _ what: String) throws {
+        let served = address.checksummed.dropFirst(2).lowercased()
+        guard served == pinned.lowercased() else { throw Failure.addressNotPinned(what) }
     }
 
     private static func address(_ text: String) throws -> EthereumAddress {

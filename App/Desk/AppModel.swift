@@ -333,7 +333,7 @@ final class AppModel {
             }
             let rest = PerplREST(configuration: try network.perpl())
             let context = try await rest.context()
-            let addresses = try ExchangeAddresses(context: context)
+            let addresses = try ExchangeAddresses(context: context, pinnedTo: network)
             if let address, let stored = apiKeys.load(for: address) {
                 await enterTrading(stored, context: context)
                 return
@@ -636,7 +636,7 @@ final class AppModel {
             }
             let rest = PerplREST(configuration: try network.perpl())
             let context = try await rest.context()
-            let addresses = try ExchangeAddresses(context: context)
+            let addresses = try ExchangeAddresses(context: context, pinnedTo: network)
             guard let minimum = context.instances.first?.minDeposit, amount >= minimum else {
                 deposit = .failed("Perpl's minimum deposit is \(context.instances.first?.minDeposit?.display() ?? "—") AUSD.")
                 return
@@ -718,7 +718,7 @@ final class AppModel {
         do {
             let rest = PerplREST(configuration: try network.perpl())
             let context = try await rest.context()
-            let addresses = try ExchangeAddresses(context: context)
+            let addresses = try ExchangeAddresses(context: context, pinnedTo: network)
             if source == .trading,
                let minimum = context.instances.first?.minWithdraw, amount < minimum {
                 withdrawal = .failed("Perpl's smallest withdrawal is \(minimum.display()) AUSD.")
@@ -919,7 +919,7 @@ final class AppModel {
         let rest = PerplREST(configuration: try network.perpl())
         let reader = BalanceReader(
             rpc: MonadRPC(configuration: try network.rpc()),
-            addresses: try ExchangeAddresses(context: await rest.context()))
+            addresses: try ExchangeAddresses(context: await rest.context(), pinnedTo: network))
         balances = reader
         return reader
     }

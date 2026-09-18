@@ -123,6 +123,9 @@ final class CopyTrader {
     private static let endpoint = "https://web-lovat-nine-49.vercel.app/api/traders"
     private static let exchange = "0x34B6552d57a35a1D042CcAe1951BD1C370112a6F"
     private static let defaultTakerFeeMicros: Int64 = 345
+    /// What shadow sizes against. A simulation given a million AUSD never refuses a copy the
+    /// real account could not have afforded, which flatters every figure downstream of it.
+    static let shadowPaperBalance = Money(raw: 1_000_000_000)
 
     init(network: DeskNetwork) {
         self.network = network
@@ -448,9 +451,13 @@ final class CopyTrader {
         for copy in open where copy.shadowed {
             guard let mark = marks[copy.symbol], let index = open.firstIndex(where: { $0.id == copy.id }) else { continue }
             open[index].lastMark = mark
-            if let fill = copy.shadow, let price = fill.trigger(at: mark) {
-                settleShadow(open[index], at: price,
-                             detail: price == fill.stop ? "Stop loss hit." : "Take profit hit.", protected: true)
+            if let fill = copy.shadow, let ended = fill.triggered(at: mark) {
+                let detail = switch ended.exit {
+                case .liquidation: "Liquidated: the margin was gone."
+                case .stop: "Stop loss hit."
+                case .take: "Take profit hit."
+                }
+                settleShadow(open[index], at: ended.price, detail: detail, protected: ended.exit != .liquidation)
             }
         }
     }
@@ -499,7 +506,7 @@ final class CopyTrader {
         let peers = open.filter { $0.shadowed == shadow }
         let exposure = peers.map { CopyExposure(symbol: $0.symbol, side: $0.isLong ? .long : .short, notional: $0.notional) }
         let today = figures(shadow: shadow).today
-        let free = shadow ? Money(raw: 1_000_000_000_000) : model.collateral.value
+        let free = shadow ? Self.shadowPaperBalance : model.collateral.value
 
         let plan: CopyPlan
         switch CopyPlanner.plan(
@@ -527,7 +534,9 @@ final class CopyTrader {
 
         if shadow {
             let markValue = Double(mark.raw) / pow(10, Double(mark.decimals))
-            let fill = ShadowFill(mark: markValue, plan: plan, takerFeeMicros: target.config.takerFeeMicros, rules: rules)
+            let fill = ShadowFill(
+                mark: markValue, plan: plan, takerFeeMicros: target.config.takerFeeMicros,
+                maintenanceMarginFraction: target.config.maintenanceMarginFraction, rules: rules)
             open.append(OpenCopy(
                 id: UUID(), trader: trader, marketID: target.id, symbol: symbol, isLong: side == .long,
                 sizeRaw: plan.draft.size.raw, leverage: plan.leverage, margin: plan.margin, positionID: nil,
