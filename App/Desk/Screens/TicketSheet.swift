@@ -44,11 +44,25 @@ struct TicketSheet: View {
     private var protection: OrderDesk.Draft.Protection? {
         guard let market, let mark else { return nil }
         let decimals = market.config.priceDecimals
-        let sl = stopLoss.isEmpty ? nil : Price(selling: stopLoss, decimals: decimals)
-        let tp = takeProfit.isEmpty ? nil : Price(buying: takeProfit, decimals: decimals)
+        // Rounded towards the mark on both sides, so a typed trigger is never moved further
+        // away than asked: a long's stop sits below the mark and rounds up, a short's sits
+        // above and rounds down, and the take profits are the mirror of that. Rounding by
+        // field rather than by side moved a short's stop away from the mark and made the
+        // realised loss a tick larger than the one on screen.
+        let sl = stopLoss.isEmpty ? nil : (side == .up
+            ? Price(selling: stopLoss, decimals: decimals)
+            : Price(buying: stopLoss, decimals: decimals))
+        let tp = takeProfit.isEmpty ? nil : (side == .up
+            ? Price(buying: takeProfit, decimals: decimals)
+            : Price(selling: takeProfit, decimals: decimals))
         guard sl != nil || tp != nil else { return nil }
         if let sl, side == .up ? sl >= mark : sl <= mark { return nil }
         if let tp, side == .up ? tp <= mark : tp >= mark { return nil }
+        // A stop beyond the liquidation price can never fire: the venue closes the position
+        // first. Accepting one showed protection the position did not have.
+        if let sl, let quote, side == .up ? sl <= quote.liquidationPrice : sl >= quote.liquidationPrice {
+            return nil
+        }
         return .init(stopLoss: sl, takeProfit: tp)
     }
 
@@ -56,14 +70,37 @@ struct TicketSheet: View {
         (!stopLoss.isEmpty || !takeProfit.isEmpty) && protection == nil
     }
 
+    /// What the order costs against what the account holds — margin *and* fee, which is what
+    /// leaves the balance. Nil while the account is unknown, which is not a refusal.
+    private var shortfall: Money? {
+        guard let quote, let free = session.account.value?.free, !quote.isAffordable(freeCollateral: free)
+        else { return nil }
+        return Money(raw: quote.total.raw - free.raw)
+    }
+
+    private var blockingReason: String? {
+        if hasInvalidProtection {
+            return side == .up
+                ? "For a long, the stop must sit below the mark and above the liquidation price, and the take profit above the mark."
+                : "For a short, the stop must sit above the mark and below the liquidation price, and the take profit below the mark."
+        }
+        guard let shortfall, let quote else { return nil }
+        return "This order costs \(DisplayCurrency.shared.format(quote.total)) with its fee — \(DisplayCurrency.shared.format(shortfall)) more than your free collateral."
+    }
+
     private func sizeFor(_ notional: Money, mark: Price, market: Market) -> Size? {
-        // size = notional / price, at the market's own size scale.
-        let scale = Int128(pow10(Int(market.config.sizeDecimals) + Int(market.config.priceDecimals)))
+        // size = notional / price, at the market's own size scale. The scale is built by
+        // integer multiplication: `pow(10:)` returns a Double, which stops being exact at
+        // 10^23 while the venue's own limit on these decimals is higher than that, and
+        // converting a non-representable Double to Int128 is a trap rather than a wrong
+        // answer. Nothing in this app does arithmetic on a price in Double.
+        let exponent = Int(market.config.sizeDecimals) + Int(market.config.priceDecimals)
+        guard exponent >= 0, exponent <= 38 else { return nil }
+        var scale = Int128(1)
+        for _ in 0..<exponent { scale *= 10 }
         let raw = Int128(notional.raw) * scale / (Int128(mark.raw) * 1_000_000)
         return Int64(exactly: raw).flatMap { market.size($0) }
     }
-
-    private func pow10(_ exponent: Int) -> Double { pow(10, Double(exponent)) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -204,6 +241,20 @@ struct TicketSheet: View {
                     AmountKeypad(text: $amount)
                         .padding(.top, 8)
 
+                    if let blockingReason, !session.hasFailed {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(DeskColor.action.color)
+                            Text(blockingReason)
+                                .font(DeskType.caption)
+                                .foregroundStyle(DeskColor.nightText.color.opacity(0.85))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.bottom, 12)
+                        .transition(.opacity)
+                    }
+
                     if session.hasFailed, let reason = session.statusText {
                         // Above the control rather than in an alert: an alert is dismissed and
                         // forgotten, and the reason is the thing the user has to act on.
@@ -230,7 +281,7 @@ struct TicketSheet: View {
                     ? "Enter order size"
                     : "Hold to \(side.word().lowercased()) \(amount) AUSD · \(leverage)×",
                 tint: side == .up ? DeskColor.rise : DeskColor.fall,
-                isEnabled: quote != nil && !hasInvalidProtection && !session.isBusy
+                isEnabled: quote != nil && !hasInvalidProtection && shortfall == nil && !session.isBusy
             ) {
                 Task { await submit() }
             }
