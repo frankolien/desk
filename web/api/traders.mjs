@@ -281,9 +281,11 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
           return res.status(400).json({ error: `Between 1 and ${MAX_FOLLOWED} wallet addresses are required.` });
         }
         const traders = await Promise.all(addresses.map((address) => trader(chain, book, address)));
-        // Auto-copy asks for a reading no older than the request itself.
+        // Auto-copy asks for a reading no older than the request itself. Private either
+        // way: the addresses are in the URL, so a shared cache would hold one person's
+        // follow list keyed by exactly the tuple that identifies them.
         res.setHeader("Cache-Control", req.query.fresh === "1"
-          ? "no-store" : "public, s-maxage=10, stale-while-revalidate=60");
+          ? "private, no-store" : "private, max-age=10");
         return res.status(200).json({
           observedAt: Date.now(),
           traders: traders.map((found, index) => found?.unreadable

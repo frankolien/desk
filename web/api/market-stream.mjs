@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 
+import { redisStore } from "./_store.mjs";
+
 export const config = { maxDuration: 300 };
 
 const TOKENS = {
@@ -32,7 +34,27 @@ function write(res, event, value) {
   res.write(`event: ${event}\ndata: ${typeof value === "string" ? value : JSON.stringify(value)}\n\n`);
 }
 
-export default function handler(req, res) {
+/// Each stream holds a function for its whole lifetime and an authenticated OKX socket with
+/// it, so a loop of requests is both a bill and a way to reach OKX's connection limit and
+/// take the feature down. A caller gets a handful at a time; the app opens one.
+const STREAM_WINDOW_SECONDS = 300;
+const STREAM_LIMIT = 12;
+
+async function withinStreamLimit(store, headers) {
+  if (!store) return true;
+  const forwarded = String(headers?.["x-forwarded-for"] ?? "").split(",")[0].trim();
+  if (!forwarded) return true;
+  try {
+    const key = `stream:${crypto.createHash("sha256").update(forwarded).digest("hex").slice(0, 32)}`;
+    const count = await store.incr(key);
+    if (count === 1) await store.expire(key, STREAM_WINDOW_SECONDS);
+    return count <= STREAM_LIMIT;
+  } catch {
+    return true;
+  }
+}
+
+export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
   if (!process.env.OKX_API_KEY || !process.env.OKX_SECRET_KEY || !process.env.OKX_PASSPHRASE) {
     return res.status(503).json({ error: "Market stream is not configured" });
@@ -42,6 +64,9 @@ export default function handler(req, res) {
   const period = String(req.query.period || "1m");
   const token = TOKENS[symbol];
   if (!token || !PERIODS.has(period)) return res.status(400).json({ error: "Unsupported market" });
+  if (!await withinStreamLimit(redisStore(), req.headers)) {
+    return res.status(429).json({ error: "Too many streams from here. Try again shortly." });
+  }
 
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache, no-transform");
