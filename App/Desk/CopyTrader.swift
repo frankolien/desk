@@ -107,6 +107,9 @@ final class CopyTrader {
 
     let network: DeskNetwork
     private var baselines: [String: [String: ObservedPosition]] = [:]
+    /// Traders whose book read as empty once. A second reading has to agree before the
+    /// copies are closed.
+    private var unconfirmedFlat: Set<String> = []
     private var portfolios: [String: Double] = [:]
     private var accounts: [UInt64: String] = [:]
     private var wokenAt: Date?
@@ -304,6 +307,13 @@ final class CopyTrader {
                 baselines[trader.id] = after
                 continue
             }
+            // A book that went from held to empty in one reading is the shape a failed read
+            // takes when it arrives as a success. A real full close still looks like this on
+            // the next reading, so it costs one cycle and nothing else; a blip costs nothing.
+            if after.isEmpty, !before.isEmpty, unconfirmedFlat.insert(trader.id).inserted {
+                continue
+            }
+            if !after.isEmpty { unconfirmedFlat.remove(trader.id) }
             baselines[trader.id] = after
             for move in CopyPlanner.moves(before: before, after: after) {
                 // Stopped or edited while an earlier move was being sent.
@@ -342,6 +352,9 @@ final class CopyTrader {
               let body = try? JSONDecoder().decode(Books.self, from: data) else { return nil }
         var books: [String: [String: ObservedPosition]] = [:]
         for trader in body.traders {
+            // The server says so when the chain would not answer. Leaving the trader out of
+            // `books` skips their diff entirely, which is what an unknown book deserves.
+            if trader.unreadable == true { continue }
             var book: [String: ObservedPosition] = [:]
             for position in trader.positions {
                 let observed = ObservedPosition(
@@ -479,8 +492,10 @@ final class CopyTrader {
         ) {
         case .failure(let skip):
             if case .dailyLossLimit = skip {
-                isPaused = true
-                persist()
+                // Through `setPaused`, so the App Group flag the run loop, the widget, Siri
+                // and Control Center all read is set too. Assigning the field alone was
+                // undone by the next tick, which then logged a resume nobody asked for.
+                setPaused(true)
                 return note(.paused, sentence(for: skip, rules: rules))
             }
             return note(.skipped, sentence(for: skip, rules: rules))

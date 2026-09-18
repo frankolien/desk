@@ -90,7 +90,7 @@ test("a followed wallet shows its live positions, and an unknown one shows none"
         ? { accountId: 3901n, accountAddr: ALICE, balanceCNS: 1_284_340_000n, positions: { bank1: 1n << 20n } }
         : null;
     },
-    async position(perpId) { return perpId === 20 ? { row: row(), mark: 244_722n } : null; },
+    async openPosition(perpId) { return perpId === 20 ? { row: row(), mark: 244_722n } : null; },
   };
   const other = "0x1111111111111111111111111111111111111111";
   const result = await createHandler({ chain, fetchImpl: context })(
@@ -99,6 +99,24 @@ test("a followed wallet shows its live positions, and an unknown one shows none"
   assert.equal(result.body.traders[0].balance, "1284.34");
   assert.equal(result.body.traders[0].positions[0].market, "ETH");
   assert.deepEqual(result.body.traders[1], { address: other, accountId: null, positions: [] });
+});
+
+test("a trader whose book could not be read is marked unreadable, never flat", async () => {
+  const chain = {
+    async accountByAddress(address) {
+      if (address === ALICE) throw new Error("rpc");
+      return { accountId: 77n, accountAddr: address, balanceCNS: 0n, positions: { bank1: 1n << 20n } };
+    },
+    async openPosition() { throw new Error("rpc"); },
+  };
+  const other = "0x1111111111111111111111111111111111111111";
+  const result = await createHandler({ chain, fetchImpl: context })(
+    { method: "GET", query: { view: "following", addresses: `${ALICE},${other}` } }, recorder());
+  assert.equal(result.status, 200);
+  // The account read failed outright.
+  assert.equal(result.body.traders[0].unreadable, true);
+  // The account read, but its positions did not.
+  assert.equal(result.body.traders[1].unreadable, true);
 });
 
 test("bad input and outages are refused plainly", async () => {

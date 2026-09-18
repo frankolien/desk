@@ -125,15 +125,7 @@ export function chainReader(rpcURL = process.env.MONAD_MAINNET_RPC || "https://r
       return read("getAccountById", [BigInt(id)]);
     },
     async accountByAddress(address) {
-      try {
-        return await read("getAccountByAddr", [address]);
-      } catch {
-        return null;
-      }
-    },
-    async position(perpId, accountId) {
-      const [row, mark, valid] = await read("getPositionV2", [BigInt(perpId), BigInt(accountId)]);
-      return valid && row.lotLNS > 0n ? { row, mark } : null;
+      return read("getAccountByAddr", [address]);
     },
     /// Open whatever the mark says. A missing mark is not a closed position, and reading
     /// it as one would tell every follower the trader had left.
@@ -144,11 +136,27 @@ export function chainReader(rpcURL = process.env.MONAD_MAINNET_RPC || "https://r
   };
 }
 
+/// One trader's book, or `unreadable` when the chain would not answer.
+///
+/// The distinction is the whole point: auto-copy diffs this against what it saw last time,
+/// so a read that failed must never arrive as a trader holding nothing. That is a wave of
+/// closes on positions the trader still holds.
 async function trader(chain, book, address) {
-  const account = await chain.accountByAddress(address);
+  let account;
+  try {
+    account = await chain.accountByAddress(address);
+  } catch {
+    return { unreadable: true };
+  }
   if (!account || account.accountId === 0n) return null;
   const ids = perpIdsFromBitmap(account.positions).filter((id) => book.has(id));
-  const found = await Promise.all(ids.map((id) => chain.position(id, account.accountId)));
+  let found;
+  try {
+    // `openPosition`, not `position`: a mark the venue would not price is not a close.
+    found = await Promise.all(ids.map((id) => chain.openPosition(id, account.accountId)));
+  } catch {
+    return { unreadable: true };
+  }
   let pnl = 0n;
   const positions = [];
   found.forEach((entry, index) => {
@@ -267,7 +275,9 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
           ? "no-store" : "public, s-maxage=10, stale-while-revalidate=60");
         return res.status(200).json({
           observedAt: Date.now(),
-          traders: traders.map((found, index) => found ?? { address: addresses[index], accountId: null, positions: [] }),
+          traders: traders.map((found, index) => found?.unreadable
+            ? { address: addresses[index], accountId: null, positions: [], unreadable: true }
+            : found ?? { address: addresses[index], accountId: null, positions: [] }),
         });
       }
       return res.status(400).json({ error: "Unknown view." });

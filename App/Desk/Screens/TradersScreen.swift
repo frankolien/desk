@@ -27,6 +27,9 @@ struct TraderSnapshot: Decodable, Hashable, Identifiable, Sendable {
     let pnl: String?
     let balance: String?
     let positions: [TraderPosition]
+    /// True when the server could not read this trader's book at all. Distinct from an
+    /// empty book, which means they hold nothing — auto-copy must never confuse the two.
+    var unreadable: Bool?
 
     var id: String { address.lowercased() }
     var isProfit: Bool { !(pnl ?? "").hasPrefix("-") }

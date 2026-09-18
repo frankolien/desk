@@ -160,7 +160,10 @@ final class TradingSession {
             }
         }
         connecting = attempt
-        defer { connecting = nil }
+        // Only if it is still ours: a cancelled attempt that cleared this slot unconditionally
+        // let a later `connect()` start a second `desk.open`, and the loser of that race left
+        // an authenticated socket with nobody reading its frames.
+        defer { if connectionID == id { connecting = nil } }
         try await attempt.value
     }
 
