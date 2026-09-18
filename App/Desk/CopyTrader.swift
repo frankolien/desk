@@ -542,7 +542,10 @@ final class CopyTrader {
                 sizeRaw: plan.draft.size.raw, leverage: plan.leverage, margin: plan.margin, positionID: nil,
                 openedAt: .now, isShadow: true, shadow: fill, lastMark: markValue, theirEntry: theirs.entry))
             entry.fillSeconds = Date.now.timeIntervalSince(seenAt)
-            entry.slippageBps = CopyPlanner.chaseBps(entry: theirs.entry, mark: fill.entry, side: side)
+            // Against the mark this copy was priced at, not the trader's entry: their entry
+            // is a price on another venue, and the difference between two venues is not
+            // slippage.
+            entry.slippageBps = CopyPlanner.chaseBps(entry: markValue, mark: fill.entry, side: side)
             record(entry)
             onEvent?("Shadow copied \(Self.name(for: trader)): \(label)")
             return
@@ -560,7 +563,8 @@ final class CopyTrader {
                 entry.fillSeconds = Date.now.timeIntervalSince(seenAt)
                 if let filled, let price = target.price(filled.entryRaw) {
                     let fillValue = Double(price.raw) / pow(10, Double(price.decimals))
-                    entry.slippageBps = CopyPlanner.chaseBps(entry: theirs.entry, mark: fillValue, side: side)
+                    entry.slippageBps = CopyPlanner.chaseBps(
+                        entry: Double(mark.raw) / pow(10, Double(mark.decimals)), mark: fillValue, side: side)
                 }
                 record(entry)
                 onEvent?("Copied \(Self.name(for: trader)): \(label)")

@@ -24,9 +24,12 @@ public enum Margin {
         guard maintenanceMarginFraction > 0, size.raw > 0 else { return nil }
 
         // E * mm, where mm = 100 / maintenanceMarginFraction.
+        // Always up. It is added for a long and subtracted for a short, so rounding it up
+        // pushes both sides' liquidation price towards the mark — which is the direction
+        // that never claims more headroom than the position has.
         let marginTerm = divide(Int128(entry.raw) * 100,
                                 by: Int128(maintenanceMarginFraction),
-                                rounding: side == .long ? .ceiling : .towardZero)
+                                rounding: .ceiling)
 
         // C / S restated at the price scale: C_raw * 10^(sd + pd - 6) / S_raw.
         let exponent = Int(size.decimals) + Int(entry.decimals) - Int(Money.decimals)
@@ -40,9 +43,10 @@ public enum Margin {
             guard let divisor = Pow10.value(-exponent) else { return nil }
             numerator = divide(numerator, by: divisor, rounding: .towardZero)
         }
+        // And always down, for the same reason: subtracted for a long, added for a short.
         let collateralTerm = divide(numerator,
                                     by: Int128(size.raw),
-                                    rounding: side == .long ? .towardZero : .ceiling)
+                                    rounding: .towardZero)
 
         let raw: Int128 = side == .long
             ? Int128(entry.raw) + marginTerm - collateralTerm

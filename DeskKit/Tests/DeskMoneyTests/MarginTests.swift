@@ -44,6 +44,30 @@ struct MarginTests {
         #expect(liquidation.text == "106000.0")
     }
 
+    // Both worked examples above divide exactly, so neither can see which way a remainder
+    // goes. This one does not divide, and the direction is the whole point: §9 says a
+    // short's liquidation price rounds down, because for a short a lower price is less
+    // headroom, and the screen must never show more room than the position has.
+    @Test("a remainder rounds against the trader on both sides")
+    func roundingIsAlwaysAgainstTheTrader() throws {
+        // 0.01 BTC short at 76,719.0 against 76.454319 AUSD, 4% maintenance.
+        let entry = try #require(Price(raw: 767_190, decimals: 1))
+        let held = try #require(Size(raw: 1_000, decimals: 5))
+        let backing = try #require(Money(raw: 76_454_319))
+        let short = try #require(Margin.liquidationPrice(
+            entry: entry, size: held, collateral: backing,
+            maintenanceMarginFraction: 2500, side: .short))
+        // E - ceil(E*100/mm) + floor(C/S) = 767190 - 30688 + 76454.
+        #expect(short.raw == 812_956)
+        #expect(short.raw != 812_958)
+
+        // The long of the same shape still rounds up, towards the mark.
+        let long = try #require(Margin.liquidationPrice(
+            entry: entry, size: held, collateral: backing,
+            maintenanceMarginFraction: 2500, side: .long))
+        #expect(long.raw == 721_424)
+    }
+
     // C/(S*E) is exactly 1/L, so the distance collapses to 1/L - mm.
     @Test("liquidation distance is one over leverage minus maintenance")
     func distanceCollapses() {

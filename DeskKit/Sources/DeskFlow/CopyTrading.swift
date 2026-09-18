@@ -220,8 +220,11 @@ public enum CopyPlanner {
         let sameMarket = openCopies.filter { $0.symbol == symbol }
         guard !sameMarket.contains(where: { $0.side != side }) else { return .failure(.offsetsOpenCopy) }
 
-        let markValue = Double(mark.raw) / pow(10, Double(mark.decimals))
-        let chase = chaseBps(entry: position.entry, mark: markValue, side: side)
+        // Against the trader's own venue. `mark` is the price this copy will be sized and
+        // filled at, which on testnet is a different market from the one they entered on:
+        // comparing the two measured the gap between two venues rather than the move since
+        // their entry, and passed or refused every copy on that basis.
+        let chase = chaseBps(entry: position.entry, mark: position.mark, side: side)
         if chase > rules.maxChaseBps { return .failure(.chased(bps: chase)) }
 
         let lev = leverage(for: position, rules: rules, market: market)
@@ -237,7 +240,12 @@ public enum CopyPlanner {
         margin = (margin * 100).rounded(.down) / 100
         let marginRaw = Int64((margin * 1_000_000).rounded(.down))
         guard marginRaw > 0 else { return .failure(.tooSmall) }
-        guard let free, free.raw >= marginRaw else { return .failure(.insufficientBalance) }
+        // What leaves the balance is margin plus the venue's fee on the notional. Checking
+        // the margin alone sent copies the venue then refused, which reached the person as a
+        // rejection rather than as "not enough AUSD".
+        let notionalRaw = Int128(marginRaw) * Int128(lev)
+        let feeRaw = Int64(clamping: (notionalRaw * Int128(market.config.takerFeeMicros) + 999_999) / 1_000_000)
+        guard let free, free.raw >= marginRaw + feeRaw else { return .failure(.insufficientBalance) }
 
         // size = margin × leverage ÷ price, at the market's size scale, never rounded up.
         let sizeScale = Int128(10).power(Int(market.config.sizeDecimals) + Int(mark.decimals))

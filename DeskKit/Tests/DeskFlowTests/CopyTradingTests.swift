@@ -141,6 +141,24 @@ struct CopyTradingTests {
         #expect(CopyPlanner.leverage(for: btc(leverage: nil), rules: CopyRules(), market: btcMarket) == 1)
     }
 
+    @Test("A copy has to afford its fee, not only its margin")
+    func affordability() throws {
+        let rules = CopyRules(mode: .live, marginPerTrade: 10, maxLeverage: 5)
+        // 10 AUSD of margin at 5x is 50 of notional; the venue's taker fee on that is 0.01725.
+        #expect(skip(try plan(btc(), rules: rules, free: money(10))) == .insufficientBalance)
+        #expect(try plan(btc(), rules: rules, free: Money(raw: 10_017_250)).get().margin == 10)
+    }
+
+    @Test("Price protection measures the trader's own venue, not the one the copy fills on")
+    func chaseIsMeasuredOnOneVenue() throws {
+        // Desk trades testnet, where BTC marks 60,000; the trader entered on mainnet at
+        // 95,000 and it marks 95,300 there. The copy is 32 bps late, not 3,684 bps early.
+        let theirs = ObservedPosition(symbol: "btc", side: .long, size: 0.5, entry: 95_000,
+                                      mark: 95_300, collateral: 0, leverage: 5)
+        #expect(skip(try plan(theirs, rules: CopyRules(mode: .live, maxChaseBps: 25))) == .chased(bps: 32))
+        #expect(throws: Never.self) { try plan(theirs, rules: CopyRules(mode: .live, maxChaseBps: 50)).get() }
+    }
+
     @Test("A shadow fill pays slippage and its fee, and fires the stop a live copy would")
     func shadow() throws {
         let rules = CopyRules(marginPerTrade: 10, maxLeverage: 5, stopLossPercent: 25, takeProfitPercent: 50)

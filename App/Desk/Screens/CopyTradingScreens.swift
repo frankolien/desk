@@ -833,7 +833,7 @@ private struct CopyLogRow: View {
         [name,
          entry.date.formatted(.relative(presentation: .named)),
          entry.fillSeconds.map { String(format: "%.1f s after their move", $0) },
-         entry.slippageBps.map { String(format: "%+d bps vs their entry", $0) }]
+         entry.slippageBps.map { String(format: "%+d bps vs mark", $0) }]
             .compactMap { $0 }.joined(separator: " · ")
     }
 }
