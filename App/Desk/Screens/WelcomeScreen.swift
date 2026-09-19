@@ -4,10 +4,10 @@ import SwiftUI
 /// The way in.
 ///
 /// Laid out after the reference app's own first screen: a ticker of what the product does
-/// running in the upper two thirds, one phrase lit in glass and the rest nearly gone, and
-/// beneath it a warm bloom rising off the bottom edge carrying the mark, the promise and
-/// the action. The ticker's timings come from the sibling app, where the same control
-/// sits commented out — 1.45 seconds a step, 0.55 to cross.
+/// running in the upper two thirds, one phrase lit in glass and the rest dimmed, and
+/// beneath it the mark, the promise and the action on the same ground every other screen
+/// uses. The ticker's timings come from the sibling app, where the same control sits
+/// commented out — 1.45 seconds a step, 0.55 to cross.
 ///
 /// It is the sign-in screen too. A welcome that says "Get started" followed by a screen
 /// that says "Continue with Face ID" is two screens doing one job, and both reference
@@ -59,12 +59,13 @@ struct WelcomeScreen: View {
                     DeskBrandMark(size: compact ? 48 : 52)
                         .padding(.horizontal, contentInset)
 
-                    // Says what the app is before it says how clever the sign-in is.
-                    // "Trade perps, with your face" asked the reader to work out what a
-                    // face has to do with a trade, and the ticker above already makes the
-                    // passkey point four times over.
-                    Text("Copy the traders\nwho are winning")
-                        .font(.system(size: compact ? 38 : 42, weight: .heavy, design: .rounded))
+                    // The category and the reason to pick this one, in that order. Perps
+                    // alone is a claim a dozen apps make; copying alone reads as though
+                    // trading yourself is not on offer, and a third of the app is exactly
+                    // that. "With your face" said neither, and the ticker above already
+                    // makes the passkey point four times over.
+                    Text("Trade perps.\nOr copy someone\nwho's good at it.")
+                        .font(.system(size: compact ? 28 : 31, weight: .heavy, design: .rounded))
                         .foregroundStyle(.white)
                         .lineSpacing(1)
                         .padding(.horizontal, contentInset)
