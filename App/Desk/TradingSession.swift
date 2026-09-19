@@ -314,7 +314,7 @@ final class TradingSession {
         case .positions(let value, let isSnapshot):
             let portfolio = isSnapshot
                 ? value
-                : Self.merging(existing: positions.value ?? [], updates: value)
+                : PositionBook.merging(existing: positions.value ?? [], updates: value)
             positions.record(portfolio)
             onPositions?(portfolio)
         case .order(let id, let phase):
@@ -322,22 +322,13 @@ final class TradingSession {
         }
     }
 
-    /// Position updates are deltas, not miniature snapshots. Replacing the array with an
-    /// ETH update made an existing BTC position disappear from Desk until reconnect.
+    /// Position updates are deltas, not miniature snapshots. The folding lives in
+    /// `PositionBook`, inside the package, where it can be tested — it was here, in the
+    /// app target, which has no tests at all.
     static func merging(
         existing: [PerplPosition], updates: [PerplPosition]
     ) -> [PerplPosition] {
-        var result = existing
-        for update in updates {
-            if let index = result.firstIndex(where: {
-                $0.accountID == update.accountID && $0.positionID == update.positionID
-            }) {
-                result[index] = update
-            } else {
-                result.append(update)
-            }
-        }
-        return result
+        PositionBook.merging(existing: existing, updates: updates)
     }
 
     private func socketEnded(id: UUID) {

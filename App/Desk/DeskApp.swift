@@ -8,20 +8,7 @@ struct DeskApp: App {
     @UIApplicationDelegateAdaptor(DeskAppDelegate.self) private var appDelegate
     @State private var model = AppModel(passkey: DeskApp.passkeyService)
 
-    /// The relying party every passkey binds to, permanently.
-    ///
-    /// It is a constant here and a `webcredentials:` entry in `Desk.entitlements`, and the
-    /// two must be identical. That is two copies of one string, which is a thing worth
-    /// being unhappy about — but the alternatives are worse. Reading the entitlement at
-    /// run time is macOS-only; `SecTaskCopyValueForEntitlement` is not in the iOS SDK. And
-    /// an `INFOPLIST_KEY_DeskRelyingParty` build setting silently does not work: Xcode
-    /// injects `INFOPLIST_KEY_*` only for keys it recognises, so a custom one vanishes
-    /// from the built plist with no warning — which, since a missing value falls back to
-    /// the debug stub, would have signed every user in as the same person.
-    ///
-    /// So the copies stay, and `tools/check-relying-party.sh` compares them. Run it before
-    /// shipping; a mismatch fails only on hardware, because the association is checked by
-    /// the system rather than by the app.
+
     static let relyingPartyIdentifier = "desk-trading-opia.vercel.app"
 
     static var relyingParty: RelyingParty? {
@@ -30,23 +17,9 @@ struct DeskApp: App {
         try? RelyingParty(relyingPartyIdentifier)
     }
 
-    /// The real ceremony once a relying party exists, and an honest failure until then.
-    ///
-    /// A release build with no relying party cannot sign in, and that is the correct
-    /// failure: better a build that refuses than one that signs everybody in as the same
-    /// person. The debug stub is compiled out of release entirely, because a fixed PRF
-    /// output derives a fixed key and a shipped fallback to it would hand every user the
-    /// same wallet.
+
     static var passkeyService: any PasskeyService {
-        // A simulator has no Secure Enclave and no real biometric, so the PRF output it
-        // would produce is not the one a device produces — the whole point of the
-        // derivation is that those bytes are the wallet. Development on a simulator
-        // therefore keeps the stub, and every build on real hardware runs the real
-        // ceremony.
-        //
-        // This regressed once: adopting the relying party made the ceremony the path on
-        // every build, and the simulator then reported "no passkey on this device yet"
-        // for a sign-in that could never have worked there.
+
         #if targetEnvironment(simulator) && DEBUG
         return StubPasskeyService()
         #else
@@ -116,10 +89,11 @@ struct RootView: View {
         .task { await DisplayCurrency.shared.refresh() }
         .task {
             guard showsLaunchMoment else { return }
-            // The mark's own animation chain finishes at about 1.4 s. Waiting 3.1 s on top
-            // of iOS's launch frame held a working app behind a logo for nearly four
-            // seconds, on every launch, warm or cold.
-            try? await Task.sleep(for: .milliseconds(1_450))
+            // The mark's own animation chain finishes at about 1.28 s, once the wordmark
+            // and the tagline that followed it are gone. Waiting 3.1 s on top of iOS's
+            // launch frame held a working app behind a logo for nearly four seconds, on
+            // every launch, warm or cold.
+            try? await Task.sleep(for: .milliseconds(1_300))
             withAnimation(.easeInOut(duration: 0.62)) {
                 showsLaunchMoment = false
             }
@@ -127,24 +101,7 @@ struct RootView: View {
     }
 }
 
-/// Keeps Desk running just long enough to wipe the trading key after it leaves the
-/// foreground, and keeps the key's transitions in order.
-///
-/// A backgrounded app is suspended within about thirty seconds and a suspended app runs no
-/// code, so a wipe merely scheduled for later would not happen until the person came back.
-/// A background task holds execution open for the grace, and the wipe runs inside it. If
-/// iOS ends that time early, the expiration handler locks on the spot.
-///
-/// Every transition goes through one queue. Leaving and returning are async calls on an
-/// actor, and two unstructured tasks carry no ordering guarantee — a quick return could
-/// otherwise land before the departure it answers, leaving an absence recorded against an
-/// app that is open and a key that would then expire in front of the person.
-///
-/// One limit, stated rather than hidden: iOS may suspend the process the instant the
-/// expiration handler returns, before the lock has run. The key would then sit in
-/// suspended memory until Desk is next opened — and it is wiped before it can be used,
-/// because `SigningSession` checks the absence again on the way back in and before every
-/// signature.
+
 @MainActor
 final class KeyGrace {
     private var task: UIBackgroundTaskIdentifier = .invalid

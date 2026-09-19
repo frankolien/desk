@@ -197,3 +197,88 @@ struct PositionFiguresTests {
         #expect(figures.mark.raw == 1_050_000)
     }
 }
+
+/// A position frame with the market, account and position id under the caller's control,
+/// so a book can be built out of several of them.
+private func bookJSON(
+    market: Int = 16, account: Int = 42, id: Int64 = 7,
+    size: Int64 = 1_000_000, exit: Int64? = nil
+) -> Data {
+    var fields: [String] = [
+        #""mkt":\#(market)"#, #""acc":\#(account)"#, #""pid":"\#(id)""#, #""sd":1"#,
+        #""c":"10000000000""#, #""ep":1000000"#, #""s":\#(size)"#,
+        #""lv":1000"#, #""efs":"0""#, #""xfs":"0""#, #""fee":"0""#, #""st":1"#,
+    ]
+    if let exit { fields.append(#""xp":\#(exit)"#) }
+    return Data("{\(fields.joined(separator: ","))}".utf8)
+}
+
+private func position(
+    market: Int = 16, account: Int = 42, id: Int64 = 7,
+    size: Int64 = 1_000_000, exit: Int64? = nil
+) throws -> PerplPosition {
+    try JSONDecoder().decode(
+        PerplPosition.self, from: bookJSON(market: market, account: account, id: id, size: size, exit: exit))
+}
+
+@Suite("Folding position deltas into the book")
+struct PositionBookTests {
+    @Test("An update to one market leaves the others alone")
+    func otherMarketsSurvive() throws {
+        let btcRow = try position(market: 16, id: 7)
+        let ethRow = try position(market: 20, id: 8)
+        let merged = PositionBook.merging(existing: [btcRow, ethRow], updates: [try position(market: 20, id: 8, size: 2_000_000)])
+        #expect(merged.count == 2)
+        #expect(merged.contains { $0.marketID == 16 && $0.positionID == 7 })
+        #expect(merged.first { $0.marketID == 20 }?.sizeRaw == 2_000_000)
+    }
+
+    @Test("An update under the same id replaces the row it names")
+    func sameIdReplaces() throws {
+        let open = try position(id: 7)
+        let closed = try position(id: 7, exit: 1_200_000)
+        let merged = PositionBook.merging(existing: [open], updates: [closed])
+        #expect(merged.count == 1)
+        #expect(merged[0].isOpen == false)
+    }
+
+    /// The reported bug: a position closed on the venue, reported under a new id, left
+    /// the old row on screen still marked open. Closing it again sent an order with
+    /// nothing to match, which came back as expired.
+    @Test("A close reported under a new id retires the row it replaces")
+    func closeUnderNewIdRetiresTheOldRow() throws {
+        let held = try position(id: 7)
+        let closedElsewhere = try position(id: 9, exit: 1_200_000)
+        let merged = PositionBook.merging(existing: [held], updates: [closedElsewhere])
+        #expect(merged.count == 1)
+        #expect(merged[0].positionID == 9)
+        #expect(merged.contains { $0.isOpen } == false)
+    }
+
+    @Test("Reopening a market under a new id retires the row it replaces")
+    func reopenRetiresTheOldRow() throws {
+        let held = try position(id: 7)
+        let merged = PositionBook.merging(existing: [held], updates: [try position(id: 11)])
+        #expect(merged.map(\.positionID) == [11])
+    }
+
+    /// Only the same account on the same market. Two people, or two markets, are not
+    /// evidence about each other.
+    @Test("Another account's position on the same market is untouched")
+    func otherAccountsSurvive() throws {
+        let mine = try position(account: 42, id: 7)
+        let theirs = try position(account: 99, id: 8)
+        let merged = PositionBook.merging(existing: [mine, theirs], updates: [try position(account: 42, id: 12, exit: 1_200_000)])
+        #expect(merged.contains { $0.accountID == 99 && $0.isOpen })
+        #expect(merged.filter { $0.accountID == 42 }.allSatisfy { !$0.isOpen })
+    }
+
+    /// A closed row is history, and history does not get retired by what comes after it.
+    @Test("A closed row on the market stays in the book")
+    func closedRowsAreKept() throws {
+        let past = try position(id: 3, exit: 900_000)
+        let merged = PositionBook.merging(existing: [past], updates: [try position(id: 7)])
+        #expect(merged.count == 2)
+        #expect(merged.contains { $0.positionID == 3 })
+    }
+}
