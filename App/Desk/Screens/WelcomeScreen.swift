@@ -3,12 +3,6 @@ import SwiftUI
 
 /// The way in.
 ///
-/// Laid out after the reference app's own first screen: a ticker of what the product does
-/// running in the upper two thirds, one phrase lit in glass and the rest dimmed, and
-/// beneath it the mark, the promise and the action on the same ground every other screen
-/// uses. The ticker's timings come from the sibling app, where the same control sits
-/// commented out — 1.45 seconds a step, 0.55 to cross.
-///
 /// It is the sign-in screen too. A welcome that says "Get started" followed by a screen
 /// that says "Continue with Face ID" is two screens doing one job, and both reference
 /// wallets create the account from the landing screen itself.
@@ -27,54 +21,33 @@ struct WelcomeScreen: View {
     var body: some View {
         GeometryReader { proxy in
             let compact = proxy.size.height < 760
-            // Keep the composition deliberately close to the top-leading edge. The
-            // safe area already supplies the necessary physical clearance; a second
-            // large inset made the onboarding feel centered and overly cautious.
-            let contentInset: CGFloat = compact ? 24 : 30
+            let contentInset: CGFloat = compact ? 22 : 30
 
-            ZStack(alignment: .bottom) {
-                // The same ground as every other screen, rather than one this screen
-                // invented. A saturated bloom used to rise off the bottom edge over most
-                // of the screen; it lit the button so brightly that amber stopped meaning
-                // "you can act here", because everything down there was already amber.
-                DeskBackground()
-
-                // One warm corner under the action, and no more than that. It reaches a
-                // third of the way up at sixteen percent, so it warms the ground the
-                // button sits on without competing with the button for the eye.
-                RadialGradient(
-                    colors: [DeskColor.action.color.opacity(0.16), .clear],
-                    center: UnitPoint(x: 0.02, y: 0.94),
-                    startRadius: 0,
-                    endRadius: proxy.size.height * 0.34)
-                    .allowsHitTesting(false)
+            ZStack {
+                WelcomeLivingBackground()
 
                 VStack(alignment: .leading, spacing: 0) {
-                    FeatureTicker(items: features)
-                        .padding(.horizontal, contentInset + 2)
-                        .frame(height: proxy.size.height * (compact ? 0.39 : 0.40), alignment: .bottom)
+                    WelcomeFeatureRail(items: features)
+                        .frame(height: proxy.size.height * (compact ? 0.40 : 0.42), alignment: .bottom)
 
                     Spacer(minLength: 0)
 
                     DeskBrandMark(size: compact ? 48 : 52)
                         .padding(.horizontal, contentInset)
 
-                    // Two words. The ticker above says what the sign-in is, the sentence
-                    // below says where and on what, and the copy engine sells itself on
-                    // the screen it lives on rather than on this one.
                     Text("Trade perps")
-                        .font(.system(size: compact ? 40 : 46, weight: .heavy, design: .rounded))
+                        .font(.system(size: compact ? 39 : 44, weight: .heavy, design: .rounded))
                         .foregroundStyle(.white)
                         .lineSpacing(1)
                         .padding(.horizontal, contentInset)
-                        .padding(.top, compact ? 22 : 28)
+                        .padding(.top, compact ? 18 : 24)
 
                     Text("Perpetuals on Monad. Face ID signs every order — no seed phrase, no wallet app.")
-                        .font(.system(size: 17, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.58))
+                        .font(.system(size: compact ? 15 : 16, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.62))
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, contentInset)
-                        .padding(.top, 22)
+                        .padding(.top, compact ? 14 : 18)
 
                     if let problem = model.signInProblem {
                         Text(problem)
@@ -86,16 +59,26 @@ struct WelcomeScreen: View {
                             .transition(.opacity)
                     }
 
-                    // Named with the method, because Apple's guidance is to say which
-                    // biometric rather than show a generic verb.
-                    PrimaryButton(
-                        title: model.isWorking ? "Deriving your keys…" : "Continue with Face ID",
-                        isEnabled: !model.isWorking
-                    ) {
+                    Button {
                         Task { await model.signIn() }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "faceid")
+                                .font(.system(size: 20, weight: .semibold))
+                            Text(model.isWorking ? "Deriving your keys…" : "Continue with Face ID")
+                                .font(.system(size: 17, weight: .bold, design: .rounded))
+                        }
+                        .foregroundStyle(DeskColor.night.color)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: compact ? 58 : 62)
+                        .background(DeskColor.action.color.opacity(model.isWorking ? 0.4 : 1), in: Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 0.7))
+                        .shadow(color: DeskColor.action.color.opacity(0.2), radius: 22, y: 9)
                     }
+                    .buttonStyle(.plain)
+                    .disabled(model.isWorking)
                     .padding(.horizontal, contentInset)
-                    .padding(.top, compact ? 26 : 30)
+                    .padding(.top, compact ? 20 : 24)
 
                     // Present on a device with no account and absent once one exists.
                     // Secondary to Face ID on purpose: a device without its own passkey
@@ -105,23 +88,23 @@ struct WelcomeScreen: View {
                     // dismissing a sheet could strand somebody's funds.
                     if model.mayOfferCreate {
                         Button("New here? Create an account") { showsCreateWarning = true }
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
                             .foregroundStyle(DeskColor.action.color)
                             .frame(maxWidth: .infinity)
-                            .padding(.top, 20)
+                            .padding(.top, compact ? 12 : 16)
                             .transition(.opacity)
                     }
 
                     Button("What is a perpetual?") { showsExplainer = true }
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.58))
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.60))
                         .frame(maxWidth: .infinity)
-                        .padding(.top, 26)
+                        .padding(.top, compact ? 16 : 20)
 
                     Spacer(minLength: 0)
-                        .frame(height: max(proxy.safeAreaInsets.bottom, 18) + 6)
+                        .frame(height: max(proxy.safeAreaInsets.bottom, 14) + 4)
                 }
-                .offset(y: -14)
+                .padding(.top, max(proxy.safeAreaInsets.top, 18))
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
         }
@@ -139,6 +122,122 @@ struct WelcomeScreen: View {
                 .accountSheetGlass()
         }
         .animation(.snappy, value: model.mayOfferCreate)
+    }
+}
+
+/// A slow lighting pass, not moving content. Core Animation interpolates two blurred
+/// fields for the whole eighteen-second cycle, and Reduce Motion freezes them in place.
+private struct WelcomeLivingBackground: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var drifting = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                DeskBackground()
+
+                Ellipse()
+                    .fill(Color(red: 0.02, green: 0.22, blue: 0.12).opacity(0.48))
+                    .frame(width: proxy.size.width * 1.15, height: proxy.size.height * 0.48)
+                    .blur(radius: 92)
+                    .offset(x: drifting ? proxy.size.width * 0.24 : -proxy.size.width * 0.22,
+                            y: drifting ? -proxy.size.height * 0.20 : -proxy.size.height * 0.34)
+                    .scaleEffect(drifting ? 1.12 : 0.92)
+
+                Ellipse()
+                    .fill(DeskColor.action.color.opacity(0.20))
+                    .frame(width: proxy.size.width * 0.95, height: proxy.size.height * 0.34)
+                    .blur(radius: 86)
+                    .offset(x: drifting ? -proxy.size.width * 0.20 : proxy.size.width * 0.22,
+                            y: drifting ? proxy.size.height * 0.39 : proxy.size.height * 0.31)
+                    .scaleEffect(drifting ? 0.94 : 1.10)
+
+                LinearGradient(
+                    colors: [.black.opacity(0.08), .clear, .black.opacity(0.18)],
+                    startPoint: .top, endPoint: .bottom)
+            }
+            .ignoresSafeArea()
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 18).repeatForever(autoreverses: true)) {
+                    drifting = true
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The existing feature ticker, redesigned as a connected security sequence. One row is
+/// active at a time; the rail keeps all four feeling like one story rather than loose text.
+private struct WelcomeFeatureRail: View {
+    let items: [(symbol: String, title: String)]
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var active = 1
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                featureRow(item, index: index)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task {
+            guard !reduceMotion, items.count > 1 else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1.65))
+                withAnimation(.smooth(duration: 0.55)) {
+                    active = (active + 1) % items.count
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func featureRow(_ item: (symbol: String, title: String), index: Int) -> some View {
+        let isActive = index == active
+        return HStack(spacing: 12) {
+            ZStack {
+                if index < items.count - 1 {
+                    Rectangle()
+                        .fill(DeskColor.action.color.opacity(0.38))
+                        .frame(width: 1, height: 62)
+                        .offset(y: 31)
+                }
+                Circle()
+                    .fill(isActive ? DeskColor.action.color : DeskColor.night.color)
+                    .frame(width: isActive ? 14 : 11, height: isActive ? 14 : 11)
+                    .overlay(Circle().stroke(DeskColor.action.color.opacity(isActive ? 1 : 0.65), lineWidth: 1.2))
+                    .shadow(color: isActive ? DeskColor.action.color.opacity(0.55) : .clear, radius: 8)
+            }
+            .frame(width: 20)
+
+            HStack(spacing: 11) {
+                if isActive {
+                    Image(systemName: item.symbol)
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(DeskColor.action.color)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                }
+                Text(item.title)
+                    .font(.system(size: isActive ? 20 : 17, weight: .bold, design: .rounded))
+                    .foregroundStyle(isActive ? DeskColor.nightText.color : DeskColor.nightText.color.opacity(0.34))
+            }
+            .padding(.horizontal, isActive ? 18 : 8)
+            .frame(maxWidth: isActive ? 300 : .infinity, alignment: .leading)
+            .frame(height: 54)
+            .background {
+                if isActive {
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                        .overlay(Capsule().fill(DeskColor.action.color.opacity(0.07)))
+                        .overlay(Capsule().stroke(DeskColor.action.color.opacity(0.45), lineWidth: 0.7))
+                }
+            }
+        }
+        .padding(.horizontal, 28)
     }
 }
 
