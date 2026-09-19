@@ -16,7 +16,36 @@ struct WidgetGallery: View {
         return arguments[index + 1]
     }
 
+    /// One tile on a flat grey ground, for cropping: `-widget-gallery portfolio-medium`.
+    private var single: (String, WidgetFamily)? {
+        let parts = section.split(separator: "-")
+        guard parts.count == 2 else { return nil }
+        let family: WidgetFamily = switch parts[1] {
+        case "small": .systemSmall
+        case "large": .systemLarge
+        default: .systemMedium
+        }
+        return (String(parts[0]), family)
+    }
+
     var body: some View {
+        if let (name, family) = single {
+            ZStack {
+                Color(white: 0.5).ignoresSafeArea()
+                tile(family) {
+                    if name == "watchlist" {
+                        WatchlistWidgetView(glance: .preview, family: family)
+                    } else {
+                        PortfolioWidgetView(glance: .preview, family: family)
+                    }
+                }
+            }
+        } else {
+            gallery
+        }
+    }
+
+    private var gallery: some View {
         ZStack {
             DeskBackground()
             ScrollView {

@@ -2,23 +2,29 @@
 <html lang="en" class="js">
 <head>
 <meta charset="utf-8">
-<title>Desk — copy the best traders on Perpl, with your face as the key</title>
+<title>Desk — perpetuals on Monad, with your face as the key</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="description" content="A native iOS perpetuals app on Monad. Sign in with Face ID, follow traders read straight off Perpl's exchange contract, and copy every move they make in the same block.">
-<meta name="theme-color" content="#ffffff">
+<meta name="description" content="A native iOS perpetuals app on Monad. Sign in with Face ID, see which way the crowd leans, follow traders read straight off Perpl's exchange contract, and copy every move in the same block.">
+<meta name="theme-color" content="#e8b339">
 <link rel="canonical" href="https://trydesk.trade/">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://trydesk.trade/">
 <meta property="og:title" content="Desk — perpetuals on Monad, with your face">
-<meta property="og:description" content="Copy the traders who are actually winning on Perpl. Native iOS, passkey signing, no seed phrase.">
+<meta property="og:description" content="Trade perps with Face ID. Copy the traders who are actually winning on Perpl. Native iOS, no seed phrase.">
 <meta property="og:image" content="https://trydesk.trade/brand/og.jpg">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
 <link rel="icon" href="/brand/apple-touch-icon.png">
+<link rel="preload" href="/fonts/bricolage-variable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/geist-variable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/site.css">
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-apple" viewBox="0 0 22 26"><path fill="currentColor" d="M15.7 1.4c0 1.1-.45 2.16-1.19 2.94-.79.83-2.08 1.47-3.15 1.38-.12-1.05.4-2.17 1.15-2.92.8-.83 2.19-1.43 3.19-1.4zM20 16.3c-.57 1.31-.84 1.9-1.58 3.05-1.02 1.6-2.46 3.6-4.25 3.62-1.58.02-2-1.03-4.14-1.02-2.15.01-2.6 1.04-4.18 1.02-1.79-.02-3.15-1.82-4.17-3.43C-1.24 15.2-1.53 9.95.86 7.18a4.9 4.9 0 0 1 3.47-1.64c1.43 0 2.33.78 3.51.78 1.15 0 1.85-.78 3.5-.78 1.24 0 2.56.68 3.5 1.84-3.08 1.68-2.58 6.08.35 7.06z"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path fill="currentColor" d="M8 5v14l11-7z"/></symbol>
+</svg>
 <div class="site-root">
 
 <a href="#site-main" class="site-skip">Skip to content</a>
@@ -26,216 +32,227 @@
 <header class="site-nav">
   <div class="site-wrap site-nav-inner">
     <a href="/" class="site-logo" aria-label="Desk home">
-      <img src="/brand/mark.webp" alt="" width="32" height="32" class="site-logo-mark">
+      <img src="/brand/mark.webp" alt="" width="34" height="34" class="site-logo-mark">
       <span class="site-logo-word">Desk</span>
     </a>
     <nav class="site-nav-links" aria-label="Primary">
-      <a href="#copy">Copy engine</a>
+      <a href="#chain">Copy engine</a>
+      <a href="#desk">Live desk</a>
       <a href="#security">Security</a>
-      <a class="site-btn site-btn-primary site-btn-small" href="#get">
-        <svg class="site-apple" width="15" height="17" viewBox="0 0 22 26" fill="currentColor" aria-hidden="true"><path d="M15.7 1.4c0 1.1-.45 2.16-1.19 2.94-.79.83-2.08 1.47-3.15 1.38-.12-1.05.4-2.17 1.15-2.92.8-.83 2.19-1.43 3.19-1.4zM20 16.3c-.57 1.31-.84 1.9-1.58 3.05-1.02 1.6-2.46 3.6-4.25 3.62-1.58.02-2-1.03-4.14-1.02-2.15.01-2.6 1.04-4.18 1.02-1.79-.02-3.15-1.82-4.17-3.43C-1.24 15.2-1.53 9.95.86 7.18a4.9 4.9 0 0 1 3.47-1.64c1.43 0 2.33.78 3.51.78 1.15 0 1.85-.78 3.5-.78 1.24 0 2.56.68 3.5 1.84-3.08 1.68-2.58 6.08.35 7.06z"/></svg>
+      <a class="site-btn site-btn-ink site-btn-small" href="#get">
+        <svg class="site-apple" width="14" height="16" aria-hidden="true"><use href="#i-apple"/></svg>
         Get the app
       </a>
     </nav>
+  </div>
+  <div class="site-ticker" aria-label="Live positioning on Perpl" data-ticker>
+    <div class="site-ticker-track">
+      <span class="site-ticker-item"><span class="site-dot"></span><b>Perpl on Monad</b><span class="site-muted">Reading the exchange contract…</span></span>
+      <span class="site-ticker-item"><span class="site-dot"></span><b>Perpl on Monad</b><span class="site-muted">Reading the exchange contract…</span></span>
+    </div>
   </div>
 </header>
 
 <main id="site-main" class="site-main">
 
-  <!-- ─────────────────────────── hero ─────────────────────────── -->
-  <section class="site-wrap site-hero" aria-labelledby="hero-title">
-    <h1 id="hero-title" class="site-h1">Copy the traders who are actually winning.</h1>
-    <p class="site-sub">Perpetuals on Monad, with your face as the key.</p>
-    <div class="site-hero-cta">
-      <a class="site-btn site-btn-primary" href="#get">
-        <svg class="site-apple" width="17" height="19" viewBox="0 0 22 26" fill="currentColor" aria-hidden="true"><path d="M15.7 1.4c0 1.1-.45 2.16-1.19 2.94-.79.83-2.08 1.47-3.15 1.38-.12-1.05.4-2.17 1.15-2.92.8-.83 2.19-1.43 3.19-1.4zM20 16.3c-.57 1.31-.84 1.9-1.58 3.05-1.02 1.6-2.46 3.6-4.25 3.62-1.58.02-2-1.03-4.14-1.02-2.15.01-2.6 1.04-4.18 1.02-1.79-.02-3.15-1.82-4.17-3.43C-1.24 15.2-1.53 9.95.86 7.18a4.9 4.9 0 0 1 3.47-1.64c1.43 0 2.33.78 3.51.78 1.15 0 1.85-.78 3.5-.78 1.24 0 2.56.68 3.5 1.84-3.08 1.68-2.58 6.08.35 7.06z"/></svg>
-        Get the app
-      </a>
-      <p class="site-hero-note">Testnet build, on TestFlight.</p>
-    </div>
-    <div class="site-hero-panel">
-      <div class="site-phone site-phone-shot" role="img" aria-label="The Desk Auto-Copy screen: a shadow result of plus $0.62, a 50% win rate, two copies and 1.1 seconds to fill">
-        <div class="site-phone-screen" aria-hidden="true">
-          <img src="/shots/autocopy.webp" width="640" height="1391" alt="" fetchpriority="high">
+  <!-- ───────────── hero ───────────── -->
+  <section class="site-block site-hero" data-tone="amber" aria-labelledby="hero-title">
+    <div class="site-wrap site-hero-grid" data-hero>
+      <div class="site-hero-copy">
+        <div class="site-hero-bars" role="tablist" aria-label="What Desk does">
+          <button class="site-hero-bar is-active" type="button" role="tab" aria-selected="true" tabindex="0"><span class="site-track"><span class="site-fill"></span></span><span class="site-visually-hidden">Trade perps with your face</span></button>
+          <button class="site-hero-bar" type="button" role="tab" aria-selected="false" tabindex="-1"><span class="site-track"><span class="site-fill"></span></span><span class="site-visually-hidden">Copy the traders who are winning</span></button>
+          <button class="site-hero-bar" type="button" role="tab" aria-selected="false" tabindex="-1"><span class="site-track"><span class="site-fill"></span></span><span class="site-visually-hidden">Everything you hold, on one screen</span></button>
+        </div>
+        <div class="site-hero-slide is-active" role="tabpanel">
+          <h1 id="hero-title" class="site-h1">Trade perps with your face.</h1>
+          <p class="site-sub">Perpetuals on Monad. Face ID signs every order — no seed phrase, no wallet app, no key stored anywhere.</p>
+        </div>
+        <div class="site-hero-slide" role="tabpanel" hidden>
+          <h1 class="site-h1">Copy the traders who are actually winning.</h1>
+          <p class="site-sub">Read straight off Perpl&rsquo;s exchange contract, copied in the same block they move in, and measured on every fill.</p>
+        </div>
+        <div class="site-hero-slide" role="tabpanel" hidden>
+          <h1 class="site-h1">Everything you hold, on one screen.</h1>
+          <p class="site-sub">Collateral, open positions, the mark, and the key that signs for them — with the Home Screen widgets to match.</p>
+        </div>
+        <div class="site-hero-cta">
+          <a class="site-btn site-btn-ink" href="#get">
+            <svg class="site-apple" width="16" height="18" aria-hidden="true"><use href="#i-apple"/></svg>
+            Get the app
+          </a>
+          <a class="site-btn site-btn-ghost" href="#chain">See how it works</a>
+          <p class="site-hero-note">Testnet build on TestFlight. Perps are leveraged — you can lose what you put in.</p>
+        </div>
+      </div>
+      <div class="site-hero-stage" aria-hidden="true">
+        <div class="site-phone is-active" data-hero-phone="0">
+          <div class="site-phone-screen">
+            <video poster="/shots/welcome-poster.webp" muted loop playsinline preload="auto"><source src="/shots/welcome.mp4" type="video/mp4"></video>
+          </div>
+        </div>
+        <div class="site-phone" data-hero-phone="1">
+          <div class="site-phone-screen">
+            <video poster="/shots/copy-poster.webp" muted loop playsinline preload="metadata"><source src="/shots/copy.mp4" type="video/mp4"></video>
+          </div>
+        </div>
+        <div class="site-phone" data-hero-phone="2">
+          <div class="site-phone-screen">
+            <video poster="/shots/home-poster.webp" muted loop playsinline preload="metadata"><source src="/shots/home.mp4" type="video/mp4"></video>
+          </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ─────────────────────────── bento ─────────────────────────── -->
-  <section class="site-wrap site-section" id="copy" aria-labelledby="not-a-terminal">
-    <div class="site-section-head">
-      <h2 id="not-a-terminal" class="site-h2">Desk isn&rsquo;t another trading terminal.</h2>
-      <p class="site-sub">
-        It is a copy-trading desk. The traders on it are read straight off Perpl&rsquo;s exchange
-        contract on Monad, the rules are yours, and every copy is measured. Nothing to write
-        down, no wallet to connect, and no key stored anywhere.
-      </p>
-    </div>
-    <div class="site-bento">
-      <article class="site-card site-card-dark">
-        <div class="site-card-art">
-          <img class="site-shot-crop" src="/shots/result-card.webp" width="900" height="660" alt="" loading="lazy">
+  <!-- ───────────── live figures ───────────── -->
+  <section class="site-block" data-tone="white" aria-label="Perpl, right now">
+    <div class="site-wrap">
+      <p class="site-eyebrow">Read live from Perpl on Monad</p>
+      <div class="site-stats" data-stats>
+        <div class="site-stat site-reveal">
+          <span class="site-stat-n" data-count="positions">—</span>
+          <span class="site-stat-l">open positions on the desk</span>
         </div>
-        <h3 class="site-card-title">It measures itself</h3>
-        <p class="site-card-text">
-          Realised result, win rate, copies and the seconds from their move to your fill.
-          Shadow and live are kept apart and never added together.
-        </p>
-      </article>
-      <div class="site-bento-right">
-        <article class="site-card site-card-light">
-          <div class="site-card-art">
-            <div class="site-notif" aria-hidden="true">
-              <div class="site-notif-head">
-                <img src="/brand/mark.webp" width="18" height="18" alt="">
-                <span>DESK</span><span class="site-notif-time">now</span>
-              </div>
-              <p class="site-notif-title">Akintomiwa opened Long ETH 5&times;</p>
-              <div class="site-notif-actions"><span>Copy Trade</span><span>View</span><span>Mute</span></div>
-            </div>
-          </div>
-          <h3 class="site-card-title">Copy from the Lock Screen</h3>
-          <p class="site-card-text">The alert carries the buttons. The ticket opens already filled in.</p>
-        </article>
-        <article class="site-card site-card-light">
-          <div class="site-card-art">
-            <div class="site-segs" aria-hidden="true">
-              <span class="site-seg"><i class="is-on">Shadow</i><i>Live</i></span>
-              <span class="site-seg"><i class="is-on">Follow</i><i>Fade</i></span>
-              <span class="site-seg"><i>Fixed</i><i class="is-on">Conviction</i></span>
-            </div>
-          </div>
-          <h3 class="site-card-title">Rules before money</h3>
-          <p class="site-card-text">Mode, direction, sizing and a leverage cap, written before a cent moves.</p>
-        </article>
-        <article class="site-card site-card-light">
-          <div class="site-card-art">
-            <div class="site-tag-stack" aria-hidden="true">
-              <span class="site-tag">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                Stop &minus;25%
-              </span>
-              <span class="site-tag-note">placed on Perpl, not in the app</span>
-            </div>
-          </div>
-          <h3 class="site-card-title">Stops live on the venue</h3>
-          <p class="site-card-text">So a copy stays protected long after Desk is closed.</p>
-        </article>
-        <article class="site-card site-card-light">
-          <div class="site-card-art">
-            <div class="site-score" aria-hidden="true">
-              <div class="site-score-n">81</div>
-              <div class="site-score-bars"><i style="--h:82%"></i><i style="--h:56%"></i><i style="--h:94%"></i><i style="--h:38%"></i></div>
-            </div>
-          </div>
-          <h3 class="site-card-title">Scored on what survives</h3>
-          <p class="site-card-text">Win rate, profit factor and drawdown, weighted by money actually at risk.</p>
-        </article>
+        <div class="site-stat site-reveal">
+          <span class="site-stat-n" data-count="oi">—</span>
+          <span class="site-stat-l">of open interest, long and short</span>
+        </div>
+        <div class="site-stat site-reveal">
+          <span class="site-stat-n" data-count="markets">—</span>
+          <span class="site-stat-l">markets, every one read from the contract</span>
+        </div>
       </div>
+      <p class="site-stats-note" data-stats-note>Figures come from the same endpoint the app reads. They will appear once it answers.</p>
     </div>
   </section>
 
-  <!-- ─────────────────────────── split: signals ─────────────────────────── -->
-  <section class="site-wrap site-section" aria-labelledby="read-not-reported">
-    <div class="site-split">
-      <div class="site-split-copy">
-        <h2 id="read-not-reported" class="site-h2">Read from the chain, not reported</h2>
+  <!-- ───────────── chain ───────────── -->
+  <section class="site-block" data-tone="night" id="chain" aria-labelledby="chain-title">
+    <div class="site-wrap site-feature">
+      <div class="site-feature-copy site-reveal">
+        <p class="site-eyebrow">Signals</p>
+        <h2 id="chain-title" class="site-h2">Read from the chain, not reported.</h2>
+        <p class="site-sub">Every trader on the board is read off Perpl&rsquo;s exchange contract — the account, its position bitmap, each open row and its mark. Nobody submits their record and nobody edits it.</p>
         <ul class="site-feature-list">
-          <li>
-            <h3>The leaderboard</h3>
-            <p>Every trader is read from Perpl&rsquo;s exchange contract — the account, its position bitmap, each open row and its mark.</p>
-          </li>
-          <li>
-            <h3>The history</h3>
-            <p>Indexed from the chain&rsquo;s own position events through Envio HyperSync. Nobody submits their record, and nobody edits it.</p>
-          </li>
+          <li><span class="site-num">1</span><div><h3>Scored on what survives</h3><p>Win rate, profit factor and drawdown, weighted by money actually at risk.</p></div></li>
+          <li><span class="site-num">2</span><div><h3>Rules before money</h3><p>Shadow or live, follow or fade, fixed or conviction sizing, and a leverage cap — written before a cent moves.</p></div></li>
+          <li><span class="site-num">3</span><div><h3>Stops live on the venue</h3><p>Placed on Perpl, not in the app, so a copy stays protected long after Desk is closed.</p></div></li>
         </ul>
       </div>
-      <div class="site-panel">
-        <div class="site-phone site-phone-shot" role="img" aria-label="The Signals leaderboard: top traders on Perpl ranked by open PnL">
-          <div class="site-phone-screen" aria-hidden="true">
-            <img src="/shots/signals.webp" width="640" height="1391" alt="" loading="lazy">
+      <div class="site-stage site-reveal">
+        <div class="site-phone is-tilt" aria-hidden="true">
+          <div class="site-phone-screen">
+            <video poster="/shots/signals-poster.webp" muted loop playsinline preload="metadata" data-scroll-video><source src="/shots/signals.mp4" type="video/mp4"></video>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ─────────────────────────── split: identity ─────────────────────────── -->
-  <section class="site-wrap site-section" aria-labelledby="face-is-key">
-    <div class="site-split is-flipped">
-      <div class="site-split-copy">
-        <h2 id="face-is-key" class="site-h2">Your face is the trading key</h2>
+  <!-- ───────────── identity ───────────── -->
+  <section class="site-block" data-tone="violet" aria-labelledby="face-title">
+    <div class="site-wrap site-feature is-flipped">
+      <div class="site-feature-copy site-reveal">
+        <p class="site-eyebrow">Identity</p>
+        <h2 id="face-title" class="site-h2">Your face is the trading key.</h2>
+        <p class="site-sub">One passkey derives both the wallet that holds the collateral and the key that signs every order, on demand. Face ID isn&rsquo;t a lock screen over a saved secret — there is no saved secret.</p>
         <ul class="site-feature-list">
-          <li>
-            <h3>No seed phrase</h3>
-            <p>One passkey derives both the wallet that holds the collateral and the key that signs every order, on demand.</p>
-          </li>
-          <li>
-            <h3>Nothing stored</h3>
-            <p>Face ID is not a lock screen over a saved secret. There is no saved secret: the key lives in memory while the app is open, and is gone when it closes.</p>
-          </li>
+          <li><span class="site-num">1</span><div><h3>No seed phrase</h3><p>Nothing to write down, photograph, or lose.</p></div></li>
+          <li><span class="site-num">2</span><div><h3>Nothing stored</h3><p>The key lives in memory while the app is open and is gone when it closes.</p></div></li>
+          <li><span class="site-num">3</span><div><h3>Gasless orders</h3><p>Signed on the device, sent over Perpl&rsquo;s websocket, deadline-bound to the head block.</p></div></li>
         </ul>
       </div>
-      <div class="site-panel">
-        <div class="site-phone site-phone-shot" role="img" aria-label="Signing in to Desk with Face ID: no seed phrase, straight into the app">
-          <div class="site-phone-screen" aria-hidden="true">
-            <video class="site-phone-video" poster="/shots/face-id-poster.webp" autoplay muted loop playsinline preload="metadata">
-              <source src="/shots/face-id.mp4" type="video/mp4">
-            </video>
+      <div class="site-stage site-reveal">
+        <div class="site-phone" aria-hidden="true">
+          <div class="site-phone-screen">
+            <video poster="/shots/face-id-poster.webp" muted loop playsinline preload="metadata" data-scroll-video><source src="/shots/face-id.mp4" type="video/mp4"></video>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ─────────────────────────── trio ─────────────────────────── -->
-  <section class="site-wrap site-section" aria-label="Where Desk lives when it is closed">
-    <ul class="site-trio">
-      <li class="site-trio-item">
-        <span class="site-icon-tile">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-        </span>
-        <h3>Live Activity</h3>
-        <p>Today&rsquo;s result in the Dynamic Island</p>
-      </li>
-      <li class="site-trio-item">
-        <span class="site-icon-tile">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
-        </span>
-        <h3>Widget</h3>
-        <p>Result, open copies, a working pause</p>
-      </li>
-      <li class="site-trio-item">
-        <span class="site-icon-tile">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg>
-        </span>
-        <h3>Siri</h3>
-        <p>&ldquo;Pause auto-copy in Desk&rdquo;</p>
-      </li>
-    </ul>
+  <!-- ───────────── crowd ───────────── -->
+  <section class="site-block" data-tone="cream" aria-labelledby="crowd-title">
+    <div class="site-wrap site-feature">
+      <div class="site-feature-copy site-reveal">
+        <p class="site-eyebrow">Market</p>
+        <h2 id="crowd-title" class="site-h2">See which way the crowd leans.</h2>
+        <p class="site-sub">Every open position on every market, summed live: how much is long, how much is short, how many traders on each side, and the biggest single position in the book.</p>
+        <ul class="site-feature-list">
+          <li><span class="site-num">1</span><div><h3>Summed, not sampled</h3><p>The whole book is read, and the screen says so when it can&rsquo;t be.</p></div></li>
+          <li><span class="site-num">2</span><div><h3>Rounded the way that costs you</h3><p>Every figure rounds in the direction that costs you rather than the one that flatters you.</p></div></li>
+        </ul>
+      </div>
+      <div class="site-stage site-reveal">
+        <div class="site-phone is-tilt" aria-hidden="true">
+          <div class="site-phone-screen">
+            <video poster="/shots/crowd-poster.webp" muted loop playsinline preload="metadata" data-scroll-video><source src="/shots/crowd.mp4" type="video/mp4"></video>
+          </div>
+        </div>
+      </div>
+    </div>
   </section>
 
-  <!-- ─────────────────────────── security ─────────────────────────── -->
-  <section class="site-wrap site-section" id="security" aria-label="Security">
-    <div class="site-split">
-      <div class="site-panel site-security-panel">
+  <!-- ───────────── live desk ───────────── -->
+  <section class="site-block" data-tone="white" id="desk" aria-labelledby="desk-title">
+    <div class="site-wrap">
+      <div class="site-desk-head site-reveal">
+        <div>
+          <p class="site-eyebrow">On the desk right now</p>
+          <h2 id="desk-title" class="site-h2">The traders you&rsquo;d be copying.</h2>
+        </div>
+        <div class="site-desk-nav">
+          <button class="site-round" type="button" data-slide="-1" aria-label="Previous traders"><svg width="18" height="18" style="transform:scaleX(-1)" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+          <button class="site-round" type="button" data-slide="1" aria-label="Next traders"><svg width="18" height="18" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+        </div>
+      </div>
+      <div class="site-slider" data-slider aria-live="polite">
+        <div class="site-trader is-empty">Reading the leaderboard off Perpl…</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── closed ───────────── -->
+  <section class="site-block" data-tone="ember" aria-labelledby="closed-title">
+    <div class="site-wrap">
+      <div class="site-reveal">
+        <p class="site-eyebrow">When Desk is closed</p>
+        <h2 id="closed-title" class="site-h2">It doesn&rsquo;t leave the phone.</h2>
+        <p class="site-sub" style="max-width:48ch;margin-top:20px">The account, the watchlist and today&rsquo;s copy result, on the Home Screen, the Lock Screen and in the Dynamic Island. Pause auto-copy without opening anything.</p>
+      </div>
+      <ul class="site-trio">
+        <li class="site-trio-item site-reveal">
+          <img class="site-widget" src="/shots/widget-portfolio.webp" width="676" height="316" alt="The Portfolio widget: collateral, then each open position with its unrealised result" loading="lazy">
+          <h3>Portfolio</h3><p>Collateral and every open position.</p>
+        </li>
+        <li class="site-trio-item site-reveal">
+          <img class="site-widget" src="/shots/widget-watchlist.webp" width="676" height="316" alt="The Watchlist widget: saved markets at their latest prices" loading="lazy">
+          <h3>Watchlist</h3><p>Saved markets at their latest marks.</p>
+        </li>
+        <li class="site-trio-item site-reveal">
+          <div style="display:grid;place-items:center;height:158px">
+            <span class="site-island"><img src="/brand/mark.webp" alt=""><span>Auto-Copy</span><b>+$14.62</b><span>today</span></span>
+          </div>
+          <h3>Live Activity</h3><p>Today&rsquo;s result in the Dynamic Island, with a pause that works.</p>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ───────────── security ───────────── -->
+  <section class="site-block" data-tone="night" id="security" aria-label="Security">
+    <div class="site-wrap site-carousel" data-carousel>
+      <div class="site-security-panel site-reveal">
         <div class="site-security-visual" data-visual="0">
           <span class="site-security-pair">
-            <span class="site-security-tile is-action">
-              <svg viewBox="0 0 64 64" width="56" height="56" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M8 22v-8a6 6 0 0 1 6-6h8"/><path d="M42 8h8a6 6 0 0 1 6 6v8"/>
-                <path d="M56 42v8a6 6 0 0 1-6 6h-8"/><path d="M22 56h-8a6 6 0 0 1-6-6v-8"/>
-                <path d="M22 25v7"/><path d="M42 25v7"/><path d="M32 25v11h-3"/>
-                <path d="M23 42a13 13 0 0 0 18 0"/>
-              </svg>
+            <span class="site-security-tile">
+              <svg viewBox="0 0 64 64" width="56" height="56" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 22v-8a6 6 0 0 1 6-6h8"/><path d="M42 8h8a6 6 0 0 1 6 6v8"/><path d="M56 42v8a6 6 0 0 1-6 6h-8"/><path d="M22 56h-8a6 6 0 0 1-6-6v-8"/><path d="M22 25v7"/><path d="M42 25v7"/><path d="M32 25v11h-3"/><path d="M23 42a13 13 0 0 0 18 0"/></svg>
             </span>
             <span class="site-security-plus" aria-hidden="true">+</span>
             <span class="site-security-tile is-ink">
-              <svg viewBox="0 0 24 24" width="46" height="46" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8-8M17 5l2.5 2.5M14.5 7.5 17 10"/>
-              </svg>
+              <svg viewBox="0 0 24 24" width="46" height="46" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8-8M17 5l2.5 2.5M14.5 7.5 17 10"/></svg>
             </span>
           </span>
           <span class="site-security-caption">Derived, never stored</span>
@@ -257,78 +274,37 @@
           <span class="site-security-caption">An empty book and an unreadable one</span>
         </div>
       </div>
-      <div class="site-split-copy">
-        <div class="site-carousel" data-carousel>
-          <div class="site-carousel-bars" role="tablist" aria-label="How Desk is secured">
-            <button class="site-carousel-bar is-active" type="button" role="tab" id="sec-tab-0" aria-selected="true" aria-controls="sec-panel" tabindex="0">
-              <span class="site-carousel-track"><span class="site-carousel-fill"></span></span>
-              <span class="site-visually-hidden">No server can trade for anyone</span>
-            </button>
-            <button class="site-carousel-bar" type="button" role="tab" id="sec-tab-1" aria-selected="false" aria-controls="sec-panel" tabindex="-1">
-              <span class="site-carousel-track"><span class="site-carousel-fill"></span></span>
-              <span class="site-visually-hidden">Rounding goes against you</span>
-            </button>
-            <button class="site-carousel-bar" type="button" role="tab" id="sec-tab-2" aria-selected="false" aria-controls="sec-panel" tabindex="-1">
-              <span class="site-carousel-track"><span class="site-carousel-fill"></span></span>
-              <span class="site-visually-hidden">Unreadable is never empty</span>
-            </button>
-          </div>
-          <div class="site-carousel-slide" role="tabpanel" id="sec-panel" aria-labelledby="sec-tab-0">
-            <h2 class="site-h2">No server can trade for anyone.</h2>
-            <p>Including ours. The signing key exists only in the app&rsquo;s memory, only while it is open and unlocked. Ours pushes notifications and reads public chain data — nothing it holds could move your money.</p>
-          </div>
+      <div class="site-reveal">
+        <p class="site-eyebrow">Security</p>
+        <div class="site-carousel-bars" role="tablist" aria-label="How Desk is secured">
+          <button class="site-carousel-bar is-active" type="button" role="tab" id="sec-tab-0" aria-selected="true" aria-controls="sec-panel" tabindex="0"><span class="site-carousel-track"><span class="site-carousel-fill"></span></span><span class="site-visually-hidden">No server can trade for anyone</span></button>
+          <button class="site-carousel-bar" type="button" role="tab" id="sec-tab-1" aria-selected="false" aria-controls="sec-panel" tabindex="-1"><span class="site-carousel-track"><span class="site-carousel-fill"></span></span><span class="site-visually-hidden">Rounding goes against you</span></button>
+          <button class="site-carousel-bar" type="button" role="tab" id="sec-tab-2" aria-selected="false" aria-controls="sec-panel" tabindex="-1"><span class="site-carousel-track"><span class="site-carousel-fill"></span></span><span class="site-visually-hidden">Unreadable is never empty</span></button>
         </div>
+        <div class="site-carousel-slide" role="tabpanel" id="sec-panel" aria-labelledby="sec-tab-0">
+          <h2 class="site-h2">No server can trade for anyone.</h2>
+          <p>Including ours. The signing key exists only in the app&rsquo;s memory, only while it is open and unlocked. Ours pushes notifications and reads public chain data — nothing it holds could move your money.</p>
+        </div>
+        <p style="margin:28px 0 0"><a class="site-btn site-btn-ghost" href="https://github.com/frankolien/desk" target="_blank" rel="noreferrer">Read the code <svg width="16" height="16" aria-hidden="true"><use href="#i-arrow"/></svg></a></p>
       </div>
     </div>
   </section>
 
-  <!-- ─────────────────────────── duo ─────────────────────────── -->
-  <section class="site-wrap site-section" aria-label="Monad, Perpl and your keys">
-    <div class="site-duo">
-      <article class="site-card site-card-dark is-artwork">
-        <span class="site-icon-tile is-dark">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 4 7v10l8 5 8-5V7z"/><path d="M12 22V12M4 7l8 5 8-5"/></svg>
-        </span>
-        <div>
-          <h3 class="site-h3">Monad and Perpl</h3>
-          <p class="site-card-text">
-            Orders are signed on the device and sent over Perpl&rsquo;s websocket, deadline-bound to
-            the head block so a stale one cannot fill late. A position event on Monad wakes the
-            copy loop in the same block the trader moved in.
-          </p>
-        </div>
-      </article>
-      <article class="site-card site-card-light">
-        <span class="site-icon-tile">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8-8M17 5l2.5 2.5M14.5 7.5 17 10"/></svg>
-        </span>
-        <div>
-          <h3 class="site-h3">Your money. Your key.</h3>
-          <p class="site-card-text">
-            No server holds a key that can move it. That is the reason live copying needs Desk
-            open, and it is a deliberate trade rather than a shortcut.
-          </p>
-        </div>
-      </article>
+  <!-- ───────────── cta ───────────── -->
+  <section class="site-block site-cta" data-tone="amber" id="get" aria-labelledby="get-title">
+    <div class="site-wrap site-cta-inner site-reveal">
+      <img src="/brand/apple-touch-icon.png" alt="The Desk app icon" width="88" height="88" class="site-cta-icon">
+      <h2 id="get-title" class="site-h2">Bring your face. Leave the seed phrase.</h2>
+      <p class="site-sub">Perpetuals on Monad, native on iPhone, with the traders worth copying already on the desk.</p>
+      <div class="site-hero-cta">
+        <a class="site-btn site-btn-ink" href="#" data-todo="TestFlight link">
+          <svg class="site-apple" width="16" height="18" aria-hidden="true"><use href="#i-apple"/></svg>
+          Get the app
+        </a>
+        <a class="site-btn site-btn-ghost" href="#" data-todo="Demo video"><svg width="16" height="16" aria-hidden="true"><use href="#i-play"/></svg> Watch the demo</a>
+      </div>
+      <p class="site-cta-fine">Perpetual futures are leveraged instruments. You can lose everything you put in.</p>
     </div>
-    <p class="site-code">
-      <span>Read the code.</span>
-      <a href="https://github.com/frankolien/desk" target="_blank" rel="noreferrer" class="site-circle-link" aria-label="Desk on GitHub">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg>
-      </a>
-    </p>
-  </section>
-
-  <!-- ─────────────────────────── cta ─────────────────────────── -->
-  <section class="site-wrap site-cta" id="get" aria-labelledby="get-started">
-    <img src="/brand/apple-touch-icon.png" alt="The Desk app icon" width="80" height="80" class="site-cta-icon">
-    <h2 id="get-started" class="site-h2">Get started with Desk today.</h2>
-    <p class="site-sub">Copy the best traders on Perpl, with your limits on their strategy.</p>
-    <a class="site-btn site-btn-primary" href="#" data-todo="TestFlight link">
-      <svg class="site-apple" width="17" height="19" viewBox="0 0 22 26" fill="currentColor" aria-hidden="true"><path d="M15.7 1.4c0 1.1-.45 2.16-1.19 2.94-.79.83-2.08 1.47-3.15 1.38-.12-1.05.4-2.17 1.15-2.92.8-.83 2.19-1.43 3.19-1.4zM20 16.3c-.57 1.31-.84 1.9-1.58 3.05-1.02 1.6-2.46 3.6-4.25 3.62-1.58.02-2-1.03-4.14-1.02-2.15.01-2.6 1.04-4.18 1.02-1.79-.02-3.15-1.82-4.17-3.43C-1.24 15.2-1.53 9.95.86 7.18a4.9 4.9 0 0 1 3.47-1.64c1.43 0 2.33.78 3.51.78 1.15 0 1.85-.78 3.5-.78 1.24 0 2.56.68 3.5 1.84-3.08 1.68-2.58 6.08.35 7.06z"/></svg>
-      Get the app
-    </a>
-    <p class="site-cta-fine">Perpetual futures are leveraged instruments. You can lose everything you put in.</p>
   </section>
 
 </main>
@@ -337,7 +313,8 @@
   <div class="site-wrap site-footer-inner">
     <p class="site-footer-copy">Desk. Perpetuals on Monad, with your face.</p>
     <nav class="site-footer-links" aria-label="Footer">
-      <a href="#copy">Copy engine</a>
+      <a href="#chain">Copy engine</a>
+      <a href="#desk">Live desk</a>
       <a href="#security">Security</a>
       <a href="https://github.com/frankolien/desk" target="_blank" rel="noreferrer">GitHub</a>
       <a href="https://perpl.trade" target="_blank" rel="noreferrer">Perpl</a>
