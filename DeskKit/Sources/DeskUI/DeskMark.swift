@@ -110,11 +110,16 @@ public struct FeatureTicker: View {
                 Image(systemName: item.symbol)
                     .font(.system(size: 25, weight: .bold, design: .rounded))
                     .foregroundStyle(DeskColor.nightText.color)
-                    .transition(.move(edge: .leading).combined(with: .opacity).combined(with: .scale))
+                    // Moving and fading is one arrival. Scaling as well was a third thing
+                    // happening to a label that only changed which row it was on.
+                    .transition(.move(edge: .leading).combined(with: .opacity))
             }
             Text(item.title)
-                .font(.system(size: isActive ? 28 : 22, weight: .bold, design: .rounded))
-                .foregroundStyle(isActive ? DeskColor.nightText.color : DeskColor.nightText.color.opacity(0.13))
+                .font(.system(size: isActive ? 26 : 22, weight: .bold, design: .rounded))
+                // The unlit rows were at 13%, which is not dim but nearly gone: the list
+                // read as one phrase with some artefacts under it. At 30% it reads as
+                // four things the app does, one of which is currently lit.
+                .foregroundStyle(isActive ? DeskColor.nightText.color : DeskColor.nightText.color.opacity(0.30))
         }
         .padding(.horizontal, isActive ? 22 : 0)
         .frame(height: isActive ? 56 : 28)

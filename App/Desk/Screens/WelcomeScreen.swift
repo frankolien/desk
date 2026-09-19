@@ -33,20 +33,11 @@ struct WelcomeScreen: View {
             let contentInset: CGFloat = compact ? 24 : 30
 
             ZStack(alignment: .bottom) {
-                DeskColor.night.color
-
-                // The bloom is the screen's light source: it rises off the bottom edge,
-                // so the mark and the button sit in the lit part and the ticker fades
-                // into the dark above them.
-                RadialGradient(
-                    colors: [
-                        Color(red: 0.55, green: 0.27, blue: 0.04).opacity(0.94),
-                        DeskColor.action.color.opacity(0.28),
-                        .clear,
-                    ],
-                    center: UnitPoint(x: 0.5, y: 0.94),
-                    startRadius: 0,
-                    endRadius: proxy.size.height * 0.62)
+                // The same ground as every other screen, rather than one this screen
+                // invented. A saturated bloom used to rise off the bottom edge over most
+                // of the screen; it lit the button so brightly that amber stopped meaning
+                // "you can act here", because everything down there was already amber.
+                DeskBackground()
 
                 VStack(alignment: .leading, spacing: 0) {
                     FeatureTicker(items: features)
