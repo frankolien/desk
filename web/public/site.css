@@ -1,8 +1,7 @@
 /* Desk — desk.trade
    The design system is Recourse's marketing site, ported: same tokens, type scale,
-   radii, card language and phone frame. The green is Desk's own `ledger` pine from
-   DeskColor.swift, which was carried over from Recourse in the first place, so the two
-   sites share an accent honestly rather than by coincidence. */
+   radii, card language and phone frame. The palette is Desk's own: amber, not
+   Recourse's green. */
 
 @font-face {
   font-family: "Geist";
@@ -26,18 +25,22 @@
 html, body { margin: 0; padding: 0; }
 
 :root {
-  --ink: #111b19;
-  --muted: #66706d;
-  --line: #e4e7e2;
-  --line-soft: #eef0ec;
+  /* Desk's palette, out of DeskColor.swift. Amber is the brand and the only colour
+     that means you can do something. It cannot carry text on white — 1.9:1 — so the
+     places where amber has to be read as words use bronze, the same hue dropped to
+     5.6:1, and amber keeps the fills where a near-black label sits on it. */
+  --ink: #0b0d0b;
+  --muted: #6b6b66;
+  --line: #e7e5e0;
+  --line-soft: #f1efea;
   --white: #ffffff;
-  --mint: #edf3ef;
-  --green: #05634a;
-  --green-dark: #044c39;
-  --amber: #e8b339;
+  --cream: #fbf4e4;
+  --action: #e8b339;
+  --action-deep: #d8a227;
+  --bronze: #8a6410;
   --night: #070907;
-  --night-text: #edf2ed;
-  --night-muted: #8c9991;
+  --night-text: #f1f0ec;
+  --night-muted: #97968e;
   --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
@@ -46,7 +49,7 @@ img, svg { display: block; max-width: 100%; }
 a { color: inherit; text-decoration: none; }
 
 .site-root {
-  --site-panel: #f5f6f4;
+  --site-panel: #f6f5f1;
   --site-radius: 24px;
   --site-gap: 120px;
   min-height: 100vh;
@@ -94,7 +97,7 @@ a { color: inherit; text-decoration: none; }
 }
 
 .site-root :is(a, button):focus-visible {
-  outline: 2px solid var(--green);
+  outline: 2px solid var(--bronze);
   outline-offset: 3px;
   border-radius: 6px;
 }
@@ -106,8 +109,8 @@ a { color: inherit; text-decoration: none; }
   z-index: 20;
   padding: 10px 14px;
   border-radius: 999px;
-  background: var(--green);
-  color: var(--white);
+  background: var(--action);
+  color: var(--ink);
 }
 .site-skip:focus { top: 16px; }
 
@@ -138,8 +141,8 @@ a { color: inherit; text-decoration: none; }
   transition: background-color 0.15s ease;
 }
 .site-btn:focus-visible { border-radius: 999px; }
-.site-btn-primary { background: var(--green); color: var(--white); }
-.site-btn-primary:hover { background: var(--green-dark); }
+.site-btn-primary { background: var(--action); color: var(--ink); }
+.site-btn-primary:hover { background: var(--action-deep); }
 .site-btn-small { height: 40px; padding: 0 16px; font-size: 14px; }
 .site-apple { margin-top: -2px; }
 
@@ -174,7 +177,7 @@ a { color: inherit; text-decoration: none; }
 
 .site-nav-links { display: flex; align-items: center; gap: 28px; }
 .site-nav-links > a:not(.site-btn) { color: var(--ink); font-size: 15px; font-weight: 500; }
-.site-nav-links > a:not(.site-btn):hover { color: var(--green); }
+.site-nav-links > a:not(.site-btn):hover { color: var(--bronze); }
 
 /* Hero */
 
@@ -198,7 +201,7 @@ a { color: inherit; text-decoration: none; }
   aspect-ratio: 16 / 9;
   margin-top: 64px;
   border-radius: var(--site-radius);
-  background: linear-gradient(160deg, var(--white) 0%, var(--mint) 45%, color-mix(in srgb, var(--green) 14%, var(--white)) 100%);
+  background: linear-gradient(160deg, var(--white) 0%, var(--cream) 45%, color-mix(in srgb, var(--action) 26%, var(--white)) 100%);
   overflow: hidden;
 }
 .site-hero-panel .site-phone {
@@ -254,14 +257,14 @@ a { color: inherit; text-decoration: none; }
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: var(--white);
-  border: 1px solid var(--line);
-  color: var(--green);
+  background: color-mix(in srgb, var(--action) 13%, var(--white));
+  border: 1px solid color-mix(in srgb, var(--action) 32%, var(--white));
+  color: var(--bronze);
 }
 .site-icon-tile.is-dark {
   background: color-mix(in srgb, var(--white) 8%, var(--ink));
   border-color: color-mix(in srgb, var(--white) 14%, var(--ink));
-  color: var(--amber);
+  color: var(--action);
 }
 
 /* Bento */
@@ -310,7 +313,7 @@ a { color: inherit; text-decoration: none; }
   text-align: center;
 }
 .site-notif-actions span { padding: 9px 2px; }
-.site-notif-actions span:first-child { color: var(--green); }
+.site-notif-actions span:first-child { color: var(--bronze); }
 .site-notif-actions span + span { border-left: 1px solid var(--line); }
 
 /* The app's segmented pickers, kept as pairs so the choice is legible. */
@@ -330,7 +333,7 @@ a { color: inherit; text-decoration: none; }
   font-style: normal;
   font-weight: 500;
 }
-.site-seg i.is-on { background: var(--green); color: var(--white); }
+.site-seg i.is-on { background: var(--action); color: var(--ink); }
 
 .site-tag-stack { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .site-tag {
@@ -341,7 +344,7 @@ a { color: inherit; text-decoration: none; }
   border-radius: 12px;
   background: var(--white);
   border: 1px solid var(--line);
-  color: var(--green);
+  color: var(--bronze);
   font-size: 15px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
@@ -362,8 +365,7 @@ a { color: inherit; text-decoration: none; }
   width: 8px;
   height: var(--h);
   border-radius: 3px;
-  background: var(--green);
-  opacity: 0.85;
+  background: var(--action);
 }
 
 /* Split sections */
@@ -395,7 +397,7 @@ a { color: inherit; text-decoration: none; }
 .site-carousel-fill {
   display: block;
   height: 100%;
-  background: var(--green);
+  background: var(--action);
   transform: scaleX(0);
   transform-origin: left;
 }
@@ -427,8 +429,8 @@ a { color: inherit; text-decoration: none; }
   width: 112px;
   height: 112px;
   border-radius: 28px;
-  background: var(--green);
-  color: #fff;
+  background: var(--action);
+  color: var(--ink);
   font-size: 22px;
   font-weight: 500;
   letter-spacing: -0.02em;
@@ -460,7 +462,7 @@ a { color: inherit; text-decoration: none; }
   color: var(--ink);
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
-.site-circle-link:hover { background: var(--mint); border-color: var(--green); color: var(--green); }
+.site-circle-link:hover { background: var(--cream); border-color: color-mix(in srgb, var(--action) 55%, var(--white)); color: var(--bronze); }
 .site-circle-link:focus-visible { border-radius: 50%; }
 
 /* Final call to action */
