@@ -48,6 +48,44 @@ struct TraderSnapshot: Decodable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// What every open position on one market adds up to.
+///
+/// The leaderboard answers who is winning; this answers what the room is holding. It is
+/// the exchange's whole list rather than a sample of it — except when `complete` is false,
+/// which means the contract's list outran the server's page budget and every figure here
+/// is a floor. The screen says which of the two it is rather than drawing both the same.
+struct MarketCrowd: Decodable, Identifiable, Hashable {
+    struct Biggest: Decodable, Hashable {
+        let address: String?
+        let side: String
+        let value: String
+        let leverage: Double?
+
+        var isLong: Bool { side == "long" }
+    }
+
+    let market: String
+    let marketId: Int
+    let complete: Bool
+    let traders: Int
+    let longTraders: Int
+    let shortTraders: Int
+    let longValue: String
+    let shortValue: String
+    /// `nil` when nothing is open: a market with no positions has no side to report, and
+    /// drawing it as an even split would be a claim about a book that is not there.
+    let longShareBps: Int?
+    let biggest: Biggest?
+
+    var id: Int { marketId }
+    var total: Double { (Double(longValue) ?? 0) + (Double(shortValue) ?? 0) }
+    var longShare: Double? { longShareBps.map { Double($0) / 10_000 } }
+    var crowdedSide: String? {
+        guard let longShareBps else { return nil }
+        return longShareBps >= 5_000 ? "long" : "short"
+    }
+}
+
 /// Traders on Perpl mainnet, read live from the exchange contract through Desk's server.
 /// Who you follow stays on this phone; the server only ever sees the addresses asked about.
 @MainActor
@@ -105,7 +143,8 @@ final class TraderDirectory {
             async let top: Void = refreshTop()
             async let following: Void = refreshFollowing()
             async let scores: Void = refreshScores()
-            _ = await (top, following, scores)
+            async let crowd: Void = refreshCrowd()
+            _ = await (top, following, scores, crowd)
             try? await Task.sleep(for: .seconds(20))
         }
     }
@@ -128,6 +167,58 @@ final class TraderDirectory {
     func trader(_ address: String) async -> TraderSnapshot? {
         await fetch(["view": "trader", "address": address])?.first
     }
+
+    /// Every open position on Perpl, added up per market.
+    ///
+    /// Read on its own clock rather than with the leaderboard: it costs the server the
+    /// same full sweep of the contract, and the room's positioning does not turn over
+    /// fast enough to be worth asking three times a minute.
+    private(set) var crowd: [MarketCrowd] = []
+    private var crowdFetchedAt: Date?
+
+    func refreshCrowd() async {
+        if let crowdFetchedAt, Date.now.timeIntervalSince(crowdFetchedAt) < 60 { return }
+        var components = URLComponents(string: Self.endpoint)!
+        components.queryItems = [URLQueryItem(name: "view", value: "crowd")]
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let body = try? JSONDecoder().decode(CrowdResponse.self, from: data) else { return }
+        crowd = body.markets
+        crowdFetchedAt = .now
+    }
+
+    private struct CrowdResponse: Decodable { let markets: [MarketCrowd] }
+
+    #if DEBUG
+    /// The book as it looked on mainnet on 19 September, so the screen can be reviewed
+    /// and recorded without waiting for a market to be interesting. Debug only.
+    func seedCrowdForReview() {
+        crowd = [
+            MarketCrowd(market: "BTC", marketId: 1, complete: true, traders: 19, longTraders: 13,
+                        shortTraders: 6, longValue: "1624380.44", shortValue: "764120.10",
+                        longShareBps: 6800,
+                        biggest: .init(address: "0xc8D7f4C1b0F0aE5C9d7a1c0f2B6e8A4d3C5e1DC",
+                                       side: "long", value: "137420.00", leverage: 15)),
+            MarketCrowd(market: "ETH", marketId: 20, complete: true, traders: 11, longTraders: 3,
+                        shortTraders: 8, longValue: "176400.00", shortValue: "663600.00",
+                        longShareBps: 2100,
+                        biggest: .init(address: "0x92E0b5A3c7D1e4F6a8B2c0D9e3F5a7B1c4D638d2",
+                                       side: "short", value: "94180.00", leverage: 8)),
+            MarketCrowd(market: "SOL", marketId: 21, complete: false, traders: 7, longTraders: 4,
+                        shortTraders: 3, longValue: "48200.00", shortValue: "41800.00",
+                        longShareBps: 5356,
+                        biggest: .init(address: "0xA77Fd2b4C6e8A0c2D4f6B8a0C2e4D6f8A0b28F57",
+                                       side: "long", value: "21600.00", leverage: 4)),
+            MarketCrowd(market: "MON", marketId: 30, complete: true, traders: 2, longTraders: 2,
+                        shortTraders: 0, longValue: "9120.00", shortValue: "0",
+                        longShareBps: 10_000,
+                        biggest: .init(address: "0xcCdD1f3a5B7c9E1d3F5a7C9e1B3d5F7a9C1e2406",
+                                       side: "long", value: "6400.00", leverage: 3)),
+        ]
+        crowdFetchedAt = .now
+    }
+    #endif
 
     /// Scores from indexed history, by lowercased address.
     private(set) var scores: [String: Int] = [:]

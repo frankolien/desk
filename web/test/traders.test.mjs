@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  createHandler, describePosition, formatFixed, perpIdsFromBitmap, rankTraders,
+  aggregateMarket, createHandler, describePosition, formatFixed, perpIdsFromBitmap, rankTraders,
 } from "../api/traders.mjs";
 
 const BTC = { id: 1, name: "BTC", config: { is_open: true, price_decimals: 1, size_decimals: 5 } };
@@ -71,7 +71,7 @@ test("top pages through every open market and resolves addresses", async () => {
   const chain = {
     async allPositions(market) {
       pages.push(market.name);
-      return market.id === 20 ? [{ row: row(), mark: 244_722n }] : [];
+      return { rows: market.id === 20 ? [{ row: row(), mark: 244_722n }] : [], complete: true };
     },
     async accountById(id) { return { accountId: id, accountAddr: ALICE }; },
   };
@@ -149,4 +149,51 @@ test("bad input and outages are refused plainly", async () => {
   const down = await broken({ method: "GET", query: { view: "top" } }, recorder());
   assert.equal(down.status, 502);
   assert.doesNotMatch(JSON.stringify(down.body), /rpc/);
+});
+
+test("a market's crowd is every open position on it, split by side", () => {
+  const entries = [
+    // 5 ETH at 2,447.22 → 12,236.10 long.
+    { row: row(), mark: 244_722n },
+    // 2 ETH short at the same mark → 4,894.44.
+    { row: row({ accountId: 77n, positionType: 1, lotLNS: 2n }), mark: 244_722n },
+    // 1 ETH long → 2,447.22, so longs are 14,683.32 of 19,577.76: 75%.
+    { row: row({ accountId: 91n, lotLNS: 1n }), mark: 244_722n },
+  ];
+  const crowd = aggregateMarket(entries, ETH);
+  assert.equal(crowd.longTraders, 2);
+  assert.equal(crowd.shortTraders, 1);
+  assert.equal(crowd.longValue, "14683.32");
+  assert.equal(crowd.shortValue, "4894.44");
+  assert.equal(crowd.longShareBps, 7500);
+  assert.equal(crowd.biggest.value, "12236.1");
+  assert.equal(crowd.biggest.side, "long");
+  assert.equal(crowd.complete, true);
+});
+
+test("an empty market has no share to report rather than a zero one", () => {
+  const crowd = aggregateMarket([], ETH);
+  assert.equal(crowd.traders, 0);
+  assert.equal(crowd.longShareBps, null);
+  assert.equal(crowd.biggest, null);
+});
+
+test("a book that outran the page budget says so", async () => {
+  const chain = {
+    async allPositions(market) {
+      return market.id === 20
+        ? { rows: [{ row: row(), mark: 244_722n }], complete: false }
+        : { rows: [], complete: true };
+    },
+    async accountById(id) { return { accountId: id, accountAddr: ALICE }; },
+  };
+  const result = await createHandler({ chain, fetchImpl: context })({ method: "GET", query: { view: "crowd" } }, recorder());
+  assert.equal(result.status, 200);
+  // The market with nothing open is left out rather than drawn as an empty bar.
+  assert.equal(result.body.markets.length, 1);
+  assert.equal(result.body.markets[0].market, "ETH");
+  assert.equal(result.body.markets[0].complete, false);
+  assert.equal(result.body.markets[0].longShareBps, 10_000);
+  assert.equal(result.body.markets[0].biggest.address, ALICE);
+  assert.match(result.headers["Cache-Control"], /s-maxage=60/);
 });

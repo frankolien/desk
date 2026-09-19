@@ -81,6 +81,54 @@ export function rankTraders(positions, limit = TOP) {
     .slice(0, limit);
 }
 
+/// What every open position on one market adds up to.
+///
+/// This is the exchange's own list rather than a sample of it: `allPositions` pages the
+/// contract until the list ends. When it ends because the page budget ran out instead,
+/// `complete` is false and every figure below is a floor, which the screen says out loud.
+///
+/// One account holds at most one position per market, so the two trader counts cannot
+/// double-count anybody.
+export function aggregateMarket(entries, market, complete = true) {
+  let longValue = 0n;
+  let shortValue = 0n;
+  let longTraders = 0;
+  let shortTraders = 0;
+  let biggest = null;
+
+  for (const { row, mark } of entries) {
+    const described = describePosition(row, mark, market);
+    // Cents, the same rounding `rankTraders` uses, so the leaderboard and this screen
+    // never disagree about what a position is worth.
+    const value = BigInt(Math.round(Number(described.value) * 1e6));
+    if (described.side === "long") { longValue += value; longTraders += 1; }
+    else { shortValue += value; shortTraders += 1; }
+    if (!biggest || value > biggest.value) biggest = { value, accountId: row.accountId, described };
+  }
+
+  const total = longValue + shortValue;
+  return {
+    market: market.name,
+    marketId: market.id,
+    complete,
+    traders: longTraders + shortTraders,
+    longTraders,
+    shortTraders,
+    longValue: formatFixed(longValue, COLLATERAL_DECIMALS, 2),
+    shortValue: formatFixed(shortValue, COLLATERAL_DECIMALS, 2),
+    // Computed here rather than in the app: two clients would round a share differently,
+    // and a bar that disagrees with the figures beside it is worse than no bar.
+    longShareBps: total > 0n ? Number((longValue * 10_000n) / total) : null,
+    biggest: biggest === null ? null : {
+      accountId: String(biggest.accountId),
+      address: null,
+      side: biggest.described.side,
+      value: biggest.described.value,
+      leverage: biggest.described.leverage,
+    },
+  };
+}
+
 let contextCache = { at: 0, markets: null };
 
 export async function openMarkets(fetchImpl = fetch) {
@@ -108,18 +156,23 @@ export function chainReader(rpcURL = process.env.MONAD_MAINNET_RPC || "https://r
   const read = (functionName, args) => client.readContract({ address: EXCHANGE, abi: EXCHANGE_VIEWS, functionName, args });
 
   return {
+    /// Every open position on one market, and whether that is really every one.
+    ///
+    /// The page budget can run out before the contract's list does. The rows read so far
+    /// are still true, but a total built from them is a floor rather than the book, and
+    /// the caller has to be able to tell the difference.
     async allPositions(market) {
       const out = [];
       let start = 0n;
       for (let page = 0; page < MAX_PAGES; page += 1) {
         const [rows, count, mark, valid] = await read("getPositionsV2", [BigInt(market.id), start, PAGE]);
-        if (!valid) return out;
+        if (!valid) return { rows: out, complete: true };
         for (const row of rows.slice(0, Number(count))) out.push({ row, mark });
         const last = rows[Number(count) - 1];
-        if (BigInt(count) < PAGE || !last || last.nextNodeId === 0n) return out;
+        if (BigInt(count) < PAGE || !last || last.nextNodeId === 0n) return { rows: out, complete: true };
         start = last.nextNodeId;
       }
-      return out;
+      return { rows: out, complete: false };
     },
     async accountById(id) {
       return read("getAccountById", [BigInt(id)]);
@@ -259,9 +312,24 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
     }
 
     try {
+      if (view === "crowd") {
+        const markets = [...book.values()];
+        const pages = await Promise.all(markets.map((market) => chain.allPositions(market)));
+        const rows = markets
+          .map((market, index) => aggregateMarket(pages[index].rows, market, pages[index].complete))
+          .filter((row) => row.traders > 0)
+          .sort((a, b) => (Number(b.longValue) + Number(b.shortValue)) - (Number(a.longValue) + Number(a.shortValue)));
+        // The biggest position is the one row worth opening a profile from, so it is the
+        // only account this view resolves to an address.
+        const accounts = await Promise.all(rows.map((row) => chain.accountById(BigInt(row.biggest.accountId))));
+        rows.forEach((row, index) => { row.biggest.address = accounts[index]?.accountAddr ?? null; });
+        res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
+        return res.status(200).json({ observedAt: Date.now(), markets: rows });
+      }
+
       if (view === "top") {
         const scanned = await Promise.all([...book.values()].map(async (market) =>
-          (await chain.allPositions(market)).map(({ row, mark }) => ({
+          (await chain.allPositions(market)).rows.map(({ row, mark }) => ({
             accountId: row.accountId, raw: row, described: describePosition(row, mark, market),
           }))));
         const ranked = rankTraders(scanned.flat());

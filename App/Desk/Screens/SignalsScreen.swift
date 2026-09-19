@@ -100,6 +100,11 @@ struct SignalsScreen: View {
         .task { await directory.run() }
         #if DEBUG
         .task { if ProcessInfo.processInfo.arguments.contains("-copy-activity") { showsCopying = true } }
+        .task {
+            guard ProcessInfo.processInfo.arguments.contains("-crowd-demo") else { return }
+            section = .market
+            directory.seedCrowdForReview()
+        }
         #endif
         #if DEBUG
         .task {
@@ -246,10 +251,15 @@ struct SignalsScreen: View {
 
     @ViewBuilder
     private var marketReadings: some View {
+        MarketCrowdFeed(crowd: directory.crowd, name: directory.name) { address in
+            selectedTrader = directory.top.first { $0.id == address.lowercased() }
+                ?? TraderSnapshot(accountId: nil, address: address, pnl: nil, balance: nil, positions: [])
+        }
+
         Text("\(market.symbol)-PERP, read live from Perpl")
             .font(DeskType.caption)
             .foregroundStyle(DeskColor.nightMuted.color)
-            .padding(.top, 16)
+            .padding(.top, 34)
 
         if let signals, !signals.isEmpty {
             premium(signals).padding(.top, 22)
