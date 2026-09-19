@@ -70,8 +70,8 @@ struct HomeScreen: View {
                     if !model.hasTradingAccount {
                         setupCard.padding(.top, 24)
                     }
-                    networkChip.padding(.top, 34)
-                    accountRows.padding(.top, 16)
+                    networkChip.padding(.top, 26)
+                    accountRows.padding(.top, 12)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
@@ -163,18 +163,18 @@ struct HomeScreen: View {
     /// reachable only from inside the More menu.
     private var networkChip: some View {
         Button(action: onNetwork) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Image(systemName: "globe")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                 Text(model.network.name)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(DeskColor.nightMuted.color)
             }
             .foregroundStyle(DeskColor.nightText.color)
-            .padding(.horizontal, 16)
-            .frame(height: 44)
+            .padding(.horizontal, 12)
+            .frame(height: 34)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -289,9 +289,10 @@ struct HomeScreen: View {
     // MARK: Rows
 
     private var accountRows: some View {
-        // Fourteen rather than eight. Each row is its own object — a balance, a
-        // position, an instrument — and at eight they read as one ruled table.
-        VStack(spacing: 14) {
+        // Ten. At eight the rows read as one ruled table; at fourteen they drifted
+        // apart into four unrelated cards. Ten is the gap that groups them without
+        // welding them together.
+        VStack(spacing: 10) {
             HomeAssetRow(
                 mark: { TokenLogo(asset: .ausd, size: 44) },
                 title: "AUSD collateral",
