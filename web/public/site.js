@@ -5,6 +5,18 @@
 (function () {
   "use strict";
 
+  // A looping capture is decoration, so it stops when the viewer has asked for less
+  // motion. The poster stays, which is the screen the video opens on anyway.
+  var motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  Array.prototype.forEach.call(document.querySelectorAll(".site-phone-video"), function (video) {
+    function apply() {
+      if (motion.matches) { video.removeAttribute("autoplay"); video.pause(); }
+      else if (video.paused) { var play = video.play(); if (play) play.catch(function () {}); }
+    }
+    motion.addEventListener("change", apply);
+    apply();
+  });
+
   var root = document.querySelector("[data-carousel]");
   if (!root) return;
 
@@ -25,6 +37,7 @@
 
   var ROTATE_MS = 6000;
   var bars = Array.prototype.slice.call(root.querySelectorAll(".site-carousel-bar"));
+  var visuals = Array.prototype.slice.call(document.querySelectorAll(".site-security-visual"));
   var panel = root.querySelector(".site-carousel-slide");
   var title = panel.querySelector("h3");
   var text = panel.querySelector("p");
@@ -47,6 +60,15 @@
         var fill = track.querySelector(".site-carousel-fill");
         track.replaceChild(fill.cloneNode(false), fill);
       }
+    });
+
+    // The visual is the slide's, not decoration beside it: the bar, the words and
+    // the picture move together or the three bars mean nothing.
+    visuals.forEach(function (visual, i) {
+      var show = i === index;
+      if (show && visual.hidden) visual.style.animation = "none";
+      visual.hidden = !show;
+      if (show) { void visual.offsetWidth; visual.style.animation = ""; }
     });
 
     title.textContent = slides[index].title;

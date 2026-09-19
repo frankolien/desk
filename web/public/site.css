@@ -201,7 +201,7 @@ a { color: inherit; text-decoration: none; }
   aspect-ratio: 16 / 9;
   margin-top: 64px;
   border-radius: var(--site-radius);
-  background: linear-gradient(160deg, var(--white) 0%, var(--cream) 45%, color-mix(in srgb, var(--action) 26%, var(--white)) 100%);
+  background: url("/brand/hero-art.svg") center / cover no-repeat, var(--cream);
   overflow: hidden;
 }
 .site-hero-panel .site-phone {
@@ -230,6 +230,15 @@ a { color: inherit; text-decoration: none; }
   color: var(--white);
   border: 1px solid color-mix(in srgb, var(--white) 10%, var(--ink));
 }
+/* The share-card artwork, dimmed enough that the copy still reads on it. */
+.site-card-dark.is-artwork {
+  background:
+    linear-gradient(100deg, rgba(7, 9, 7, 0.95) 28%, rgba(7, 9, 7, 0.74) 62%, rgba(7, 9, 7, 0.42) 100%),
+    url("/brand/card.webp") 62% 28% / cover no-repeat,
+    var(--night);
+  border-color: color-mix(in srgb, var(--action) 26%, transparent);
+}
+
 .site-card-art {
   flex: 1;
   display: flex;
@@ -420,9 +429,25 @@ a { color: inherit; text-decoration: none; }
   background-size: 33.34% 33.34%;
   background-position: -1px -1px;
 }
-.site-security-visual { display: grid; place-items: center; width: 100%; height: 100%; }
-.site-security-pair { display: flex; align-items: center; gap: 28px; color: var(--ink); }
-.site-security-plus { font-size: 44px; font-weight: 300; line-height: 1; color: #b8bdb9; }
+/* One visual per slide, swapped with the bars above the text. */
+.site-security-visual {
+  grid-area: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  width: 100%;
+  height: 100%;
+  animation: site-fade 0.45s ease;
+}
+.site-security-visual[hidden] { display: none; }
+
+.site-security-pair,
+.site-security-row { display: flex; align-items: center; gap: 24px; color: var(--ink); }
+.site-security-plus,
+.site-figure-not { font-size: 40px; font-weight: 300; line-height: 1; color: #bdb9b0; }
+
 .site-security-tile {
   display: grid;
   place-items: center;
@@ -435,7 +460,28 @@ a { color: inherit; text-decoration: none; }
   font-weight: 500;
   letter-spacing: -0.02em;
 }
-.site-security-tile.is-ink { background: var(--ink); }
+.site-security-tile.is-ink { background: var(--ink); color: var(--action); }
+
+.site-figure {
+  padding: 14px 20px;
+  border-radius: 16px;
+  background: var(--white);
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.site-figure.is-action { background: var(--action); border-color: var(--action); }
+.site-figure.is-ink { background: var(--ink); border-color: var(--ink); color: var(--action); padding-inline: 34px; }
+.site-figure.is-struck { color: var(--muted); text-decoration: line-through; }
+.site-figure-arrow { color: #bdb9b0; }
+
+.site-security-caption {
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
 
 /* Duo cards and the code line */
 
@@ -525,7 +571,8 @@ a { color: inherit; text-decoration: none; }
 
 /* Real screenshots in the frame: the capture fills the screen edge to edge. */
 .site-phone-shot .site-phone-screen { padding: 0; }
-.site-phone-shot img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.site-phone-shot img,
+.site-phone-video { width: 100%; height: 100%; object-fit: cover; object-position: top; }
 
 /* Responsive */
 

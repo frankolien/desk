@@ -179,9 +179,13 @@
         </ul>
       </div>
       <div class="site-panel">
-        <div class="site-phone site-phone-shot" role="img" aria-label="Desk's sign-in screen: Trade perps, with your face — Continue with Face ID">
+        <div class="site-phone site-phone-shot" role="img" aria-label="Signing in to Desk with Face ID: no seed phrase, straight into the app">
           <div class="site-phone-screen" aria-hidden="true">
-            <img src="/shots/welcome.webp" width="640" height="1391" alt="" loading="lazy">
+            <!-- Drop the capture at /shots/face-id.mp4. Until it exists the poster
+                 stands in, so the section is never broken while it is missing. -->
+            <video class="site-phone-video" poster="/shots/welcome.webp" autoplay muted loop playsinline preload="none">
+              <source src="/shots/face-id.mp4" type="video/mp4">
+            </video>
           </div>
         </div>
       </div>
@@ -219,12 +223,40 @@
   <section class="site-wrap site-section" id="security" aria-labelledby="security-title">
     <div class="site-split">
       <div class="site-panel site-security-panel">
-        <div class="site-security-visual">
+        <div class="site-security-visual" data-visual="0">
           <span class="site-security-pair">
-            <span class="site-security-tile">Face ID</span>
+            <span class="site-security-tile is-action">
+              <svg viewBox="0 0 64 64" width="56" height="56" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M8 22v-8a6 6 0 0 1 6-6h8"/><path d="M42 8h8a6 6 0 0 1 6 6v8"/>
+                <path d="M56 42v8a6 6 0 0 1-6 6h-8"/><path d="M22 56h-8a6 6 0 0 1-6-6v-8"/>
+                <path d="M22 25v7"/><path d="M42 25v7"/><path d="M32 25v11h-3"/>
+                <path d="M23 42a13 13 0 0 0 18 0"/>
+              </svg>
+            </span>
             <span class="site-security-plus" aria-hidden="true">+</span>
-            <span class="site-security-tile is-ink">Perpl</span>
+            <span class="site-security-tile is-ink">
+              <svg viewBox="0 0 24 24" width="46" height="46" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8-8M17 5l2.5 2.5M14.5 7.5 17 10"/>
+              </svg>
+            </span>
           </span>
+          <span class="site-security-caption">Derived, never stored</span>
+        </div>
+        <div class="site-security-visual" data-visual="1" hidden>
+          <span class="site-security-row">
+            <span class="site-figure">81,295.83</span>
+            <svg class="site-figure-arrow" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+            <span class="site-figure is-action">81,295.8</span>
+          </span>
+          <span class="site-security-caption">Rounded the way that costs you</span>
+        </div>
+        <div class="site-security-visual" data-visual="2" hidden>
+          <span class="site-security-row">
+            <span class="site-figure is-struck">0.00</span>
+            <span class="site-figure-not" aria-hidden="true">&ne;</span>
+            <span class="site-figure is-ink">&mdash;</span>
+          </span>
+          <span class="site-security-caption">An empty book and an unreadable one</span>
         </div>
       </div>
       <div class="site-split-copy">
@@ -256,7 +288,7 @@
   <!-- ─────────────────────────── duo ─────────────────────────── -->
   <section class="site-wrap site-section" aria-label="Monad, Perpl and your keys">
     <div class="site-duo">
-      <article class="site-card site-card-dark">
+      <article class="site-card site-card-dark is-artwork">
         <span class="site-icon-tile is-dark">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 4 7v10l8 5 8-5V7z"/><path d="M12 22V12M4 7l8 5 8-5"/></svg>
         </span>

@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" width="1200" height="675" fill="none" role="presentation">
+  <title>Desk</title>
+  <defs>
+    <linearGradient id="d-ground" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.45" stop-color="#FDF8EE"/>
+      <stop offset="1" stop-color="#F7E9C8"/>
+    </linearGradient>
+    <radialGradient id="d-glow" cx="50%" cy="44%" r="54%">
+      <stop offset="0" stop-color="#E8B339" stop-opacity="0.34"/>
+      <stop offset="0.55" stop-color="#E8B339" stop-opacity="0.09"/>
+      <stop offset="1" stop-color="#E8B339" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="d-area" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E8B339" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#E8B339" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="d-line" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#D8A227" stop-opacity="0.35"/>
+      <stop offset="0.45" stop-color="#E8B339" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#8A6410" stop-opacity="0.7"/>
+    </linearGradient>
+    <linearGradient id="d-mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#E8B339" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#8A6410" stop-opacity="0.18"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="675" fill="url(#d-ground)"/>
+
+  <!-- The grid a price sits on, at the weight of a watermark. -->
+  <g stroke="#0B0D0B" stroke-opacity="0.04" stroke-width="1">
+    <path d="M60 0V675M120 0V675M180 0V675M240 0V675M300 0V675M360 0V675M420 0V675M480 0V675M540 0V675M600 0V675M660 0V675M720 0V675M780 0V675M840 0V675M900 0V675M960 0V675M1020 0V675M1080 0V675M1140 0V675"/>
+    <path d="M0 45H1200M0 90H1200M0 135H1200M0 180H1200M0 225H1200M0 270H1200M0 315H1200M0 360H1200M0 405H1200M0 450H1200M0 495H1200M0 540H1200M0 585H1200M0 630H1200"/>
+  </g>
+
+  <!-- The monogram, ghosted: the same D the app icon draws. -->
+  <g opacity="0.5">
+    <path d="M905 128h132a196 196 0 0 1 0 392H905a34 34 0 0 1-34-34V162a34 34 0 0 1 34-34Z"
+          stroke="url(#d-mark)" stroke-width="2.5"/>
+    <path d="M933 372h150a22 22 0 0 1 22 22v14" stroke="url(#d-mark)" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M948 300l44-46 38 40 52-64 44 38" stroke="url(#d-mark)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <rect width="1200" height="675" fill="url(#d-glow)"/>
+
+  <!-- Volume, then the mark it made. -->
+  <g fill="#8A6410" fill-opacity="0.10">
+    <rect x="72" y="600" width="12" height="40" rx="3"/>
+    <rect x="102" y="580" width="12" height="60" rx="3"/>
+    <rect x="132" y="596" width="12" height="44" rx="3"/>
+    <rect x="162" y="566" width="12" height="74" rx="3"/>
+    <rect x="192" y="588" width="12" height="52" rx="3"/>
+    <rect x="222" y="556" width="12" height="84" rx="3"/>
+    <rect x="252" y="574" width="12" height="66" rx="3"/>
+    <rect x="282" y="542" width="12" height="98" rx="3"/>
+  </g>
+
+  <g stroke="#8A6410" stroke-opacity="0.16" stroke-width="2">
+    <path d="M1010 596v52M1010 606h0"/>
+    <path d="M1050 584v58M1090 572v62M1130 556v70"/>
+  </g>
+  <g fill="#E8B339" fill-opacity="0.18">
+    <rect x="1004" y="606" width="13" height="30" rx="2"/>
+    <rect x="1044" y="596" width="13" height="34" rx="2"/>
+    <rect x="1084" y="582" width="13" height="40" rx="2"/>
+    <rect x="1124" y="566" width="13" height="46" rx="2"/>
+  </g>
+
+  <path d="M0 528 60 512 120 538 180 500 240 476 300 506 360 460 420 434 480 466 540 414 600 384 660 410 720 352 780 322 840 348 900 292 960 256 1020 278 1080 222 1140 192 1200 208V675H0Z"
+        fill="url(#d-area)"/>
+  <path d="M0 528 60 512 120 538 180 500 240 476 300 506 360 460 420 434 480 466 540 414 600 384 660 410 720 352 780 322 840 348 900 292 960 256 1020 278 1080 222 1140 192 1200 208"
+        stroke="url(#d-line)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- The last print, marked the way the app marks it. -->
+  <circle cx="1140" cy="192" r="7" fill="#E8B339"/>
+  <circle cx="1140" cy="192" r="15" stroke="#E8B339" stroke-opacity="0.35" stroke-width="2"/>
+</svg>
