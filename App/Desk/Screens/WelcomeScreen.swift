@@ -39,6 +39,16 @@ struct WelcomeScreen: View {
                 // "you can act here", because everything down there was already amber.
                 DeskBackground()
 
+                // One warm corner under the action, and no more than that. It reaches a
+                // third of the way up at sixteen percent, so it warms the ground the
+                // button sits on without competing with the button for the eye.
+                RadialGradient(
+                    colors: [DeskColor.action.color.opacity(0.16), .clear],
+                    center: UnitPoint(x: 0.02, y: 0.94),
+                    startRadius: 0,
+                    endRadius: proxy.size.height * 0.34)
+                    .allowsHitTesting(false)
+
                 VStack(alignment: .leading, spacing: 0) {
                     FeatureTicker(items: features)
                         .padding(.horizontal, contentInset + 2)
@@ -49,14 +59,18 @@ struct WelcomeScreen: View {
                     DeskBrandMark(size: compact ? 48 : 52)
                         .padding(.horizontal, contentInset)
 
-                    Text("Trade perps,\nwith your face")
+                    // Says what the app is before it says how clever the sign-in is.
+                    // "Trade perps, with your face" asked the reader to work out what a
+                    // face has to do with a trade, and the ticker above already makes the
+                    // passkey point four times over.
+                    Text("Copy the traders\nwho are winning")
                         .font(.system(size: compact ? 38 : 42, weight: .heavy, design: .rounded))
                         .foregroundStyle(.white)
                         .lineSpacing(1)
                         .padding(.horizontal, contentInset)
                         .padding(.top, compact ? 22 : 28)
 
-                    Text("Passkey sign-in, AUSD collateral, gasless orders on Monad")
+                    Text("Perpetuals on Monad. Face ID signs every order — no seed phrase, no wallet app.")
                         .font(.system(size: 17, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.58))
                         .fixedSize(horizontal: false, vertical: true)
