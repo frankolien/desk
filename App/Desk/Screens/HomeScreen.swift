@@ -94,7 +94,10 @@ struct HomeScreen: View {
     }
 
     private var homeBackground: some View {
-        Color.black.ignoresSafeArea()
+        ZStack {
+            Color.black.ignoresSafeArea()
+            DeskAurora()
+        }
     }
 
     // MARK: Chrome
