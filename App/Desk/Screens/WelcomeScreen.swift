@@ -59,13 +59,11 @@ struct WelcomeScreen: View {
                     DeskBrandMark(size: compact ? 48 : 52)
                         .padding(.horizontal, contentInset)
 
-                    // The category and the reason to pick this one, in that order. Perps
-                    // alone is a claim a dozen apps make; copying alone reads as though
-                    // trading yourself is not on offer, and a third of the app is exactly
-                    // that. "With your face" said neither, and the ticker above already
-                    // makes the passkey point four times over.
-                    Text("Trade perps.\nOr copy someone\nwho's good at it.")
-                        .font(.system(size: compact ? 28 : 31, weight: .heavy, design: .rounded))
+                    // Two words. The ticker above says what the sign-in is, the sentence
+                    // below says where and on what, and the copy engine sells itself on
+                    // the screen it lives on rather than on this one.
+                    Text("Trade perps")
+                        .font(.system(size: compact ? 40 : 46, weight: .heavy, design: .rounded))
                         .foregroundStyle(.white)
                         .lineSpacing(1)
                         .padding(.horizontal, contentInset)
