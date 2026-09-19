@@ -397,10 +397,7 @@ a { color: inherit; text-decoration: none; }
 
 /* Security carousel */
 
-.site-carousel { margin-top: 36px; }
-.site-carousel-body { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; }
-
-.site-carousel-bars { display: flex; gap: 8px; margin-bottom: 28px; }
+.site-carousel-bars { display: flex; gap: 8px; margin-bottom: 32px; }
 .site-carousel-bar { flex: 1; padding: 10px 0; background: none; border: 0; cursor: pointer; }
 .site-carousel-track { display: block; height: 3px; border-radius: 999px; background: var(--line); overflow: hidden; }
 .site-carousel-fill {
@@ -412,10 +409,12 @@ a { color: inherit; text-decoration: none; }
 }
 .site-carousel-bar.is-active .site-carousel-fill { animation: site-carousel-fill 6s linear forwards; }
 
-.site-carousel-slide { min-height: 190px; }
-.site-carousel-slide p { max-width: 44ch; margin: 12px 0 0; color: var(--muted); }
-.site-carousel-slide h3,
-.site-carousel-slide p { animation: site-fade 0.3s ease; }
+/* The heading belongs to the slide, so the tallest one sets the height and nothing
+   below it moves as the slides turn. */
+.site-carousel-slide { min-height: 300px; }
+.site-carousel-slide p { max-width: 44ch; margin: 20px 0 0; color: var(--muted); font-size: 18px; line-height: 1.5; }
+.site-carousel-slide h2,
+.site-carousel-slide p { animation: site-fade 0.4s ease; }
 
 @keyframes site-carousel-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes site-fade { from { opacity: 0; } to { opacity: 1; } }
@@ -594,9 +593,9 @@ a { color: inherit; text-decoration: none; }
   .site-split,
   .site-trio,
   .site-duo,
-  .site-carousel-body { grid-template-columns: 1fr; }
 
-  .site-split, .site-carousel-body { gap: 40px; }
+
+  .site-split { gap: 40px; }
   .site-split-copy { order: -1; }
   .site-split.is-flipped .site-split-copy { order: -1; }
   .site-split.is-flipped .site-panel { order: 0; }

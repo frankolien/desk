@@ -22,15 +22,15 @@
 
   var slides = [
     {
-      title: "The key is never on a server",
-      text: "It exists only in the app’s memory, only while it is open and unlocked. Ours pushes notifications and reads public chain data — nothing it holds could move your money.",
+      title: "No server can trade for anyone.",
+      text: "Including ours. The signing key exists only in the app’s memory, only while it is open and unlocked. Ours pushes notifications and reads public chain data — nothing it holds could move your money.",
     },
     {
-      title: "Rounding goes against you",
+      title: "Rounding goes against you.",
       text: "Every figure rounds in the direction that costs you rather than the one that flatters you, and the arithmetic lives in a module that cannot reach the network by construction.",
     },
     {
-      title: "Unreadable is never empty",
+      title: "Unreadable is never empty.",
       text: "A position book that cannot be read is never treated as an empty one, because that would announce closes that never happened.",
     },
   ];
@@ -39,7 +39,7 @@
   var bars = Array.prototype.slice.call(root.querySelectorAll(".site-carousel-bar"));
   var visuals = Array.prototype.slice.call(document.querySelectorAll(".site-security-visual"));
   var panel = root.querySelector(".site-carousel-slide");
-  var title = panel.querySelector("h3");
+  var title = panel.querySelector("h2");
   var text = panel.querySelector("p");
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
   var index = 0;
