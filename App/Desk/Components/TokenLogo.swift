@@ -88,7 +88,10 @@ struct MarketTokenLogo: View {
 
     var body: some View {
         Group {
-            if remoteURL == nil && ["MON", "LIT", "PUMP"].contains(symbol.uppercased()) {
+            // Every market Perpl lists is in the catalog, so a listed market never
+            // flashes a placeholder while a CDN answers. The fetch is for the spot
+            // tokens, whose artwork arrives with the feed.
+            if remoteURL == nil, UIImage(named: symbol.uppercased()) != nil {
                 Image(symbol.uppercased()).resizable().scaledToFit()
             } else {
                 AsyncImage(url: url) { phase in

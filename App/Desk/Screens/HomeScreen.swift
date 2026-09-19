@@ -364,9 +364,7 @@ struct HomeScreen: View {
 
     /// Micros to a percentage, truncated. A gain is never rounded up into one it is not.
     static func percent(_ micros: Int, signed: Bool = true) -> String {
-        let sign = micros < 0 ? Direction.minus : (signed ? "+" : "")
-        let magnitude = abs(micros)
-        return "\(sign)\(magnitude / 10_000).\(String(format: "%02d", (magnitude % 10_000) / 100))%"
+        Percent.micros(micros, signed: signed)
     }
 
     /// The key's state rather than a countdown — there is no timer to show. Unlocked goes

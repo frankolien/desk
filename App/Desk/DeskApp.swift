@@ -80,6 +80,12 @@ struct RootView: View {
                 }
             }
 
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-widget-gallery") {
+                WidgetGallery().zIndex(2)
+            }
+            #endif
+
             if showsLaunchMoment {
                 LaunchMoment()
                     .transition(.opacity.combined(with: .scale(scale: 1.035)))

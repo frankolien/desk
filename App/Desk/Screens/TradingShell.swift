@@ -9,6 +9,7 @@ struct TradingShell: View {
 
     @State private var market: MarketModel
     @State private var copier: CopyTrader
+    @State private var glances = HomeGlancePublisher()
     /// The model's session, never one of our own. `openDesk` hands the enrolled key to
     /// `model.trading`, so a session created here would be a different object and the
     /// ticket would talk to one that had never been given a key.
@@ -128,6 +129,12 @@ struct TradingShell: View {
             FundScreen(model: model) { showsSetup = false }
         }
         .task { market.start() }
+        .task {
+            while !Task.isCancelled {
+                glances.publish(model: model, market: market)
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
         .task {
             copier.onEvent = { message in toast(message) }
             #if DEBUG

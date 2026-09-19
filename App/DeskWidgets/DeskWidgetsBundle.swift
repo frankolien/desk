@@ -5,6 +5,8 @@ import WidgetKit
 struct DeskWidgetsBundle: WidgetBundle {
     var body: some Widget {
         AutoCopyWidget()
+        PortfolioWidget()
+        WatchlistWidget()
         AutoCopyLiveActivity()
         AutoCopyToggle()
     }

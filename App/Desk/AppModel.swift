@@ -805,7 +805,9 @@ final class AppModel {
         await TradeAlerts.shared.signOut()
         UserDefaults.standard.removeObject(forKey: "desk.followedTraders")
         AutoCopyGlance.forget()
+        PortfolioGlance.forget()
         WidgetCenter.shared.reloadTimelines(ofKind: AutoCopyControl.widgetKind)
+        WidgetCenter.shared.reloadTimelines(ofKind: PortfolioGlance.widgetKind)
     }
 
     // MARK: - The trading key
