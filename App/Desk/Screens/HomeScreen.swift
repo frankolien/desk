@@ -70,7 +70,8 @@ struct HomeScreen: View {
                     if !model.hasTradingAccount {
                         setupCard.padding(.top, 24)
                     }
-                    accountRows.padding(.top, 24)
+                    networkChip.padding(.top, 34)
+                    accountRows.padding(.top, 16)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
@@ -153,6 +154,33 @@ struct HomeScreen: View {
         .buttonStyle(.plain)
         .homeGlass(interactive: true, in: Circle())
         .accessibilityLabel(label)
+    }
+
+    /// What the rows below are. Desk trades one network at a time, so this names the one
+    /// in force rather than claiming an "all networks" view the app does not have — the
+    /// figures underneath come from a single chain and saying otherwise would be a lie
+    /// told by a filter. It doubles as the way into the switcher, which was previously
+    /// reachable only from inside the More menu.
+    private var networkChip: some View {
+        Button(action: onNetwork) {
+            HStack(spacing: 8) {
+                Image(systemName: "globe")
+                    .font(.system(size: 14, weight: .semibold))
+                Text(model.network.name)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+            }
+            .foregroundStyle(DeskColor.nightText.color)
+            .padding(.horizontal, 16)
+            .frame(height: 44)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .homeGlass(interactive: true, in: Capsule())
+        .accessibilityLabel("Network, \(model.network.name)")
+        .accessibilityHint("Double tap to switch network")
     }
 
     // MARK: Balance
@@ -261,9 +289,11 @@ struct HomeScreen: View {
     // MARK: Rows
 
     private var accountRows: some View {
-        VStack(spacing: 8) {
+        // Fourteen rather than eight. Each row is its own object — a balance, a
+        // position, an instrument — and at eight they read as one ruled table.
+        VStack(spacing: 14) {
             HomeAssetRow(
-                mark: { TokenLogo(asset: .ausd, size: 38) },
+                mark: { TokenLogo(asset: .ausd, size: 44) },
                 title: "AUSD collateral",
                 subtitle: "Available to trade",
                 value: hidesBalance ? "•••••" : collateralInCurrency,
@@ -282,7 +312,7 @@ struct HomeScreen: View {
             } else {
                 ForEach(Array(positionContexts.prefix(3))) { position in
                     HomeAssetRow(
-                        mark: { MarketTokenLogo(symbol: position.market.symbol, size: 38) },
+                        mark: { MarketTokenLogo(symbol: position.market.symbol, size: 44) },
                         title: "\(position.figures.side == .long ? "Long" : "Short") \(position.market.symbol) · \(position.figures.leverageHundredths / 100)×",
                         subtitle: positionSubtitle(position.figures),
                         value: hidesBalance
@@ -307,7 +337,7 @@ struct HomeScreen: View {
             }
 
             HomeAssetRow(
-                mark: { TokenLogo(asset: .bitcoin, size: 38) },
+                mark: { TokenLogo(asset: .bitcoin, size: 44) },
                 title: "Bitcoin perpetual",
                 subtitle: "\(market.symbol)-PERP",
                 value: market.markText == "—" ? "—" : "$" + market.markText,
@@ -350,11 +380,11 @@ struct HomeScreen: View {
                     .font(.system(size: 24, weight: .medium))
                     .foregroundStyle(DeskColor.nightText.color)
                     .contentTransition(.symbolEffect(.replace))
-                .frame(width: 38, height: 38)
+                .frame(width: 44, height: 44)
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text("Face ID trading key")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
                     Text(model.isKeyUnlocked ? "Held in memory while Desk is open" : "Locked · never stored")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -367,8 +397,8 @@ struct HomeScreen: View {
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle((model.isKeyUnlocked ? DeskColor.nightText : DeskColor.identity).color)
             }
-            .padding(.horizontal, 14)
-            .frame(height: 66)
+            .padding(.horizontal, 16)
+            .frame(height: 80)
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
         }
@@ -434,18 +464,18 @@ private struct HomeAssetRow<Mark: View>: View {
         Button(action: action) {
             HStack(spacing: 12) {
                 mark()
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(title)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
                     Text(subtitle)
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
                 }
                 Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 3) {
+                VStack(alignment: .trailing, spacing: 4) {
                     Text(value)
-                        .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
+                        .font(.system(size: 16, weight: .bold, design: .rounded).monospacedDigit())
                         .foregroundStyle(DeskColor.nightText.color)
                     if let change {
                         Text(change)
@@ -454,8 +484,8 @@ private struct HomeAssetRow<Mark: View>: View {
                     }
                 }
             }
-            .padding(.horizontal, 14)
-            .frame(height: 66)
+            .padding(.horizontal, 16)
+            .frame(height: 80)
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
         }
@@ -472,7 +502,7 @@ private struct MonochromeAssetMark: View {
         Text(glyph)
             .font(.system(size: 26, weight: .heavy, design: .rounded))
             .foregroundStyle(DeskColor.nightText.color)
-            .frame(width: 38, height: 38)
+            .frame(width: 44, height: 44)
         .accessibilityHidden(true)
     }
 }
@@ -484,7 +514,7 @@ private struct MonochromeSymbolMark: View {
         Image(systemName: symbol)
             .font(.system(size: 23, weight: .semibold))
             .foregroundStyle(DeskColor.nightText.color)
-        .frame(width: 38, height: 38)
+        .frame(width: 44, height: 44)
         .accessibilityHidden(true)
     }
 }
