@@ -42,24 +42,23 @@
     $$("video").forEach(function (v) { if (reduced.matches) v.pause(); });
   });
 
-  /* ── Hero: three statements, three recordings, one timer ── */
+  /* ── Hero: three statements, three recordings, one card that changes colour ──
+     Scrolling inside the hero steps the slides — down to the next, up to the one
+     before — and only past the last one does the page scroll. A wheel or a swipe
+     is claimed only while the page is at the very top, so there is no way to be
+     stuck: scroll up from anywhere lower and the page moves as usual. */
+  var heroEl = $(".site-hero");
   var hero = $("[data-hero]");
-  if (hero) {
+  if (hero && heroEl) {
     var ROTATE = 7000;
-    var bars = $$(".site-hero-bar", hero);
     var slides = $$(".site-hero-slide", hero);
     var phones = $$("[data-hero-phone]", hero);
-    var hi = 0, ht = null;
+    var nums = $$(".site-hero-num", heroEl);
+    var hi = 0, ht = null, lock = 0;
 
     function heroShow(next, focus) {
-      hi = (next + slides.length) % slides.length;
-      bars.forEach(function (b, i) {
-        var on = i === hi;
-        b.classList.toggle("is-active", on);
-        b.setAttribute("aria-selected", on ? "true" : "false");
-        b.tabIndex = on ? 0 : -1;
-        if (on) { var fill = $(".site-fill", b); restart(fill); }
-      });
+      hi = Math.max(0, Math.min(slides.length - 1, next));
+      heroEl.setAttribute("data-tone", slides[hi].getAttribute("data-tone"));
       slides.forEach(function (s, i) {
         var on = i === hi;
         s.hidden = !on;
@@ -72,20 +71,61 @@
         var v = $("video", p);
         if (on) { if (v) { v.currentTime = 0; play(v); } } else if (v) { v.pause(); }
       });
-      if (focus) bars[hi].focus();
+      nums.forEach(function (n, i) {
+        var on = i === hi;
+        n.classList.toggle("is-active", on);
+        n.setAttribute("aria-selected", on ? "true" : "false");
+        n.tabIndex = on ? 0 : -1;
+      });
+      if (focus) nums[hi].focus();
     }
     function heroSchedule() {
       if (ht) clearInterval(ht);
       if (reduced.matches) return;
-      ht = setInterval(function () { heroShow(hi + 1, false); }, ROTATE);
+      ht = setInterval(function () { heroShow((hi + 1) % slides.length, false); }, ROTATE);
     }
-    bars.forEach(function (b, i) { b.addEventListener("click", function () { heroShow(i, false); heroSchedule(); }); });
-    $(".site-hero-bars", hero).addEventListener("keydown", function (ev) {
+    function step(dir) {
+      var now = Date.now();
+      if (now - lock < 900) return true;
+      var next = hi + dir;
+      if (next < 0 || next >= slides.length) return false;
+      lock = now;
+      heroShow(next, false);
+      heroSchedule();
+      return true;
+    }
+    function atTop() { return window.scrollY < 4 && !reduced.matches; }
+
+    window.addEventListener("wheel", function (ev) {
+      if (!atTop() || Math.abs(ev.deltaY) < 8) return;
+      var dir = ev.deltaY > 0 ? 1 : -1;
+      if (dir > 0 && hi === slides.length - 1) return;
+      if (dir < 0 && hi === 0) return;
+      ev.preventDefault();
+      step(dir);
+    }, { passive: false });
+
+    var touchY = null;
+    window.addEventListener("touchstart", function (ev) { touchY = ev.touches[0].clientY; }, { passive: true });
+    window.addEventListener("touchmove", function (ev) {
+      if (touchY == null || !atTop()) return;
+      var dy = touchY - ev.touches[0].clientY;
+      if (Math.abs(dy) < 30) return;
+      var dir = dy > 0 ? 1 : -1;
+      if ((dir > 0 && hi === slides.length - 1) || (dir < 0 && hi === 0)) { touchY = null; return; }
+      ev.preventDefault();
+      touchY = null;
+      step(dir);
+    }, { passive: false });
+
+    nums.forEach(function (n, i) { n.addEventListener("click", function () { heroShow(i, false); heroSchedule(); }); });
+    $(".site-hero-rail", heroEl).addEventListener("keydown", function (ev) {
       var n;
-      if (ev.key === "ArrowRight") n = hi + 1; else if (ev.key === "ArrowLeft") n = hi - 1; else return;
-      ev.preventDefault(); heroShow(n, true); heroSchedule();
+      if (ev.key === "ArrowDown" || ev.key === "ArrowRight") n = hi + 1;
+      else if (ev.key === "ArrowUp" || ev.key === "ArrowLeft") n = hi - 1;
+      else return;
+      ev.preventDefault(); heroShow((n + slides.length) % slides.length, true); heroSchedule();
     });
-    // The hero's own recording keeps looping; the timer only decides which one.
     document.addEventListener("visibilitychange", function () {
       if (document.hidden) { if (ht) clearInterval(ht); } else heroSchedule();
     });

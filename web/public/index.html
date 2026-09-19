@@ -56,23 +56,21 @@
 <main id="site-main" class="site-main">
 
   <!-- ───────────── hero ───────────── -->
-  <section class="site-block site-hero" data-tone="amber" aria-labelledby="hero-title">
+  <section class="site-block site-hero" data-tone="violet" aria-labelledby="hero-title">
     <div class="site-wrap site-hero-grid" data-hero>
       <div class="site-hero-copy">
-        <div class="site-hero-bars" role="tablist" aria-label="What Desk does">
-          <button class="site-hero-bar is-active" type="button" role="tab" aria-selected="true" tabindex="0"><span class="site-track"><span class="site-fill"></span></span><span class="site-visually-hidden">Trade perps with your face</span></button>
-          <button class="site-hero-bar" type="button" role="tab" aria-selected="false" tabindex="-1"><span class="site-track"><span class="site-fill"></span></span><span class="site-visually-hidden">Copy the traders who are winning</span></button>
-          <button class="site-hero-bar" type="button" role="tab" aria-selected="false" tabindex="-1"><span class="site-track"><span class="site-fill"></span></span><span class="site-visually-hidden">Everything you hold, on one screen</span></button>
-        </div>
-        <div class="site-hero-slide is-active" role="tabpanel">
+        <div class="site-hero-slide is-active" role="tabpanel" data-tone="violet">
+          <p class="site-eyebrow">Perpetuals on Monad</p>
           <h1 id="hero-title" class="site-h1">Trade perps with your face.</h1>
-          <p class="site-sub">Perpetuals on Monad. Face ID signs every order — no seed phrase, no wallet app, no key stored anywhere.</p>
+          <p class="site-sub">Face ID signs every order — no seed phrase, no wallet app, no key stored anywhere.</p>
         </div>
-        <div class="site-hero-slide" role="tabpanel" hidden>
+        <div class="site-hero-slide" role="tabpanel" data-tone="amber" hidden>
+          <p class="site-eyebrow">The copy engine</p>
           <h1 class="site-h1">Copy the traders who are actually winning.</h1>
           <p class="site-sub">Read straight off Perpl&rsquo;s exchange contract, copied in the same block they move in, and measured on every fill.</p>
         </div>
-        <div class="site-hero-slide" role="tabpanel" hidden>
+        <div class="site-hero-slide" role="tabpanel" data-tone="ember" hidden>
+          <p class="site-eyebrow">Home</p>
           <h1 class="site-h1">Everything you hold, on one screen.</h1>
           <p class="site-sub">Collateral, open positions, the mark, and the key that signs for them — with the Home Screen widgets to match.</p>
         </div>
@@ -103,10 +101,15 @@
         </div>
       </div>
     </div>
+    <ol class="site-hero-rail" role="tablist" aria-label="What Desk does">
+      <li><button class="site-hero-num is-active" type="button" role="tab" aria-selected="true" tabindex="0" aria-label="Trade perps with your face">01</button></li>
+      <li><span class="site-line" aria-hidden="true"></span><button class="site-hero-num" type="button" role="tab" aria-selected="false" tabindex="-1" aria-label="Copy the traders who are winning">02</button></li>
+      <li><span class="site-line" aria-hidden="true"></span><button class="site-hero-num" type="button" role="tab" aria-selected="false" tabindex="-1" aria-label="Everything you hold, on one screen">03</button></li>
+    </ol>
   </section>
 
   <!-- ───────────── live figures ───────────── -->
-  <section class="site-block" data-tone="white" aria-label="Perpl, right now">
+  <section class="site-block" data-tone="cream" aria-label="Perpl, right now">
     <div class="site-wrap">
       <p class="site-eyebrow">Read live from Perpl on Monad</p>
       <div class="site-stats" data-stats>
@@ -128,7 +131,7 @@
   </section>
 
   <!-- ───────────── chain ───────────── -->
-  <section class="site-block" data-tone="night" id="chain" aria-labelledby="chain-title">
+  <section class="site-block" data-tone="dark" id="chain" aria-labelledby="chain-title">
     <div class="site-wrap site-feature">
       <div class="site-feature-copy site-reveal">
         <p class="site-eyebrow">Signals</p>
@@ -242,7 +245,7 @@
   </section>
 
   <!-- ───────────── security ───────────── -->
-  <section class="site-block" data-tone="night" id="security" aria-label="Security">
+  <section class="site-block" data-tone="dark" id="security" aria-label="Security">
     <div class="site-wrap site-carousel" data-carousel>
       <div class="site-security-panel site-reveal">
         <div class="site-security-visual" data-visual="0">
