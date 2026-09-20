@@ -37,6 +37,7 @@
     <nav class="site-nav-links" aria-label="Primary">
       <a href="#chain">Copy engine</a>
       <a href="#desk">Live desk</a>
+      <a href="#alerts">Alerts</a>
       <a href="#security">Security</a>
       <a class="site-btn site-btn-ink site-btn-small" href="#get">
         <svg class="site-apple" width="14" height="16" aria-hidden="true"><use href="#i-apple"/></svg>
@@ -216,30 +217,80 @@
     </div>
   </section>
 
+  <!-- ───────────── alerts ───────────── -->
+  <section class="site-block" data-tone="amber" id="alerts" aria-labelledby="alerts-title">
+    <div class="site-wrap site-feature is-flipped">
+      <div class="site-feature-copy site-reveal">
+        <p class="site-eyebrow">Alerts</p>
+        <h2 id="alerts-title" class="site-h2">Know the moment they trade.</h2>
+        <p class="site-sub">Follow a trader and Desk watches their account on Perpl. When they open, add to or close a position, the alert lands on your Lock Screen with the trade in it — tap it and the ticket opens already filled in.</p>
+        <ul class="site-feature-list">
+          <li><span class="site-num">1</span><div><h3>Opens, adds, closes</h3><p>Every position event on the account, read from the chain, not from a feed someone curates.</p></div></li>
+          <li><span class="site-num">2</span><div><h3>Copy from the alert</h3><p>The buttons are on the notification. Nothing to find, nothing to type.</p></div></li>
+          <li><span class="site-num">3</span><div><h3>The server only pushes</h3><p>It sends the alert and reads public chain data. It never holds a key, so it can never place the trade.</p></div></li>
+        </ul>
+        <img class="site-strip" src="/shots/lockscreen.webp" width="900" height="521" alt="An iPhone Lock Screen with the Desk Live Activity and a notification: Trade alerts are on" loading="lazy">
+      </div>
+      <div class="site-stage site-reveal">
+        <div class="site-phone" aria-hidden="true">
+          <div class="site-phone-screen">
+            <img src="/shots/primer.webp" width="640" height="1387" alt="" loading="lazy">
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ───────────── closed ───────────── -->
   <section class="site-block" data-tone="ember" aria-labelledby="closed-title">
-    <div class="site-wrap">
-      <div class="site-reveal">
+    <div class="site-wrap site-feature">
+      <div class="site-feature-copy site-reveal">
         <p class="site-eyebrow">When Desk is closed</p>
         <h2 id="closed-title" class="site-h2">It doesn&rsquo;t leave the phone.</h2>
-        <p class="site-sub" style="max-width:48ch;margin-top:20px">The account, the watchlist and today&rsquo;s copy result, on the Home Screen, the Lock Screen and in the Dynamic Island. Pause auto-copy without opening anything.</p>
+        <p class="site-sub">The account and today&rsquo;s copy result on the Home Screen, the Lock Screen and in the Dynamic Island. Pause auto-copy without opening anything.</p>
+        <ul class="site-feature-list">
+          <li><span class="site-num">1</span><div><h3>Portfolio widget</h3><p>Collateral and every open position with its unrealised result.</p></div></li>
+          <li><span class="site-num">2</span><div><h3>Watchlist widget</h3><p>Saved markets at their latest marks, with the day&rsquo;s change.</p></div></li>
+          <li><span class="site-num">3</span><div><h3>Auto-Copy, live</h3><p>Today&rsquo;s result and a working pause — as a widget, a Live Activity, and in the Dynamic Island.</p></div></li>
+        </ul>
       </div>
-      <ul class="site-trio">
-        <li class="site-trio-item site-reveal">
-          <img class="site-widget" src="/shots/widget-portfolio.webp" width="676" height="316" alt="The Portfolio widget: collateral, then each open position with its unrealised result" loading="lazy">
-          <h3>Portfolio</h3><p>Collateral and every open position.</p>
-        </li>
-        <li class="site-trio-item site-reveal">
-          <img class="site-widget" src="/shots/widget-watchlist.webp" width="676" height="316" alt="The Watchlist widget: saved markets at their latest prices" loading="lazy">
-          <h3>Watchlist</h3><p>Saved markets at their latest marks.</p>
-        </li>
-        <li class="site-trio-item site-reveal">
-          <div style="display:grid;place-items:center;height:158px">
-            <span class="site-island"><img src="/brand/mark.webp" alt=""><span>Auto-Copy</span><b>+$14.62</b><span>today</span></span>
+      <div class="site-stage site-reveal">
+        <div class="site-phone is-tilt" aria-hidden="true">
+          <div class="site-phone-screen">
+            <img src="/shots/homescreen.webp" width="640" height="1387" alt="" loading="lazy">
           </div>
-          <h3>Live Activity</h3><p>Today&rsquo;s result in the Dynamic Island, with a pause that works.</p>
-        </li>
-      </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── more ───────────── -->
+  <section class="site-block" data-tone="white" aria-labelledby="more-title">
+    <div class="site-wrap">
+      <div class="site-reveal">
+        <p class="site-eyebrow">Also on the desk</p>
+        <h2 id="more-title" class="site-h2">Spot, and the receipt.</h2>
+      </div>
+      <div class="site-duo">
+        <article class="site-duo-card site-reveal">
+          <div class="site-duo-art">
+            <div class="site-phone" aria-hidden="true">
+              <div class="site-phone-screen">
+                <img src="/shots/spot.webp" width="640" height="1387" alt="" loading="lazy">
+              </div>
+            </div>
+          </div>
+          <h3 class="site-h3">Spot, too</h3>
+          <p class="site-sub">Trending tokens with a live chart, the transactions as they land, holders and the order book — and a buy button on the ones you can hold.</p>
+        </article>
+        <article class="site-duo-card site-reveal">
+          <div class="site-duo-art">
+            <img class="site-share" src="/shots/share.webp" width="720" height="900" alt="A Desk share card: ETH long 10×, +176.59 AUSD, +88% on margin, over a photo" loading="lazy">
+          </div>
+          <h3 class="site-h3">Share the result</h3>
+          <p class="site-sub">A position card with the mark, the size and the return, laid over your own photo, with a code that opens Desk.</p>
+        </article>
+      </div>
     </div>
   </section>
 
