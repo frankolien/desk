@@ -277,8 +277,9 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
       if (addresses.length === 0 || addresses.length > MAX_ADDRESSES || !addresses.every(validAddress)) {
         return res.status(400).json({ error: `Between 1 and ${MAX_ADDRESSES} wallet addresses are required.` });
       }
-      const identities = await resolveIdentities(addresses, { fetchImpl, chain, store, ens });
-      res.setHeader("Cache-Control", "public, s-maxage=600, stale-while-revalidate=86400");
+      const fresh = req.query.fresh === "1";
+      const identities = await resolveIdentities(addresses, { fetchImpl, chain, store, ens, fresh });
+      res.setHeader("Cache-Control", fresh ? "no-store" : "public, s-maxage=600, stale-while-revalidate=86400");
       return res.status(200).json({ identities });
     }
 

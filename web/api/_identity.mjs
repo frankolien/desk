@@ -67,6 +67,19 @@ async function nadFun(address, fetchImpl) {
   }
 }
 
+/// An address can belong to several Farcaster accounts (custody of one, verified on
+/// another, or a throwaway). A name beginning with "!" is a placeholder for an account
+/// that never registered one. The account that verified this address wins, then the
+/// most followed.
+export function pickFarcasterUser(address, users) {
+  const lower = address.toLowerCase();
+  const verified = (user) => (user?.verified_addresses?.eth_addresses ?? [])
+    .some((entry) => String(entry).toLowerCase() === lower);
+  return (Array.isArray(users) ? users : [])
+    .filter((user) => text(user?.username) && !user.username.startsWith("!"))
+    .sort((a, b) => (Number(verified(b)) - Number(verified(a))) || ((b.follower_count ?? 0) - (a.follower_count ?? 0)))[0] ?? null;
+}
+
 async function farcaster(addresses, fetchImpl, key) {
   const found = new Map();
   if (!key || addresses.length === 0) return found;
@@ -75,7 +88,7 @@ async function farcaster(addresses, fetchImpl, key) {
     if (!response.ok) return found;
     const body = await response.json();
     for (const [address, users] of Object.entries(body ?? {})) {
-      const user = Array.isArray(users) ? users[0] : null;
+      const user = pickFarcasterUser(address, users);
       const username = text(user?.username);
       if (!username) continue;
       found.set(address.toLowerCase(), {
@@ -112,12 +125,12 @@ export function describeIdentity(address, { nad = null, fun = null, ens = null, 
 
 const cacheKey = (address) => `id:${address}`;
 
-export async function resolveIdentities(addresses, { fetchImpl = fetch, chain = null, store = null, ens = null, neynarKey = process.env.NEYNAR_API_KEY } = {}) {
+export async function resolveIdentities(addresses, { fetchImpl = fetch, chain = null, store = null, ens = null, neynarKey = process.env.NEYNAR_API_KEY, fresh = false } = {}) {
   const wanted = [...new Set(addresses.map((value) => value.toLowerCase()))];
   const identities = {};
   let missing = wanted;
 
-  if (store) {
+  if (store && !fresh) {
     const cached = await store.mget(wanted.map(cacheKey)).catch(() => wanted.map(() => null));
     missing = [];
     wanted.forEach((address, index) => {

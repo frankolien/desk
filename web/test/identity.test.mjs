@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { describeIdentity, resolveIdentities } from "../api/_identity.mjs";
+import { describeIdentity, pickFarcasterUser, resolveIdentities } from "../api/_identity.mjs";
 import { memoryStore } from "../api/_store.mjs";
 import { createHandler } from "../api/traders.mjs";
 
@@ -104,4 +104,16 @@ test("the handler validates, batches, and answers from the cache the second time
   const again = await handler({ method: "GET", query: { view: "identity", addresses: SALMO } }, recorder());
   assert.equal(again.body.identities[SALMO.toLowerCase()].name, "salmo.nad");
   assert.equal(calls.length, before);
+});
+
+test("of several Farcaster accounts on one address, the one that verified it wins, never a placeholder", () => {
+  const address = "0xD7029BDEa1c17493893AAfE29AAD69EF892B8ff2";
+  const users = [
+    { fid: 188133, username: "!188133", follower_count: 0 },
+    { fid: 9, username: "throwaway", follower_count: 12, verified_addresses: { eth_addresses: [] } },
+    { fid: 3, username: "dwr.eth", follower_count: 500000, verified_addresses: { eth_addresses: [address.toLowerCase()] } },
+  ];
+  assert.equal(pickFarcasterUser(address, users).username, "dwr.eth");
+  assert.equal(pickFarcasterUser(address, [users[0]]), null);
+  assert.equal(pickFarcasterUser(address, [users[1], { username: "big", follower_count: 90 }]).username, "big");
 });
