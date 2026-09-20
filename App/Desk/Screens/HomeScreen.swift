@@ -20,10 +20,12 @@ struct HomeScreen: View {
     var onNetwork: () -> Void = {}
     var onFollowing: () -> Void = {}
     var onActivity: () -> Void = {}
+    var onSpot: () -> Void = {}
     let onAccount: () -> Void
 
     @AppStorage("desk.hidesBalance") private var hidesBalance = false
     @State private var selectedPosition: PerplPosition?
+    @State private var spot = SpotHoldingsModel()
 
     private var collateralText: String {
         // Wallet AUSD and Perpl collateral are different balances. Falling back to the
@@ -92,6 +94,7 @@ struct HomeScreen: View {
             PositionScreen(position: held, market: market, session: model.trading, model: model)
                 .presentationDetents([.large])
         }
+        .task(id: model.address) { await spot.run(for: model.address) }
     }
 
     private var homeBackground: some View {
@@ -335,6 +338,21 @@ struct HomeScreen: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 40)
                 }
+            }
+
+            // What was bought through Desk, as the chain reports it now. The rows read
+            // the balance rather than the purchase, so a token moved on shows as gone.
+            ForEach(spot.holdings) { holding in
+                HomeAssetRow(
+                    mark: { MarketTokenLogo(symbol: holding.purchase.symbol, size: 44, remoteURL: TokenArtwork.url(holding.purchase.logoURL)) },
+                    title: holding.purchase.symbol,
+                    subtitle: holding.balance.map { "\($0) on \(holding.purchase.chainName)" }
+                        ?? "\(holding.purchase.chainName) · \(Unavailable.text)",
+                    value: hidesBalance ? "•••••"
+                        : holding.value.map { DisplayCurrency.shared.format($0) } ?? Unavailable.text,
+                    change: holding.changeSincePaid.map { Self.percent(Int($0 * 1_000_000)) + " since buy" },
+                    tint: (holding.changeSincePaid ?? 0) < 0 ? DeskColor.fall : DeskColor.rise,
+                    action: onSpot)
             }
 
             HomeAssetRow(

@@ -66,6 +66,7 @@ struct TradingShell: View {
                     onNetwork: { showsNetwork = true },
                     onFollowing: { tab = .signals },
                     onActivity: { showsActivity = true },
+                    onSpot: { tab = .search },
                     onAccount: { showsAccount = true })
             }
 

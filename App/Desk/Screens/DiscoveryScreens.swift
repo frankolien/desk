@@ -1733,6 +1733,7 @@ private final class SpotPurchaseModel: ObservableObject {
         } catch TransactionSender.Failure.notMinedInTime {
             phase = .filling
             await track(quoted.requestId)
+            remember(token, quoted, wallet: wallet)
             return
         } catch {
             phase = .failed("The deposit could not be sent. No MON was taken.")
@@ -1740,6 +1741,16 @@ private final class SpotPurchaseModel: ObservableObject {
         }
         phase = .filling
         await track(quoted.requestId)
+        remember(token, quoted, wallet: wallet)
+    }
+
+    /// A fill is a holding. Recorded on the device so Home can ask the chain about it.
+    private func remember(_ token: TrendingSpotToken, _ quoted: RelayQuote, wallet: EthereumAddress) {
+        guard phase == .filled else { return }
+        SpotPurchases.record(SpotPurchase(
+            chainIndex: token.chainIndex, chainName: token.chainName, contract: token.contract,
+            symbol: token.symbol, name: token.name, logoURL: token.logoURL,
+            paidUSD: quoted.receive.usd.flatMap(Double.init), boughtAt: .now), for: wallet)
     }
 
     private func track(_ requestId: String) async {
