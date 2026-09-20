@@ -1,12 +1,6 @@
 import CoreGraphics
 import Foundation
 
-/// The vertical scale of a price chart: the range it covers, where a price lands inside
-/// it, and the ticks that label it.
-///
-/// One mapping, in one place. Every chart defect so far has been two pieces of arithmetic
-/// disagreeing about where a price belongs — a grid row against a candle, a clamped guide
-/// against a tick — and each was invisible until it was drawn. Here it can be tested.
 public struct PriceAxis: Sendable, Equatable {
     /// A labelled position on the axis. The label is formatted from the step every tick
     /// shares, so a column of them cannot print at mixed precision.

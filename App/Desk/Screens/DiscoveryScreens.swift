@@ -627,11 +627,6 @@ private func spotPrice(_ value: Double) -> String {
 
 // MARK: - One market
 
-/// A market as the venue reports it: its own price, its own leverage ceiling.
-///
-/// The leverage figure comes from `initialMarginFraction`, which the venue encodes as a
-/// divisor in hundredths — 1500 is 15×, not 15%. The hard-coded version of this screen
-/// claimed 40× for Bitcoin, which is not a number Perpl would accept.
 private struct MarketRow: View {
     let model: MarketModel
     let market: Market
@@ -1351,10 +1346,6 @@ private struct SpotTradeTicket: View {
     }
 }
 
-/// Buys a token on its own chain with MON on Monad mainnet, through one Relay deposit.
-///
-/// Real funds, unlike everything else in Desk, so the sheet says so and the deposit is
-/// checked by `RelayDeposit` before Face ID is asked for.
 private struct SpotBuyTicket: View {
     let token: TrendingSpotToken
     let model: AppModel

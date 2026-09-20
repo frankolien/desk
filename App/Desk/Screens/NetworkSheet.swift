@@ -2,10 +2,6 @@ import DeskFlow
 import DeskUI
 import SwiftUI
 
-/// Testnet or mainnet, chosen once and shown everywhere after.
-///
-/// Two cards rather than a toggle: the difference is whether money is real, and that
-/// deserves a sentence each, not a switch that looks the same in both positions.
 struct NetworkSheet: View {
     let model: AppModel
 

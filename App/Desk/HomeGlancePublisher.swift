@@ -2,12 +2,7 @@ import DeskPerpl
 import Foundation
 import WidgetKit
 
-/// Keeps the Portfolio and Watchlist widgets in step with what Home and Watchlist show.
-///
-/// Called on a slow loop rather than on every tick, because a widget reload is not free:
-/// WidgetKit budgets them, and a price that moves several times a second would spend
-/// the day's budget before lunch. Each glance is only written when something in it
-/// changed, so a quiet market costs nothing.
+
 @MainActor
 final class HomeGlancePublisher {
     private var lastPortfolio: PortfolioGlance?

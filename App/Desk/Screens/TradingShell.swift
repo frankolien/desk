@@ -1,9 +1,7 @@
 import DeskUI
 import SwiftUI
 
-/// The signed-in shell deliberately uses Apple's native `TabView` rather than drawing
-/// a tab bar. On iOS 26 the system supplies Liquid Glass, the moving selection lens,
-/// search separation, refraction, safe-area placement and interaction behavior.
+/// Apple's own `TabView`, not a drawn bar: iOS supplies the glass, the selection lens and the safe-area placement.
 struct TradingShell: View {
     let model: AppModel
 

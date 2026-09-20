@@ -3,16 +3,6 @@ import DeskPerpl
 import DeskUI
 import SwiftUI
 
-/// Who is winning on Perpl, and what the market is doing, in sentences.
-///
-/// Traders come first. Perpl's public trade stream carries no account identity, but the
-/// exchange contract lists every open position with its account, so the leaderboard and
-/// the people you follow are read from mainnet positions rather than invented. Copying a
-/// position opens your own testnet ticket at their side and leverage.
-///
-/// The market readings come off the same context call the price does — mark against
-/// oracle, bid against ask, last against mid, open interest. A reading that cannot be
-/// computed says so.
 struct SignalsScreen: View {
     let model: AppModel
     let market: MarketModel

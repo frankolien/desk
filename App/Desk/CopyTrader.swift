@@ -76,19 +76,7 @@ struct CopyLogEntry: Codable, Hashable, Identifiable {
     var shadowed: Bool { isShadow == true }
 }
 
-/// Copies followed traders' entries and exits onto this person's own Perpl account, or
-/// simulates them in shadow.
-///
-/// Runs only while Desk is open and unlocked, signing with the key that is already in
-/// memory. No server holds a key that could trade for anyone: that is the trade-off, and
-/// live stops and take profits are placed on Perpl itself so a copy stays protected after
-/// Desk closes.
-///
-/// A websocket on Monad streams Perpl's position events, and one naming a copied trader's
-/// account wakes the loop at once, so a copy follows the block the trader moved in rather
-/// than the next poll. The poll stays underneath as the fallback. Every cycle reads the
-/// traders' books fresh and acts on what changed; the first reading is a baseline, so a
-/// position a trader already held is never copied late.
+/// Copies followed traders' entries and exits onto this account, shadow or live, under the person's rules.
 @MainActor
 @Observable
 final class CopyTrader {
@@ -858,10 +846,6 @@ struct MainnetMarkets {
     }
 }
 
-/// Perpl's position events from a Monad websocket, reduced to "this account moved".
-///
-/// Reconnects with backoff when the socket drops. Nothing here decides anything: a move
-/// only wakes the copy loop, which reads the trader's book before acting.
 @MainActor
 final class PositionStream {
     var onMove: ((UInt64) -> Void)?

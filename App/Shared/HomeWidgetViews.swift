@@ -2,11 +2,6 @@ import DeskUI
 import SwiftUI
 import WidgetKit
 
-/// The account on the Home Screen: collateral, then the open positions under it.
-///
-/// Shared with the app rather than kept in the extension so the app can draw the same
-/// view in a debug gallery — a widget cannot be launched from the command line, and a
-/// layout nobody has seen rendered is a layout with a wrapped label in it somewhere.
 struct PortfolioWidgetView: View {
     let glance: PortfolioGlance?
     let family: WidgetFamily

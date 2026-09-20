@@ -1,16 +1,6 @@
 import DeskAuth
 import Foundation
 
-/// What the app needs from a passkey ceremony.
-///
-/// Behind a protocol so every screen can be built and run before the relying party
-/// exists — the real implementation needs an associated domain, which needs a paid
-/// developer account and a domain that serves an association file without redirecting.
-///
-/// Main-actor isolated because the real ceremony presents system UI and needs a window to
-/// present it from. Making that explicit here rather than at the conformance keeps the
-/// stubs honest: anything standing in for this has to be usable from where the real one
-/// is, or it is not a stand-in.
 @MainActor
 protocol PasskeyService: Sendable {
     var lastSeenAddress: EthereumAddress? { get }
@@ -51,12 +41,6 @@ enum TradingKeyIndex {
     static let attempts: UInt32 = 8
 }
 
-/// Trading keys by index, valid only inside the `withKeys` call that produced them.
-///
-/// Perpl never re-issues a token for a public key it has seen, so recovering from a lost
-/// token means enrolling the next derived key — and that has to happen inside the same
-/// Face ID prompt. The PRF bytes behind this are wiped when the call returns; a copy that
-/// escaped would derive nothing afterwards.
 struct TradingKeys: Sendable {
     fileprivate let source: PRFSource
 
@@ -105,15 +89,8 @@ struct DerivedAccounts: Sendable {
 }
 
 #if DEBUG
-/// Derives from a fixed seed so the screens can be driven end to end without hardware.
-///
-/// It performs the real derivation — the same `PasskeyAccounts` path a device will take —
-/// and only the PRF output is invented.
-///
-/// Compiled out of release builds on purpose. A fixed PRF output derives a fixed key, so
-/// a shipped build that fell back to this would hand every user the same wallet. The
-/// `#if DEBUG` is the only thing standing between a convenience and that, which is why
-/// it wraps the type rather than a call site.
+/// A fixed PRF output, so the screens run without hardware. Compiled out of release on purpose:
+/// shipped, it would hand every user the same wallet.
 struct StubPasskeyService: PasskeyService {
     /// Remembered like the real ceremony remembers, so the simulator takes the returning
     /// path — Face ID under the mark, no onboarding — once it has signed in once.

@@ -3,11 +3,7 @@ import DeskUI
 import SwiftUI
 import WidgetKit
 
-/// Every Home Screen widget at every size, drawn inside the app.
-///
-/// A widget extension cannot be launched from a script and the simulator's Home Screen
-/// cannot be edited from one, so without this the only way to see a widget rendered is
-/// by hand. `-widget-gallery` on the launch line shows this instead of the app.
+/// `-widget-gallery`, or `-widget-gallery portfolio-medium` for one tile on a grey ground to crop.
 struct WidgetGallery: View {
     /// `-widget-gallery watchlist` shows one section, so each fits a single capture.
     private var section: String {

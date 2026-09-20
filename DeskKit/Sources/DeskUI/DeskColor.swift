@@ -1,13 +1,7 @@
 import SwiftUI
 
-/// The palette. Twenty-odd colours, and every one of them earns its place in a test.
-///
-/// Ported from Recourse, with one correction the port forced. Recourse's accent, deep
-/// pine `#05634A`, was chosen against a near-white canvas. On Desk's near-black ground it
-/// reaches only 2.75:1 — below the 3:1 floor for a UI component and far below the 4.5:1
-/// a figure needs. Pine survives as the button fill, where the contrast that matters is
-/// the label against the fill rather than the fill against the ground, and a lighter
-/// green carries every figure. Discovered by computing the ratios rather than by looking.
+/// Amber is the only colour that means "you can act here"; green and red belong to direction.
+/// Pine survives from Recourse for quiet surfaces only — on this ground it reads at 2.75:1.
 public enum DeskColor {
     // MARK: Ground
 

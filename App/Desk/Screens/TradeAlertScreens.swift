@@ -105,9 +105,6 @@ struct AlertsPrimerSheet: View {
     }
 }
 
-/// What a tapped alert opens: the move, where the market is now against their entry, and
-/// the copy. Their book is read again first, so a trade closed since the alert says so
-/// rather than inviting a copy of something they have left.
 struct TradeAlertSheet: View {
     let alert: TradeAlert
     let directory: TraderDirectory

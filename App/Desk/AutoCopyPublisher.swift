@@ -4,10 +4,6 @@ import Foundation
 import UIKit
 import WidgetKit
 
-/// Keeps auto-copy's widget and Live Activity in step with the copy loop.
-///
-/// The loop only runs while Desk is open, so the Live Activity carries a short stale date:
-/// once Desk is closed it stops claiming to copy and asks to be opened instead.
 @MainActor
 final class AutoCopyPublisher {
     static let liveActivityKey = "desk.copy.liveActivity"

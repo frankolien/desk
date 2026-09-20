@@ -5,17 +5,6 @@ import DeskPerpl
 import Foundation
 import Observation
 
-/// What stands between the ticket and the venue.
-///
-/// The ticket should not know about sockets, request counters or head blocks, and it
-/// should not decide whether an order can be sent — it should ask, and be told in a
-/// sentence. So this owns the `OrderDesk`, the enrolled key and the block the venue last
-/// reported, and exposes exactly two things: place an order, and watch what happens to it.
-///
-/// It is also the honest boundary. Before enrolment there is no key to sign with, and
-/// `place` says so by throwing `notEnrolled` from the same call the real path takes —
-/// rather than the ticket short-circuiting and never reaching the desk at all. When a key
-/// appears, nothing in the ticket changes.
 @MainActor
 @Observable
 final class TradingSession {

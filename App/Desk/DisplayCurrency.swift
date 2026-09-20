@@ -2,11 +2,7 @@ import DeskMoney
 import Foundation
 import Observation
 
-/// The currency balances and profit are shown in.
-///
-/// Display only. AUSD is a dollar stablecoin and every order, deposit and withdrawal stays
-/// denominated in it; market prices stay in dollars because that is what the venue
-/// quotes. What converts is what a person reads to know how they are doing.
+
 @MainActor
 @Observable
 final class DisplayCurrency {

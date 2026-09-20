@@ -1,15 +1,5 @@
 import SwiftUI
 
-/// A traded asset's own mark.
-///
-/// Deliberately not `DeskMark`. The app's mark stands for Desk; using it for Bitcoin too
-/// would say the two are the same thing, and a list where every row wears the app's logo
-/// is the tell of a placeholder. Every wallet in the reference set gives each asset its
-/// own disc in its own colour, and a person finds the row they want by that colour before
-/// they have read the name.
-///
-/// Drawn rather than bundled: an image asset would need a licence check per logo, and a
-/// glyph on a lit disc is what those logos are anyway.
 public struct AssetMark: View {
     private let glyph: String
     private let tint: Color

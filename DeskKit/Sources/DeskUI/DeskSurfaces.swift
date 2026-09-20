@@ -1,12 +1,5 @@
 import SwiftUI
 
-/// The ground every screen sits on.
-///
-/// Never flat black. A single off-centre light source at four percent white is the
-/// cheapest device in the reference set and its absence is the most reliable tell of an
-/// unfinished app — the same move as the reference app's diagonal sheen across pure
-/// black, or the starfield its closest competitor uses. One light, always from the same
-/// direction, so the app reads as one lit room rather than a stack of screens.
 public struct DeskBackground: View {
     public init() {}
 
@@ -28,10 +21,6 @@ public struct DeskBackground: View {
     }
 }
 
-/// A chip that reads as glass rather than as a filled badge.
-///
-/// Faint light border, material behind, and nothing else. Filled badges are the
-/// prototype look; every app in the reference set that feels expensive uses this instead.
 public struct GlassChip<Content: View>: View {
     private let content: Content
 
@@ -50,11 +39,6 @@ public struct GlassChip<Content: View>: View {
     }
 }
 
-/// A row that is present but has nothing in it yet.
-///
-/// Emptiness should read as loading rather than as failure — the reference wallet renders
-/// its welcome screen with skeleton token rows standing in for tokens the user does not
-/// own, which is why a brand new account looks like it is filling rather than broken.
 public struct SkeletonRow: View {
     private let widthFraction: CGFloat
 

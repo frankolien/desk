@@ -46,11 +46,6 @@ struct TradeAlert: Identifiable, Hashable, Sendable {
     }
 }
 
-/// Push alerts for followed traders.
-///
-/// Which traders to watch and the device token go to Desk's server, keyed by a secret that
-/// never leaves this phone's keychain. The server can only notify; a copy is still placed
-/// here, with this person's own key.
 @MainActor
 @Observable
 final class TradeAlerts {

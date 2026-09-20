@@ -1,11 +1,6 @@
 import DeskUI
 import SwiftUI
 
-/// The way in.
-///
-/// It is the sign-in screen too. A welcome that says "Get started" followed by a screen
-/// that says "Continue with Face ID" is two screens doing one job, and both reference
-/// wallets create the account from the landing screen itself.
 struct WelcomeScreen: View {
     let model: AppModel
     @State private var showsExplainer = false

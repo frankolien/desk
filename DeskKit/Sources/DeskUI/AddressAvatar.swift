@@ -1,13 +1,5 @@
 import SwiftUI
 
-/// The account, as a drawn object rather than a letter in a circle.
-///
-/// Every wallet in the reference set gives the account a face — an emoji, a generated
-/// blob, a photograph — because an address is unreadable and a person still needs to know
-/// at a glance that this is theirs. A monogram would be a lie here: there is no name, only
-/// a key. So the address itself picks the colours, which makes the mark stable for a given
-/// account and different between accounts, and makes a wrong-account screen visibly wrong
-/// before the user has read a single hex digit.
 public struct AddressAvatar: View {
     private let address: String
     private let size: CGFloat

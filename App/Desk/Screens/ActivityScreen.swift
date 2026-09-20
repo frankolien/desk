@@ -2,11 +2,6 @@ import DeskFlow
 import DeskUI
 import SwiftUI
 
-/// Every transfer in and out of this wallet on the current network, newest first.
-///
-/// Read from the chain through Desk's server, which holds the explorer key. Transfers to
-/// Perpl, Agora's faucet and Relay are named as deposits, faucet claims and spot buys,
-/// because that is what they were to the person who made them.
 struct ActivityScreen: View {
     let model: AppModel
 

@@ -6,11 +6,6 @@ import DeskUI
 import Foundation
 import Observation
 
-/// Live market state for one market.
-///
-/// Everything it exposes goes through `LastGood`, so a dropped poll shows the last figure
-/// with its age rather than a zero. The freshness the screen renders is computed from
-/// when we received a value, never from the server's own clock.
 @MainActor
 @Observable
 final class MarketModel {

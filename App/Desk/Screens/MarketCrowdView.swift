@@ -1,13 +1,6 @@
 import DeskUI
 import SwiftUI
 
-/// What the room is holding, market by market.
-///
-/// The leaderboard says who is winning. This says what everybody is in, which is the
-/// other half of a copy decision: siding with a trader when nine tenths of the open
-/// interest is already on that side is a different bet from siding with them when it is
-/// not. Every figure is the exchange's own list of positions, added up — nothing here is
-/// modelled, estimated or sampled.
 struct MarketCrowdFeed: View {
     let crowd: [MarketCrowd]
     let name: (String) -> String

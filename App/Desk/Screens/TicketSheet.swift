@@ -4,13 +4,7 @@ import DeskPerpl
 import DeskUI
 import SwiftUI
 
-/// The order ticket. Its order is fixed: the amount, then what the amount costs, then
-/// the keypad, then the action.
-///
-/// Nothing consequential is behind a disclosure. Margin, liquidation, fee and total stay
-/// on screen at all times; only stop loss and take profit fold away, because they are
-/// optional and empty unless asked for — and leaving them open pushed the keypad and the
-/// confirm control off the bottom of the sheet.
+
 struct TicketSheet: View {
     let side: Direction
     let market: Market?

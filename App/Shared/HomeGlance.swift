@@ -1,11 +1,7 @@
 import DeskUI
 import Foundation
 
-/// The account as Desk last wrote it for the Home Screen.
-///
-/// Every figure arrives already formatted. The widget cannot reach `DisplayCurrency`, and
-/// a collateral figure the app shows in naira and the widget shows in dollars would be
-/// the same number disagreeing with itself across two screens of the same phone.
+/// Every figure arrives formatted: the widget cannot reach `DisplayCurrency`, and two screens of one phone must not disagree.
 struct PortfolioGlance: Codable, Hashable, Sendable {
     struct Position: Codable, Hashable, Sendable, Identifiable {
         let id: String

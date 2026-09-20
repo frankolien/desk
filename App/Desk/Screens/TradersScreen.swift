@@ -48,12 +48,6 @@ struct TraderSnapshot: Decodable, Hashable, Identifiable, Sendable {
     }
 }
 
-/// What every open position on one market adds up to.
-///
-/// The leaderboard answers who is winning; this answers what the room is holding. It is
-/// the exchange's whole list rather than a sample of it — except when `complete` is false,
-/// which means the contract's list outran the server's page budget and every figure here
-/// is a floor. The screen says which of the two it is rather than drawing both the same.
 struct MarketCrowd: Decodable, Identifiable, Hashable {
     struct Biggest: Decodable, Hashable {
         let address: String?

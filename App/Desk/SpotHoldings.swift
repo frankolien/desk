@@ -2,11 +2,6 @@ import DeskAuth
 import Foundation
 import Observation
 
-/// A token bought through Desk, as the app remembers it.
-///
-/// The app remembers what was bought and what it cost; the chain is asked what is still
-/// held. So a token sent on or sold elsewhere shows as what it is now, and one that was
-/// never delivered shows as nothing rather than as the purchase.
 struct SpotPurchase: Codable, Hashable, Identifiable, Sendable {
     let chainIndex: String
     let chainName: String
@@ -72,9 +67,6 @@ struct SpotHolding: Identifiable, Sendable {
     }
 }
 
-/// Reads the balances and prices of what this wallet bought, on a slow loop while Home
-/// is showing. The list comes from the device; the figures come from each token's chain
-/// and from the price feed, through the server so the app holds no API key.
 @MainActor
 @Observable
 final class SpotHoldingsModel {

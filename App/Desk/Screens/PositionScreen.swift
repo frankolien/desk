@@ -5,12 +5,6 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
-/// One held position, in full.
-///
-/// The chart comes first and carries the position on it: entry, liquidation, and the
-/// mark moving between them. A row of figures can say the liquidation price is 75,080,
-/// but only the chart says whether the last hour has been walking toward it — and that
-/// is the question someone opens a position they already hold to answer.
 struct PositionScreen: View {
     let position: PerplPosition
     let market: MarketModel

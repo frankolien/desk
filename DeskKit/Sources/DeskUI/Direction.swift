@@ -1,11 +1,6 @@
 import SwiftUI
 
-/// Long or short, up or down — encoded so it survives a grayscale filter.
-///
-/// The screen designs set an encoding ladder, strongest first, and this carries all of
-/// it: an explicit sign using U+2212 MINUS rather than a hyphen, an SF Symbol that scales
-/// with Dynamic Type, the word itself, and only then a colour. Colour is the last rung,
-/// never the only one.
+/// Encoded so it survives a grayscale filter: luminance differs, not only hue.
 public enum Direction: String, Sendable, Hashable, CaseIterable {
     case up
     case down

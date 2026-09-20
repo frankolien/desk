@@ -1,14 +1,5 @@
 import SwiftUI
 
-/// A price line with no axes, no grid and no labels.
-///
-/// Hairline, a soft fade beneath it, and a lit dot at the live end — the reference app's
-/// treatment, and the reason its portfolio card reads as alive without animating anything.
-///
-/// The venue publishes no candle or history endpoint, so this draws only marks actually
-/// observed by this device plus the one previous mark the context carries. Below two
-/// points it renders nothing and the caller shows a skeleton, because a line invented to
-/// fill a space is a claim about a market.
 public struct Sparkline: View {
     private let values: [Double]
     private let tint: DeskRGB

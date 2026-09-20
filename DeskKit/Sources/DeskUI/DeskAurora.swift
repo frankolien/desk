@@ -1,25 +1,7 @@
 import SwiftUI
 
-/// The wash behind the balance.
-///
-/// Amber alone is a flat yellow, and a flat yellow behind a figure reads as a filter
-/// rather than as light. So the ground under the balance is a mixture of two colours the
-/// app already owns: its own amber, and Monad's violet — the chain it trades on, and the
-/// one other hue Desk has a reason to wear.
-///
-/// The mixing happens before the mesh, not inside it. An earlier version put amber on the
-/// left of the grid and violet on the right, and that is exactly what it looked like: a
-/// yellow half and a blue half meeting in the middle. Here every vertex is already both
-/// colours in a different ratio, and no vertex is either colour on its own, so the field
-/// reads as one indeterminate mixture rather than as two named colours sharing a screen.
-/// Each stop is then mixed down into the near-black ground, which is what keeps it dim —
-/// a wash this large goes garish long before it goes bright.
-///
-/// A mesh rather than stacked radial gradients because a mesh interpolates in one pass:
-/// the seams are real blends rather than two translucent circles overlapping, which is
-/// the look the grant review called generated. A four by four grid rather than three by
-/// three because the extra ring of vertices lets the ratios shift several times across
-/// the screen — the marbling is those crossings, blurred.
+/// Every vertex is already a mix of amber and violet, then taken most of the way into the ground —
+/// a field with an amber half and a violet half is two tints, not one light.
 public struct DeskAurora: View {
     private let height: CGFloat
 

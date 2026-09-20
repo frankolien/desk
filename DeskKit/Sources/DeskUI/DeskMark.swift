@@ -1,11 +1,5 @@
 import SwiftUI
 
-/// The app's mark, drawn rather than borrowed from SF Symbols.
-///
-/// A system glyph is the clearest tell that a screen is a prototype: it is the same shape
-/// every other app on the phone is using. This is a struck coin — a warm disc, a raised
-/// rim, a price line cut into the face, and one specular highlight off the top left so it
-/// reads as an object with a light on it rather than a flat circle.
 public struct DeskMark: View {
     private let size: CGFloat
 
@@ -68,12 +62,6 @@ public struct DeskMark: View {
     }
 }
 
-/// The feature ticker: a stack of phrases with one lit and the rest nearly gone.
-///
-/// Ported from the sibling app, where the same control sits commented out with the note
-/// *"the ticker through Hold, Send, Request, Earn is switched off for now."* Its timings
-/// are kept — 1.45 seconds a step, 0.55 to cross — because they are already tuned: fast
-/// enough to read as alive, slow enough to actually read.
 public struct FeatureTicker: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var active = 0

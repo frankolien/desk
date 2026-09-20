@@ -60,10 +60,6 @@ actor ResponseCache {
     }
 }
 
-/// Whether the phone has a route to the internet, as the system reports it.
-///
-/// Read by the banner and nothing else: no fetch is skipped because this says offline,
-/// because the system is sometimes wrong and a request that fails says so itself.
 @MainActor
 @Observable
 final class Connectivity {

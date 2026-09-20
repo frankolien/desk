@@ -1,11 +1,6 @@
 import CoreGraphics
 import Foundation
 
-/// The mapping between a leverage value and a position along its rail.
-///
-/// Extracted for the same reason the price axis was: the drag rounded a fraction into a
-/// value inline, nothing asserted it, and the tick density was tied to the leverage range
-/// so a five times market drew five marks and a fifteen times market drew fifteen.
 public struct LeverageScale: Sendable, Equatable {
     public let maximum: Int
     /// Marks drawn across the rail, independent of the leverage range.

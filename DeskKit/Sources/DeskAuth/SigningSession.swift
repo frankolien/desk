@@ -1,26 +1,7 @@
 import Foundation
 
-/// The window in which the trading key exists.
-///
-/// The product claim is that the key does not exist at rest: a Face ID touch derives it
-/// and it lives only in memory. That claim is only true if this is the sole owner. Nothing
-/// is handed a key here — callers borrow one for the duration of a closure, so there is
-/// no second reference to outlive a lock and no way for a component to keep signing after
-/// the key is gone.
-///
-/// **There is no timer while Desk is open.** The first version expired the key after
-/// fifteen minutes, and the app then signed the person out — including in the middle of
-/// closing a losing position, which is the one moment an app must never stand between a
-/// person and their decision. The trading key cannot move money: deposits and withdrawals
-/// are signed by the wallet key, with Face ID every time. Stolen, its worst case is trades
-/// on the account, not theft of it. A countdown on that key was friction with no security
-/// behind it.
-///
-/// What does end it:
-///   - Desk staying in the background past `backgroundGrace`.
-///   - The phone locking, or the person locking Desk — both `end()`.
-///
-/// An optional absolute `lifetime` remains for callers that want one. Desk sets none.
+/// The key is lent for the duration of a closure and never handed out, so nothing can keep signing
+/// after a lock. No timer while Desk is open: a countdown once signed a person out mid-close.
 public actor SigningSession {
     public enum Failure: Error, Sendable, Equatable {
         case closed

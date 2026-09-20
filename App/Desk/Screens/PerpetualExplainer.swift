@@ -1,17 +1,6 @@
 import DeskUI
 import SwiftUI
 
-/// The question the rest of the app assumes you can already answer.
-///
-/// Offered from the welcome screen and never forced. That distinction is the whole design:
-/// the research is blunt that a pre-roll tutorial makes tasks feel *harder* rather than
-/// easier, so this is a link a curious person can pull rather than a wall everybody has to
-/// climb. Someone who knows what a perpetual is never sees it.
-///
-/// Deliberately not the risk disclosure. `LeverageExplainer` is the one blocking sheet in
-/// the app and it appears later, at the moment leverage is actually reached, with terms
-/// that have to be ticked. This one explains and then gets out of the way — mixing the two
-/// would turn an answer into a consent form.
 struct PerpetualExplainer: View {
     let onClose: () -> Void
 

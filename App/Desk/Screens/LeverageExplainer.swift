@@ -2,17 +2,6 @@ import DeskMoney
 import DeskUI
 import SwiftUI
 
-/// What has to be understood before the first leveraged trade.
-///
-/// Presented once, ever, and only when the user first reaches for leverage — not during
-/// onboarding. That placement is the reference implementation's: a one-time sheet behind
-/// a `hasSeen` flag gating first entry to perps, rather than a wall between a person and
-/// the product. Apple's guidance points the same way, and a pre-roll tutorial measurably
-/// makes tasks feel *harder* — 4.92 against 5.49 on a seven-point scale in Nielsen
-/// Norman's seventy-user study, with no gain in success or time.
-///
-/// The number below is computed from the live market configuration by the same code the
-/// ticket uses. It is not typed here, so it cannot drift from what the exchange does.
 struct LeverageExplainer: View {
     let onAgree: () -> Void
     let onBack: () -> Void

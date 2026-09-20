@@ -1,10 +1,5 @@
 import SwiftUI
 
-/// Under twenty type styles, all system, all semibold or heavier where they matter.
-///
-/// No licensed face. Every style that can carry a changing value is monospaced-digit, so
-/// a price does not jitter as it updates — which is the difference between a live number
-/// and a distracting one.
 public enum DeskType {
     /// The billboard figure: the amount being entered, the mark price.
     public static let display = Font.system(size: 56, weight: .heavy, design: .rounded).monospacedDigit()

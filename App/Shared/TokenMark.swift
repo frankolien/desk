@@ -2,12 +2,7 @@ import DeskUI
 import SwiftUI
 import UIKit
 
-/// A market's logo from the bundle, or a monogram when the bundle has none.
-///
-/// Bundled rather than fetched: a widget cannot load an image over the network, and the
-/// app drawing a logo from a CDN that the Home Screen then draws as a grey hexagon is
-/// two versions of one instrument. Perpl lists eight markets; all eight are in both
-/// asset catalogs. The monogram is for a ninth the venue lists after this ships.
+/// Bundled, never fetched — a widget cannot load an image over the network.
 struct TokenMark: View {
     let symbol: String
     var size: CGFloat = 28

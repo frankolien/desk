@@ -3,9 +3,6 @@ import DeskMoney
 import DeskUI
 import SwiftUI
 
-/// Perpetuals opens as an overview, matching the product hierarchy in the reference:
-/// collateral, positions, then supported markets. Desk currently supports one live market,
-/// so the list stays truthful rather than filling the design with invented feeds.
 struct MarketScreen: View {
     private struct PositionContext: Identifiable {
         let held: PerplPosition

@@ -2,23 +2,8 @@ import Foundation
 import LocalAuthentication
 import Security
 
-/// The trading key at rest.
-///
-/// Sealed rather than stored. The item is written under the Secure Enclave's protection
-/// with the current biometric enrolment as the only thing that can open it: it cannot be
-/// read without Face ID, cannot leave this device, is not backed up, and is invalidated
-/// the moment the enrolment changes. The bytes on disk are useless to anyone who is not
-/// the face that put them there, which is the whole difference from a seed phrase.
-///
-/// Only the trading key goes in. It signs orders on Perpl and nothing else — deposits and
-/// withdrawals are signed by the wallet key, which the passkey derives every time and
-/// which is never written anywhere. The worst case for a sealed trading key is therefore
-/// a trade on the account, which is the same worst case as the key in memory, and the
-/// gain is that reopening the app costs one Face ID rather than a passkey ceremony.
-///
-/// Everything here is best effort: a device without a passcode cannot seal, and a
-/// simulator usually cannot either. The caller falls back to deriving the key from the
-/// passkey, which is what it did before the vault existed.
+/// Sealed under the Secure Enclave, this device only, openable only by the current biometric enrolment.
+/// Only the trading key: it signs orders and nothing else. Best effort — a device that cannot seal falls back to the passkey.
 public enum TradingKeyVault {
     public enum Outcome: Sendable {
         case opened(TradingKey)

@@ -1,12 +1,7 @@
 import DeskUI
 import SwiftUI
 
-/// One quick brand beat between iOS's static launch frame and the restored app state.
-/// It never waits for networking and disappears in under a second and a half.
-///
-/// The mark carries it alone. A wordmark under a logo that already reads as the wordmark
-/// is the logo twice, and a tagline on a splash is read by nobody who has already tapped
-/// the icon.
+
 struct LaunchMoment: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var struck = false

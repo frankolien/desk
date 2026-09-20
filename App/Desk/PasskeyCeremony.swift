@@ -4,29 +4,7 @@ import DeskAuth
 import Foundation
 import UIKit
 
-/// The real ceremony: a platform passkey, the PRF extension, and nothing kept afterwards.
-///
-/// This is the whole product in one file. The PRF output *is* the wallet — there is no
-/// key in the keychain, no encrypted blob, no export. Face ID produces thirty-two bytes,
-/// those bytes derive both accounts, and the bytes are wiped on the next line.
-///
-/// Three things here are not obvious and all three are load-bearing.
-///
-/// **iOS 18.4, not 18.0.** PRF has existed on the API since 18.0, but 18.0 through 18.3
-/// return *wrong* values — not an error, a different thirty-two bytes. A wrong value is
-/// silently a different wallet, so the floor is enforced at run time as well as in the
-/// deployment target, because a deployment target is a build setting and this is a
-/// correctness boundary.
-///
-/// **Assert first, create second.** Creating a credential when one already exists makes a
-/// second one: Mera generates a fresh user handle on every create, so the new passkey
-/// derives a different address and the user's funds appear to vanish. So the flow always
-/// tries to use an existing credential and only creates when the platform says there is
-/// none.
-///
-/// **No fallback, ever.** Every failure path throws. There is deliberately no branch that
-/// reaches for a stored key on failure, because there is no stored key — and a branch that
-/// implied otherwise would be the one bug that loses someone's money.
+/// A platform passkey with the PRF extension. The PRF output is the only secret; both keys derive from it on demand.
 @MainActor
 final class PasskeyCeremony: NSObject, PasskeyService {
     /// 18.4 is the first version whose PRF output can be trusted. Below it the ceremony
@@ -283,12 +261,6 @@ private final class CeremonyDelegate: NSObject, ASAuthorizationControllerDelegat
     }
 }
 
-/// Remembers the address the last successful ceremony derived.
-///
-/// The address alone, never a key. It exists for the address guard: Apple's synced-passkey
-/// bug can return different PRF output on a second device, and an app that rendered that
-/// account's zero balance would be telling the user their money is gone. Comparing against
-/// the last address makes that visible instead.
 struct LastSeenAddressStore: Sendable {
     static let standard = LastSeenAddressStore(key: "desk.lastSeenAddress")
 

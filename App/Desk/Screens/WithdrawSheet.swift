@@ -4,13 +4,6 @@ import DeskUI
 import SwiftUI
 import UIKit
 
-/// Taking AUSD out, on one screen: where it comes from, where it goes, how much, then one
-/// hold and one Face ID prompt.
-///
-/// The wallet key signs here, never the trading session, and the sheet says so. A
-/// withdrawal to another address is two transactions — out of the exchange, then on to
-/// the address — and both are shown as they happen, because the moment between them is
-/// when the AUSD is safe in this wallet and a failure should say exactly that.
 struct WithdrawSheet: View {
     let model: AppModel
     let onClose: () -> Void
