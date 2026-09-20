@@ -1,6 +1,7 @@
 import { createPublicClient, http } from "viem";
 
 import { describe, shardKey, shardOf, statistics, tradesKey } from "./_history.mjs";
+import { MAX_ADDRESSES, ensReader, resolveIdentities } from "./_identity.mjs";
 import { EXCHANGE_VIEWS } from "./_perpl-abi.mjs";
 import { redisStore } from "./_store.mjs";
 
@@ -265,10 +266,21 @@ async function styleSummary({ store, fetchImpl, account, stats, apiKey = process
   }
 }
 
-export function createHandler({ chain = chainReader(), fetchImpl = fetch, store = redisStore() } = {}) {
+export function createHandler({ chain = chainReader(), fetchImpl = fetch, store = redisStore(), ens = ensReader() } = {}) {
   return async function handler(req, res) {
     if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
     const view = String(req.query.view || "top");
+
+    if (view === "identity") {
+      const addresses = String(req.query.addresses ?? req.query.address ?? "")
+        .split(",").map((value) => value.trim()).filter(Boolean);
+      if (addresses.length === 0 || addresses.length > MAX_ADDRESSES || !addresses.every(validAddress)) {
+        return res.status(400).json({ error: `Between 1 and ${MAX_ADDRESSES} wallet addresses are required.` });
+      }
+      const identities = await resolveIdentities(addresses, { fetchImpl, chain, store, ens });
+      res.setHeader("Cache-Control", "public, s-maxage=600, stale-while-revalidate=86400");
+      return res.status(200).json({ identities });
+    }
 
     if (view === "history" || view === "scores") {
       if (!store) return res.status(503).json({ error: "Trader history isn't configured on this server." });

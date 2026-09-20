@@ -102,7 +102,7 @@ final class TraderDirectory {
     }
 
     func name(for address: String) -> String {
-        nicknames[address.lowercased()] ?? TraderSnapshot.short(address)
+        nicknames[address.lowercased()] ?? IdentityDirectory.shared.name(for: address) ?? TraderSnapshot.short(address)
     }
 
     func hasNickname(_ address: String) -> Bool { nicknames[address.lowercased()] != nil }
@@ -138,6 +138,7 @@ final class TraderDirectory {
            let cached = await ResponseCache.shared.cached(url),
            let body = try? JSONDecoder().decode(TradersResponse.self, from: cached) {
             top = body.traders
+            Task { await IdentityDirectory.shared.resolve(body.traders.map(\.address)) }
         }
         while !Task.isCancelled {
             async let top: Void = refreshTop()
@@ -156,12 +157,14 @@ final class TraderDirectory {
         }
         topProblem = nil
         top = traders
+        Task { await IdentityDirectory.shared.resolve(traders.map(\.address)) }
     }
 
     func refreshFollowing() async {
         guard !followed.isEmpty else { following = []; return }
         guard let traders = await fetch(["view": "following", "addresses": followed.joined(separator: ",")]) else { return }
         following = traders.filter { isFollowing($0.address) }
+        Task { await IdentityDirectory.shared.resolve(traders.map(\.address)) }
     }
 
     func trader(_ address: String) async -> TraderSnapshot? {
@@ -185,6 +188,7 @@ final class TraderDirectory {
               let body = try? JSONDecoder().decode(CrowdResponse.self, from: fetched.0) else { return }
         crowd = body.markets
         crowdFetchedAt = .now
+        Task { await IdentityDirectory.shared.resolve(body.markets.compactMap { $0.biggest?.address }) }
     }
 
     private struct CrowdResponse: Decodable { let markets: [MarketCrowd] }
@@ -351,6 +355,18 @@ struct TraderAvatar: View {
     }
 
     var body: some View {
+        if let url = IdentityDirectory.shared.identity(for: address)?.avatarURL {
+            AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { generated }
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.08), lineWidth: 0.5))
+                .accessibilityHidden(true)
+        } else {
+            generated
+        }
+    }
+
+    private var generated: some View {
         let seed = Self.seed(of: address)
         let tint = tint(seed)
         return Canvas { context, canvas in
@@ -577,6 +593,7 @@ struct TraderProfileScreen: View {
     private var alerting: Bool { alerts.isOn(for: trader.address) }
 
     private var trader: TraderSnapshot { snapshot ?? initial }
+    private var resolved: Identity? { IdentityDirectory.shared.identity(for: trader.address) }
     private var following: Bool { directory.isFollowing(trader.address) }
     private var explorerURL: URL { URL(string: "https://monadvision.com/address/\(trader.address)")! }
 
@@ -768,12 +785,20 @@ struct TraderProfileScreen: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Score \(score). Show stats")
                 }
+                if let label = resolved?.sourceLabel {
+                    Text(label)
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.6))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .deskGlass(in: Capsule())
+                }
             }
             Button {
                 UIPasteboard.general.string = trader.address
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
             } label: {
-                Text(directory.hasNickname(trader.address) ? trader.shortAddress
+                Text(directory.hasNickname(trader.address) || resolved?.name != nil ? trader.shortAddress
                      : "Perpl account \(trader.accountId.map { "#\($0)" } ?? "")")
                     .font(.system(size: 13, weight: .regular, design: .rounded))
                     .foregroundStyle(Color.white.opacity(0.55))

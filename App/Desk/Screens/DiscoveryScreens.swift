@@ -338,7 +338,8 @@ struct MarketSearchScreen: View {
             // `-spot-buy` opens the first buyable trending token with its Buy sheet up,
             // so the sheet can be captured on any simulator without tapping through.
             .task {
-                guard ProcessInfo.processInfo.arguments.contains("-spot-buy") else { return }
+                let arguments = ProcessInfo.processInfo.arguments
+                guard arguments.contains("-spot-buy") || arguments.contains("-wallet-demo") else { return }
                 while discovery.trending.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
                 selectedSpot = discovery.trending.first { $0.buyable == true } ?? discovery.trending.first
             }
@@ -835,6 +836,8 @@ private struct SpotTokenDetailScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .task { await feed.run(period: range) }
         .onChange(of: range) { _, newValue in feed.changePeriod(newValue) }
+        .task(id: feed.holders.map(\.id)) { await IdentityDirectory.shared.resolve(feed.holders.map(\.wallet.address)) }
+        .task(id: feed.transactions.map(\.wallet.address)) { await IdentityDirectory.shared.resolve(feed.transactions.map(\.wallet.address)) }
         .navigationDestination(item: $selectedWallet) { wallet in
             WalletProfileScreen(wallet: wallet)
                 .toolbar(.hidden, for: .tabBar)
@@ -853,7 +856,24 @@ private struct SpotTokenDetailScreen: View {
             try? await Task.sleep(for: .milliseconds(800))
             tradeSide = "Buy"
         }
+        // `-wallet-demo` opens the first holder with a resolved name, so the profile
+        // can be captured without waiting on a wallet that has one.
+        .task {
+            guard ProcessInfo.processInfo.arguments.contains("-wallet-demo") else { return }
+            while feed.holders.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
+            let first = feed.holders[0].wallet
+            IdentityDirectory.shared.seedForReview(first.address, name: "salmo.nad", source: "nad",
+                                                   avatar: "https://euc.li/vitalik.eth",
+                                                   bio: "Building on Monad. Long everything purple.", x: "salmo")
+            withAnimation { tab = .holders }
+            try? await Task.sleep(for: .seconds(4))
+            selectedWallet = first
+        }
         #endif
+    }
+
+    private func walletLabel(_ wallet: SpotWallet) -> String {
+        IdentityDirectory.shared.name(for: wallet.address) ?? wallet.displayAddress
     }
 
     private var header: some View {
@@ -997,7 +1017,7 @@ private struct SpotTokenDetailScreen: View {
                     .font(.subheadline.weight(.bold).monospacedDigit())
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     Button { selectedWallet = tx.wallet } label: {
-                        HStack(spacing: 6) { Text(tx.wallet.emoji); Text(tx.wallet.displayAddress).underline() }
+                        HStack(spacing: 6) { WalletMark(wallet: tx.wallet); Text(walletLabel(tx.wallet)).underline() }
                             .font(.caption.weight(.semibold))
                             .lineLimit(1)
                     }.foregroundStyle(.secondary).frame(width: 104, alignment: .trailing)
@@ -1027,7 +1047,7 @@ private struct SpotTokenDetailScreen: View {
                 HStack {
                     Text("\(index + 1)").foregroundStyle(.secondary).frame(width: 20)
                     Button { selectedWallet = holder.wallet } label: {
-                        HStack { Text(holder.wallet.emoji); Text(holder.wallet.displayAddress).underline() }
+                        HStack { WalletMark(wallet: holder.wallet); Text(walletLabel(holder.wallet)).underline() }
                     }.foregroundStyle(.secondary)
                     Spacer()
                     Text(holder.amount)
@@ -1922,39 +1942,135 @@ private final class SpotQuoteModel: ObservableObject {
     }
 }
 
+private struct WalletMark: View {
+    let wallet: SpotWallet
+    var size: CGFloat = 16
+
+    var body: some View {
+        if let url = IdentityDirectory.shared.identity(for: wallet.address)?.avatarURL {
+            AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Text(wallet.emoji) }
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+        } else {
+            Text(wallet.emoji)
+        }
+    }
+}
+
 private struct WalletProfileScreen: View {
     let wallet: SpotWallet
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @State private var looked = false
+    @State private var copied = false
+
+    private var identity: Identity? { IdentityDirectory.shared.identity(for: wallet.address) }
+    private var hasProfile: Bool { !(identity?.isEmpty ?? true) }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Button { dismiss() } label: { Image(systemName: "chevron.left").frame(width: 50, height: 50) }.perpSearchGlass(in: Circle())
-                    Spacer()
-                    ShareLink(item: wallet.address) { Image(systemName: "square.and.arrow.up").frame(width: 50, height: 50) }.perpSearchGlass(in: Circle())
-                }.font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack {
+                        Button { dismiss() } label: { Image(systemName: "chevron.left").frame(width: 50, height: 50) }.perpSearchGlass(in: Circle())
+                        Spacer()
+                        ShareLink(item: wallet.address) { Image(systemName: "square.and.arrow.up").frame(width: 50, height: 50) }.perpSearchGlass(in: Circle())
+                    }.font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
 
-                HStack(spacing: 18) {
-                    Text(wallet.emoji).font(.system(size: 50)).frame(width: 84, height: 84).perpSearchGlass(in: Circle())
-                    VStack(alignment: .leading, spacing: 3) { Text(wallet.portfolio).font(.system(size: 18, weight: .bold)); Text("Portfolio").foregroundStyle(.secondary) }
-                    Divider().frame(height: 46).overlay(Color.white.opacity(0.12))
-                    VStack(alignment: .leading, spacing: 3) { Text("—").font(.system(size: 18, weight: .bold)); Text("Total PnL").foregroundStyle(.secondary) }
-                }.padding(.top, 42)
+                    HStack(spacing: 18) {
+                        avatar
+                        VStack(alignment: .leading, spacing: 3) { Text(wallet.portfolio).font(.system(size: 18, weight: .bold)); Text("Portfolio").foregroundStyle(.secondary) }
+                        Divider().frame(height: 46).overlay(Color.white.opacity(0.12))
+                        VStack(alignment: .leading, spacing: 3) { Text("—").font(.system(size: 18, weight: .bold)); Text("Total PnL").foregroundStyle(.secondary) }
+                    }.padding(.top, 42)
 
-                Text(wallet.displayAddress).font(.system(size: 20, weight: .bold, design: .rounded)).padding(.top, 22)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(identity?.name ?? wallet.displayAddress)
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                        Button {
+                            UIPasteboard.general.string = wallet.address
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            withAnimation(.snappy(duration: 0.2)) { copied = true }
+                            Task { try? await Task.sleep(for: .seconds(1.6)); withAnimation { copied = false } }
+                        } label: {
+                            HStack(spacing: 6) {
+                                if let label = identity?.sourceLabel {
+                                    Text(label)
+                                    Text("·")
+                                }
+                                Text(copied ? "Address copied" : (identity?.name == nil ? "Tap to copy the address" : wallet.displayAddress))
+                            }
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(Color.white.opacity(0.55))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        if let bio = identity?.bio {
+                            Text(bio)
+                                .font(.system(size: 15, weight: .regular))
+                                .foregroundStyle(Color.white.opacity(0.78))
+                                .padding(.top, 8)
+                        }
+                    }.padding(.top, 22)
 
-                ContentUnavailableView(
-                    "Wallet history not connected",
-                    systemImage: "chart.bar.doc.horizontal",
-                    description: Text("Perpl publishes no account identity on its public "
-                                      + "trade stream, so Desk cannot show this wallet's "
-                                      + "positions or activity without indexing Monad."))
-                    .padding(.top, 26)
-                Spacer()
-            }.padding(.horizontal, 20).padding(.top, 8)
-        }.toolbar(.hidden, for: .navigationBar)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            if let url = identity?.profileURL, let label = identity?.sourceLabel {
+                                pill("Open on \(label)", symbol: "arrow.up.right") { openURL(url) }
+                            }
+                            if let url = identity?.xURL, let handle = identity?.x {
+                                pill("@\(handle)", symbol: "at") { openURL(url) }
+                            }
+                            if let account = identity?.perplAccount {
+                                pill("Perpl account #\(account)", symbol: "chart.line.uptrend.xyaxis", action: nil)
+                            }
+                        }
+                    }
+                    .padding(.top, 18)
+                    .opacity(hasProfile ? 1 : 0)
+
+                    if looked, !hasProfile {
+                        ContentUnavailableView(
+                            "Nothing public on this wallet",
+                            systemImage: "person.crop.circle.badge.questionmark",
+                            description: Text("No .nad name, nad.fun profile, ENS name or Farcaster account points here."))
+                            .padding(.top, 10)
+                    }
+                }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 40)
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .task {
+            await IdentityDirectory.shared.resolve([wallet.address])
+            looked = true
+        }
     }
 
+    private var avatar: some View {
+        Group {
+            if let url = identity?.avatarURL {
+                AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Text(wallet.emoji).font(.system(size: 50)) }
+            } else {
+                Text(wallet.emoji).font(.system(size: 50))
+            }
+        }
+        .frame(width: 84, height: 84)
+        .clipShape(Circle())
+        .perpSearchGlass(in: Circle())
+    }
+
+    private func pill(_ title: String, symbol: String, action: (() -> Void)?) -> some View {
+        Button { action?() } label: {
+            Label(title, systemImage: symbol)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(action == nil ? Color.white.opacity(0.6) : .white)
+                .padding(.horizontal, 14)
+                .frame(height: 38)
+        }
+        .buttonStyle(.plain)
+        .disabled(action == nil)
+        .perpSearchGlass(in: Capsule())
+    }
 }
