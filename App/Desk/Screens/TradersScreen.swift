@@ -139,6 +139,12 @@ final class TraderDirectory {
     }
 
     func run() async {
+        // The board as it was last seen, before the first read comes back.
+        if top.isEmpty, let url = Self.url(["view": "top"]),
+           let cached = await ResponseCache.shared.cached(url),
+           let body = try? JSONDecoder().decode(TradersResponse.self, from: cached) {
+            top = body.traders
+        }
         while !Task.isCancelled {
             async let top: Void = refreshTop()
             async let following: Void = refreshFollowing()
@@ -181,9 +187,8 @@ final class TraderDirectory {
         var components = URLComponents(string: Self.endpoint)!
         components.queryItems = [URLQueryItem(name: "view", value: "crowd")]
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              let body = try? JSONDecoder().decode(CrowdResponse.self, from: data) else { return }
+              let fetched = try? await ResponseCache.shared.data(from: url),
+              let body = try? JSONDecoder().decode(CrowdResponse.self, from: fetched.0) else { return }
         crowd = body.markets
         crowdFetchedAt = .now
     }
@@ -229,9 +234,8 @@ final class TraderDirectory {
         var components = URLComponents(string: Self.endpoint)!
         components.queryItems = [URLQueryItem(name: "view", value: "scores")]
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              let body = try? JSONDecoder().decode(ScoresResponse.self, from: data) else { return }
+              let fetched = try? await ResponseCache.shared.data(from: url),
+              let body = try? JSONDecoder().decode(ScoresResponse.self, from: fetched.0) else { return }
         scores = Dictionary(body.traders.map { ($0.address.lowercased(), $0.score) }, uniquingKeysWith: max)
         scoresFetchedAt = .now
     }
@@ -240,9 +244,8 @@ final class TraderDirectory {
         var components = URLComponents(string: Self.endpoint)!
         components.queryItems = [URLQueryItem(name: "view", value: "history"), URLQueryItem(name: "address", value: address)]
         guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-        return try? JSONDecoder().decode(TraderHistory.self, from: data)
+              let fetched = try? await ResponseCache.shared.data(from: url) else { return nil }
+        return try? JSONDecoder().decode(TraderHistory.self, from: fetched.0)
     }
 
     private struct ScoresResponse: Decodable {
@@ -250,13 +253,18 @@ final class TraderDirectory {
         let traders: [Row]
     }
 
+    /// Sorted, so the same question is always the same URL — which is what the
+    /// response cache keys on.
+    private static func url(_ query: [String: String]) -> URL? {
+        var components = URLComponents(string: endpoint)!
+        components.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
+        return components.url
+    }
+
     private func fetch(_ query: [String: String]) async -> [TraderSnapshot]? {
-        var components = URLComponents(string: Self.endpoint)!
-        components.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
-        guard let url = components.url,
-              let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              let body = try? JSONDecoder().decode(TradersResponse.self, from: data) else { return nil }
+        guard let url = Self.url(query),
+              let fetched = try? await ResponseCache.shared.data(from: url),
+              let body = try? JSONDecoder().decode(TradersResponse.self, from: fetched.0) else { return nil }
         return body.traders
     }
 

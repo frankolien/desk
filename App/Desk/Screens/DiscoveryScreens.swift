@@ -453,15 +453,19 @@ private final class TokenDiscoveryModel: ObservableObject {
     }
 
     private func load(query: String, intoSearch: Bool) async {
-        isLoading = (intoSearch ? searchResults : trending).isEmpty
-        if isLoading { errorText = nil }
         var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/token-discovery")!
         if !query.isEmpty { components.queryItems = [URLQueryItem(name: "q", value: query)] }
+        let url = components.url!
+        // What this list showed last time, at once; the network's answer replaces it.
+        if (intoSearch ? searchResults : trending).isEmpty,
+           let cached = await ResponseCache.shared.cached(url),
+           let tokens = try? JSONDecoder().decode(Response.self, from: cached).tokens {
+            if intoSearch { searchResults = tokens } else { trending = tokens }
+        }
+        isLoading = (intoSearch ? searchResults : trending).isEmpty
+        if isLoading { errorText = nil }
         do {
-            let (data, response) = try await URLSession.shared.data(from: components.url!)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                throw URLError(.badServerResponse)
-            }
+            let (data, _) = try await ResponseCache.shared.data(from: url)
             let tokens = try await Task.detached(priority: .utility) {
                 try JSONDecoder().decode(Response.self, from: data).tokens
             }.value
@@ -1196,10 +1200,7 @@ private final class SpotLiveFeed: ObservableObject {
             URLQueryItem(name: "address", value: contract)
         ]
         do {
-            let (data, response) = try await URLSession.shared.data(from: components.url!)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                throw URLError(.badServerResponse)
-            }
+            let (data, _) = try await ResponseCache.shared.data(from: components.url!)
             let payload = try await Task.detached(priority: .utility) {
                 try Self.decodeDetails(data)
             }.value
@@ -1219,11 +1220,22 @@ private final class SpotLiveFeed: ObservableObject {
             URLQueryItem(name: "address", value: contract),
             URLQueryItem(name: "period", value: period)
         ]
-        do {
-            let (data, response) = try await URLSession.shared.data(from: components.url!)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                throw URLError(.badServerResponse)
+        let url = components.url!
+        // The chart as it was last drawn, so the screen opens on a line rather than a
+        // spinner; the read that follows replaces it.
+        if candles.isEmpty, let cached = await ResponseCache.shared.cached(url, maxAge: 3_600) {
+            let currentSymbol = symbol
+            if let payload = try? await Task.detached(priority: .utility, operation: {
+                try Self.decodeSnapshot(cached, symbol: currentSymbol)
+            }).value {
+                candles = payload.candles
+                transactions = payload.transactions
+                latestPrice = candles.last?.close
+                isLoading = false
             }
+        }
+        do {
+            let (data, _) = try await ResponseCache.shared.data(from: url, maxStale: 3_600)
             let currentSymbol = symbol
             let payload = try await Task.detached(priority: .utility) {
                 try Self.decodeSnapshot(data, symbol: currentSymbol)

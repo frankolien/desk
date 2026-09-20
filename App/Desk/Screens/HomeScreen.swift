@@ -1,3 +1,4 @@
+import DeskMoney
 import DeskPerpl
 import DeskUI
 import SwiftUI
@@ -35,6 +36,18 @@ struct HomeScreen: View {
 
     private var collateralInCurrency: String {
         model.collateral.value.map { DisplayCurrency.shared.format($0) } ?? Unavailable.text
+    }
+
+    private var walletInCurrency: String {
+        model.walletAUSD.value.map { DisplayCurrency.shared.format($0) } ?? Unavailable.text
+    }
+
+    /// The headline is everything the person holds here: collateral on the desk and
+    /// AUSD sitting in the wallet. A withdrawal moves money between the two rows and
+    /// leaves this figure alone, which is the answer to "where did my money go".
+    private var totalInCurrency: String {
+        guard let collateral = model.collateral.value else { return Unavailable.text }
+        return DisplayCurrency.shared.format(collateral + (model.walletAUSD.value ?? .zero))
     }
 
     /// Either balance can leave: collateral from the exchange, or AUSD already in the wallet.
@@ -201,7 +214,7 @@ struct HomeScreen: View {
                     }
                     .frame(height: 48)
                 } else {
-                    AmountText(collateralInCurrency, size: 46)
+                    AmountText(totalInCurrency, size: 46)
                         .contentTransition(.numericText())
                 }
             }
@@ -209,8 +222,8 @@ struct HomeScreen: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Collateral balance")
-        .accessibilityValue(hidesBalance ? "Hidden" : "\(collateralText) AUSD")
+        .accessibilityLabel("Total balance")
+        .accessibilityValue(hidesBalance ? "Hidden" : totalInCurrency)
         .accessibilityHint("Double tap to \(hidesBalance ? "show" : "hide") your balance")
         .animation(.snappy, value: hidesBalance)
     }
@@ -296,14 +309,25 @@ struct HomeScreen: View {
         // apart into four unrelated cards. Ten is the gap that groups them without
         // welding them together.
         VStack(spacing: 10) {
+            // Two accounts, named as two. The desk is where trades come from; the
+            // wallet is where a withdrawal lands and where a deposit is taken from.
             HomeAssetRow(
                 mark: { TokenLogo(asset: .ausd, size: 44) },
-                title: "AUSD collateral",
+                title: "Trading account",
                 subtitle: "Available to trade",
                 value: hidesBalance ? "•••••" : collateralInCurrency,
                 change: nil,
                 tint: DeskColor.action,
                 action: onFund)
+
+            HomeAssetRow(
+                mark: { MonochromeSymbolMark(symbol: "wallet.bifold") },
+                title: "Wallet",
+                subtitle: "AUSD, not on the desk",
+                value: hidesBalance ? "•••••" : walletInCurrency,
+                change: nil,
+                tint: DeskColor.nightMuted,
+                action: onWithdraw)
 
             // Profit first. A position row that leads with size answers a question
             // nobody opens the app to ask.

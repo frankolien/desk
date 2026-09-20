@@ -650,6 +650,19 @@ final class AppModel {
     // MARK: - Withdrawing
 
     private(set) var withdrawal: Withdrawal = .idle
+
+    #if DEBUG
+    /// The sent screen, for review: two hashes, an outside recipient.
+    func seedWithdrawalSentForReview() {
+        withdrawal = .sent(WithdrawalReceipt(
+            amount: Money(text: "107783.80") ?? .zero,
+            recipient: EthereumAddress(text: "0x82f0c4a9e1b7d3f5a2c8e6b4d0a9f1e3c5b7d3ae"),
+            transactions: [
+                "0xd4236470b7532e15fb9a3c1e8d2f4b6a0c7e9d1f3b5a7c9e1d3f5b7a9c1e3f5a11b459811f4fbc945c7",
+                "0x22b5f79ac1c3320752e4d6f8a0b2c4d6e8f0a2b4c6d8e0f2a4b6c8d0e2f4a6b858ac29e37b65964af2ed",
+            ]))
+    }
+    #endif
     private(set) var deposit: Deposit = .idle
 
     enum Deposit: Equatable {

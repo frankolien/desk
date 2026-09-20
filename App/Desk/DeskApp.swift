@@ -1,5 +1,6 @@
 import Combine
 import DeskAuth
+import DeskUI
 import SwiftUI
 import UIKit
 
@@ -102,6 +103,16 @@ struct RootView: View {
                     .zIndex(1)
             }
         }
+        // Said once, at the top, on every screen. The figures underneath keep showing
+        // what was last read; this is why they have stopped moving.
+        .overlay(alignment: .top) {
+            if !Connectivity.shared.isOnline {
+                OfflineBanner()
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(3)
+            }
+        }
+        .animation(.snappy, value: Connectivity.shared.isOnline)
         .task { await DisplayCurrency.shared.refresh() }
         .task {
             guard showsLaunchMoment else { return }
@@ -186,5 +197,24 @@ final class KeyGrace {
         guard task != .invalid else { return }
         UIApplication.shared.endBackgroundTask(task)
         task = .invalid
+    }
+}
+
+/// The one sentence the app says about the network, in the app's own glass.
+private struct OfflineBanner: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 13, weight: .bold))
+            Text("No internet connection")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+        }
+        .foregroundStyle(DeskColor.nightText.color)
+        .padding(.horizontal, 14)
+        .frame(height: 36)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(Color.white.opacity(0.14), lineWidth: 0.5))
+        .padding(.top, 8)
+        .accessibilityAddTraits(.isStaticText)
     }
 }

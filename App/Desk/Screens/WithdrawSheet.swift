@@ -22,6 +22,7 @@ struct WithdrawSheet: View {
     @State private var amount = ""
     @State private var recipientText = ""
     @FocusState private var editingRecipient: Bool
+    @State private var receiptShown = false
 
     private var tradingBalance: Money { model.collateral.value ?? .zero }
     private var walletBalance: Money { model.walletAUSD.value ?? .zero }
@@ -77,6 +78,9 @@ struct WithdrawSheet: View {
             .padding(.bottom, 12)
         }
         .interactiveDismissDisabled(model.withdrawal.isBusy)
+        #if DEBUG
+        .task { if ProcessInfo.processInfo.arguments.contains("-withdraw-sent") { model.seedWithdrawalSentForReview() } }
+        #endif
         .onAppear {
             // Open on whichever balance actually holds something.
             if tradingBalance.isZero && !walletBalance.isZero { source = .wallet }
@@ -386,41 +390,112 @@ struct WithdrawSheet: View {
     }
 
     private func done(_ receipt: AppModel.WithdrawalReceipt) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
             Spacer()
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 48, weight: .semibold))
-                .foregroundStyle(DeskColor.rise.color)
-            Text("\(receipt.amount.display()) AUSD sent")
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-                .foregroundStyle(DeskColor.nightText.color)
+
+            // The mark, lit once. A green tick is what every app shows; this is the
+            // one moment the app's own face belongs on the screen, and one ring of its
+            // own colour around it says "done" without a symbol saying so.
+            ZStack {
+                Circle()
+                    .stroke(DeskColor.action.color.opacity(0.28), lineWidth: 1)
+                    .frame(width: 112, height: 112)
+                    .scaleEffect(receiptShown ? 1 : 0.7)
+                    .opacity(receiptShown ? 1 : 0)
+                Circle()
+                    .fill(DeskColor.action.color.opacity(0.10))
+                    .frame(width: 88, height: 88)
+                DeskBrandMark(size: 56)
+                    .scaleEffect(receiptShown ? 1 : 0.86)
+            }
+            .frame(width: 112, height: 112)
+            .padding(.bottom, 28)
+
+            Text("SENT")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .tracking(2)
+                .foregroundStyle(DeskColor.nightMuted.color)
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                AmountText(receipt.amount.display(), size: 44)
+                Text("AUSD")
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+            }
+            .padding(.top, 6)
+
             // Only rendered after every receipt came back, so this is a fact, not a hope.
             Text(receipt.recipient.map { "Confirmed on \(model.network.name). It's at \(TraderSnapshot.short($0.checksummed)) now." }
                  ?? "Confirmed on \(model.network.name). It's in your wallet now.")
-                .font(DeskType.caption)
+                .font(.system(size: 15, weight: .medium, design: .rounded))
                 .foregroundStyle(DeskColor.nightMuted.color)
-            VStack(spacing: 8) {
-                ForEach(receipt.transactions, id: \.self) { hash in
-                    Link(destination: model.network.explorer.appending(path: "tx/\(hash)")) {
-                        HStack {
-                            Text(hash)
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Spacer(minLength: 12)
-                            Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .bold))
-                        }
-                        .foregroundStyle(DeskColor.nightMuted.color)
-                        .padding(.horizontal, 12)
-                        .frame(height: 38)
-                        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                }
-            }
-            .padding(.top, 6)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 10)
+
+            receiptCard(receipt)
+                .padding(.top, 24)
+
             Spacer()
             PrimaryButton(title: "Done", tint: DeskColor.action) { close() }
         }
+        .onAppear {
+            withAnimation(.spring(duration: 0.55, bounce: 0.3)) { receiptShown = true }
+        }
+    }
+
+    /// One line per thing that happened, in the order it happened, each a link to the
+    /// explorer. Named by what it was — a withdrawal off the desk, a transfer out — so
+    /// two hashes read as two steps rather than as two of the same thing.
+    private func receiptCard(_ receipt: AppModel.WithdrawalReceipt) -> some View {
+        let labels: [String] = switch (receipt.transactions.count, receipt.recipient == nil) {
+        case (2, _): ["Withdrawal from Perpl", "Transfer"]
+        case (1, true): ["Withdrawal from Perpl"]
+        default: ["Transfer"]
+        }
+        return VStack(spacing: 0) {
+            receiptRow("To", receipt.recipient.map { TraderSnapshot.short($0.checksummed) } ?? "Your wallet")
+            Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+            receiptRow("Network", model.network.name)
+            ForEach(Array(receipt.transactions.enumerated()), id: \.element) { index, hash in
+                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+                Link(destination: model.network.explorer.appending(path: "tx/\(hash)")) {
+                    HStack(spacing: 12) {
+                        Text(labels.indices.contains(index) ? labels[index] : "Transaction")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DeskColor.nightText.color)
+                        Spacer(minLength: 8)
+                        Text(hash)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 150)
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(DeskColor.action.color)
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(height: 46)
+                    .contentShape(Rectangle())
+                }
+            }
+        }
+        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 0.6))
+    }
+
+    private func receiptRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(DeskColor.nightMuted.color)
+            Spacer()
+            Text(value)
+                .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundStyle(DeskColor.nightText.color)
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 44)
     }
 
     private func close() {
