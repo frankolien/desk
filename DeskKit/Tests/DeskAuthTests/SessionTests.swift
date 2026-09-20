@@ -184,11 +184,13 @@ struct SigningSessionTests {
         }
     }
 
-    /// A backgrounded app gets roughly thirty seconds before iOS suspends it. A grace any
-    /// longer would be a wipe scheduled for a moment the process is no longer running.
-    @Test("The grace fits inside iOS's background window")
-    func graceFitsBackgroundTime() {
-        #expect(SigningSession.backgroundGrace < .seconds(30))
+    /// The grace used to have to fit iOS's thirty-second background window, because the
+    /// wipe was scheduled inside it. It no longer is: the absence is measured on return
+    /// against a monotonic clock, so the grace can be the one a person would choose, and
+    /// the test above this one is what guarantees a late return still finds the key gone.
+    @Test("The grace is long enough that a trip to another app costs nothing")
+    func graceIsHuman() {
+        #expect(SigningSession.backgroundGrace >= .seconds(60))
     }
 
     @Test("Ending twice is not an error")

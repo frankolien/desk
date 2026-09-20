@@ -260,6 +260,54 @@ final class AppModel {
         await authenticate(creating: true)
     }
 
+    enum Resumption: Equatable { case arrived, cancelled, unavailable }
+
+    /// The returning path: the sealed trading key, opened with one Face ID, and the
+    /// account it belongs to brought back. No passkey ceremony. Nothing here can create
+    /// a wallet or change which one is on screen — the address is the one last seen.
+    func resume() async -> Resumption {
+        guard let last = passkey.lastSeenAddress else { return .unavailable }
+        switch await TradingKeyVault.open(address: last, network: network.rawValue, reason: "Unlock Desk") {
+        case .opened(let key):
+            isWorking = true
+            defer { isWorking = false }
+            address = last
+            await session.open(key)
+            sessionTradingIndex = apiKeys.tradingIndex(for: last)
+            isKeyUnlocked = true
+            do {
+                try await arrive(at: last)
+            } catch {
+                // The venue did not answer. The account is still this person's; the
+                // trading screens report the connection themselves.
+                stage = hasOnboarded(last) ? .trading : .needsDesk
+            }
+            return .arrived
+        case .cancelled:
+            return .cancelled
+        case .missing, .unavailable:
+            return .unavailable
+        }
+    }
+
+    /// With the key open, brings the account up and picks the screen.
+    ///
+    /// `hasDesk` is an on-chain fact. Passkey derivation deliberately cannot answer it, so
+    /// checking a derived flag here always sent returning users back to setup. The account
+    /// is read before the destination is chosen, and the authenticated socket is rebuilt
+    /// before the first order can be opened — a returning user who jumped straight to the
+    /// trading UI once found a ticket that could only answer "not connected".
+    private func arrive(at address: EthereumAddress) async throws {
+        await refreshBalances()
+        startPollingBalances()
+        if hasDesk.value == true, let stored = apiKeys.load(for: address) {
+            let context = try await PerplREST(configuration: network.perpl()).context()
+            await enterTrading(stored, context: context)
+        } else {
+            stage = hasOnboarded(address) ? .trading : .needsDesk
+        }
+    }
+
     private func authenticate(creating: Bool) async {
         isWorking = true
         signInProblem = nil
@@ -286,21 +334,8 @@ final class AppModel {
             await session.open(keys.trading)
             sessionTradingIndex = store.tradingIndex(for: keys.address)
             isKeyUnlocked = true
-            // `hasDesk` is an on-chain fact. Passkey derivation deliberately cannot
-            // answer it, so checking `keys.hasDesk` here always sent returning users
-            // back to setup. Read the account before choosing the destination.
-            await refreshBalances()
-            startPollingBalances()
-            if hasDesk.value == true, let stored = apiKeys.load(for: keys.address) {
-                // A returning user used to jump straight to the trading UI without
-                // rebuilding the authenticated socket. The ticket then had no desk and
-                // could only answer “not connected”. Sign-in now restores the complete
-                // trading session before the first order can be opened.
-                let context = try await PerplREST(configuration: network.perpl()).context()
-                await enterTrading(stored, context: context)
-            } else {
-                stage = hasOnboarded(keys.address) ? .trading : .needsDesk
-            }
+            TradingKeyVault.seal(keys.trading, address: keys.address, network: network.rawValue)
+            try await arrive(at: keys.address)
         } catch PasskeyFailure.cancelledByUser {
             // A dismissed sheet is not a failure and not a reason to offer anything. It
             // used to run a registration, which is how a mis-tap became a second wallet.
@@ -781,6 +816,7 @@ final class AppModel {
 
     /// Signs out: the key, the connection and the account on screen all go.
     func endSession() async {
+        if let address { TradingKeyVault.forget(address: address, network: network.rawValue) }
         await trading.close()
         await session.end()
         isKeyUnlocked = false
@@ -869,8 +905,20 @@ final class AppModel {
         isUnlocking = true
         unlockProblem = nil
         defer { isUnlocking = false }
+        let store = apiKeys
+        switch await TradingKeyVault.open(address: address, network: network.rawValue, reason: "Unlock Desk") {
+        case .opened(let key):
+            await session.open(key)
+            sessionTradingIndex = store.tradingIndex(for: address)
+            isKeyUnlocked = true
+            await trading.reconnect()
+            return true
+        case .cancelled:
+            return false
+        case .missing, .unavailable:
+            break
+        }
         do {
-            let store = apiKeys
             let keys = try await passkey.deriveAccounts(tradingIndex: { store.tradingIndex(for: $0) })
             guard keys.address == address else {
                 unlockProblem = "That passkey belongs to a different wallet, so Desk stayed "
@@ -880,6 +928,7 @@ final class AppModel {
             await session.open(keys.trading)
             sessionTradingIndex = store.tradingIndex(for: address)
             isKeyUnlocked = true
+            TradingKeyVault.seal(keys.trading, address: address, network: network.rawValue)
             await trading.reconnect()
             return true
         } catch PasskeyFailure.cancelledByUser {

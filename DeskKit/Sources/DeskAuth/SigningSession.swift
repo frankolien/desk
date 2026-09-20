@@ -28,12 +28,13 @@ public actor SigningSession {
 
     /// How long Desk may sit in the background before the key is wiped.
     ///
-    /// Twenty seconds, and the number is set by iOS rather than by taste: a backgrounded
-    /// app gets roughly thirty seconds of execution before it is suspended, and the wipe
-    /// has to run inside that window or it would not run until the person came back. Long
-    /// enough that copying an address into another app, or answering a message, does not
-    /// cost a Face ID prompt on return.
-    public static let backgroundGrace: Duration = .seconds(20)
+    /// Five minutes. It was twenty seconds, set by iOS's background execution limit so the
+    /// wipe could run before suspension; now the check runs on return instead, against a
+    /// monotonic clock, so the window can be the one a person would choose. Answering a
+    /// message or checking a price elsewhere costs nothing on return; a phone left on a
+    /// table for the afternoon asks for Face ID again. And since the key is also sealed
+    /// in the keychain (`TradingKeyVault`), that Face ID is one prompt, not a passkey.
+    public static let backgroundGrace: Duration = .seconds(300)
 
     private let lifetime: Duration?
     private let grace: Duration

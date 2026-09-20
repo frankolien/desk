@@ -383,7 +383,8 @@ struct SessionOwnershipTests {
         await #expect(throws: Never.self) {
             try await rest.signedData(try PerplEndpoint(method: .get, path: "/v1/a"))
         }
-        elapsed.advance(.seconds(11))
+        // Past the grace, wherever the grace is set.
+        elapsed.advance(SigningSession.backgroundGrace)
         // The client holds a function, not a key, so there is nothing left to sign with.
         await #expect(throws: SigningSession.Failure.closed) {
             try await rest.signedData(try PerplEndpoint(method: .get, path: "/v1/b"))

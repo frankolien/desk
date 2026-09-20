@@ -116,7 +116,10 @@ struct RootView: View {
             // decided yet, shown to someone who decided last week. Cancelling the
             // prompt drops through to that screen, where the button still works.
             if model.isReturning, model.stage == .welcome, !Self.isStaged {
-                await model.signIn()
+                // The sealed key first: one Face ID. The passkey ceremony only when
+                // there is nothing sealed. A refused Face ID is left alone — the
+                // onboarding is underneath, with its button.
+                if await model.resume() == .unavailable { await model.signIn() }
             }
             withAnimation(.easeInOut(duration: 0.62)) {
                 showsLaunchMoment = false
@@ -139,8 +142,11 @@ final class KeyGrace {
 
         task = UIApplication.shared.beginBackgroundTask(withName: "desk.trading-key-grace") { [weak self] in
             MainActor.assumeIsolated {
+                // iOS is out of patience, not the grace. The session checks the absence
+                // against a monotonic clock on return, so nothing is lost by not wiping
+                // here — and wiping here was what made every trip to another app cost a
+                // sign-in, because this fires at about thirty seconds regardless.
                 self?.timer?.cancel()
-                self?.enqueue { await model.lock() }
                 // The handler must end the task before it returns, or iOS ends the app.
                 self?.finishBackgroundTask()
             }
