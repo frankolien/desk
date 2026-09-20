@@ -82,7 +82,7 @@ final class SpotHoldingsModel {
     private(set) var isLoading = false
     private var address: EthereumAddress?
 
-    private static let endpoint = "https://web-lovat-nine-49.vercel.app/api/holdings"
+    private static let endpoint = "https://web-lovat-nine-49.vercel.app/api/token-details"
 
     private struct Response: Decodable {
         struct Row: Decodable {
@@ -118,6 +118,7 @@ final class SpotHoldingsModel {
         defer { isLoading = false }
         var components = URLComponents(string: Self.endpoint)!
         components.queryItems = [
+            URLQueryItem(name: "view", value: "holdings"),
             URLQueryItem(name: "address", value: address.checksummed),
             URLQueryItem(name: "items", value: purchases.map { "\($0.chainIndex):\($0.contract)" }.joined(separator: ",")),
         ]

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { describeHolding } from "../api/holdings.mjs";
+import { describeHolding } from "../api/_holdings.mjs";
 
 test("a balance is written in the token's own units, truncated to six places", () => {
   // 1234.5678901 with 18 decimals

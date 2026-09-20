@@ -8,7 +8,10 @@ import { okxConfigured, okxPost } from "./_okx.mjs";
 /// still held, so a token sent elsewhere or sold shows as what it is rather than as
 /// what was paid for.
 ///
-///   GET /api/holdings?address=0x…&items=<chainIndex>:<contract>,…   (up to 20)
+///   GET /api/token-details?view=holdings&address=0x…&items=<chainIndex>:<contract>,…   (up to 20)
+///
+/// A view on token-details rather than a function of its own: the Hobby plan allows
+/// twelve functions per deployment and this would have been the thirteenth.
 
 const BALANCE_OF = "0x70a08231";
 const DECIMALS = "0x313ce567";
@@ -70,10 +73,9 @@ async function prices(items) {
   }
 }
 
-export default async function handler(req, res) {
-  const url = new URL(req.url, "http://localhost");
-  const address = String(url.searchParams.get("address") ?? "").toLowerCase();
-  const items = parseItems(url.searchParams.get("items"));
+export async function handleHoldings(req, res) {
+  const address = String(req.query.address ?? "").toLowerCase();
+  const items = parseItems(req.query.items);
   if (!/^0x[0-9a-f]{40}$/.test(address)) {
     res.status(400).json({ error: "address must be an EVM address" });
     return;
