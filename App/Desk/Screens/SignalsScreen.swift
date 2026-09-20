@@ -132,7 +132,7 @@ struct SignalsScreen: View {
         }
         .sheet(item: $debugPrimer) { trader in
             AlertsPrimerSheet(trader: trader, name: directory.name(for: trader.address), onEnable: {}, onLater: {})
-                .presentationDetents([.height(500)])
+                .fittedSheet()
         }
         #endif
         .onChange(of: TradeAlerts.shared.opened, initial: true) { _, opened in

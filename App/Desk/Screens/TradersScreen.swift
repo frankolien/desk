@@ -654,7 +654,7 @@ struct TraderProfileScreen: View {
                     alerts.hasSeenPrimer = true
                     showsAlertsPrimer = false
                 })
-                .presentationDetents([.height(500)])
+                .fittedSheet()
                 .presentationDragIndicator(.visible)
         }
         .alert("Notifications are off for Desk", isPresented: $showsNotificationsOff) {

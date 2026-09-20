@@ -174,3 +174,25 @@ struct AmountKeypad: View {
         return text.distance(from: text.index(after: point), to: text.endIndex)
     }
 }
+
+/// A sheet the height of what is in it.
+///
+/// A fixed detent is a guess about the content's height, and the guess is wrong on
+/// every phone but the one it was made on: on a Pro Max the leftover reads as a layout
+/// that stopped early, on an SE the button falls off the bottom. The content is measured
+/// at its ideal height — spacers collapse, text wraps as it will — and the detent follows.
+struct FittedSheet: ViewModifier {
+    @State private var height: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+            .frame(maxHeight: .infinity, alignment: .top)
+            .presentationDetents([.height(max(height, 1))])
+    }
+}
+
+extension View {
+    func fittedSheet() -> some View { modifier(FittedSheet()) }
+}

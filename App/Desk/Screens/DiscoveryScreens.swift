@@ -334,6 +334,15 @@ struct MarketSearchScreen: View {
                     onOrderFilled: onOrderFilled)
                     .toolbar(.hidden, for: .tabBar)
             }
+            #if DEBUG
+            // `-spot-buy` opens the first buyable trending token with its Buy sheet up,
+            // so the sheet can be captured on any simulator without tapping through.
+            .task {
+                guard ProcessInfo.processInfo.arguments.contains("-spot-buy") else { return }
+                while discovery.trending.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
+                selectedSpot = discovery.trending.first { $0.buyable == true } ?? discovery.trending.first
+            }
+            #endif
             .navigationDestination(item: $selectedSpot) { token in
                 SpotTokenDetailScreen(token: token, model: model)
                     .toolbar(.hidden, for: .tabBar)
@@ -836,9 +845,16 @@ private struct SpotTokenDetailScreen: View {
             set: { if !$0 { tradeSide = nil } }
         )) {
             SpotTradeTicket(token: token, side: tradeSide ?? "Buy", model: model)
-                .presentationDetents([.height(tradeSide == "Buy" ? 640 : 560)])
+                .fittedSheet()
                 .presentationDragIndicator(.visible)
         }
+        #if DEBUG
+        .task {
+            guard ProcessInfo.processInfo.arguments.contains("-spot-buy") else { return }
+            try? await Task.sleep(for: .milliseconds(800))
+            tradeSide = "Buy"
+        }
+        #endif
     }
 
     private var header: some View {

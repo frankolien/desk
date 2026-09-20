@@ -113,7 +113,7 @@ struct WelcomeScreen: View {
         }
         .sheet(isPresented: $showsCreateWarning) {
             CreateAccountSheet(model: model)
-                .presentationDetents([.height(390)])
+                .fittedSheet()
                 .presentationDragIndicator(.visible)
                 .accountSheetGlass()
         }
