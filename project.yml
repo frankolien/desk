@@ -71,6 +71,11 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.opia.desk
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
+        # iPhone only. The default also claims iPad, and an iPad app has to support
+        # every orientation for multitasking — App Store Connect rejects a
+        # portrait-only bundle that claims it. Desk is portrait and built around the
+        # Dynamic Island; on an iPad it runs in the iPhone compatibility window.
+        TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_NSSupportsLiveActivities: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
@@ -119,4 +124,5 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.opia.desk.widgets
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1"
         SKIP_INSTALL: YES
