@@ -439,13 +439,10 @@ button { font: inherit; color: inherit; }
 }
 .site-wordmark-d {
   display: inline-block;
-  width: 0.76em;
-  height: 0.76em;
-  margin-right: 0.03em;
-  border-radius: 0.17em;
-  align-self: center;
-  transform: translateY(-0.04em);
-  box-shadow: 0 0.12em 0.3em -0.1em rgba(0, 0, 0, 0.8);
+  width: auto;
+  height: 0.73em;
+  margin-right: 0.05em;
+  filter: drop-shadow(0 0.08em 0.16em rgba(0, 0, 0, 0.55));
 }
 .site-cta-lines { margin: 22px 0 0; font-family: var(--mono); font-size: 13px; line-height: 1.8; letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-muted); }
 .site-cta .site-hero-cta { justify-content: center; margin-top: 32px; }
