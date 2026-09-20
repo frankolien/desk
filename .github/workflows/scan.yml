@@ -1,0 +1,23 @@
+name: scan
+# Runs the alerts scan on a schedule. GitHub fires this every five minutes at best and
+# often later; each call scans four rounds fourteen seconds apart. For a one-minute
+# cadence point an external scheduler (cron-job.org or similar) at the same URL with
+# the same header. CRON_SECRET is the repository secret; it is never in the tree.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: scan followed and copied traders
+        run: |
+          curl -sS --max-time 90 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "https://web-lovat-nine-49.vercel.app/api/alerts?job=scan" | head -c 400
+      - name: index trader history
+        run: |
+          curl -sS --max-time 60 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "https://web-lovat-nine-49.vercel.app/api/alerts?job=index" | head -c 400

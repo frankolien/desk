@@ -204,6 +204,19 @@ final class TradeAlerts {
 
     func namesChanged() { if !alerted.isEmpty { scheduleSync() } }
 
+    private static let copyingKey = "desk.alerts.copying"
+    private(set) var copying: [String] = UserDefaults.standard.stringArray(forKey: "desk.alerts.copying") ?? []
+
+    /// The traders the copy loop wants to be woken for. A token is needed to be woken
+    /// at all, and asking iOS for one shows no prompt.
+    func setCopying(_ addresses: [String]) {
+        guard addresses != copying else { return }
+        copying = addresses
+        UserDefaults.standard.set(addresses, forKey: Self.copyingKey)
+        if deviceToken == nil, !addresses.isEmpty { UIApplication.shared.registerForRemoteNotifications() }
+        scheduleSync()
+    }
+
     private func persist() {
         UserDefaults.standard.set(alerted, forKey: Self.storageKey)
     }
@@ -234,6 +247,7 @@ final class TradeAlerts {
             "environment": environment,
             "traders": traders,
             "names": nicknames.filter { traders.contains($0.key) },
+            "copying": copying,
             "confirm": confirm,
         ]
         var request = URLRequest(url: Self.endpoint)
@@ -303,6 +317,16 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: any Error) {
         TradeAlerts.shared.didFailToRegister()
+    }
+
+    /// A background push: a trader this phone copies has moved. The loop takes the copy
+    /// itself if it is still running with its key; otherwise the alert, if any, stands.
+    func application(
+        _ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any]
+    ) async -> UIBackgroundFetchResult {
+        guard let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "wake" else { return .noData }
+        let copier = await MainActor.run { CopyTrader.current }
+        return await copier?.wake() == true ? .newData : .noData
     }
 
     nonisolated func userNotificationCenter(

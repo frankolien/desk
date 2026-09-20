@@ -51,16 +51,18 @@ export function apnsClient({
     return created;
   }
 
-  function post(environment, deviceToken, payload, { collapseId } = {}) {
+  function post(environment, deviceToken, payload, { collapseId, background = false } = {}) {
     return new Promise((resolve) => {
+      // A background push wakes the app without showing anything. Apple requires the
+      // type to say so and the priority to be 5; a 10 is rejected outright.
       const headers = {
         ":method": "POST",
         ":path": `/3/device/${deviceToken}`,
         authorization: `bearer ${bearer()}`,
         "apns-topic": topic,
-        "apns-push-type": "alert",
-        "apns-priority": "10",
-        "apns-expiration": String(Math.floor(Date.now() / 1000) + 3600),
+        "apns-push-type": background ? "background" : "alert",
+        "apns-priority": background ? "5" : "10",
+        "apns-expiration": String(Math.floor(Date.now() / 1000) + (background ? 600 : 3600)),
       };
       if (collapseId) headers["apns-collapse-id"] = collapseId.slice(0, 64);
       let request;

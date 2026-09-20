@@ -16,9 +16,14 @@ public actor SigningSession {
     /// table for the afternoon asks for Face ID again. And since the key is also sealed
     /// in the keychain (`TradingKeyVault`), that Face ID is one prompt, not a passkey.
     public static let backgroundGrace: Duration = .seconds(300)
+    /// The grace while away copying is on: the key stays for the copy loop to be woken
+    /// with. Coming back after the ordinary grace still asks for Face ID before the
+    /// screens show; the key being alive is for the loop, not for whoever holds the phone.
+    public static let awayGrace: Duration = .seconds(12 * 3600)
 
     private let lifetime: Duration?
-    private let grace: Duration
+    private let baseGrace: Duration
+    private var grace: Duration
     private let now: @Sendable () -> ContinuousClock.Instant
     private var key: TradingKey?
     private var deadline: ContinuousClock.Instant?
@@ -32,8 +37,18 @@ public actor SigningSession {
         now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now }
     ) {
         self.lifetime = lifetime
+        self.baseGrace = backgroundGrace
         self.grace = backgroundGrace
         self.now = now
+    }
+
+    public func allowAway(_ enabled: Bool) {
+        grace = enabled ? Self.awayGrace : baseGrace
+    }
+
+    /// How long Desk has been in the background, or nil in the foreground.
+    public var absence: Duration? {
+        backgroundedAt.map { $0.duration(to: now()) }
     }
 
     public func open(_ key: TradingKey) {

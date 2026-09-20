@@ -193,3 +193,24 @@ test("the provider token is ES256 over the team and key", () => {
   assert.equal(readPrivateKey(pem.replace(/\n/g, "\\n")), pem);
   assert.equal(readPrivateKey(Buffer.from(pem).toString("base64")), pem);
 });
+
+test("a subscription may name the traders it copies, and a move on one wakes the app silently", async () => {
+  const parsed = parseSubscription(subscribe({ traders: [], copying: [ALICE] }));
+  assert.deepEqual(parsed.record.copying, [ALICE.toLowerCase()]);
+  assert.ok(parseSubscription(subscribe({ copying: ["0x123"] })).error);
+
+  const store = memoryStore();
+  const apns = fakeAPNs();
+  const state = { row: row() };
+  const handler = createHandler(() => ({ store, apns, chain: fakeChain(state), markets: async () => markets, secret: "s3cret", sleep: async () => {} }));
+  await handler({ method: "POST", query: {}, body: subscribe({ traders: [], copying: [ALICE] }) }, recorder());
+  apns.sent.length = 0;
+  await scan({ store, chain: fakeChain(state), apns, markets });
+  state.row = row({ positionType: 1 });
+  const second = await scan({ store, chain: fakeChain(state), apns, markets });
+  assert.equal(second.sent, 1);
+  assert.equal(apns.sent[0].payload.aps["content-available"], 1);
+  assert.equal(apns.sent[0].payload.aps.alert, undefined);
+  assert.equal(apns.sent[0].payload.desk.type, "wake");
+  assert.equal(apns.sent[0].options.background, true);
+});

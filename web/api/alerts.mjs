@@ -35,13 +35,17 @@ const validAddress = (value) => typeof value === "string" && /^0x[a-fA-F0-9]{40}
 /// The subscription as stored, or the sentence explaining why it was refused.
 export function parseSubscription(body) {
   if (!body || typeof body !== "object") return { error: "A JSON body is required." };
-  const { install, token, environment, traders, names } = body;
+  const { install, token, environment, traders, names, copying } = body;
   if (typeof install !== "string" || !/^[0-9a-f]{64}$/.test(install)) return { error: "A valid install secret is required." };
   if (typeof token !== "string" || !/^[0-9a-fA-F]{64,200}$/.test(token)) return { error: "A valid device token is required." };
   if (!Array.isArray(traders) || traders.length > MAX_TRADERS || !traders.every(validAddress)) {
     return { error: `Up to ${MAX_TRADERS} trader addresses are allowed.` };
   }
+  if (copying != null && (!Array.isArray(copying) || copying.length > MAX_TRADERS || !copying.every(validAddress))) {
+    return { error: `Up to ${MAX_TRADERS} copied addresses are allowed.` };
+  }
   const followed = [...new Set(traders.map((address) => address.toLowerCase()))];
+  const copied = [...new Set((copying ?? []).map((address) => address.toLowerCase()))];
   const labels = {};
   if (names && typeof names === "object") {
     for (const address of followed) {
@@ -55,8 +59,19 @@ export function parseSubscription(body) {
       token: token.toLowerCase(),
       environment: environment === "production" ? "production" : "sandbox",
       traders: followed,
+      copying: copied,
       names: labels,
     },
+  };
+}
+
+/// Wakes the app in the background so the copy loop can take the copy itself. Nothing
+/// visible: the alert, if this address is also followed, is a separate push.
+export function wakePayload(address, event) {
+  const { position } = event;
+  return {
+    aps: { "content-available": 1 },
+    desk: { type: "wake", event: event.kind, trader: address, market: position.market, marketId: position.marketId },
   };
 }
 
@@ -225,7 +240,7 @@ export async function scan({ store, chain, apns, markets }) {
   ids.forEach((id, index) => {
     if (!records[index]) return expired.push(id);
     const record = JSON.parse(records[index]);
-    for (const address of record.traders) {
+    for (const address of new Set([...record.traders, ...(record.copying ?? [])])) {
       followers.set(address, [...(followers.get(address) ?? []), { id, record }]);
     }
   });
@@ -249,16 +264,22 @@ export async function scan({ store, chain, apns, markets }) {
     const events = tradeEvents(JSON.parse(previous[index]), book).slice(0, MAX_EVENTS_PER_TRADER);
     for (const { id, record } of followers.get(address)) {
       for (const event of events) {
-        deliveries.push({ id, record, payload: alertPayload(address, record.names?.[address], event),
-          collapseId: `${address.slice(2, 14)}-${event.position.marketId}-${event.kind}` });
+        if (record.traders.includes(address)) {
+          deliveries.push({ id, record, payload: alertPayload(address, record.names?.[address], event),
+            collapseId: `${address.slice(2, 14)}-${event.position.marketId}-${event.kind}` });
+        }
+        if (record.copying?.includes(address)) {
+          deliveries.push({ id, record, payload: wakePayload(address, event),
+            collapseId: `wake-${address.slice(2, 14)}`, background: true });
+        }
       }
     }
   });
   // Saved before anything is sent, so a scan that dies mid-delivery cannot repeat itself.
   await store.setMany(snapshots, SNAPSHOT_TTL);
 
-  const results = await inBatches(deliveries, 10, ({ record, payload, collapseId }) =>
-    apns.send(record, payload, { collapseId }));
+  const results = await inBatches(deliveries, 10, ({ record, payload, collapseId, background }) =>
+    apns.send(record, payload, { collapseId, background }));
   const dead = new Set();
   const moved = new Map();
   results.forEach((result, index) => {
@@ -358,7 +379,8 @@ export function createHandler(resolve) {
     if (parsed.error) return res.status(400).json({ error: parsed.error });
     const { id, record } = parsed;
 
-    if (record.traders.length === 0) {
+    // Nothing to follow and nothing to copy is a request to be forgotten.
+    if (record.traders.length === 0 && record.copying.length === 0) {
       await store.del(subscriptionKey(id));
       await store.srem(SUBSCRIPTIONS, id);
       return res.status(200).json({ traders: 0 });
@@ -377,14 +399,17 @@ export function createHandler(resolve) {
     const announcing = !known || body.confirm === true;
     if (announcing && await store.set(`alerts:confirm:${id}`, "1", { ex: 60, nx: true })) {
       const first = record.traders[0];
-      const who = record.names[first] || shortAddress(first);
+      const who = first ? (record.names[first] || shortAddress(first)) : null;
+      const copied = record.copying.length;
       const result = await apns.send(record, {
         aps: {
           alert: {
-            title: "Trade alerts are on",
-            body: record.traders.length === 1
-              ? `You'll hear the moment ${who} opens, adds to or closes a position.`
-              : `You'll hear the moment any of your ${record.traders.length} traders opens, adds to or closes a position.`,
+            title: first ? "Trade alerts are on" : "Away copying is on",
+            body: !first
+              ? `Desk will wake to copy ${copied === 1 ? "your trader" : `your ${copied} traders`} while it's closed.`
+              : record.traders.length === 1
+                ? `You'll hear the moment ${who} opens, adds to or closes a position.`
+                : `You'll hear the moment any of your ${record.traders.length} traders opens, adds to or closes a position.`,
           },
           sound: "default",
         },

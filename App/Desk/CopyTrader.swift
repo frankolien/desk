@@ -105,6 +105,10 @@ final class CopyTrader {
     private var portfolios: [String: Double] = [:]
     private var accounts: [UInt64: String] = [:]
     private var wokenAt: Date?
+    private var cycles = 0
+    private var syncedCopying: [String]?
+    /// The loop that is running, for the background push handler to wake.
+    static weak var current: CopyTrader?
     private let stream = PositionStream()
     private let glance = AutoCopyPublisher()
     private var mainnet = MainnetMarkets()
@@ -246,8 +250,22 @@ final class CopyTrader {
 
     // MARK: - The loop
 
+    /// Wakes the loop as a position event would and waits for the cycle it triggers —
+    /// up to twenty seconds, which is what iOS allows a background push. True when a
+    /// cycle ran; false when the loop is not running or the key is gone.
+    func wake() async -> Bool {
+        let before = cycles
+        wokenAt = wokenAt ?? .now
+        for _ in 0..<100 {
+            if cycles > before { return true }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        return false
+    }
+
     func run(model: AppModel, market: MarketModel, session: TradingSession) async {
-        defer { stream.stop() }
+        Self.current = self
+        defer { stream.stop(); if Self.current === self { Self.current = nil } }
         var lastCycle = Date.distantPast
         var streaming = false
         while !Task.isCancelled {
@@ -275,9 +293,17 @@ final class CopyTrader {
                 wokenAt = nil
                 lastCycle = .now
                 await cycle(seenAt: seenAt, model: model, market: market, session: session)
+                cycles += 1
             } else if !active {
                 baselines = [:]
                 readProblem = nil
+            }
+            // The server wakes this loop for the traders it is told about, and only
+            // while the switch is on.
+            let copying = AutoCopyAway.isOn ? traders.map { $0.address.lowercased() }.sorted() : []
+            if copying != syncedCopying {
+                syncedCopying = copying
+                TradeAlerts.shared.setCopying(copying)
             }
             glance.follow(self)
             try? await Task.sleep(for: .milliseconds(200))

@@ -1,4 +1,5 @@
 import DeskAuth
+import LocalAuthentication
 import DeskChain
 import DeskFlow
 import DeskMoney
@@ -870,6 +871,7 @@ final class AppModel {
     /// holds a background task open for the grace and calls `expireIfAway` at the end of
     /// it, so the wipe runs while Desk can still execute.
     func enterBackground() async {
+        await session.allowAway(AutoCopyAway.isOn)
         await session.enterBackground()
     }
 
@@ -886,8 +888,16 @@ final class AppModel {
     /// on the trading screens: setup signs every transaction with a fresh ceremony anyway,
     /// so an unlock there would be a prompt for nothing.
     func enterForeground() async {
+        let absence = await session.absence
         await session.enterForeground()
         if await session.isOpen == false, isKeyUnlocked { await lock() }
+        // Away copying keeps the key alive through a long absence for the loop's sake,
+        // not for whoever is holding the phone now: past the ordinary grace, the person
+        // confirms it is them before the screens show, and a refusal wipes the key.
+        if isKeyUnlocked, let absence, absence >= SigningSession.backgroundGrace,
+           await LocalAuth.confirm("Unlock Desk") == false {
+            await lock()
+        }
         guard !isKeyUnlocked, address != nil, stage == .trading else { return }
         await unlock()
     }
@@ -1014,5 +1024,16 @@ final class AppModel {
             addresses: try ExchangeAddresses(context: await rest.context(), pinnedTo: network))
         balances = reader
         return reader
+    }
+}
+
+/// One system prompt, no key involved: the phone's own "is this you" for a screen that
+/// is about to show a balance.
+enum LocalAuth {
+    static func confirm(_ reason: String) async -> Bool {
+        let context = LAContext()
+        var unavailable: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &unavailable) else { return true }
+        return (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)) ?? false
     }
 }

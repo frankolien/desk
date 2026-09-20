@@ -665,6 +665,7 @@ private struct PauseButtonStyle: ViewModifier {
 /// Limits and the Live Activity, out of the way of the result.
 struct CopySettingsSheet: View {
     let copier: CopyTrader
+    @AppStorage(AutoCopyAway.key) private var copiesWhileAway = false
 
     @Environment(\.dismiss) private var dismiss
     @AppStorage(AutoCopyPublisher.liveActivityKey) private var showsLiveActivity = true
@@ -693,7 +694,10 @@ struct CopySettingsSheet: View {
                     }
                 }
 
-                GlassSection(footer: "Traders are read on Perpl mainnet the moment they trade. Copying runs while Desk is open.") {
+                GlassSection(footer: "Copying runs while Desk is open. With away copying on, Desk keeps the trading key ready after you leave and wakes when a trader you copy moves — until iOS closes the app, when the alert takes over.") {
+                    Toggle(isOn: $copiesWhileAway) {
+                        GlassRow("Keep copying when I leave", subtitle: "Woken by a silent push") { EmptyView() }
+                    }
                     Toggle(isOn: $showsLiveActivity) {
                         GlassRow("Live Activity", subtitle: "Lock Screen and Dynamic Island") { EmptyView() }
                     }

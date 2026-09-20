@@ -126,6 +126,16 @@ final class AutoCopyPublisher {
     }
 }
 
+/// Whether the copy loop may be woken while Desk is closed. Read by the session on
+/// leaving and by the loop on every tick; written only from Auto-Copy settings.
+enum AutoCopyAway {
+    static let key = "desk.copy.away"
+    static var isOn: Bool {
+        get { UserDefaults.standard.bool(forKey: key) }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+}
+
 struct DeskShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
