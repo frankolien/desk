@@ -64,6 +64,16 @@ struct RootView: View {
     let model: AppModel
     @State private var showsLaunchMoment = true
 
+    /// A `-stage` launch has chosen its screen; the returning path must not sign in
+    /// over the top of it.
+    private static var isStaged: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-stage")
+        #else
+        false
+        #endif
+    }
+
     var body: some View {
         ZStack {
             Group {
@@ -100,6 +110,14 @@ struct RootView: View {
             // launch frame held a working app behind a logo for nearly four seconds, on
             // every launch, warm or cold.
             try? await Task.sleep(for: .milliseconds(1_300))
+            // A device that has signed in before is asked for Face ID here, under the
+            // mark, and lands on Home. It used to land on the onboarding every launch
+            // and wait for a tap on "Continue" — a screen for people who have not
+            // decided yet, shown to someone who decided last week. Cancelling the
+            // prompt drops through to that screen, where the button still works.
+            if model.isReturning, model.stage == .welcome, !Self.isStaged {
+                await model.signIn()
+            }
             withAnimation(.easeInOut(duration: 0.62)) {
                 showsLaunchMoment = false
             }

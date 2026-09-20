@@ -115,12 +115,20 @@ struct DerivedAccounts: Sendable {
 /// `#if DEBUG` is the only thing standing between a convenience and that, which is why
 /// it wraps the type rather than a call site.
 struct StubPasskeyService: PasskeyService {
-    var lastSeenAddress: EthereumAddress? { nil }
+    /// Remembered like the real ceremony remembers, so the simulator takes the returning
+    /// path — Face ID under the mark, no onboarding — once it has signed in once.
+    private static let seenKey = "desk.stub.lastSeen"
+
+    var lastSeenAddress: EthereumAddress? {
+        guard UserDefaults.standard.bool(forKey: Self.seenKey) else { return nil }
+        return try? PasskeyAccounts.deriveAddress(prfOutput: Data(repeating: 0x2A, count: 32))
+    }
 
     func deriveAccounts(tradingIndex: @Sendable (EthereumAddress) -> UInt32) async throws -> DerivedAccounts {
         try await Task.sleep(for: .milliseconds(600))
         let pretendPRF = Data(repeating: 0x2A, count: 32)
         let address = try PasskeyAccounts.deriveAddress(prfOutput: pretendPRF)
+        UserDefaults.standard.set(true, forKey: Self.seenKey)
         return DerivedAccounts(
             address: address,
             trading: try PasskeyAccounts.deriveTradingKey(

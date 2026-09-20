@@ -246,6 +246,11 @@ final class AppModel {
     /// device to have none of its own.
     var mayOfferCreate: Bool { passkey.lastSeenAddress == nil }
 
+    /// This device has signed in before. Nothing about the key is stored — only the
+    /// address it derived last time — but that is enough to know the onboarding has
+    /// been read, and that the next thing this person wants is Face ID, not a pitch.
+    var isReturning: Bool { passkey.lastSeenAddress != nil }
+
     func signIn() async {
         await authenticate(creating: false)
     }
