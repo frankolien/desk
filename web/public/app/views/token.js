@@ -1,4 +1,4 @@
-import { $, $$, esc, api, poll, fmtUsd, fmtSmall, fmtCompact, fmtPct, fmtAmount, short, ago, dirClass, logo, nativeLogo, person, hydratePeople, handoff, identity, knownIdentity, navigate } from "../app.js";
+import { $, $$, esc, api, poll, fmtUsd, fmtSmall, fmtCompact, fmtPct, fmtAmount, short, ago, dirClass, logo, nativeLogo, person, hydratePeople, handoff, identity, knownIdentity, navigate, connectedWallet } from "../app.js";
 
 const STYLE = `<style>
 .tk-tx { display: inline-flex; color: var(--muted); } .tk-tx:hover { color: var(--text); } .tk-tx svg { width: 13px; height: 13px; }
@@ -277,8 +277,9 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
       ? [25, 50, 100, 250].map((v) => `<button class="chip" type="button" data-usd="${v}">$${v}</button>`).join("")
       : [25, 50, 75, 100].map((v) => `<button class="chip" type="button" data-pct="${v}" aria-pressed="${pct === v}">${v}%</button>`).join("");
     const go = q("#tk-go");
-    go.className = `btn btn-lg btn-block ${buying ? "btn-rise" : "btn-fall"}`;
-    go.textContent = `${buying ? "Buy" : "Sell"} ${symbol} in Desk`;
+    const connected = Boolean(connectedWallet());
+    go.className = `btn btn-lg btn-block ${!connected ? "btn-primary" : buying ? "btn-rise" : "btn-fall"}`;
+    go.textContent = connected ? `${buying ? "Buy" : "Sell"} ${symbol} in Desk` : "Connect wallet";
     paintEstimate();
   };
   const paintEstimate = () => {
@@ -305,7 +306,10 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     paintEstimate();
   });
   amountInput.addEventListener("input", () => { if (side === "sell" && amountInput.value) { pct = null; $$("[data-pct]", el).forEach((c) => c.setAttribute("aria-pressed", "false")); } paintEstimate(); });
+  const onWallet = () => paintTicket();
+  document.addEventListener("wallet", onWallet);
   q("#tk-go").addEventListener("click", () => {
+    if (!connectedWallet()) { $("#connect").click(); return; }
     const amount = Number(amountInput.value);
     const what = side === "buy"
       ? (amount > 0 ? `${fmtUsd(amount)} of ${symbol}` : symbol)
@@ -543,6 +547,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   const holders = (details?.holders ?? []).map((h) => ({ address: h.holderWalletAddress, amount: num(h.holdAmount), pct: num(h.holdPercent) }));
 
   function tradeKey(t) { return t.id ?? `${t.time}:${t.userAddress}:${t.volume}`; }
+  let shown = 8;
   const tokenAmount = (t) => {
     const hit = (t.changedTokenInfo ?? []).find((c) => String(c.tokenAddress ?? "").toLowerCase() === address.toLowerCase()) ?? (t.changedTokenInfo ?? []).find((c) => c.tokenSymbol === symbol);
     return num(hit?.amount);
@@ -647,8 +652,10 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     const host = q("#tk-table");
     if (tab === "trades") {
       host.innerHTML = trades.length
-        ? `<table class="table table-compact"><thead><tr><th>Wallet</th><th class="left">Type</th><th>USD</th><th>${esc(symbol)}</th><th>Price</th><th>Quote</th><th>Txn · Time</th></tr></thead><tbody>${trades.map((t) => tradeRow(t, fresh.has(tradeKey(t)))).join("")}</tbody></table>`
+        ? `<table class="table table-compact"><thead><tr><th>Wallet</th><th class="left">Type</th><th>USD</th><th>${esc(symbol)}</th><th>Price</th><th>Quote</th><th>Txn · Time</th></tr></thead><tbody>${trades.slice(0, shown).map((t) => tradeRow(t, fresh.has(tradeKey(t)))).join("")}</tbody></table>`
+          + (trades.length > shown ? `<div class="card-foot"><span>${Math.min(shown, trades.length)} of ${trades.length} trades</span><button class="btn btn-ghost btn-xs" type="button" data-more>Show more</button></div>` : `<div class="card-foot"><span>${trades.length} trades on the tape</span></div>`)
         : `<div class="empty">No trades yet.</div>`;
+      host.querySelector("[data-more]")?.addEventListener("click", () => { shown += 20; paintTable(); });
     } else if (tab === "holders") {
       if (!holders.length) { host.innerHTML = `<div class="empty">No holders listed.</div>`; return; }
       const top = Math.max(...holders.map((h) => h.pct ?? 0), 0) || 1;
@@ -686,7 +693,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     for (const t of trades) { if (!fresh.has(tradeKey(t))) break; head.push(t); }
     if (head.length !== fresh.size) return false;
     tbody.insertAdjacentHTML("afterbegin", head.map((t) => tradeRow(t, true)).join(""));
-    while (tbody.rows.length > trades.length) tbody.lastElementChild.remove();
+    while (tbody.rows.length > Math.min(shown, trades.length)) tbody.lastElementChild.remove();
     hydratePeople(tbody);
     return true;
   };
@@ -814,6 +821,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
 
   function cleanup() {
     clearInterval(agoTimer);
+    document.removeEventListener("wallet", onWallet);
     dead = true;
     aborter.abort();
     if (stopSnapshot) stopSnapshot();

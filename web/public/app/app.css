@@ -368,6 +368,9 @@ h3 { font-size: 14px; font-weight: 700; }
 .sheet { width: min(640px, 100%); background: var(--card); border: 1px solid var(--line-strong); border-radius: 20px; overflow: hidden; box-shadow: 0 30px 80px rgba(0,0,0,0.6); animation: sheetIn 0.22s var(--ease); }
 @keyframes sheetIn { from { opacity: 0; transform: translateY(8px) scale(0.99); } }
 .sheet-center { align-items: center; }
+.overlay.drawer { justify-content: flex-end; align-items: stretch; padding: 0; background: rgba(0, 0, 0, 0.35); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.sheet-drawer { width: min(380px, 100%); height: 100%; border-radius: 0; border-top: 0; border-bottom: 0; border-right: 0; display: flex; flex-direction: column; justify-content: center; animation: drawerIn 0.25s var(--ease); }
+@keyframes drawerIn { from { transform: translateX(28px); opacity: 0; } }
 .sheet-sm { width: min(420px, 100%); }
 .search-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
 .search-head svg { width: 20px; height: 20px; color: var(--muted); flex: none; }

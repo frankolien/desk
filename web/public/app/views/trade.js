@@ -1,4 +1,4 @@
-import { $, $$, MARKET_LOGOS, ago, api, dirClass, esc, fmtAmount, fmtCompact, fmtPct, fmtPrice, fmtUsd, handoff, head, hydratePeople, identity, knownIdentity, logo, markets, navigate, person, poll, short } from "../app.js";
+import { $, $$, MARKET_LOGOS, ago, api, dirClass, esc, fmtAmount, fmtCompact, fmtPct, fmtPrice, fmtUsd, handoff, head, hydratePeople, connectedWallet, identity, knownIdentity, logo, markets, navigate, person, poll, short } from "../app.js";
 
 const BAR_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "1H": 3600, "4H": 14400, "1D": 86400 };
 
@@ -113,6 +113,9 @@ export default async function mount(el, params) {
   };
   document.addEventListener("marks", onMarks);
   stops.push(() => document.removeEventListener("marks", onMarks));
+  const onWallet = () => paintQuote();
+  document.addEventListener("wallet", onWallet);
+  stops.push(() => document.removeEventListener("wallet", onWallet));
 
   stops.push(poll(loadCandles, 15_000));
   stops.push(poll(loadCrowd, 30_000));
@@ -279,6 +282,7 @@ export default async function mount(el, params) {
       const lev = event.target.closest("[data-lev]");
       if (lev) { setLeverage(Number(lev.dataset.lev)); return; }
       if (event.target.closest("#td-go")) {
+        if (!connectedWallet()) { $("#connect").click(); return; }
         if (!(state.margin > 0)) { $("#td-amount", ticket).focus(); return; }
         handoff({ title: `${cap(state.side)} ${m.name} in Desk`, sub: `${sentence()}. Scan to open the order in the app and sign it with Face ID.` });
       }
@@ -324,11 +328,14 @@ export default async function mount(el, params) {
     const q = quote();
     const box = $("#td-quote", root); const line = $("#td-sentence", root); const go = $("#td-go", root);
     if (!box) return;
-    go.textContent = `${cap(state.side)} ${m.name} in Desk`;
+    const connected = Boolean(connectedWallet());
+    go.className = `btn btn-lg btn-block ${!connected ? "btn-primary" : state.side === "long" ? "btn-rise" : "btn-fall"}`;
+    go.textContent = connected ? `${cap(state.side)} ${m.name} in Desk` : "Connect wallet";
+    if (!connected) go.disabled = false;
     if (!q) {
       box.innerHTML = `<div><span>Size</span><b>—</b></div><div><span>Entry</span><b class="num">${fmtPrice(m.mark, m.priceDecimals)}</b></div><div><span>Liquidation</span><b>—</b></div><div><span>Fee</span><b class="muted">${(m.takerFee / 1e4).toFixed(3)}% taker</b></div>`;
       line.textContent = "";
-      go.disabled = true;
+      go.disabled = !connected;
       return;
     }
     go.disabled = false;
