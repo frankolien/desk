@@ -4,26 +4,85 @@
     "title": "Desk API",
     "version": "1",
     "summary": "Public, read-only data on Monad traders and wallets.",
-    "description": "Keyless and rate-limited. Every response is JSON; successes are wrapped in `{ data, meta }`, errors are RFC 9457 Problem Details. Only public inputs are accepted: addresses, never keys, seeds or signatures.",
+    "description": "Keyless and rate-limited. Every response is JSON; successes are wrapped in `{ data, meta }` (health excepted), errors are RFC 9457 Problem Details with a stable `code`. Only public inputs are accepted: addresses, never keys, seeds or signatures. Limits are per client IP over a sliding minute: 60/min on the default tier, 10/min on the expensive tier (history and wallets).",
     "license": { "name": "Read-only public data" }
   },
   "externalDocs": { "url": "https://trydesk.trade/docs" },
   "servers": [{ "url": "https://trydesk.trade" }],
+  "tags": [
+    { "name": "Traders", "description": "Perpl traders: the leaderboard and one trader's closed trades." },
+    { "name": "Identity", "description": "Names and avatars for an address." },
+    { "name": "Wallets", "description": "Holdings and the Monad ledger of a wallet." },
+    { "name": "Signals", "description": "Tokens tracked wallets are buying." },
+    { "name": "Monitoring", "description": "Health and public counters." }
+  ],
   "paths": {
     "/api/v1": {
       "get": {
         "operationId": "index",
+        "tags": ["Monitoring"],
         "summary": "Index",
-        "responses": { "200": { "description": "Routes, limits and links.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } } } } }
+        "description": "Name, version, links, rate-limit tiers and the route list. Default tier; cached 60 s.",
+        "responses": {
+          "200": {
+            "description": "Routes, limits and links.",
+            "headers": { "$ref": "#/components/headers/RateLimit" },
+            "content": {
+              "application/json": {
+                "schema": { "allOf": [{ "$ref": "#/components/schemas/Envelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Index" } } }] },
+                "example": {
+                  "data": {
+                    "name": "Desk API", "version": "1", "docs": "https://trydesk.trade/docs", "openapi": "https://trydesk.trade/openapi.json", "health": "/api/v1/health",
+                    "rateLimits": { "default": "60/min", "expensive": "10/min" },
+                    "endpoints": [{ "path": "/api/v1/traders/top", "tier": "default", "description": "Top traders on Perpl by unrealised PnL. ?limit=1..25" }]
+                  },
+                  "meta": { "asOf": "2026-09-21T03:06:42.396Z", "chain": "monad", "cached": false }
+                }
+              }
+            }
+          },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
       }
     },
     "/api/v1/traders/top": {
       "get": {
         "operationId": "topTraders",
+        "tags": ["Traders"],
         "summary": "Top traders on Perpl by unrealised PnL",
-        "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 25, "default": 25 } }],
+        "description": "Every open position on every Perpl market, summed per account and ranked by unrealised PnL. Ties and empty books are ordered by position value. Default tier; cached 30 s.",
+        "parameters": [
+          {
+            "name": "limit", "in": "query", "required": false,
+            "description": "How many traders to return, 1 to 25. Out-of-range values are clamped; anything that is not a number falls back to 25.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 25, "default": 25 },
+            "example": 5
+          }
+        ],
         "responses": {
-          "200": { "description": "Ranked traders with their open positions.", "headers": { "$ref": "#/components/headers/RateLimit" }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } } } },
+          "200": {
+            "description": "Ranked traders with their open positions.",
+            "headers": { "$ref": "#/components/headers/RateLimit" },
+            "content": {
+              "application/json": {
+                "schema": { "allOf": [{ "$ref": "#/components/schemas/Envelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/TopTraders" } } }] },
+                "example": {
+                  "data": {
+                    "observedAt": 1789960004040,
+                    "traders": [
+                      {
+                        "accountId": "3901", "address": "0x95D2602d30DA1179fd13274839e60345857ca648", "pnl": "9995.72", "balance": null,
+                        "positions": [
+                          { "market": "ETH", "marketId": 20, "side": "long", "entry": "1847.99", "mark": "2666.85", "size": "5", "collateral": "2309.98", "value": "13334.25", "pnl": "4122.97", "pnlPercent": 178.48, "leverage": 4, "entryBlock": 90179398 }
+                        ]
+                      }
+                    ]
+                  },
+                  "meta": { "asOf": "2026-09-21T03:06:44.040Z", "chain": "monad", "cached": false }
+                }
+              }
+            }
+          },
           "429": { "$ref": "#/components/responses/RateLimited" },
           "503": { "$ref": "#/components/responses/Upstream" }
         }
@@ -32,11 +91,33 @@
     "/api/v1/traders/{address}/history": {
       "get": {
         "operationId": "traderHistory",
+        "tags": ["Traders"],
         "summary": "A trader's closed trades and statistics",
-        "description": "Expensive tier: 10 requests per minute.",
+        "description": "Perpl's open, close, decrease and liquidation events folded into one record per account: win rate, profit factor, drawdown, hold time, leverage, a 0–100 score, style tags, a one-line summary and the last 20 closed trades. A wallet with no Perpl account answers `stats: null`. Expensive tier: 10 requests per minute; cached 60 s.",
         "parameters": [{ "$ref": "#/components/parameters/Address" }],
         "responses": {
-          "200": { "description": "Statistics, a one-line summary and the closed trades.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } } } },
+          "200": {
+            "description": "Statistics, a one-line summary and the closed trades.",
+            "headers": { "$ref": "#/components/headers/RateLimit" },
+            "content": {
+              "application/json": {
+                "schema": { "allOf": [{ "$ref": "#/components/schemas/Envelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/TraderHistory" } } }] },
+                "example": {
+                  "data": {
+                    "address": "0xa8805F0471c128270c49aD5B8D62111c7117c9c9", "accountId": "3679",
+                    "stats": {
+                      "trades": 1, "wins": 1, "losses": 0, "winRate": 1, "profitFactor": null, "realised": 0.48, "grossProfit": 0.48, "grossLoss": 0, "maxDrawdown": 0,
+                      "bestStreak": 1, "worstStreak": 0, "currentStreak": 1, "averageHoldSeconds": null, "averageLeverage": null, "liquidations": 0, "volume": 0, "funding": 0.23,
+                      "since": 1789248594, "lastActive": 1789248594, "bestMarket": { "symbol": "SOL", "pnl": 0.483118, "count": 1 }, "worstMarket": null, "tags": [], "score": 0
+                    },
+                    "summary": "Trader. Wins 100% of 1 closed trades, best on SOL.", "summarySource": "figures",
+                    "trades": [{ "time": 1789248594, "market": "SOL", "side": "long", "entry": null, "exit": 101.432, "pnl": 0.483118, "holdSeconds": null, "leverage": null, "liquidated": false }]
+                  },
+                  "meta": { "asOf": "2026-09-21T03:07:43.859Z", "chain": "monad", "cached": false }
+                }
+              }
+            }
+          },
           "400": { "$ref": "#/components/responses/InvalidAddress" },
           "429": { "$ref": "#/components/responses/RateLimited" },
           "503": { "$ref": "#/components/responses/Upstream" }
@@ -46,26 +127,66 @@
     "/api/v1/identity/{address}": {
       "get": {
         "operationId": "identity",
+        "tags": ["Identity"],
         "summary": "Names and avatars for an address",
-        "description": ".nad names, nad.fun profiles, ENS and Farcaster, whichever has verified the address.",
+        "description": ".nad names, nad.fun profiles, ENS and Farcaster, asked in that order; the first with a name wins `name` and `source`, and an avatar, bio or X handle it lacks is borrowed from the others. Only a Farcaster account that verified the address counts. A wallet with none answers nulls. Default tier; cached 60 s, resolved names remembered for a day.",
         "parameters": [{ "$ref": "#/components/parameters/Address" }],
         "responses": {
-          "200": { "description": "The identity record.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } } } },
+          "200": {
+            "description": "The identity record.",
+            "headers": { "$ref": "#/components/headers/RateLimit" },
+            "content": {
+              "application/json": {
+                "schema": { "allOf": [{ "$ref": "#/components/schemas/Envelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Identity" } } }] },
+                "example": {
+                  "data": { "address": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045", "name": "vitalik.eth", "source": "ens", "avatar": "https://euc.li/vitalik.eth", "bio": "hullo", "x": "VitalikButerin", "farcaster": "vitalik.eth", "perplAccount": null },
+                  "meta": { "asOf": "2026-09-21T03:06:45.121Z", "chain": "monad", "cached": false }
+                }
+              }
+            }
+          },
           "400": { "$ref": "#/components/responses/InvalidAddress" },
           "404": { "$ref": "#/components/responses/NotFound" },
-          "429": { "$ref": "#/components/responses/RateLimited" }
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Upstream" }
         }
       }
     },
     "/api/v1/wallets/{address}": {
       "get": {
         "operationId": "wallet",
+        "tags": ["Wallets"],
         "summary": "What a wallet holds and did on Monad",
-        "description": "Expensive tier: 10 requests per minute. The ledger is indexed on first sight and continued by a worker; `ledger.status` says which.",
+        "description": "Identity, holdings on every chain OKX reads, and the wallet's trade ledger on Monad with realised and unrealised PnL. An unseen wallet is indexed on the spot (up to 25 s) and continued by a worker; `ledger.status` says which. Expensive tier: 10 requests per minute; cached 60 s.",
         "parameters": [{ "$ref": "#/components/parameters/Address" }],
         "responses": {
-          "200": { "description": "Identity, holdings and the Monad ledger.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } } } },
+          "200": {
+            "description": "Identity, holdings and the Monad ledger.",
+            "headers": { "$ref": "#/components/headers/RateLimit" },
+            "content": {
+              "application/json": {
+                "schema": { "allOf": [{ "$ref": "#/components/schemas/Envelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Wallet" } } }] },
+                "example": {
+                  "data": {
+                    "address": "0x95d2602d30da1179fd13274839e60345857ca648", "observedAt": 1789960007335,
+                    "identity": { "address": "0x95d2602d30da1179fd13274839e60345857ca648", "name": null, "source": null, "avatar": null, "bio": null, "x": null, "farcaster": null, "perplAccount": "3901" },
+                    "portfolio": null, "chains": [], "held": null, "holdings": [],
+                    "ledger": {
+                      "status": "ready", "indexedAt": 1789960006791, "behind": 0, "realized": -3.868253284869727, "unrealized": 0, "value": 0, "winRate": 0.6666666666666666,
+                      "last7d": { "realized": 0, "trades": 2, "winRate": 1 }, "last30d": { "realized": -3.868253284869727, "trades": 6, "winRate": 0.6666666666666666 },
+                      "tokens": [{ "token": "0x00000000efe302beaa2b3e6e1b18d08d69a9012a", "symbol": "AUSD", "holding": 0, "unpriced": 0, "averageCost": null, "price": 1.0022532779189006, "value": 0, "realized": -3.868253284869727, "unrealized": 0 }],
+                      "trades": [{ "time": 1789797877000, "hash": "0x171fdca313496c0757fb42e093fbd2fe57fefa82367606453beb7b462adf078d", "token": "0x00000000efe302beaa2b3e6e1b18d08d69a9012a", "symbol": "AUSD", "side": "sell", "amount": 2039.77, "price": 0.9983990165892015, "value": 2036.5043620681556, "gain": 0 }]
+                    },
+                    "labels": [{ "code": "perpl", "text": "Trades perps here · Perpl #3901" }],
+                    "logos": { "143:0x00000000efe302beaa2b3e6e1b18d08d69a9012a": "https://static.oklink.com/cdn/web3/currency/token/large/143-0x00000000efe302beaa2b3e6e1b18d08d69a9012a-105/type=default_90_0?v=1789931285453" }
+                  },
+                  "meta": { "asOf": "2026-09-21T03:06:47.373Z", "chain": "monad", "cached": false }
+                }
+              }
+            }
+          },
           "400": { "$ref": "#/components/responses/InvalidAddress" },
+          "404": { "$ref": "#/components/responses/NotFound" },
           "429": { "$ref": "#/components/responses/RateLimited" },
           "503": { "$ref": "#/components/responses/Upstream" }
         }
@@ -74,11 +195,45 @@
     "/api/v1/tokens/signals": {
       "get": {
         "operationId": "tokenSignals",
+        "tags": ["Signals"],
         "summary": "Token signals from tracked wallets over a window",
-        "parameters": [{ "name": "window", "in": "query", "schema": { "type": "string", "enum": ["1h", "6h", "24h"], "default": "6h" } }],
+        "description": "Tokens that the Perpl leaderboard, followed wallets and proven tracked wallets have been buying, scored 0–100 by distinct buyers, net inflow, first-time buys and freshness, less a penalty for concentration. At least two buyers of $100+ and a score of 50 to appear; stablecoins and MON wrappers excluded; at most 25. Default tier; cached 15 s, recomputed at most once a minute.",
+        "parameters": [
+          {
+            "name": "window", "in": "query", "required": false,
+            "description": "How far back to look. Anything else is refused with `invalid_request`.",
+            "schema": { "type": "string", "enum": ["1h", "6h", "24h"], "default": "6h" },
+            "example": "6h"
+          }
+        ],
         "responses": {
-          "200": { "description": "Scored tokens for the window.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } } } },
-          "400": { "description": "Unknown window.", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } },
+          "200": {
+            "description": "Scored tokens for the window. An empty list is a real answer.",
+            "headers": { "$ref": "#/components/headers/RateLimit" },
+            "content": {
+              "application/json": {
+                "schema": { "allOf": [{ "$ref": "#/components/schemas/Envelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Signals" } } }] },
+                "examples": {
+                  "quiet": { "summary": "Captured live: nothing qualified in the window", "value": { "data": { "observedAt": 1789960007855, "window": "6h", "signals": [] }, "meta": { "asOf": "2026-09-21T03:06:47.885Z", "chain": "monad", "cached": false } } },
+                  "populated": {
+                    "summary": "One signal, in the shape the server builds",
+                    "value": {
+                      "data": {
+                        "observedAt": 1789960007855, "window": "6h",
+                        "signals": [{ "token": "0x1234567890abcdef1234567890abcdef12345678", "symbol": "CHOG", "chainIndex": "143", "score": 82, "strong": true, "summary": "3 top traders bought CHOG in the last 6 hours · +$4.2K net", "buyers": [{ "address": "0x95d2602d30da1179fd13274839e60345857ca648" }], "distinct": 3, "netUsd": 4210.5, "firstBuyShare": 0.667, "warning": null, "price": 0.0412 }]
+                      },
+                      "meta": { "asOf": "2026-09-21T03:06:47.885Z", "chain": "monad", "cached": false }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown window.",
+            "headers": { "$ref": "#/components/headers/RateLimit" },
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" }, "example": { "type": "https://trydesk.trade/docs#error-invalid_request", "title": "Invalid request", "status": 400, "detail": "window must be one of 1h, 6h, 24h.", "instance": "/api/v1/tokens/signals", "code": "invalid_request" } } }
+          },
           "429": { "$ref": "#/components/responses/RateLimited" },
           "503": { "$ref": "#/components/responses/Upstream" }
         }
@@ -87,44 +242,100 @@
     "/api/v1/health": {
       "get": {
         "operationId": "health",
+        "tags": ["Monitoring"],
         "summary": "Service health",
-        "description": "draft-inadarei-api-health-check shape. 200 on pass or warn, 503 on fail. Never cached by clients; memoised server-side for 10 seconds.",
+        "description": "draft-inadarei-api-health-check shape, not wrapped in the envelope. Probes Redis, the Monad RPC, Perpl, the indexing worker's heartbeat and the alerts cron; Redis and the worker are critical. 200 on pass or warn, 503 on fail. Sent `no-store`; memoised server-side for 10 s. Default tier.",
         "responses": {
-          "200": { "description": "Healthy or degraded.", "content": { "application/health+json": { "schema": { "$ref": "#/components/schemas/Health" } } } },
-          "503": { "description": "A critical check failed.", "content": { "application/health+json": { "schema": { "$ref": "#/components/schemas/Health" } } } }
+          "200": {
+            "description": "Healthy or degraded.",
+            "headers": { "$ref": "#/components/headers/RateLimit" },
+            "content": {
+              "application/health+json": {
+                "schema": { "$ref": "#/components/schemas/Health" },
+                "example": {
+                  "status": "warn", "version": "1", "releaseId": "", "time": "2026-09-21T03:06:48.408Z",
+                  "checks": {
+                    "redis:responseTime": [{ "status": "pass", "observedValue": 7, "observedUnit": "ms", "time": "2026-09-21T03:06:48.408Z" }],
+                    "monad-rpc:responseTime": [{ "status": "pass", "observedValue": 16, "observedUnit": "ms", "time": "2026-09-21T03:06:48.408Z", "block": 106637740 }],
+                    "perpl:responseTime": [{ "status": "pass", "observedValue": 36, "observedUnit": "ms", "time": "2026-09-21T03:06:48.408Z" }],
+                    "worker:heartbeatAge": [{ "status": "pass", "observedValue": 81, "observedUnit": "s", "time": "2026-09-21T03:06:48.408Z", "wallets": 22, "behind": 0 }],
+                    "cron:lastRunAge": [{ "status": "warn", "observedValue": 3119, "observedUnit": "s", "time": "2026-09-21T03:06:48.408Z" }]
+                  }
+                }
+              }
+            }
+          },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "description": "A critical check failed. The body is the same health document with `status: \"fail\"`.", "content": { "application/health+json": { "schema": { "$ref": "#/components/schemas/Health" } } } }
         }
       },
-      "head": { "operationId": "healthHead", "summary": "Service health, status code only", "responses": { "200": { "description": "Healthy or degraded." }, "503": { "description": "A critical check failed." } } }
+      "head": { "operationId": "healthHead", "tags": ["Monitoring"], "summary": "Service health, status code only", "responses": { "200": { "description": "Healthy or degraded." }, "503": { "description": "A critical check failed." } } }
     },
     "/api/v1/stats": {
       "get": {
         "operationId": "stats",
+        "tags": ["Monitoring"],
         "summary": "Usage counters",
-        "description": "Counts only: requests served today, tracked wallets, alert subscriptions. No addresses.",
-        "responses": { "200": { "description": "Counters.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } } } } }
+        "description": "Counts only: requests served today, tracked wallets, alert subscriptions. No addresses. Default tier; cached 30 s.",
+        "responses": {
+          "200": {
+            "description": "Counters.",
+            "headers": { "$ref": "#/components/headers/RateLimit" },
+            "content": {
+              "application/json": {
+                "schema": { "allOf": [{ "$ref": "#/components/schemas/Envelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Stats" } } }] },
+                "example": { "data": { "day": "2026-09-21", "requestsToday": 14, "trackedWallets": 22, "alertSubscriptions": 3 }, "meta": { "asOf": "2026-09-21T03:06:49.038Z", "chain": "monad", "cached": false } }
+              }
+            }
+          },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Upstream" }
+        }
       }
     }
   },
   "components": {
     "parameters": {
-      "Address": { "name": "address", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/Address" } }
+      "Address": {
+        "name": "address", "in": "path", "required": true,
+        "description": "A wallet address: 0x followed by 40 hex characters, in any case. Anything else is refused with `invalid_address` before any lookup.",
+        "schema": { "$ref": "#/components/schemas/Address" },
+        "example": "0x95d2602d30da1179fd13274839e60345857ca648"
+      }
     },
     "headers": {
       "RateLimit": {
         "X-RateLimit-Limit": { "schema": { "type": "integer" }, "description": "Requests allowed per minute on this route's tier." },
-        "X-RateLimit-Remaining": { "schema": { "type": "integer" }, "description": "Requests left in the current window." },
+        "X-RateLimit-Remaining": { "schema": { "type": "integer" }, "description": "Requests left in the current window; 0 when over." },
         "X-RateLimit-Reset": { "schema": { "type": "integer" }, "description": "Unix seconds when the window resets." }
       }
     },
     "responses": {
-      "InvalidAddress": { "description": "The address is not 0x followed by 40 hex characters.", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } },
-      "NotFound": { "description": "Nothing is known about this address.", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } },
-      "RateLimited": {
-        "description": "Over the limit for this tier.",
-        "headers": { "Retry-After": { "schema": { "type": "integer" }, "description": "Seconds until the window resets." } },
-        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+      "InvalidAddress": {
+        "description": "The address is not 0x followed by 40 hex characters.",
+        "headers": { "$ref": "#/components/headers/RateLimit" },
+        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" }, "example": { "type": "https://trydesk.trade/docs#error-invalid_address", "title": "Invalid address", "status": 400, "detail": "Addresses are 0x followed by 40 hex characters.", "instance": "/api/v1/identity/nope", "code": "invalid_address" } } }
       },
-      "Upstream": { "description": "Monad, Perpl or Redis could not be read.", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+      "NotFound": {
+        "description": "The address is valid but the route has nothing for it. Reserved; in practice a record of nulls is answered instead.",
+        "headers": { "$ref": "#/components/headers/RateLimit" },
+        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" }, "example": { "type": "https://trydesk.trade/docs#error-not_found", "title": "Not found", "status": 404, "detail": "Nothing is known about this address.", "instance": "/api/v1/identity/0x0000000000000000000000000000000000000001", "code": "not_found" } } }
+      },
+      "RateLimited": {
+        "description": "Over the limit for this tier. Wait `Retry-After` seconds, then retry once.",
+        "headers": {
+          "Retry-After": { "schema": { "type": "integer" }, "description": "Whole seconds until the window resets." },
+          "X-RateLimit-Limit": { "schema": { "type": "integer" }, "description": "Requests allowed per minute on this route's tier." },
+          "X-RateLimit-Remaining": { "schema": { "type": "integer" }, "description": "Always 0 on a 429." },
+          "X-RateLimit-Reset": { "schema": { "type": "integer" }, "description": "Unix seconds when the window resets." }
+        },
+        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" }, "example": { "type": "https://trydesk.trade/docs#error-rate_limited", "title": "Too many requests", "status": 429, "detail": "Limit is 10 requests per minute for this route. Try again in 35s.", "instance": "/api/v1/traders/0x95d2602d30da1179fd13274839e60345857ca648/history", "code": "rate_limited" } } }
+      },
+      "Upstream": {
+        "description": "Monad, Perpl, HyperSync or the store could not be read in time. Retry with backoff.",
+        "headers": { "$ref": "#/components/headers/RateLimit" },
+        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" }, "example": { "type": "https://trydesk.trade/docs#error-upstream_unavailable", "title": "Upstream unavailable", "status": 503, "detail": "Perpl mainnet could not be read right now.", "instance": "/api/v1/traders/top", "code": "upstream_unavailable" } } }
+      }
     },
     "schemas": {
       "Address": { "type": "string", "pattern": "^0x[0-9a-fA-F]{40}$", "examples": ["0x95d2602d30da1179fd13274839e60345857ca648"] },
@@ -137,24 +348,257 @@
             "type": "object",
             "required": ["asOf", "chain", "cached"],
             "properties": {
-              "asOf": { "type": "string", "format": "date-time" },
+              "asOf": { "type": "string", "format": "date-time", "description": "When the server produced the answer." },
               "chain": { "type": "string", "const": "monad" },
-              "cached": { "type": "boolean" }
+              "cached": { "type": "boolean", "description": "True when served from the server's own memo rather than a fresh read." }
             }
           }
         }
       },
       "Problem": {
         "type": "object",
-        "description": "RFC 9457 Problem Details with a stable `code`.",
+        "description": "RFC 9457 Problem Details with a stable `code`. Served as application/problem+json with Cache-Control: no-store.",
         "required": ["type", "title", "status", "detail", "instance", "code"],
         "properties": {
-          "type": { "type": "string", "format": "uri" },
+          "type": { "type": "string", "format": "uri", "description": "https://trydesk.trade/docs#error-{code}" },
           "title": { "type": "string" },
           "status": { "type": "integer" },
-          "detail": { "type": "string" },
-          "instance": { "type": "string" },
+          "detail": { "type": "string", "description": "Written for people; may change." },
+          "instance": { "type": "string", "description": "The request path." },
           "code": { "type": "string", "enum": ["invalid_address", "invalid_request", "not_found", "method_not_allowed", "rate_limited", "upstream_unavailable", "unknown_route"] }
+        }
+      },
+      "Index": {
+        "type": "object",
+        "required": ["name", "version", "docs", "openapi", "health", "rateLimits", "endpoints"],
+        "properties": {
+          "name": { "type": "string", "const": "Desk API" },
+          "version": { "type": "string", "const": "1" },
+          "docs": { "type": "string", "format": "uri" },
+          "openapi": { "type": "string", "format": "uri" },
+          "health": { "type": "string" },
+          "rateLimits": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Tier name to \"N/min\"." },
+          "endpoints": { "type": "array", "items": { "type": "object", "required": ["path", "tier", "description"], "properties": { "path": { "type": "string" }, "tier": { "type": "string", "enum": ["default", "expensive"] }, "description": { "type": "string" } } } }
+        }
+      },
+      "Position": {
+        "type": "object",
+        "required": ["market", "marketId", "side", "entry", "mark", "size", "collateral", "value", "pnl", "pnlPercent", "leverage", "entryBlock"],
+        "properties": {
+          "market": { "type": "string", "description": "Market symbol, e.g. BTC." },
+          "marketId": { "type": "integer", "description": "Perpl's numeric perp id." },
+          "side": { "type": "string", "enum": ["long", "short"] },
+          "entry": { "type": "string", "description": "Average entry price, decimal string." },
+          "mark": { "type": "string", "description": "Current mark price, decimal string." },
+          "size": { "type": "string", "description": "Position size in the base asset, decimal string." },
+          "collateral": { "type": "string", "description": "Collateral posted, 2 decimals." },
+          "value": { "type": "string", "description": "Notional at mark: size × mark, 2 decimals." },
+          "pnl": { "type": "string", "description": "Unrealised PnL, 2 decimals." },
+          "pnlPercent": { "type": ["number", "null"], "description": "pnl / collateral × 100." },
+          "leverage": { "type": ["number", "null"], "description": "Entry notional over collateral, one decimal." },
+          "entryBlock": { "type": "integer", "description": "Monad block the position was opened at." }
+        }
+      },
+      "Trader": {
+        "type": "object",
+        "required": ["accountId", "address", "pnl", "balance", "positions"],
+        "properties": {
+          "accountId": { "type": "string", "description": "Perpl account id, decimal string." },
+          "address": { "type": "string", "description": "Owning wallet, EIP-55 checksummed." },
+          "pnl": { "type": "string", "description": "Unrealised PnL across open positions, 2 decimals." },
+          "balance": { "type": ["string", "null"], "description": "Always null on the leaderboard." },
+          "positions": { "type": "array", "items": { "$ref": "#/components/schemas/Position" }, "description": "Largest value first." }
+        }
+      },
+      "TopTraders": {
+        "type": "object",
+        "required": ["observedAt", "traders"],
+        "properties": {
+          "observedAt": { "type": "integer", "description": "Unix milliseconds when the book was scanned." },
+          "traders": { "type": "array", "items": { "$ref": "#/components/schemas/Trader" }, "description": "Highest pnl first; at most `limit`." }
+        }
+      },
+      "MarketPnl": {
+        "type": "object",
+        "required": ["symbol", "pnl", "count"],
+        "properties": { "symbol": { "type": "string" }, "pnl": { "type": "number" }, "count": { "type": "integer" } }
+      },
+      "TraderStats": {
+        "type": "object",
+        "required": ["trades", "wins", "losses", "winRate", "profitFactor", "realised", "grossProfit", "grossLoss", "maxDrawdown", "bestStreak", "worstStreak", "currentStreak", "averageHoldSeconds", "averageLeverage", "liquidations", "volume", "funding", "since", "lastActive", "bestMarket", "worstMarket", "tags", "score"],
+        "properties": {
+          "trades": { "type": "integer", "description": "Closed round trips." },
+          "wins": { "type": "integer" },
+          "losses": { "type": "integer" },
+          "winRate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+          "profitFactor": { "type": ["number", "null"], "description": "grossProfit / grossLoss; null with profits and no losses, 0 with neither." },
+          "realised": { "type": "number", "description": "Cumulative realised PnL, partial closes included." },
+          "grossProfit": { "type": "number" },
+          "grossLoss": { "type": "number", "description": "Non-negative." },
+          "maxDrawdown": { "type": "number", "description": "Largest peak-to-trough fall in cumulative realised PnL." },
+          "bestStreak": { "type": "integer" },
+          "worstStreak": { "type": "integer", "description": "Longest losing run, as a positive count." },
+          "currentStreak": { "type": "integer", "description": "Negative while losing." },
+          "averageHoldSeconds": { "type": ["number", "null"] },
+          "averageLeverage": { "type": ["number", "null"] },
+          "liquidations": { "type": "integer" },
+          "volume": { "type": "number", "description": "Notional opened, USD." },
+          "funding": { "type": "number", "description": "Net funding across closes." },
+          "since": { "type": ["integer", "null"], "description": "Unix seconds of the first event seen." },
+          "lastActive": { "type": ["integer", "null"], "description": "Unix seconds of the last event seen." },
+          "bestMarket": { "oneOf": [{ "$ref": "#/components/schemas/MarketPnl" }, { "type": "null" }] },
+          "worstMarket": { "oneOf": [{ "$ref": "#/components/schemas/MarketPnl" }, { "type": "null" }] },
+          "tags": { "type": "array", "items": { "type": "string" }, "description": "Scalper, Day trader, Swing trader, High leverage, Low leverage, <SYM> specialist, Long-biased, Short-biased, Liquidated once, Liquidated N×." },
+          "score": { "type": ["integer", "null"], "minimum": 0, "maximum": 100 }
+        }
+      },
+      "ClosedTrade": {
+        "type": "object",
+        "required": ["time", "market", "side", "entry", "exit", "pnl", "holdSeconds", "leverage", "liquidated"],
+        "properties": {
+          "time": { "type": "integer", "description": "Unix seconds the round trip closed." },
+          "market": { "type": "string" },
+          "side": { "type": "string", "enum": ["long", "short"] },
+          "entry": { "type": ["number", "null"] },
+          "exit": { "type": ["number", "null"] },
+          "pnl": { "type": "number", "description": "Realised PnL for the whole round trip." },
+          "holdSeconds": { "type": ["number", "null"] },
+          "leverage": { "type": ["number", "null"] },
+          "liquidated": { "type": "boolean" }
+        }
+      },
+      "TraderHistory": {
+        "type": "object",
+        "required": ["address", "stats", "trades"],
+        "properties": {
+          "address": { "type": "string", "description": "As given in the path." },
+          "accountId": { "type": "string", "description": "Perpl account id; absent when the wallet has no account." },
+          "stats": { "oneOf": [{ "$ref": "#/components/schemas/TraderStats" }, { "type": "null" }], "description": "null with no account or no indexed record." },
+          "summary": { "type": "string", "description": "One or two sentences built from the figures." },
+          "summarySource": { "type": "string", "enum": ["ai", "figures"] },
+          "trades": { "type": "array", "items": { "$ref": "#/components/schemas/ClosedTrade" }, "description": "Newest first, at most 20." }
+        }
+      },
+      "Identity": {
+        "type": "object",
+        "required": ["address", "name", "source", "avatar", "bio", "x", "farcaster", "perplAccount"],
+        "properties": {
+          "address": { "type": "string", "description": "Lowercased." },
+          "name": { "type": ["string", "null"] },
+          "source": { "type": ["string", "null"], "enum": ["nad", "nadfun", "ens", "farcaster", null], "description": "Which source supplied the name." },
+          "avatar": { "type": ["string", "null"], "description": "Picture URL." },
+          "bio": { "type": ["string", "null"] },
+          "x": { "type": ["string", "null"], "description": "X handle without the @, from the ENS com.twitter record." },
+          "farcaster": { "type": ["string", "null"], "description": "Username of the Farcaster account that verified the address." },
+          "perplAccount": { "type": ["string", "null"], "description": "Perpl account id when the wallet has one." }
+        }
+      },
+      "Holding": {
+        "type": "object",
+        "required": ["chainIndex", "chain", "contract", "symbol", "balance", "value"],
+        "properties": {
+          "chainIndex": { "type": "string", "description": "OKX chain index; Monad is \"143\"." },
+          "chain": { "type": ["string", "null"] },
+          "contract": { "type": "string", "description": "Lowercased; \"\" for the native coin." },
+          "symbol": { "type": "string" },
+          "balance": { "type": "number" },
+          "value": { "type": ["number", "null"], "description": "USD, or null when unpriced." }
+        }
+      },
+      "LedgerWindow": {
+        "type": "object",
+        "required": ["realized", "trades", "winRate"],
+        "properties": { "realized": { "type": "number" }, "trades": { "type": "integer" }, "winRate": { "type": ["number", "null"] } }
+      },
+      "LedgerToken": {
+        "type": "object",
+        "required": ["token", "symbol", "holding", "unpriced", "averageCost", "price", "value", "realized", "unrealized"],
+        "properties": {
+          "token": { "type": "string", "description": "Contract, lowercased." },
+          "symbol": { "type": ["string", "null"] },
+          "holding": { "type": "number", "description": "Units held." },
+          "unpriced": { "type": "number", "description": "Units acquired without a known cost." },
+          "averageCost": { "type": ["number", "null"], "description": "USD per unit." },
+          "price": { "type": ["number", "null"], "description": "Current USD per unit." },
+          "value": { "type": ["number", "null"] },
+          "realized": { "type": "number" },
+          "unrealized": { "type": ["number", "null"] }
+        }
+      },
+      "LedgerTrade": {
+        "type": "object",
+        "required": ["time", "hash", "token", "symbol", "side", "amount", "price", "value", "gain"],
+        "properties": {
+          "time": { "type": "integer", "description": "Unix milliseconds." },
+          "hash": { "type": "string", "description": "Transaction hash." },
+          "token": { "type": "string" },
+          "symbol": { "type": ["string", "null"] },
+          "side": { "type": "string", "enum": ["buy", "sell"] },
+          "amount": { "type": "number", "description": "Units." },
+          "price": { "type": ["number", "null"], "description": "USD per unit." },
+          "value": { "type": ["number", "null"], "description": "USD." },
+          "gain": { "type": ["number", "null"], "description": "Realised USD on a sell; null on a buy." }
+        }
+      },
+      "Ledger": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "type": "string", "enum": ["ready", "indexing", "unavailable"], "description": "ready at the chain tip; indexing while the worker catches up; unavailable when it could not be read, with only detail and behind alongside." },
+          "detail": { "type": "string", "description": "Only when unavailable." },
+          "indexedAt": { "type": "integer", "description": "Unix milliseconds of the last index pass." },
+          "behind": { "type": ["integer", "null"], "description": "Blocks between the ledger and the chain tip." },
+          "realized": { "type": "number" },
+          "unrealized": { "type": "number" },
+          "value": { "type": "number", "description": "USD value of tracked tokens at current prices." },
+          "winRate": { "type": ["number", "null"] },
+          "last7d": { "$ref": "#/components/schemas/LedgerWindow" },
+          "last30d": { "$ref": "#/components/schemas/LedgerWindow" },
+          "tokens": { "type": "array", "items": { "$ref": "#/components/schemas/LedgerToken" } },
+          "trades": { "type": "array", "items": { "$ref": "#/components/schemas/LedgerTrade" }, "description": "Newest first, at most 60." }
+        }
+      },
+      "Wallet": {
+        "type": "object",
+        "required": ["address", "observedAt", "identity", "portfolio", "chains", "held", "holdings", "ledger", "labels", "logos"],
+        "properties": {
+          "address": { "type": "string", "description": "Lowercased." },
+          "observedAt": { "type": "integer", "description": "Unix milliseconds." },
+          "identity": { "oneOf": [{ "$ref": "#/components/schemas/Identity" }, { "type": "null" }] },
+          "portfolio": { "type": ["number", "null"], "description": "USD across priced holdings on every chain." },
+          "chains": { "type": "array", "items": { "type": "object", "required": ["chainIndex", "chain", "value"], "properties": { "chainIndex": { "type": "string" }, "chain": { "type": ["string", "null"] }, "value": { "type": "number" } } } },
+          "held": { "type": "null", "description": "Always null on this route." },
+          "holdings": { "type": "array", "items": { "$ref": "#/components/schemas/Holding" }, "description": "Largest value first; risk-flagged tokens removed." },
+          "ledger": { "$ref": "#/components/schemas/Ledger" },
+          "labels": { "type": "array", "items": { "type": "object", "required": ["code", "text"], "properties": { "code": { "type": "string", "enum": ["bot", "contract", "top", "perpl", "fresh"] }, "text": { "type": "string" } } } },
+          "logos": { "type": "object", "additionalProperties": { "type": "string", "format": "uri" }, "description": "Keyed \"chainIndex:contract\"; the native coin is \"143:\"." }
+        }
+      },
+      "Signal": {
+        "type": "object",
+        "required": ["token", "symbol", "chainIndex", "score", "strong", "summary", "buyers", "distinct", "netUsd", "firstBuyShare", "warning", "price"],
+        "properties": {
+          "token": { "type": "string", "description": "Contract on Monad, lowercased." },
+          "symbol": { "type": ["string", "null"] },
+          "chainIndex": { "type": "string", "const": "143" },
+          "score": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "strong": { "type": "boolean", "description": "score >= 75." },
+          "summary": { "type": "string" },
+          "buyers": { "type": "array", "maxItems": 3, "items": { "type": "object", "required": ["address"], "properties": { "address": { "type": "string" } } }, "description": "Biggest buyer first." },
+          "distinct": { "type": "integer", "description": "Qualified wallets that bought." },
+          "netUsd": { "type": "number", "description": "Buys minus sells over the window." },
+          "firstBuyShare": { "type": "number", "minimum": 0, "maximum": 1 },
+          "warning": { "type": ["string", "null"], "description": "Set when one wallet is over 70% of the inflow." },
+          "price": { "type": ["number", "null"] }
+        }
+      },
+      "Signals": {
+        "type": "object",
+        "required": ["observedAt", "window", "signals"],
+        "properties": {
+          "observedAt": { "type": "integer", "description": "Unix milliseconds." },
+          "window": { "type": "string", "enum": ["1h", "6h", "24h"] },
+          "signals": { "type": "array", "maxItems": 25, "items": { "$ref": "#/components/schemas/Signal" } }
         }
       },
       "Check": {
@@ -165,16 +609,19 @@
           "observedValue": { "type": ["number", "null"] },
           "observedUnit": { "type": "string", "enum": ["ms", "s"] },
           "time": { "type": "string", "format": "date-time" },
-          "output": { "type": "string" }
+          "output": { "type": "string", "description": "Why the probe failed." },
+          "block": { "type": "integer", "description": "monad-rpc only: latest block." },
+          "wallets": { "type": ["integer", "null"], "description": "worker only: wallets tracked." },
+          "behind": { "type": ["integer", "null"], "description": "worker only: blocks behind the tip." }
         }
       },
       "Health": {
         "type": "object",
         "required": ["status", "version", "checks"],
         "properties": {
-          "status": { "type": "string", "enum": ["pass", "warn", "fail"] },
+          "status": { "type": "string", "enum": ["pass", "warn", "fail"], "description": "fail if Redis or the worker fails; warn if anything else is not passing." },
           "version": { "type": "string" },
-          "releaseId": { "type": ["string", "null"] },
+          "releaseId": { "type": ["string", "null"], "description": "Short git commit of the deployment." },
           "time": { "type": "string", "format": "date-time" },
           "checks": {
             "type": "object",
@@ -186,6 +633,16 @@
               "cron:lastRunAge": { "type": "array", "items": { "$ref": "#/components/schemas/Check" } }
             }
           }
+        }
+      },
+      "Stats": {
+        "type": "object",
+        "required": ["day", "requestsToday", "trackedWallets", "alertSubscriptions"],
+        "properties": {
+          "day": { "type": "string", "format": "date", "description": "UTC day the counter belongs to." },
+          "requestsToday": { "type": "integer" },
+          "trackedWallets": { "type": "integer" },
+          "alertSubscriptions": { "type": "integer" }
         }
       }
     }
