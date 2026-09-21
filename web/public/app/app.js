@@ -149,7 +149,8 @@ const hue = (text) => [...String(text)].reduce((h, c) => (h * 31 + c.charCodeAt(
 export function logo(url, label, size = 32, { square = false } = {}) {
   const initials = esc(String(label ?? "?").replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase() || "?");
   const bg = `hsl(${hue(label)} 22% 18%)`;
-  const img = url ? `<img src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : "";
+  // Token art is often a transparent PNG, so the initials must go once it has loaded.
+  const img = url ? `<img src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onload="this.previousElementSibling.hidden=true" onerror="this.remove()">` : "";
   return `<span class="logo logo-${size}${square ? " sq" : ""}" style="background:${bg}"><span style="position:absolute">${initials}</span>${img}</span>`;
 }
 

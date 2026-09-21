@@ -538,7 +538,7 @@ export default async function mount(el, params) {
     const layer = $("#td-faces", root); if (!layer) return;
     layer.innerHTML = state.faces.map((f, i) => {
       const id = knownIdentity(f.address);
-      const face = id?.avatar ? `<img src="${esc(id.avatar)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : "";
+      const face = id?.avatar ? `<img src="${esc(id.avatar)}" alt="" referrerpolicy="no-referrer" onload="this.previousElementSibling.hidden=true" onerror="this.remove()">` : "";
       const hue = [...f.address.toLowerCase()].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7);
       return `<div class="td-face ${f.side}" data-face="${i}" style="background:linear-gradient(135deg,hsl(${hue} 60% 45%),hsl(${(hue + 40) % 360} 60% 30%));display:none"><span>${esc((id?.name ?? f.address.slice(2, 4)).slice(0, 2).toUpperCase())}</span>${face}</div>`;
     }).join("") + `<div class="td-tip" id="td-tip" hidden></div>`;
