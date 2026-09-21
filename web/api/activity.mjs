@@ -21,6 +21,7 @@ const COUNTERPARTIES = {
 };
 
 const validAddress = (value) => /^0x[a-fA-F0-9]{40}$/.test(value);
+const validSolana = (value) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
 
 export function formatUnits(raw, decimals) {
   if (!/^\d+$/.test(String(raw ?? "")) || !Number.isInteger(decimals) || decimals < 0) return null;
@@ -82,7 +83,7 @@ export function createHandler(fetchImpl = fetch, key = () => process.env.ETHERSC
     const address = String(req.query.address || "");
 
     if (req.query.view === "wallet") {
-      if (!validAddress(address)) return res.status(400).json({ error: "A wallet address is required." });
+      if (!validAddress(address) && !validSolana(address)) return res.status(400).json({ error: "A wallet address is required." });
       try {
         const body = await wallet(address, {
           chainIndex: String(req.query.chainIndex || "143"), contract: String(req.query.contract || ""), store, fetchImpl,

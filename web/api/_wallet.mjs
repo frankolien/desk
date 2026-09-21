@@ -31,7 +31,9 @@ export function describeWallet(rows, contract) {
       assets.push({
         chainIndex: String(asset?.chainIndex ?? ""),
         chain: CHAINS[String(asset?.chainIndex ?? "")]?.name ?? null,
-        contract: String(asset?.tokenContractAddress ?? asset?.tokenAddress ?? "").toLowerCase(),
+        contract: String(asset?.chainIndex) === "501"
+          ? String(asset?.tokenContractAddress ?? asset?.tokenAddress ?? "")
+          : String(asset?.tokenContractAddress ?? asset?.tokenAddress ?? "").toLowerCase(),
         symbol: String(asset?.symbol ?? "").trim() || "?",
         balance,
         value: price == null ? null : balance * price,
@@ -39,7 +41,7 @@ export function describeWallet(rows, contract) {
     }
   }
   assets.sort((a, b) => (b.value ?? -1) - (a.value ?? -1));
-  const held = assets.find((asset) => asset.contract === wanted) ?? null;
+  const held = assets.find((asset) => asset.contract.toLowerCase() === wanted) ?? null;
   const priced = assets.filter((asset) => asset.value != null);
   const byChain = new Map();
   for (const asset of priced) byChain.set(asset.chainIndex, (byChain.get(asset.chainIndex) ?? 0) + asset.value);
@@ -87,7 +89,7 @@ export async function logosFor(items, { store = null, search = okxGet } = {}) {
     if (item.contract === "" && NATIVE_LOGOS[item.chainIndex]) logos[`${item.chainIndex}:`] = NATIVE_LOGOS[item.chainIndex];
   }
   const wanted = [...new Map(items
-    .filter((item) => /^0x[0-9a-f]{40}$/.test(item.contract) && /^\d+$/.test(item.chainIndex))
+    .filter((item) => (/^0x[0-9a-f]{40}$/.test(item.contract) || (item.chainIndex === "501" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(item.contract))) && /^\d+$/.test(item.chainIndex))
     .map((item) => [`${item.chainIndex}:${item.contract}`, item])).values()].slice(0, 24);
   if (!wanted.length || !okxConfigured()) return logos;
   const keys = wanted.map((item) => `logo3:${item.chainIndex}:${item.contract}`);
@@ -98,8 +100,10 @@ export async function logosFor(items, { store = null, search = okxGet } = {}) {
     let url = "";
     try {
       const rows = await search("/api/v6/dex/market/token/search", { chains: item.chainIndex, search: item.contract, limit: "3" });
-      const row = (Array.isArray(rows) ? rows : []).find((candidate) =>
-        String(candidate.tokenContractAddress ?? "").toLowerCase() === item.contract) ?? (Array.isArray(rows) ? rows[0] : null);
+      const same = (candidate) => item.chainIndex === "501"
+        ? String(candidate.tokenContractAddress ?? "") === item.contract
+        : String(candidate.tokenContractAddress ?? "").toLowerCase() === item.contract;
+      const row = (Array.isArray(rows) ? rows : []).find(same) ?? (Array.isArray(rows) ? rows[0] : null);
       url = String(row?.tokenLogoUrl ?? "");
     } catch { /* drawn from the symbol instead */ }
     // Search by symbol finds what search by contract does not, as long as the contract agrees.

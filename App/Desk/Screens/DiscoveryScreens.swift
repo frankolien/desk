@@ -352,7 +352,7 @@ struct MarketSearchScreen: View {
                 while discovery.trending.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
                 if arguments.contains("-wallet-demo") {
                     // A Monad token, so the holder opened has a ledger to show.
-                    var monad = discovery.trending.first { $0.chainIndex == "143" }
+                    var monad = discovery.trending.first { $0.chainIndex == (arguments.contains("-wallet-solana") ? "501" : "143") }
                     if monad == nil {
                         await discovery.search("0x5e49e1f85813f2b65858860a3fa231b4186f2e0e")
                         monad = discovery.searchResults.first { $0.chainIndex == "143" }
@@ -2157,12 +2157,14 @@ private struct WalletProfileScreen: View {
 
     private func logo(_ chainIndex: String, _ contract: String) -> URL? {
         if chainIndex == token.chainIndex, contract.caseInsensitiveCompare(token.contract) == .orderedSame, let own = token.artworkURL { return own }
-        return (resource?.logos?["\(chainIndex):\(contract.lowercased())"]).flatMap(TokenArtwork.url)
+        let key = chainIndex == "501" ? contract : contract.lowercased()
+        return (resource?.logos?["\(chainIndex):\(key)"]).flatMap(TokenArtwork.url)
     }
 
     private var identity: Identity? { IdentityDirectory.shared.identity(for: wallet.address) }
     private var tracked: TrackedWallet? { TrackedWallets.shared.wallet(for: wallet.address) }
     private var isEVM: Bool { wallet.address.hasPrefix("0x") && wallet.address.count == 42 }
+    private var isSolana: Bool { !wallet.address.hasPrefix("0x") && (32...44).contains(wallet.address.count) }
     private var ledger: WalletResource.Ledger? { resource.map(\.ledger).flatMap { $0.status == "unavailable" ? nil : $0 } }
     private var name: String {
         if let name = identity?.name { return name }
@@ -2385,7 +2387,7 @@ private struct WalletProfileScreen: View {
     @ViewBuilder
     private var content: some View {
         let rows = rows(for: tab)
-        if resource == nil, !resourceFailed, isEVM, rows.isEmpty {
+        if resource == nil, !resourceFailed, isEVM || isSolana, rows.isEmpty {
             VStack(spacing: 0) {
                 ForEach(0..<3, id: \.self) { _ in
                     HStack(spacing: 14) {
@@ -2505,7 +2507,7 @@ private struct WalletProfileScreen: View {
     }
 
     private func loadResource() async {
-        guard isEVM else { resourceFailed = true; return }
+        guard isEVM || isSolana else { resourceFailed = true; return }
         var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/activity")!
         components.queryItems = [
             URLQueryItem(name: "view", value: "wallet"),

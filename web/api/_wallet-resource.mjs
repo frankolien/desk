@@ -19,21 +19,24 @@ const INDEX_BUDGET_MS = 25_000;
 const MAX_TRACKED = 2_000;
 
 export async function walletResource(address, { chainIndex = MONAD, contract = "", store, fetchImpl = fetch, chain = null, ens = null, hypersync = hypersyncClient(), now = Date.now } = {}) {
-  const wanted = address.toLowerCase();
+  // A Solana address is case-sensitive base58 and lives on one chain; names and the
+  // ledger are Monad things and do not apply.
+  const solana = !address.startsWith("0x");
+  const wanted = solana ? address : address.toLowerCase();
   const chains = Object.keys(CHAINS).filter((index) => CHAINS[index].rpc !== null && index !== "501");
 
   const [identities, balances] = await Promise.all([
-    resolveIdentities([wanted], { fetchImpl, chain, store, ens }).catch(() => ({})),
-    balancesAcross(wanted, chains, chainIndex),
+    solana ? {} : resolveIdentities([wanted], { fetchImpl, chain, store, ens }).catch(() => ({})),
+    solana ? walletBalances(wanted, ["501"]).catch(() => null) : balancesAcross(wanted, chains, chainIndex),
   ]);
   const identity = identities[wanted] ?? null;
   const wallet = balances ? describeWallet(balances, contract) : { portfolio: null, chains: [], held: null, holdings: [] };
   if (contract) {
-    const match = wallet.holdings.find((row) => row.chainIndex === chainIndex && row.contract === contract.toLowerCase());
+    const match = wallet.holdings.find((row) => row.chainIndex === chainIndex && row.contract.toLowerCase() === contract.toLowerCase());
     wallet.held = match ? { balance: match.balance, value: match.value } : null;
   }
 
-  const ledger = await monadLedger(wanted, { store, hypersync, now });
+  const ledger = solana ? { status: "unavailable" } : await monadLedger(wanted, { store, hypersync, now });
   const labels = walletLabels({ identity, ledger, holdings: wallet.holdings, now: now() });
   const logos = await logosFor([
     ...wallet.holdings.map((row) => ({ chainIndex: row.chainIndex, contract: row.contract, symbol: row.symbol })),
