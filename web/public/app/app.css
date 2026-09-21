@@ -400,6 +400,17 @@ h3 { font-size: 14px; font-weight: 700; }
 .toast small { color: var(--muted); font-size: 11px; }
 .toast .amt { margin-left: auto; font-family: var(--mono); font-weight: 600; }
 
+/* ── Charts ───────────────────────────────────────────── */
+
+.chart-legend { position: absolute; left: 12px; top: 10px; z-index: 4; pointer-events: none; font-size: 12px; color: #b2b5be; white-space: nowrap; }
+.chart-legend b { color: var(--text); font-weight: 600; }
+.chart-legend span { margin-left: 8px; font-family: var(--rounded); font-variant-numeric: tabular-nums; }
+.chart-legend span i { font-style: normal; margin: 0 6px 0 2px; }
+.chart-legend .up { color: #26a69a; } .chart-legend .down { color: #ef5350; }
+.chart-countdown { position: absolute; right: 0; z-index: 4; pointer-events: none; padding: 1px 6px 2px; font-size: 11px; font-family: var(--rounded); font-variant-numeric: tabular-nums; color: #fff; background: #26a69a; border-radius: 0 0 3px 3px; }
+.chart-countdown.down { background: #ef5350; }
+@media (max-width: 720px) { .chart-legend span { display: none; } }
+
 /* ── Wallet ───────────────────────────────────────────── */
 
 .top-actions { position: relative; }

@@ -241,6 +241,65 @@ export function sparkline(values, { width = 96, height = 28, up = null } = {}) {
   </svg>`;
 }
 
+// ── Charts, drawn the way TradingView draws them ────────
+
+export const CANDLE_UP = "#26a69a";
+export const CANDLE_DOWN = "#ef5350";
+
+export function chartOptions(LW, extra = {}) {
+  return {
+    layout: { background: { type: "solid", color: "transparent" }, textColor: "#b2b5be", fontFamily: getComputedStyle(document.body).fontFamily, fontSize: 12 },
+    grid: { vertLines: { color: "rgba(255,255,255,0.07)", style: LW.LineStyle.Dotted }, horzLines: { color: "rgba(255,255,255,0.07)", style: LW.LineStyle.Dotted } },
+    rightPriceScale: { borderColor: "rgba(255,255,255,0.12)", scaleMargins: { top: 0.1, bottom: 0.24 }, entireTextOnly: true },
+    timeScale: { borderColor: "rgba(255,255,255,0.12)", timeVisible: true, secondsVisible: false, rightOffset: 6, barSpacing: 8, minBarSpacing: 2 },
+    crosshair: { mode: LW.CrosshairMode.Normal, vertLine: { color: "rgba(255,255,255,0.45)", width: 1, style: LW.LineStyle.Dashed, labelBackgroundColor: "#363a45" }, horzLine: { color: "rgba(255,255,255,0.45)", width: 1, style: LW.LineStyle.Dashed, labelBackgroundColor: "#363a45" } },
+    handleScale: { axisPressedMouseMove: true },
+    ...extra,
+  };
+}
+
+export const candleOptions = (extra = {}) => ({ upColor: CANDLE_UP, downColor: CANDLE_DOWN, borderUpColor: CANDLE_UP, borderDownColor: CANDLE_DOWN, wickUpColor: CANDLE_UP, wickDownColor: CANDLE_DOWN, ...extra });
+export const volumeColor = (up) => (up ? "rgba(38,166,154,0.4)" : "rgba(239,83,80,0.4)");
+
+/// The line TradingView writes over the chart: name, bar, and the candle under the
+/// cursor (or the last one) as O H L C with the change.
+export function chartLegend(host, { title, bar, format }) {
+  const el = document.createElement("div");
+  el.className = "chart-legend";
+  host.appendChild(el);
+  return {
+    update(candle, previous, barLabel = bar) {
+      if (!candle) { el.innerHTML = `<b>${esc(title)}</b> · ${esc(barLabel)} · Desk`; return; }
+      const ref = previous?.close ?? candle.open;
+      const delta = candle.close - ref;
+      const pct = ref ? delta / ref : 0;
+      const tone = candle.close >= candle.open ? "up" : "down";
+      el.innerHTML = `<b>${esc(title)}</b> · ${esc(barLabel)} · Desk <span class="${tone}">O<i>${format(candle.open)}</i> H<i>${format(candle.high)}</i> L<i>${format(candle.low)}</i> C<i>${format(candle.close)}</i> ${delta >= 0 ? "+" : "−"}${format(Math.abs(delta))} (${fmtPct(pct)})</span>`;
+    },
+    remove() { el.remove(); },
+  };
+}
+
+/// The clock to the current bar's close, hung under the last-price label.
+export function chartCountdown(host, { barSeconds, y }) {
+  const el = document.createElement("div");
+  el.className = "chart-countdown";
+  host.appendChild(el);
+  const tick = () => {
+    const seconds = barSeconds();
+    const left = seconds - (Math.floor(Date.now() / 1000) % seconds);
+    const h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60), s = left % 60;
+    el.textContent = seconds >= 3600 ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    const top = y();
+    if (top == null) { el.hidden = true; return; }
+    el.hidden = false;
+    el.style.top = `${top + 11}px`;
+  };
+  tick();
+  const timer = setInterval(tick, 1000);
+  return { tick, remove() { clearInterval(timer); el.remove(); } };
+}
+
 // ── Toasts and the hand-off sheet ───────────────────────
 
 export function toast({ logoHTML = "", title, sub = "", amount = "", ttl = 6000 }) {

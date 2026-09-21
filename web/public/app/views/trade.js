@@ -1,4 +1,4 @@
-import { $, $$, MARKET_LOGOS, ago, api, dirClass, esc, fmtAmount, fmtCompact, fmtPct, fmtPrice, fmtUsd, handoff, head, hydratePeople, connectedWallet, identity, knownIdentity, logo, markets, navigate, person, poll, short } from "../app.js";
+import { $, $$, MARKET_LOGOS, ago, api, dirClass, esc, fmtAmount, fmtCompact, fmtPct, fmtPrice, fmtUsd, handoff, head, hydratePeople, connectedWallet, chartOptions, candleOptions, volumeColor, chartLegend, chartCountdown, identity, knownIdentity, logo, markets, navigate, person, poll, short } from "../app.js";
 
 const BAR_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "1H": 3600, "4H": 14400, "1D": 86400 };
 
@@ -57,7 +57,7 @@ const CSS = `
 .td-live .halo { transform-box: fill-box; transform-origin: center; animation: tdHalo 1.6s ease-out infinite; }
 @keyframes tdHalo { from { transform: scale(1); opacity: .5; } to { transform: scale(2.2); opacity: 0; } }
 .td-faces { position: absolute; inset: 0; pointer-events: none; z-index: 3; overflow: hidden; }
-.td-face { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; overflow: hidden; pointer-events: auto; cursor: pointer; box-shadow: 0 0 0 2px var(--ring), 0 0 0 3px #000; background: var(--chip); transition: transform .12s var(--ease); }
+.td-face { position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; overflow: hidden; pointer-events: auto; cursor: pointer; box-shadow: 0 0 0 2px var(--ring), 0 0 0 3px #000; background: var(--chip); transition: transform .12s var(--ease); }
 .td-face:hover { transform: scale(1.25); z-index: 2; }
 .td-face img { width: 100%; height: 100%; object-fit: cover; }
 .td-face span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: 800; color: #fff; }
@@ -77,7 +77,7 @@ export default async function mount(el, params) {
   const state = {
     market: null, rows: [], bar: "15m", side: "long", margin: 0, leverage: 3, tab: "crowd",
     chart: null, series: null, volume: null, markLine: null, crowd: null, top: null, watched: watched(), lastBar: null,
-    ring: [], lastCandle: null, faces: [], showFaces: localStorage.getItem("desk.web.chartfaces") !== "off",
+    ring: [], lastCandle: null, candles: [], legend: null, countdown: null, faces: [], showFaces: localStorage.getItem("desk.web.chartfaces") !== "off",
   };
 
   let rows = markets();
@@ -462,17 +462,20 @@ export default async function mount(el, params) {
   function buildChart() {
     const host = $("#td-lw", root);
     if (!window.LightweightCharts || !host) return;
-    const chart = LightweightCharts.createChart(host, {
-      layout: { background: { type: "solid", color: "transparent" }, textColor: "#8a8a92", fontFamily: "Manrope, ui-sans-serif, system-ui", fontSize: 11 },
-      grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
-      rightPriceScale: { borderColor: "rgba(255,255,255,0.08)", scaleMargins: { top: 0.08, bottom: 0.22 } },
-      timeScale: { borderColor: "rgba(255,255,255,0.08)", timeVisible: true, secondsVisible: false, rightOffset: 4 },
-      crosshair: { mode: 0, vertLine: { color: "rgba(255,255,255,0.2)", labelBackgroundColor: "#222" }, horzLine: { color: "rgba(255,255,255,0.2)", labelBackgroundColor: "#222" } },
-      handleScroll: true, handleScale: true,
+    const LW = LightweightCharts;
+    const chart = LW.createChart(host, chartOptions(LW));
+    const series = chart.addCandlestickSeries(candleOptions({ priceFormat: { type: "price", precision: state.market.priceDecimals, minMove: 10 ** -state.market.priceDecimals } }));
+    const volume = chart.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "", lastValueVisible: false, priceLineVisible: false });
+    volume.priceScale().applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
+    const fmt = (v) => fmtPrice(v, state.market.priceDecimals);
+    state.legend = chartLegend(host.parentElement, { title: `${state.market.name} / AUSD · PERP`, bar: state.bar, format: fmt });
+    state.countdown = chartCountdown(host.parentElement, { barSeconds: () => BAR_SECONDS[state.bar] ?? 900, y: () => { const c = state.lastCandle; const y = c ? series.priceToCoordinate(c.close) : null; return y == null || y < 0 ? null : y; } });
+    stops.push(() => state.countdown.remove());
+    chart.subscribeCrosshairMove((param) => {
+      const hit = param?.seriesData?.get(series);
+      const i = hit ? state.candles.findIndex((c) => c.time === hit.time) : -1;
+      state.legend.update(i >= 0 ? state.candles[i] : state.lastCandle, i >= 0 ? state.candles[i - 1] : state.candles[state.candles.length - 2], state.bar);
     });
-    const series = chart.addCandlestickSeries({ upColor: "#2fd67b", downColor: "#ff5c5c", borderVisible: false, wickUpColor: "#2fd67b", wickDownColor: "#ff5c5c", priceFormat: { type: "price", precision: state.market.priceDecimals, minMove: 10 ** -state.market.priceDecimals } });
-    const volume = chart.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "", color: "rgba(255,255,255,0.12)" });
-    volume.priceScale().applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
     state.markLine = series.createPriceLine({ price: state.market.mark, color: "#836ef9", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "mark" });
     chart.timeScale().subscribeVisibleLogicalRangeChange(() => placeFaces());
     const observer = new ResizeObserver(() => { chart.applyOptions({ width: host.clientWidth, height: host.clientHeight }); placeFaces(); });
@@ -490,7 +493,8 @@ export default async function mount(el, params) {
     if (!rows.length) return;
     if (reset || state.lastBar !== state.bar) {
       state.series.setData(rows.map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
-      state.volume.setData(rows.map((c) => ({ time: c.time, value: c.volume, color: c.close >= c.open ? "rgba(47,214,123,0.28)" : "rgba(255,92,92,0.28)" })));
+      state.volume.setData(rows.map((c) => ({ time: c.time, value: c.volume, color: volumeColor(c.close >= c.open) })));
+      state.chart.timeScale().applyOptions({ barSpacing: Math.min(12, Math.max(4, ($("#td-lw", root)?.clientWidth ?? 800) / (rows.length + 8))) });
       state.chart.timeScale().scrollToRealTime();
       state.lastBar = state.bar;
       if (!state.ring.length) state.ring = rows.slice(-30).map((c) => c.close);
@@ -498,10 +502,13 @@ export default async function mount(el, params) {
     } else {
       for (const c of rows.slice(-3)) {
         state.series.update({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close });
-        state.volume.update({ time: c.time, value: c.volume, color: c.close >= c.open ? "rgba(47,214,123,0.28)" : "rgba(255,92,92,0.28)" });
+        state.volume.update({ time: c.time, value: c.volume, color: volumeColor(c.close >= c.open) });
       }
     }
+    state.candles = rows;
     state.lastCandle = { ...rows[rows.length - 1] };
+    state.legend?.update(state.lastCandle, rows[rows.length - 2], state.bar);
+    state.countdown?.tick();
     placeFaces();
   }
 
@@ -515,7 +522,10 @@ export default async function mount(el, params) {
     if (slot > c.time) c = { time: slot, open: c.close, high: c.close, low: c.close, close: c.close, volume: 0 };
     c = { ...c, close: mark, high: Math.max(c.high, mark), low: Math.min(c.low, mark) };
     state.lastCandle = c;
+    if (state.candles.length && state.candles[state.candles.length - 1].time === c.time) state.candles[state.candles.length - 1] = c; else if (slot > (state.candles[state.candles.length - 1]?.time ?? 0)) state.candles.push(c);
     try { state.series.update({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }); } catch { /* older than the series' last bar */ }
+    state.legend?.update(c, state.candles[state.candles.length - 2], state.bar);
+    state.countdown?.tick();
   }
 
   function paintSpark() {
@@ -541,7 +551,7 @@ export default async function mount(el, params) {
     state.faces = state.top.flatMap((t) => t.positions.filter((p) => p.market === m.name).map((p) => ({
       address: t.address, side: p.side, leverage: p.leverage, entry: Number(p.entry), value: p.value, pnl: p.pnl, pnlPercent: p.pnlPercent,
       time: Math.floor((h.time - (h.block - p.entryBlock) * h.blockMs) / 1000),
-    }))).filter((f) => Number.isFinite(f.time) && f.entry > 0).slice(0, 40);
+    }))).filter((f) => Number.isFinite(f.time) && f.entry > 0).sort((a, b) => Number(b.value) - Number(a.value)).slice(0, 12);
     const layer = $("#td-faces", root); if (!layer) return;
     layer.innerHTML = state.faces.map((f, i) => {
       const id = knownIdentity(f.address);
@@ -577,7 +587,7 @@ export default async function mount(el, params) {
       if (x == null || y == null || x < 0) { el.style.display = "none"; continue; }
       const key = `${slot}:${f.side}`;
       const n = stacks.get(key) ?? 0; stacks.set(key, n + 1);
-      if (n >= 4) { el.style.display = "none"; continue; }
+      if (n >= 2) { el.style.display = "none"; continue; }
       el.style.display = "";
       el.style.left = `${x.toFixed(1)}px`;
       el.style.top = `${(y + (f.side === "long" ? -1 : 1) * (14 + n * 9)).toFixed(1)}px`;

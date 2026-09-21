@@ -6,7 +6,7 @@ const TOKENS = {
   SOL: { chainIndex: "501", address: "So11111111111111111111111111111111111111112", instrument: "SOL-USDT" },
   PUMP: { chainIndex: "501", address: "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn", instrument: "PUMP-USDT" },
 };
-const PERIODS = new Set(["1s", "1m", "3m", "5m", "15m", "30m", "1H", "4H"]);
+const PERIODS = new Set(["1s", "1m", "3m", "5m", "15m", "30m", "1H", "4H", "1D"]);
 
 async function signedGet(path, params) {
   const query = new URLSearchParams(params).toString();

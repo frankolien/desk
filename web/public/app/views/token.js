@@ -1,4 +1,4 @@
-import { $, $$, esc, api, poll, fmtUsd, fmtSmall, fmtCompact, fmtPct, fmtAmount, short, ago, dirClass, logo, nativeLogo, person, hydratePeople, handoff, identity, knownIdentity, navigate, connectedWallet } from "../app.js";
+import { $, $$, esc, api, poll, fmtUsd, fmtSmall, fmtCompact, fmtPct, fmtAmount, short, ago, dirClass, logo, nativeLogo, person, hydratePeople, handoff, identity, knownIdentity, navigate, connectedWallet, chartOptions, candleOptions, volumeColor, chartLegend, chartCountdown } from "../app.js";
 
 const STYLE = `<style>
 .tk-tx { display: inline-flex; color: var(--muted); } .tk-tx:hover { color: var(--text); } .tk-tx svg { width: 13px; height: 13px; }
@@ -77,8 +77,8 @@ const STYLE = `<style>
 @media (max-width: 720px) { .tk-stats { margin-left: 0; gap: 14px; } .tk-chart { height: 320px; } }
 </style>`;
 
-const BARS = ["1m", "5m", "15m", "1H", "4H"];
-const BAR_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "1H": 3600, "4H": 14400 };
+const BARS = ["1m", "5m", "15m", "1H", "4H", "1D"];
+const BAR_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "1H": 3600, "4H": 14400, "1D": 86400 };
 const WINDOWS = [["5m", 5 * 60e3], ["15m", 15 * 60e3], ["1h", 3600e3], ["24h", 86400e3]];
 const TABS = [["trades", "Trades"], ["holders", "Holders"], ["traders", "Traders"], ["bundlers", "Bundlers"], ["snipers", "Snipers"], ["insiders", "Insiders"]];
 const EARLY_TABS = ["bundlers", "snipers", "insiders"];
@@ -87,8 +87,8 @@ const EARLY_RETRIES = 5;
 const RISK_LABEL = { low: "Low risk", caution: "Caution", high: "High risk", unchecked: "Not checked" };
 const WATCH_KEY = "desk.web.watch";
 const FACES_KEY = "desk.web.chartfaces";
-const FACES_MAX = 60;
-const STACK_MAX = 4;
+const FACES_MAX = 12;
+const STACK_MAX = 2;
 
 const num = (value) => { const n = Number(value); return value === "" || value == null || !Number.isFinite(n) ? null : n; };
 const first = (...values) => values.find((v) => v != null) ?? null;
@@ -349,28 +349,29 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   const factor = () => (scale === "mc" && supply != null ? supply : 1);
   const priceFormatter = (v) => (scale === "mc" ? `$${fmtCompact(v)}` : price < 0.01 ? `$${fmtSmall(v)}` : `$${v.toLocaleString("en-US", { minimumFractionDigits: precisionFor(price), maximumFractionDigits: precisionFor(price) })}`);
   const toPoint = (c) => ({ time: c.time, open: c.open * factor(), high: c.high * factor(), low: c.low * factor(), close: c.close * factor() });
-  const toVolume = (c) => ({ time: c.time, value: c.volUsd, color: c.close >= c.open ? "rgba(47,214,123,0.35)" : "rgba(255,92,92,0.35)" });
+  const toVolume = (c) => ({ time: c.time, value: c.volUsd, color: volumeColor(c.close >= c.open) });
   // Lightweight Charts labels the axis in UTC, so times are shifted to read as local.
   const tzShift = -new Date().getTimezoneOffset() * 60;
   const barTime = (at) => Math.floor(at / 1000 / BAR_SECONDS[bar]) * BAR_SECONDS[bar] + tzShift;
   const parseCandles = (rows) => (rows ?? []).map((c) => ({ time: Math.floor(Number(c[0]) / 1000) + tzShift, open: Number(c[1]), high: Number(c[2]), low: Number(c[3]), close: Number(c[4]), volUsd: Number(c[6] ?? c[5]) })).filter((c) => Number.isFinite(c.time) && Number.isFinite(c.close)).sort((a, b) => a.time - b.time).filter((c, i, all) => !i || c.time !== all[i - 1].time);
 
+  let legend = null;
+  let countdown = null;
+  let framed = false;
   const ensureChart = () => {
     if (chart || !window.LightweightCharts) return;
     const LW = window.LightweightCharts;
-    chart = LW.createChart(chartEl, {
-      width: chartEl.clientWidth, height: chartEl.clientHeight,
-      layout: { background: { type: "solid", color: "transparent" }, textColor: "#8a8a92", fontFamily: getComputedStyle(document.body).fontFamily, fontSize: 11 },
-      grid: { vertLines: { color: "rgba(255,255,255,0.05)" }, horzLines: { color: "rgba(255,255,255,0.05)" } },
-      rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.08, bottom: 0.22 } },
-      timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false, rightOffset: 4 },
-      crosshair: { mode: LW.CrosshairMode.Normal, vertLine: { color: "rgba(255,255,255,0.2)", labelBackgroundColor: "#222" }, horzLine: { color: "rgba(255,255,255,0.2)", labelBackgroundColor: "#222" } },
-      localization: { priceFormatter },
-      handleScale: { axisPressedMouseMove: true },
-    });
-    candleSeries = chart.addCandlestickSeries({ upColor: "#2fd67b", downColor: "#ff5c5c", borderVisible: false, wickUpColor: "#2fd67b", wickDownColor: "#ff5c5c", priceFormat: { type: "custom", minMove: 10 ** -precisionFor(price), formatter: priceFormatter } });
+    chart = LW.createChart(chartEl, chartOptions(LW, { width: chartEl.clientWidth, height: chartEl.clientHeight, localization: { priceFormatter } }));
+    candleSeries = chart.addCandlestickSeries(candleOptions({ priceFormat: { type: "custom", minMove: 10 ** -precisionFor(price), formatter: priceFormatter } }));
     volumeSeries = chart.addHistogramSeries({ priceScaleId: "", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false });
-    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
+    legend = chartLegend(chartEl, { title: `${symbol} / USD`, bar, format: (v) => priceFormatter(v).replace(/^\$/, "") });
+    countdown = chartCountdown(chartEl, { barSeconds: () => BAR_SECONDS[bar], y: () => { const last = candles[candles.length - 1]; const y = last ? candleSeries.priceToCoordinate(last.close * factor()) : null; return y == null || y < 0 ? null : y; } });
+    chart.subscribeCrosshairMove((param) => {
+      const hit = param?.seriesData?.get(candleSeries);
+      const i = hit ? candles.findIndex((c) => c.time === hit.time) : -1;
+      legend.update(i >= 0 ? candles[i] : candles[candles.length - 1], i >= 0 ? candles[i - 1] : candles[candles.length - 2], bar);
+    });
     chart.timeScale().subscribeVisibleTimeRangeChange(schedulePlace);
     chart.timeScale().subscribeVisibleLogicalRangeChange(schedulePlace);
     observer = new ResizeObserver(() => { if (chart) { chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight }); schedulePlace(); } });
@@ -385,7 +386,10 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     chart.applyOptions({ localization: { priceFormatter } });
     candleSeries.setData(candles.map(toPoint));
     volumeSeries.setData(candles.map(toVolume));
-    chart.timeScale().fitContent();
+    // Bars keep TradingView's spacing rather than stretching a thin tape across the pane.
+    if (!framed) { chart.timeScale().applyOptions({ barSpacing: Math.min(12, Math.max(4, chartEl.clientWidth / (candles.length + 8))) }); chart.timeScale().scrollToRealTime(); framed = true; }
+    legend?.update(candles[candles.length - 1], candles[candles.length - 2], bar);
+    countdown?.tick();
     chartEl.querySelector(".empty")?.remove();
     if (!candles.length) chartEl.insertAdjacentHTML("beforeend", `<div class="empty">No candles yet.</div>`);
     buildFaces();
@@ -415,6 +419,8 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
       last.low = Math.min(last.low, p);
     }
     candleSeries.update(toPoint(last));
+    legend?.update(last, candles[candles.length - 2], bar);
+    countdown?.tick();
     schedulePlace();
   };
 
@@ -481,7 +487,9 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     faceNodes = [];
     if (!facesOn || !chart) { hideTip(); return; }
     const groups = new Map();
-    for (const t of trades.slice(0, FACES_MAX)) {
+    // The biggest trades on the tape, not all of them: the chart stays readable.
+    const biggest = [...trades.slice(0, 60)].sort((a, b) => (num(b.volume) ?? 0) - (num(a.volume) ?? 0)).slice(0, FACES_MAX);
+    for (const t of biggest) {
       const at = Number(t.time);
       const p = num(t.price);
       if (!Number.isFinite(at) || p == null) continue;
@@ -821,6 +829,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
 
   function cleanup() {
     clearInterval(agoTimer);
+    countdown?.remove();
     document.removeEventListener("wallet", onWallet);
     dead = true;
     aborter.abort();
