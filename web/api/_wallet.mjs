@@ -1,5 +1,7 @@
 import { CHAINS, EVM_NATIVE_ADDRESS, rpcEndpoint } from "./_chains.mjs";
 import { NATIVE } from "./_ledger.mjs";
+import { getAddress } from "viem";
+
 import { okxConfigured, okxGet, okxPost } from "./_okx.mjs";
 
 /// What a wallet holds, what its tokens are, and what they were worth at a given
@@ -52,13 +54,43 @@ export function describeWallet(rows, contract) {
 
 /// Artwork for tokens the balance API names but does not picture: one search per
 /// token, remembered for a month. Native tokens are drawn from the app's own catalog.
+const TRUST_WALLET_CHAINS = {
+  "1": "ethereum", "10": "optimism", "56": "smartchain", "137": "polygon", "8453": "base", "42161": "arbitrum",
+  "43114": "avalanchec", "59144": "linea", "534352": "scroll", "5000": "mantle", "146": "sonic",
+};
+const NATIVE_LOGOS = {
+  "1": "https://assets.coingecko.com/coins/images/279/large/ethereum.png",
+  "10": "https://assets.coingecko.com/coins/images/279/large/ethereum.png",
+  "8453": "https://assets.coingecko.com/coins/images/279/large/ethereum.png",
+  "42161": "https://assets.coingecko.com/coins/images/279/large/ethereum.png",
+  "56": "https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png",
+  "137": "https://assets.coingecko.com/coins/images/32440/large/polygon.png",
+  "43114": "https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite_Trans.png",
+  "143": "https://coin-images.coingecko.com/coins/images/38909/large/monad.png",
+};
+
+async function exists(url) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2_500);
+    const response = await fetch(url, { method: "HEAD", signal: controller.signal });
+    clearTimeout(timer);
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function logosFor(items, { store = null, search = okxGet } = {}) {
+  const logos = {};
+  for (const item of items) {
+    if (item.contract === "" && NATIVE_LOGOS[item.chainIndex]) logos[`${item.chainIndex}:`] = NATIVE_LOGOS[item.chainIndex];
+  }
   const wanted = [...new Map(items
     .filter((item) => /^0x[0-9a-f]{40}$/.test(item.contract) && /^\d+$/.test(item.chainIndex))
     .map((item) => [`${item.chainIndex}:${item.contract}`, item])).values()].slice(0, 24);
-  const logos = {};
   if (!wanted.length || !okxConfigured()) return logos;
-  const keys = wanted.map((item) => `logo:${item.chainIndex}:${item.contract}`);
+  const keys = wanted.map((item) => `logo3:${item.chainIndex}:${item.contract}`);
   const cached = store ? await store.mget(keys).catch(() => keys.map(() => null)) : keys.map(() => null);
   await Promise.all(wanted.map(async (item, index) => {
     const id = `${item.chainIndex}:${item.contract}`;
@@ -70,6 +102,22 @@ export async function logosFor(items, { store = null, search = okxGet } = {}) {
         String(candidate.tokenContractAddress ?? "").toLowerCase() === item.contract) ?? (Array.isArray(rows) ? rows[0] : null);
       url = String(row?.tokenLogoUrl ?? "");
     } catch { /* drawn from the symbol instead */ }
+    // Search by symbol finds what search by contract does not, as long as the contract agrees.
+    if (!url && item.symbol) {
+      try {
+        const rows = await search("/api/v6/dex/market/token/search", { chains: item.chainIndex, search: item.symbol, limit: "10" });
+        const row = (Array.isArray(rows) ? rows : []).find((candidate) =>
+          String(candidate.tokenContractAddress ?? "").toLowerCase() === item.contract);
+        url = String(row?.tokenLogoUrl ?? "");
+      } catch { /* next source */ }
+    }
+    // Trust Wallet's asset list pictures the established tokens OKX's search skips.
+    if (!url && TRUST_WALLET_CHAINS[item.chainIndex]) {
+      try {
+        const candidate = `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${TRUST_WALLET_CHAINS[item.chainIndex]}/assets/${getAddress(item.contract)}/logo.png`;
+        if (await exists(candidate)) url = candidate;
+      } catch { /* not a valid address for a checksum */ }
+    }
     // OKX's search does not index most Monad tokens; nad.fun pictures the ones it launched.
     if (!url && item.chainIndex === "143") {
       try {

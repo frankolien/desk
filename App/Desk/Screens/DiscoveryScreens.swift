@@ -2147,7 +2147,8 @@ private struct WalletProfileScreen: View {
     }
 
     private func logo(_ chainIndex: String, _ contract: String) -> URL? {
-        (resource?.logos?["\(chainIndex):\(contract.lowercased())"]).flatMap(TokenArtwork.url)
+        if chainIndex == token.chainIndex, contract.caseInsensitiveCompare(token.contract) == .orderedSame, let own = token.artworkURL { return own }
+        return (resource?.logos?["\(chainIndex):\(contract.lowercased())"]).flatMap(TokenArtwork.url)
     }
 
     private var identity: Identity? { IdentityDirectory.shared.identity(for: wallet.address) }

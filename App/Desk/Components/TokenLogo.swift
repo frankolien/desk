@@ -57,7 +57,7 @@ enum TokenArtwork {
     /// Checked against what the feed actually serves — the trending list's artwork comes
     /// from static.oklink.com, and an allow-list written from the API's name alone would
     /// have quietly removed every logo on the screen.
-    private static let hosts = ["coingecko.com", "oklink.com", "okx.com", "coinall.ltd", "nadapp.net"]
+    private static let hosts = ["coingecko.com", "oklink.com", "okx.com", "coinall.ltd", "nadapp.net", "raw.githubusercontent.com"]
 
     static func url(_ text: String?) -> URL? {
         guard let text, let url = URL(string: text), url.scheme?.lowercased() == "https",

@@ -36,8 +36,9 @@ export async function walletResource(address, { chainIndex = MONAD, contract = "
   const ledger = await monadLedger(wanted, { store, hypersync, now });
   const labels = walletLabels({ identity, ledger, holdings: wallet.holdings, now: now() });
   const logos = await logosFor([
-    ...wallet.holdings.map((row) => ({ chainIndex: row.chainIndex, contract: row.contract })),
-    ...(ledger.tokens ?? []).map((row) => ({ chainIndex: MONAD, contract: row.token })),
+    ...wallet.holdings.map((row) => ({ chainIndex: row.chainIndex, contract: row.contract, symbol: row.symbol })),
+    ...(wallet.holdings.some((row) => row.contract === "") ? [{ chainIndex: "143", contract: "" }] : []),
+    ...(ledger.tokens ?? []).map((row) => ({ chainIndex: MONAD, contract: row.token, symbol: row.symbol })),
   ], { store });
   return { address: wanted, observedAt: now(), identity, ...wallet, ledger, labels, logos };
 }
