@@ -103,7 +103,7 @@ export function assessToken({
   return { level, reasons: reasons.map(({ code, text, severity }) => ({ code, text, severity })), facts, checkedAt: now };
 }
 
-async function nadfunToken(address, fetchImpl) {
+export async function nadfunToken(address, fetchImpl) {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3_000);

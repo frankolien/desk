@@ -96,3 +96,25 @@ test("the public API serves markets and candles", async () => {
   const badBar = await call(handler, "markets/BTC/candles", { bar: "2m" });
   assert.equal(badBar.status, 400);
 });
+
+test("the head and block time come from the stamps, and marks are read off the contract", async () => {
+  const context = {
+    chain: { gas: { at: { b: 1000, t: 1_000_300 } } },
+    markets: [{ ...BTC, config: { ...BTC.config, at: { b: 0, t: 700_000 } }, state: { ...BTC.state, at: { b: 1000, t: 1_000_000 } } }],
+    tokens: [{ symbol: "AUSD" }],
+  };
+  const out = describeMarkets(context);
+  assert.deepEqual(out.head, { block: 1000, time: 1_000_300, blockMs: 300 });
+
+  const fetchImpl = async () => ({ ok: true, json: async () => context });
+  const source = createMarkets({ fetchImpl, now: () => 5, readMark: async (id) => (id === 1 ? 812345 : null) });
+  const marks = await source.marks();
+  assert.deepEqual(marks, { at: 5, marks: { BTC: 81234.5 } });
+
+  const markets = { context: async () => out, marks: () => source.marks(), candles: async () => [], hasInstrument: () => false };
+  const handler = createHandler({ store: memoryStore(), markets, now: () => 5 });
+  const live = await call(handler, "markets/marks");
+  assert.equal(live.status, 200);
+  assert.equal(live.body.data.marks.BTC, 81234.5);
+  assert.match(live.headers["Cache-Control"], /s-maxage=2/);
+});

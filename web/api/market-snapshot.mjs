@@ -53,15 +53,16 @@ export default async function handler(req, res) {
   const validChain = /^\d{1,10}$/.test(chainIndex);
   const validAddress = /^0x[a-fA-F0-9]{40}$/.test(address) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
   if (!PERIODS.has(bar) || !validChain || !validAddress) return res.status(400).json({ error: "Unsupported market" });
+  const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit ?? "60"), 10) || 60));
   try {
     const common = { chainIndex, tokenContractAddress: address };
     const [candles, trades] = await Promise.all([
       known && known.chainIndex === chainIndex && known.address.toLowerCase() === address.toLowerCase()
         ? exchangeCandles(known.instrument, bar)
         : dexCandles(common, bar),
-      signedGet("/api/v6/dex/market/trades", { ...common, limit: "60" }),
+      signedGet("/api/v6/dex/market/trades", { ...common, limit: String(limit) }),
     ]);
-    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Cache-Control", "public, s-maxage=3, stale-while-revalidate=10");
     return res.status(200).json({ symbol, chainIndex, address, bar, observedAt: Date.now(), candles, trades });
   } catch (error) {
     return res.status(502).json({ error: error.message });

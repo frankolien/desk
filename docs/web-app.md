@@ -78,3 +78,26 @@ web/public/app/
 
 No build step. Same-origin fetches only, so the page's CSP allows no outside script or
 connection; token images come from the CDNs the app already trusts.
+
+## Live
+
+Neither venue sells a socket the web can use: OKX's DEX websocket needs a paid market
+subscription and Perpl's trading socket is sign-in only. So the page polls, and the CDN
+answers most of it:
+
+| What | Source | Every |
+|---|---|---|
+| Perp marks (ticker, Trade page, Live 10s sparks) | `/api/v1/markets/marks`, read off the exchange contract, 2 s CDN cache | 2 s |
+| Spot prices for a table or a token | `/api/token-details?view=prices&tokens=…` (one OKX call for 20 tokens, 3 s cache) | 4 s |
+| A token's tape | `/api/market-snapshot?…&limit=100`, 3 s cache | 5 s |
+| Candles | `/api/v1/markets/{m}/candles`, `/api/market-snapshot` | 15 s, with the last bar following ticks in between |
+
+Faces on charts: the Token page draws the last 60 trades at their price and bar, buys
+ringed green and sells red, with the trader's name and face where one is known; the
+Trade page draws the top traders' entries the same way, entry blocks turned into times
+with the head block and block time from `/api/v1/markets`.
+
+Who got in first: `/api/token-details?view=early` reads a Monad token's launch from
+HyperSync — snipers (first 20 buyers within 200 blocks), bundles (three or more wallets
+funded from one sender in one block), insiders (the creator and everyone it sent tokens
+to) — with what each still holds. Contracts (curve, pool, lockers) are filtered out.

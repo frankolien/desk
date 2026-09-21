@@ -325,7 +325,9 @@ window.addEventListener("popstate", render);
 // ── Ticker ──────────────────────────────────────────────
 
 let marketsNow = [];
+let headNow = null;
 export const markets = () => marketsNow;
+export const head = () => headNow;
 
 function paintTicker(rows) {
   const run = $("#ticker-run");
@@ -346,6 +348,7 @@ function startTicker() {
       const rows = out.markets ?? [];
       const previous = new Map(marketsNow.map((m) => [m.name, m.mark]));
       marketsNow = rows;
+      headNow = out.head ?? headNow;
       if (!painted) { paintTicker(rows); painted = true; }
       else {
         for (const m of rows) {
@@ -364,6 +367,26 @@ function startTicker() {
       $("#ticker-dot").className = "dot amber";
     }
   }, 10_000);
+  // Marks come off the exchange contract every two seconds; the list above only every ten.
+  poll(async () => {
+    if (!marketsNow.length) return;
+    const out = await api("/api/v1/markets/marks");
+    const marks = out?.marks ?? {};
+    for (const m of marketsNow) {
+      const mark = marks[m.name];
+      if (mark == null || mark === m.mark) continue;
+      const was = m.mark;
+      m.mark = mark;
+      m.change = m.prev > 0 ? (mark - m.prev) / m.prev : m.change;
+      for (const el of $$(`[data-mark="${m.name}"]`, $("#ticker-run"))) {
+        el.textContent = fmtPrice(mark, m.priceDecimals);
+        el.classList.remove("flash-up", "flash-down"); void el.offsetWidth; el.classList.add(mark > was ? "flash-up" : "flash-down");
+        const change = el.nextElementSibling;
+        if (change) { change.textContent = fmtPct(m.change); change.className = `num ${dirClass(m.change)}`; }
+      }
+    }
+    document.dispatchEvent(new CustomEvent("marks", { detail: { marks, at: out?.at ?? Date.now() } }));
+  }, 2_000);
 }
 
 // ── Search ──────────────────────────────────────────────

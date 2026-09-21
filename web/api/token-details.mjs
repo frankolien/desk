@@ -1,6 +1,7 @@
 import { okxGet, okxPost } from "./_okx.mjs";
 import { handleHoldings } from "./_holdings.mjs";
 import { handleRisk } from "./_risk.mjs";
+import { handleEarly } from "./_early.mjs";
 
 const TOKENS = {
   BTC: { chainIndex: "1", address: "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599" },
@@ -9,10 +10,36 @@ const TOKENS = {
   PUMP: { chainIndex: "501", address: "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn" },
 };
 
+const TOKEN_ID = /^(\d{1,10}):(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/;
+const PRICE_BATCH = 20;
+const number = (value) => { const n = Number(value); return Number.isFinite(n) ? n : null; };
+
+/// One OKX call for a whole table: `?view=prices&tokens=chain:addr,chain:addr` (up to 20).
+async function handlePrices(req, res) {
+  const ids = [...new Set(String(req.query.tokens ?? "").split(",").map((v) => v.trim()).filter(Boolean))].slice(0, PRICE_BATCH);
+  const parsed = ids.map((id) => TOKEN_ID.exec(id)).filter(Boolean).map((m) => ({ chainIndex: m[1], tokenContractAddress: m[2] }));
+  if (!parsed.length) return res.status(400).json({ error: "tokens must be chain:address pairs." });
+  try {
+    const rows = await okxPost("/api/v6/dex/market/price-info", parsed);
+    const prices = (Array.isArray(rows) ? rows : []).map((row) => ({
+      chainIndex: String(row.chainIndex ?? ""), contract: String(row.tokenContractAddress ?? ""),
+      price: number(row.price), change5m: number(row.priceChange5M), change1h: number(row.priceChange1H), change24h: number(row.priceChange24H),
+      volume24H: number(row.volume24H), marketCap: number(row.marketCap), liquidity: number(row.liquidity), holders: number(row.holders),
+      txs5m: number(row.txs5M), time: number(row.time),
+    }));
+    res.setHeader("Cache-Control", "public, s-maxage=3, stale-while-revalidate=10");
+    return res.status(200).json({ observedAt: Date.now(), prices });
+  } catch (error) {
+    return res.status(502).json({ error: error.message });
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
   if (req.query.view === "holdings") return handleHoldings(req, res);
   if (req.query.view === "risk") return handleRisk(req, res);
+  if (req.query.view === "early") return handleEarly(req, res);
+  if (req.query.view === "prices") return handlePrices(req, res);
   // The worker on Railway prices trades through here, so OKX's key stays on Vercel.
   if (req.query.view === "candle") {
     const secret = process.env.CRON_SECRET;

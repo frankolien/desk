@@ -1,4 +1,4 @@
-import { $, $$, esc, api, poll, fmtUsd, fmtSmall, fmtCompact, fmtPct, fmtAmount, short, ago, dirClass, logo, nativeLogo, person, hydratePeople, handoff } from "../app.js";
+import { $, $$, esc, api, poll, fmtUsd, fmtSmall, fmtCompact, fmtPct, fmtAmount, short, ago, dirClass, logo, nativeLogo, person, hydratePeople, handoff, identity, knownIdentity, navigate } from "../app.js";
 
 const STYLE = `<style>
 .tk-back { margin-bottom: 12px; }
@@ -24,8 +24,31 @@ const STYLE = `<style>
 .tk-main, .tk-side { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; min-width: 0; }
 .tk-main > .card, .tk-side > .card { min-width: 0; }
 .tk-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.tk-toolbar .row { gap: 8px; }
+.tk-toolbar .chip { height: 26px; padding: 0 10px; }
 .tk-chart { height: 420px; position: relative; }
 .tk-chart .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.tk-faces { position: absolute; inset: 0; z-index: 5; pointer-events: none; overflow: hidden; }
+.tk-face { position: absolute; display: inline-flex; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; pointer-events: auto; box-shadow: 0 0 0 2px var(--rise), 0 0 0 3px #000; transition: transform 0.12s var(--ease); }
+.tk-face.sell { box-shadow: 0 0 0 2px var(--fall), 0 0 0 3px #000; }
+.tk-face .logo { width: 20px; height: 20px; font-size: 8px; color: #fff; }
+.tk-face:hover { transform: scale(1.3); z-index: 1; }
+.tk-more { position: absolute; margin: -7px 0 0 -10px; height: 14px; padding: 0 5px; border-radius: 7px; background: var(--chip); color: var(--text-2); font-family: var(--rounded); font-size: 9px; font-weight: 800; line-height: 14px; box-shadow: 0 0 0 1px #000; }
+.tk-tip { position: absolute; z-index: 6; pointer-events: none; padding: 8px 10px; background: #141414; border-color: var(--line-strong); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); font-size: 12px; line-height: 1.4; white-space: nowrap; }
+.tk-tip small { display: block; font-size: 11px; color: var(--muted); }
+.tk .tabs { overflow-x: auto; scrollbar-width: none; }
+.tk .tabs::-webkit-scrollbar { display: none; }
+.tk .tabs button { white-space: nowrap; }
+.tk-n { margin-left: 5px; font-family: var(--rounded); font-style: normal; font-size: 11px; font-weight: 700; color: var(--faint); font-variant-numeric: tabular-nums; }
+.tk-n:empty { display: none; }
+.tk-tabhead { display: flex; align-items: center; gap: 12px; padding: 10px 16px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.tk-line { padding: 24px 16px; text-align: center; color: var(--muted); font-size: 13px; }
+.tk-foot { padding: 10px 16px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+.tk .table .chip { height: 22px; padding: 0 8px; font-size: 11px; }
+.tk-stack { display: inline-flex; align-items: center; vertical-align: middle; }
+.tk-stack .logo { box-shadow: 0 0 0 2px var(--card); font-size: 8px; color: #fff; }
+.tk-stack .logo + .logo { margin-left: -6px; }
+.tk-stack .more { margin-left: 6px; font-size: 11px; font-weight: 600; color: var(--muted); }
 .tk .table td { height: 40px; }
 .tk-share { display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; }
 .tk-share i { width: 60px; height: 4px; border-radius: 2px; background: var(--chip); overflow: hidden; display: block; }
@@ -54,17 +77,29 @@ const STYLE = `<style>
 </style>`;
 
 const BARS = ["1m", "5m", "15m", "1H", "4H"];
+const BAR_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "1H": 3600, "4H": 14400 };
 const WINDOWS = [["5m", 5 * 60e3], ["15m", 15 * 60e3], ["1h", 3600e3], ["24h", 86400e3]];
+const TABS = [["trades", "Trades"], ["holders", "Holders"], ["traders", "Traders"], ["bundlers", "Bundlers"], ["snipers", "Snipers"], ["insiders", "Insiders"]];
+const EARLY_TABS = ["bundlers", "snipers", "insiders"];
+const EARLY_LABEL = { bundlers: ["Bundles", "bundles"], snipers: ["Snipers", "snipers"], insiders: ["Insiders", "insiders"] };
+const EARLY_RETRIES = 5;
 const RISK_LABEL = { low: "Low risk", caution: "Caution", high: "High risk", unchecked: "Not checked" };
 const WATCH_KEY = "desk.web.watch";
+const FACES_KEY = "desk.web.chartfaces";
+const FACES_MAX = 60;
+const STACK_MAX = 4;
 
 const num = (value) => { const n = Number(value); return value === "" || value == null || !Number.isFinite(n) ? null : n; };
 const first = (...values) => values.find((v) => v != null) ?? null;
+const ms = (value) => { const n = num(value); return n == null ? null : n < 1e12 ? n * 1000 : n; };
+const hue = (text) => [...String(text)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
 const skel = (w = "100%", h = 14) => `<div class="skel" style="width:${w};height:${h}px"></div>`;
 const icon = (id) => `<svg aria-hidden="true"><use href="#${id}"/></svg>`;
 
 function readWatch() { try { return JSON.parse(localStorage.getItem(WATCH_KEY) || "[]"); } catch { return []; } }
 function writeWatch(list) { try { localStorage.setItem(WATCH_KEY, JSON.stringify(list)); } catch { /* private mode */ } }
+function readFaces() { try { return localStorage.getItem(FACES_KEY) !== "0"; } catch { return true; } }
+function writeFaces(on) { try { localStorage.setItem(FACES_KEY, on ? "1" : "0"); } catch { /* private mode */ } }
 
 function precisionFor(price) {
   if (price == null || price <= 0) return 2;
@@ -80,6 +115,22 @@ function copyButton(text) {
   return `<button class="tk-copy" type="button" data-copy="${esc(text)}" aria-label="Copy contract">${icon("i-copy")}</button>`;
 }
 
+/// A face alone: the avatar, or a monogram on the same gradient `person()` uses.
+function face(address, id = knownIdentity(address), size = 20) {
+  if (id?.avatar) return `<span class="logo logo-${size}"><img src="${esc(id.avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></span>`;
+  const mark = esc(String(address ?? "").replace(/^0x/i, "").slice(0, 2).toUpperCase());
+  return `<span class="logo logo-${size}" style="background:linear-gradient(135deg,hsl(${hue(address)} 60% 45%),hsl(${(hue(address) + 40) % 360} 60% 30%))">${mark}</span>`;
+}
+
+const flash = (node, text, dir) => {
+  if (!node || node.textContent === text) return;
+  node.textContent = text;
+  if (!dir) return;
+  node.classList.remove("flash-up", "flash-down");
+  void node.offsetWidth;
+  node.classList.add(dir > 0 ? "flash-up" : "flash-down");
+};
+
 export default async function mount(el, { chainIndex, address, query = {} }) {
   const key = `${chainIndex}:${address}`;
   const aborter = new AbortController();
@@ -87,7 +138,10 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   let dead = false;
   let chart = null;
   let observer = null;
-  let stopPoll = null;
+  let stopSnapshot = null;
+  let stopPrices = null;
+  let earlyTimer = null;
+  let facesOn = readFaces();
 
   el.innerHTML = `${STYLE}<div class="tk">
     <div class="tk-back"><a class="btn btn-ghost btn-xs" href="/app/markets" data-link>← Markets</a></div>
@@ -100,12 +154,15 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
         <div class="card">
           <div class="tk-toolbar">
             <div class="seg seg-sm" id="tk-bars">${BARS.map((b) => `<button type="button" data-bar="${b}" aria-selected="${b === "5m"}">${b}</button>`).join("")}</div>
-            <div class="seg seg-sm seg-line" id="tk-scale"><button type="button" data-scale="price" aria-selected="true">Price</button><button type="button" data-scale="mc" aria-selected="false">MC</button></div>
+            <div class="row">
+              <button class="chip" type="button" id="tk-faces-toggle" aria-pressed="${facesOn}">Traders</button>
+              <div class="seg seg-sm seg-line" id="tk-scale"><button type="button" data-scale="price" aria-selected="true">Price</button><button type="button" data-scale="mc" aria-selected="false">MC</button></div>
+            </div>
           </div>
-          <div class="tk-chart" id="tk-chart"></div>
+          <div class="tk-chart" id="tk-chart"><div class="tk-faces" id="tk-faces"></div><div class="card tk-tip" id="tk-tip" hidden></div></div>
         </div>
         <div class="card">
-          <div class="tabs" style="padding:0 16px" id="tk-tabs"><button type="button" data-tab="trades" aria-selected="true">Trades</button><button type="button" data-tab="holders" aria-selected="false">Holders</button></div>
+          <div class="tabs" style="padding:0 16px" id="tk-tabs">${TABS.map(([id, label]) => `<button type="button" data-tab="${id}" aria-selected="false">${label}<i class="tk-n" data-count="${id}"></i></button>`).join("")}</div>
           <div class="table-wrap" id="tk-table">${[1, 2, 3, 4, 5].map(() => `<div class="skel-row"><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>`).join("")}</div>
         </div>
       </div>
@@ -155,7 +212,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   const symbol = row?.symbol || details?.symbol || short(address);
   const name = row?.name || symbol;
   const chainName = row?.chainName || `Chain ${chainIndex}`;
-  const price = first(num(info?.price), num(row?.price));
+  let price = first(num(info?.price), num(row?.price));
   const change = first(num(info?.priceChange24H), num(row?.change));
   const marketCap = first(num(info?.marketCap), num(row?.marketCap));
   const liquidity = first(num(info?.liquidity), num(row?.liquidity));
@@ -163,17 +220,17 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   const holdersCount = first(num(info?.holders), num(row?.holders));
   const supply = first(num(info?.circSupply), marketCap != null && price > 0 ? marketCap / price : null);
 
-  const stat = (label, value, extra = "") => `<div class="tk-stat"><span>${label}</span><b>${value}${extra}</b></div>`;
+  const stat = (label, id, value, extra = "") => `<div class="tk-stat"><span>${label}</span><b><span id="${id}">${value}</span>${extra}</b></div>`;
   q("#tk-head").innerHTML = `
     <div class="tk-id">${logo(row?.logoURL, symbol, 44)}
       <div class="name"><b>${esc(name)} <small>${esc(symbol)}</small></b><span class="addr">${esc(short(address))} ${copyButton(address)}</span></div>
     </div>
     <div class="tk-stats">
-      ${stat("Price", tokenPrice(price), change == null ? "" : `<small class="${dirClass(change)}">${fmtPct(change / 100)}</small>`)}
-      ${stat("Mcap", fmtUsd(marketCap, { compact: true }))}
-      ${stat("Liquidity", fmtUsd(liquidity, { compact: true }))}
-      ${stat("24h Volume", fmtUsd(volume, { compact: true }))}
-      ${stat("Holders", holdersCount > 0 ? fmtCompact(holdersCount) : "—")}
+      ${stat("Price", "tk-price", tokenPrice(price), `<small id="tk-change" class="${dirClass(change)}">${change == null ? "" : fmtPct(change / 100)}</small>`)}
+      ${stat("Mcap", "tk-mcap", fmtUsd(marketCap, { compact: true }))}
+      ${stat("Liquidity", "tk-liq", fmtUsd(liquidity, { compact: true }))}
+      ${stat("24h Volume", "tk-vol", fmtUsd(volume, { compact: true }))}
+      ${stat("Holders", "tk-holders", holdersCount > 0 ? fmtCompact(holdersCount) : "—")}
     </div>
     <button class="tk-star" type="button" id="tk-star" aria-label="Watch" aria-pressed="${readWatch().includes(key)}">${icon("i-star")}</button>`;
 
@@ -281,7 +338,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   let candleSeries = null;
   let volumeSeries = null;
   let candles = [];
-  let lastTime = 0;
+  let candlesAt = 0;
   let generation = 0;
   const chartEl = q("#tk-chart");
   const factor = () => (scale === "mc" && supply != null ? supply : 1);
@@ -290,6 +347,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   const toVolume = (c) => ({ time: c.time, value: c.volUsd, color: c.close >= c.open ? "rgba(47,214,123,0.35)" : "rgba(255,92,92,0.35)" });
   // Lightweight Charts labels the axis in UTC, so times are shifted to read as local.
   const tzShift = -new Date().getTimezoneOffset() * 60;
+  const barTime = (at) => Math.floor(at / 1000 / BAR_SECONDS[bar]) * BAR_SECONDS[bar] + tzShift;
   const parseCandles = (rows) => (rows ?? []).map((c) => ({ time: Math.floor(Number(c[0]) / 1000) + tzShift, open: Number(c[1]), high: Number(c[2]), low: Number(c[3]), close: Number(c[4]), volUsd: Number(c[6] ?? c[5]) })).filter((c) => Number.isFinite(c.time) && Number.isFinite(c.close)).sort((a, b) => a.time - b.time).filter((c, i, all) => !i || c.time !== all[i - 1].time);
 
   const ensureChart = () => {
@@ -308,7 +366,9 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     candleSeries = chart.addCandlestickSeries({ upColor: "#2fd67b", downColor: "#ff5c5c", borderVisible: false, wickUpColor: "#2fd67b", wickDownColor: "#ff5c5c", priceFormat: { type: "custom", minMove: 10 ** -precisionFor(price), formatter: priceFormatter } });
     volumeSeries = chart.addHistogramSeries({ priceScaleId: "", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false });
     volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
-    observer = new ResizeObserver(() => { if (chart) chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight }); });
+    chart.timeScale().subscribeVisibleTimeRangeChange(schedulePlace);
+    chart.timeScale().subscribeVisibleLogicalRangeChange(schedulePlace);
+    observer = new ResizeObserver(() => { if (chart) { chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight }); schedulePlace(); } });
     observer.observe(chartEl);
   };
 
@@ -320,42 +380,263 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     chart.applyOptions({ localization: { priceFormatter } });
     candleSeries.setData(candles.map(toPoint));
     volumeSeries.setData(candles.map(toVolume));
-    lastTime = candles.length ? candles[candles.length - 1].time : 0;
     chart.timeScale().fitContent();
     chartEl.querySelector(".empty")?.remove();
     if (!candles.length) chartEl.insertAdjacentHTML("beforeend", `<div class="empty">No candles yet.</div>`);
+    buildFaces();
   };
 
-  // ── Trades, holders, activity ─────────────────────────
+  /// The server's candles replace ours; bars the price ticks opened before the server did stay.
+  const applyCandles = (next) => {
+    const newest = next.length ? next[next.length - 1].time : 0;
+    candles = [...next, ...candles.filter((c) => c.time > newest)];
+    candlesAt = Date.now();
+    candleSeries.setData(candles.map(toPoint));
+    volumeSeries.setData(candles.map(toVolume));
+    schedulePlace();
+  };
 
-  let tab = query.tab === "holders" ? "holders" : "trades";
+  const liveCandle = (p, at) => {
+    if (!chart || !candles.length) return;
+    const t = barTime(at);
+    let last = candles[candles.length - 1];
+    if (t > last.time) {
+      last = { time: t, open: last.close, high: Math.max(last.close, p), low: Math.min(last.close, p), close: p, volUsd: 0 };
+      candles.push(last);
+      volumeSeries.update(toVolume(last));
+    } else {
+      last.close = p;
+      last.high = Math.max(last.high, p);
+      last.low = Math.min(last.low, p);
+    }
+    candleSeries.update(toPoint(last));
+    schedulePlace();
+  };
+
+  // ── Faces on the chart ────────────────────────────────
+
+  const facesEl = q("#tk-faces");
+  const tipEl = q("#tk-tip");
+  let faceNodes = [];
+  let placeQueued = false;
+  let tipKey = null;
+
+  const indexBefore = (t) => {
+    let lo = 0, hi = candles.length - 1, out = -1;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (candles[mid].time <= t) { out = mid; lo = mid + 1; } else hi = mid - 1; }
+    return out;
+  };
+
+  const placeFaces = () => {
+    if (!chart || !faceNodes.length) return;
+    const ts = chart.timeScale();
+    const width = chartEl.clientWidth - (chart.priceScale("right").width() || 0);
+    const height = chartEl.clientHeight - (ts.height() || 0);
+    const sec = BAR_SECONDS[bar];
+    const f = factor();
+    for (const n of faceNodes) {
+      const i = indexBefore(n.aligned);
+      const x = i < 0 ? null : ts.logicalToCoordinate(i + (n.aligned - candles[i].time) / sec);
+      const y = candleSeries.priceToCoordinate(n.price * f);
+      const hide = x == null || y == null || x < 0 || x > width || y < 0 || y > height;
+      n.el.hidden = hide;
+      if (!hide) { n.el.style.left = `${x}px`; n.el.style.top = `${y + n.offset}px`; }
+    }
+    if (tipKey) placeTip();
+  };
+  function schedulePlace() {
+    if (placeQueued) return;
+    placeQueued = true;
+    requestAnimationFrame(() => { placeQueued = false; placeFaces(); });
+  }
+
+  const placeTip = () => {
+    const n = faceNodes.find((f) => f.trade && tradeKey(f.trade) === tipKey);
+    if (!n || n.el.hidden) { tipEl.hidden = true; return; }
+    tipEl.hidden = false;
+    const x = parseFloat(n.el.style.left);
+    const y = parseFloat(n.el.style.top);
+    const tw = tipEl.offsetWidth;
+    const th = tipEl.offsetHeight;
+    const left = x + 16 + tw > chartEl.clientWidth ? x - 16 - tw : x + 16;
+    tipEl.style.left = `${Math.max(4, left)}px`;
+    tipEl.style.top = `${Math.max(4, Math.min(chartEl.clientHeight - th - 4, y - th / 2))}px`;
+  };
+  const showTip = (n) => {
+    const t = n.trade;
+    const id = knownIdentity(t.userAddress);
+    tipKey = tradeKey(t);
+    tipEl.innerHTML = `<b>${esc(id?.name ?? short(t.userAddress))}</b> ${t.type === "buy" ? "bought" : "sold"} ${esc(symbol)} · Price ${tokenPrice(num(t.price))} · Value ${fmtUsd(num(t.volume))} · Wallet ${esc(short(t.userAddress))}<small>${ago(Number(t.time))}</small>`;
+    placeTip();
+  };
+  const hideTip = () => { tipKey = null; tipEl.hidden = true; };
+
+  function buildFaces() {
+    facesEl.innerHTML = "";
+    faceNodes = [];
+    if (!facesOn || !chart) { hideTip(); return; }
+    const groups = new Map();
+    for (const t of trades.slice(0, FACES_MAX)) {
+      const at = Number(t.time);
+      const p = num(t.price);
+      if (!Number.isFinite(at) || p == null) continue;
+      const aligned = barTime(at);
+      const side = t.type === "buy" ? "buy" : "sell";
+      const k = `${aligned}:${side}`;
+      if (!groups.has(k)) groups.set(k, { aligned, side, list: [] });
+      groups.get(k).list.push(t);
+    }
+    for (const g of groups.values()) {
+      g.list.sort((a, b) => Number(b.time) - Number(a.time));
+      const anchor = num(g.list[0].price);
+      const dir = g.side === "buy" ? -1 : 1;
+      g.list.slice(0, STACK_MAX).forEach((t, i) => {
+        const node = document.createElement("button");
+        node.type = "button";
+        node.className = `tk-face ${g.side}`;
+        node.innerHTML = face(t.userAddress);
+        node.setAttribute("aria-label", `${t.type === "buy" ? "Buy" : "Sell"} by ${short(t.userAddress)}`);
+        const entry = { el: node, trade: t, aligned: g.aligned, price: anchor, offset: dir * i * 8 };
+        node.addEventListener("mouseenter", () => showTip(entry));
+        node.addEventListener("mouseleave", hideTip);
+        node.addEventListener("click", () => navigate(`/app/wallet/${t.userAddress}`));
+        facesEl.appendChild(node);
+        faceNodes.push(entry);
+      });
+      if (g.list.length > STACK_MAX) {
+        const more = document.createElement("span");
+        more.className = "tk-more";
+        more.textContent = `+${g.list.length - STACK_MAX}`;
+        facesEl.appendChild(more);
+        faceNodes.push({ el: more, trade: null, aligned: g.aligned, price: anchor, offset: dir * (STACK_MAX * 8 + 6) });
+      }
+    }
+    schedulePlace();
+    if (tipKey && !faceNodes.some((n) => n.trade && tradeKey(n.trade) === tipKey)) hideTip();
+  }
+
+  q("#tk-faces-toggle").addEventListener("click", (event) => {
+    facesOn = !facesOn;
+    event.currentTarget.setAttribute("aria-pressed", String(facesOn));
+    writeFaces(facesOn);
+    buildFaces();
+  });
+
+  const asked = new Set();
+  const learn = (addresses, then) => {
+    const fresh = [...new Set(addresses)].filter((a) => a && !asked.has(a));
+    if (!fresh.length) return;
+    fresh.forEach((a) => asked.add(a));
+    Promise.all(fresh.map((a) => identity(a))).then((ids) => { if (!dead && ids.some(Boolean)) then(); });
+  };
+
+  // ── Trades, holders, traders, launch ──────────────────
+
+  const TAB_IDS = TABS.map(([id]) => id);
+  let tab = TAB_IDS.includes(query.tab) ? query.tab : "trades";
   $$("[data-tab]", el).forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
   let trades = [];
   let seenTrades = new Set();
   let win = "1h";
+  let early = { status: "loading", data: null };
   const holders = (details?.holders ?? []).map((h) => ({ address: h.holderWalletAddress, amount: num(h.holdAmount), pct: num(h.holdPercent) }));
 
-  const tradeKey = (t) => t.id ?? `${t.time}:${t.userAddress}:${t.volume}`;
+  function tradeKey(t) { return t.id ?? `${t.time}:${t.userAddress}:${t.volume}`; }
   const tokenAmount = (t) => {
     const hit = (t.changedTokenInfo ?? []).find((c) => String(c.tokenAddress ?? "").toLowerCase() === address.toLowerCase()) ?? (t.changedTokenInfo ?? []).find((c) => c.tokenSymbol === symbol);
     return num(hit?.amount);
   };
 
-  const paintTable = ({ fresh = new Set() } = {}) => {
-    const host = q("#tk-table");
-    if (tab === "trades") {
-      if (!trades.length) { host.innerHTML = `<div class="empty">No trades yet.</div>`; return; }
-      host.innerHTML = `<table class="table table-compact"><thead><tr><th>Wallet</th><th class="left">Type</th><th>USD</th><th>Amount</th><th>Price</th><th class="left">Venue</th><th>Time</th></tr></thead><tbody>${trades.map((t) => `
-        <tr class="${fresh.has(tradeKey(t)) ? "enter" : ""}">
+  const tradeRow = (t, fresh = false) => `
+        <tr class="${fresh ? "enter" : ""}" data-key="${esc(tradeKey(t))}">
           <td>${person(t.userAddress)}</td>
           <td class="left"><span class="side-chip ${t.type === "buy" ? "buy" : "sell"}">${t.type === "buy" ? "BUY" : "SELL"}</span></td>
           <td class="num">${fmtUsd(num(t.volume))}</td>
           <td class="num">${fmtAmount(tokenAmount(t))}</td>
           <td class="num">${tokenPrice(num(t.price))}</td>
           <td class="left muted">${esc(t.dexName ?? "")}</td>
-          <td class="mono muted">${ago(Number(t.time), { suffix: false })}</td>
-        </tr>`).join("")}</tbody></table>`;
+          <td class="mono muted tk-ago">${ago(Number(t.time), { suffix: false })}</td>
+        </tr>`;
+
+  const traderRows = () => {
+    const by = new Map();
+    for (const t of trades) {
+      const a = t.userAddress;
+      if (!a) continue;
+      const r = by.get(a) ?? { address: a, buys: 0, sells: 0, bought: 0, sold: 0, last: 0 };
+      const usd = num(t.volume) ?? 0;
+      if (t.type === "buy") { r.buys += 1; r.bought += usd; } else { r.sells += 1; r.sold += usd; }
+      r.last = Math.max(r.last, Number(t.time) || 0);
+      by.set(a, r);
+    }
+    return [...by.values()].sort((a, b) => (b.bought + b.sold) - (a.bought + a.sold));
+  };
+
+  const paintCounts = () => {
+    const counts = {
+      trades: trades.length || null, holders: holders.length, traders: trades.length ? traderRows().length : null,
+      bundlers: early.data?.bundles?.length ?? null, snipers: early.data?.snipers?.length ?? null, insiders: early.data?.insiders?.length ?? null,
+    };
+    for (const node of $$("[data-count]", el)) { const v = counts[node.dataset.count]; node.textContent = v == null ? "" : fmtCompact(v); }
+  };
+
+  const sinceLaunch = (item, d) => {
+    const t = ms(item.time);
+    const t0 = ms(d.createdAt);
+    if (t != null && t0 != null) { const s = Math.max(0, Math.round((t - t0) / 1000)); return s < 90 ? `+${s}s` : `+${Math.round(s / 60)}m`; }
+    const b = num(item.block);
+    const b0 = num(d.launchBlock);
+    return b != null && b0 != null ? `+${b - b0} blocks` : "—";
+  };
+  const share = (v) => (v > 0 && v < 0.001 ? "<0.1%" : fmtPct(v, { sign: false, digits: 1 }));
+  const holdsNow = (v) => (v == null ? "—" : v >= 1e-6 ? `<span class="num">${share(v)}</span>` : `<span class="chip chip-fall">sold</span>`);
+  const bought = (amount, s) => `<span class="num">${fmtAmount(amount, 2)}</span> <span class="muted num">${share(s)}</span>`;
+  const stack = (wallets) => `<span class="tk-stack">${wallets.slice(0, 5).map((w) => face(w)).join("")}${wallets.length > 5 ? `<span class="more">+${wallets.length - 5}</span>` : ""}</span>`;
+
+  const earlyLine = () => {
+    const s = early.status;
+    const text = s === "unsupported" ? "Read on Monad only for now."
+      : s === "indexing" || s === "loading" ? "Reading the launch from the chain…"
+      : s === "stale" ? "The launch is still being read. Try again in a minute."
+      : "The launch could not be read right now.";
+    return `<div class="tk-line${s === "indexing" || s === "loading" ? " pulse" : ""}">${text}</div>`;
+  };
+
+  const paintEarly = (host) => {
+    if (early.status !== "ready") { host.innerHTML = earlyLine(); return; }
+    const d = early.data;
+    const [label, totalKey] = EARLY_LABEL[tab];
+    const total = num(d.totals?.[totalKey]);
+    const head = `<div class="tk-tabhead"><span class="chip">${label} hold ${total == null ? "—" : share(total)}</span>${d.createdAt ? `<span>Launched ${ago(ms(d.createdAt))}</span>` : ""}${d.creator ? `<span class="row" style="gap:6px">by ${person(d.creator, undefined, { size: 16, via: false })}</span>` : ""}</div>`;
+    const table = (heads, rows) => `<table class="table table-compact"><thead><tr>${heads}</tr></thead><tbody>${rows}</tbody></table>`;
+    let body;
+    if (tab === "snipers") {
+      const rows = d.snipers ?? [];
+      body = rows.length
+        ? table(`<th class="rank">#</th><th class="left">Wallet</th><th>After launch</th><th>Bought</th><th>Holds now</th>`, rows.map((s, i) => `<tr><td class="rank">${i + 1}</td><td class="left">${person(s.address)}</td><td class="num">${sinceLaunch(s, d)}</td><td>${bought(s.amount, s.share)}</td><td>${holdsNow(s.holdsNow)}</td></tr>`).join(""))
+        : `<div class="tk-line">No snipers in the first blocks.</div>`;
+    } else if (tab === "bundlers") {
+      const rows = d.bundles ?? [];
+      body = rows.length
+        ? table(`<th>Block</th><th class="left">Time</th><th class="left">Wallets</th><th>Bought</th>`, rows.map((b) => `<tr><td class="mono">${esc(b.block ?? "—")}</td><td class="left mono muted">${b.time != null ? ago(ms(b.time), { suffix: false }) : "—"}</td><td class="left">${stack(b.wallets ?? [])}<span class="muted" style="margin-left:8px">${(b.wallets ?? []).length}</span></td><td>${bought(b.amount, b.share)}</td></tr>`).join(""))
+        : `<div class="tk-line">No bundles at launch.</div>`;
+      learn(rows.flatMap((b) => b.wallets ?? []), () => { if (tab === "bundlers") paintTable(); });
     } else {
+      const rows = d.insiders ?? [];
+      body = rows.length
+        ? table(`<th>Wallet</th><th class="left">Via</th><th>Received</th><th>Holds now</th>`, rows.map((r) => `<tr><td>${person(r.address)}</td><td class="left"><span class="chip${r.via === "creator" ? " chip-brand" : ""}">${r.via === "creator" ? "creator" : "from creator"}</span></td><td>${bought(r.amount, r.share)}</td><td>${holdsNow(r.holdsNow)}</td></tr>`).join(""))
+        : `<div class="tk-line">No insiders found.</div>`;
+    }
+    host.innerHTML = head + body;
+  };
+
+  const paintTable = ({ fresh = new Set() } = {}) => {
+    const host = q("#tk-table");
+    if (tab === "trades") {
+      host.innerHTML = trades.length
+        ? `<table class="table table-compact"><thead><tr><th>Wallet</th><th class="left">Type</th><th>USD</th><th>Amount</th><th>Price</th><th class="left">Venue</th><th>Time</th></tr></thead><tbody>${trades.map((t) => tradeRow(t, fresh.has(tradeKey(t)))).join("")}</tbody></table>`
+        : `<div class="empty">No trades yet.</div>`;
+    } else if (tab === "holders") {
       if (!holders.length) { host.innerHTML = `<div class="empty">No holders listed.</div>`; return; }
       const top = Math.max(...holders.map((h) => h.pct ?? 0), 0) || 1;
       host.innerHTML = `<table class="table table-compact"><thead><tr><th class="rank">#</th><th class="left">Wallet</th><th>Amount</th><th>Share</th></tr></thead><tbody>${holders.map((h, i) => `
@@ -365,8 +646,53 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
           <td class="num">${fmtAmount(h.amount)}</td>
           <td><span class="tk-share num">${fmtPct(h.pct == null ? null : h.pct / 100, { sign: false })}<i><b style="width:${Math.min(100, Math.max(0, ((h.pct ?? 0) / top) * 100))}%"></b></i></span></td>
         </tr>`).join("")}</tbody></table>`;
+    } else if (tab === "traders") {
+      const rows = traderRows();
+      host.innerHTML = rows.length
+        ? `<table class="table table-compact"><thead><tr><th>Wallet</th><th>Buys</th><th>Sells</th><th>Bought</th><th>Sold</th><th>Net</th><th>Last</th></tr></thead><tbody>${rows.map((r) => `
+        <tr>
+          <td>${person(r.address)}</td>
+          <td class="num">${r.buys}</td>
+          <td class="num">${r.sells}</td>
+          <td class="num">${fmtUsd(r.bought, { compact: true })}</td>
+          <td class="num">${fmtUsd(r.sold, { compact: true })}</td>
+          <td class="num ${dirClass(r.bought - r.sold)}">${fmtUsd(r.bought - r.sold, { sign: true, compact: true })}</td>
+          <td class="mono muted">${ago(r.last, { suffix: false })}</td>
+        </tr>`).join("")}</tbody></table><div class="tk-foot">From the last ${trades.length} trades on the tape</div>`
+        : `<div class="empty">No trades yet.</div>`;
+    } else {
+      paintEarly(host);
     }
     hydratePeople(host);
+  };
+
+  const prependTrades = (fresh) => {
+    const tbody = q("#tk-table tbody");
+    if (!tbody) return false;
+    const head = [];
+    for (const t of trades) { if (!fresh.has(tradeKey(t))) break; head.push(t); }
+    if (head.length !== fresh.size) return false;
+    tbody.insertAdjacentHTML("afterbegin", head.map((t) => tradeRow(t, true)).join(""));
+    while (tbody.rows.length > trades.length) tbody.lastElementChild.remove();
+    hydratePeople(tbody);
+    return true;
+  };
+  const refreshAgo = () => $$(".tk-ago", q("#tk-table")).forEach((td, i) => { if (trades[i]) td.textContent = ago(Number(trades[i].time), { suffix: false }); });
+  const hasTable = () => !!q("#tk-table table");
+
+  const applyTrades = (incoming) => {
+    const fresh = new Set(seenTrades.size ? incoming.map(tradeKey).filter((k) => !seenTrades.has(k)) : []);
+    trades = incoming;
+    seenTrades = new Set(incoming.map(tradeKey));
+    paintCounts();
+    if (tab === "trades") {
+      if (!hasTable()) paintTable({ fresh });
+      else if (fresh.size && !prependTrades(fresh)) paintTable({ fresh });
+      refreshAgo();
+    } else if (tab === "traders" && (fresh.size || !hasTable())) paintTable();
+    paintActivity();
+    buildFaces();
+    learn(trades.slice(0, FACES_MAX).map((t) => t.userAddress), buildFaces);
   };
 
   const paintActivity = () => {
@@ -385,7 +711,23 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
         + line("Traders", uniq(inWindow, "buy"), uniq(inWindow, "sell"), String)
         + line("Txns", count(inWindow, "buy"), count(inWindow, "sell"), String)
       : `<div class="empty" style="padding:14px 0 6px">No trades in the last ${win}.</div>`)
-      + `<div class="faint" style="font-size:11px">From the last ${trades.length || 60} trades</div>`;
+      + `<div class="faint" style="font-size:11px">From the last ${trades.length || 100} trades</div>`;
+  };
+
+  const loadEarly = async (attempt = 0) => {
+    if (String(chainIndex) !== "143") early = { status: "unsupported", data: null };
+    else {
+      const out = await api(`/api/token-details?view=early&chainIndex=${chainIndex}&address=${address}`, { signal }).catch(() => null);
+      if (dead) return;
+      const status = ["ready", "indexing", "unavailable", "unsupported"].includes(out?.status) ? out.status : "unavailable";
+      early = { status, data: status === "ready" ? out : null };
+      if (status === "indexing") {
+        if (attempt < EARLY_RETRIES) earlyTimer = setTimeout(() => loadEarly(attempt + 1), 8000);
+        else early.status = "stale";
+      }
+    }
+    paintCounts();
+    if (EARLY_TABS.includes(tab)) paintTable();
   };
 
   q("#tk-tabs").addEventListener("click", (event) => {
@@ -417,41 +759,51 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     bar = button.dataset.bar;
     $$("[data-bar]", el).forEach((b) => b.setAttribute("aria-selected", String(b === button)));
     candles = [];
-    lastTime = 0;
+    candlesAt = 0;
     const mine = ++generation;
     chartEl.insertAdjacentHTML("beforeend", `<div class="empty pulse">Loading…</div>`);
-    load(mine, true).catch(() => { if (mine === generation && !dead) { candles = []; paintChart(); } });
+    refresh(mine, true).catch(() => { if (mine === generation && !dead) { candles = []; paintChart(); } });
   });
 
-  const hasTable = () => !!q("#tk-table table");
-  const load = async (mine, full) => {
-    const out = await api(`/api/market-snapshot?chainIndex=${chainIndex}&address=${address}&period=${bar}`, { signal });
+  // ── Polling ───────────────────────────────────────────
+
+  const refresh = async (mine, full) => {
+    const out = await api(`/api/market-snapshot?chainIndex=${chainIndex}&address=${address}&period=${bar}&limit=100`, { signal });
     if (dead || mine !== generation) return;
     const next = parseCandles(out?.candles);
-    if (full || !candles.length) {
-      candles = next;
-      paintChart();
-    } else if (chart) {
-      for (const c of next) if (c.time >= lastTime) { candleSeries.update(toPoint(c)); volumeSeries.update(toVolume(c)); lastTime = c.time; }
-      const merged = new Map(candles.map((c) => [c.time, c]));
-      for (const c of next) merged.set(c.time, c);
-      candles = [...merged.values()].sort((a, b) => a.time - b.time);
-    }
-    const incoming = out?.trades ?? [];
-    const fresh = new Set(seenTrades.size ? incoming.map(tradeKey).filter((k) => !seenTrades.has(k)) : []);
-    trades = incoming;
-    seenTrades = new Set(incoming.map(tradeKey));
-    if (full || fresh.size || !hasTable()) paintTable({ fresh });
-    else $$("td.mono", q("#tk-table")).forEach((td, i) => { if (trades[i]) td.textContent = ago(Number(trades[i].time), { suffix: false }); });
-    paintActivity();
+    if (full || !candles.length) { candles = next; candlesAt = Date.now(); paintChart(); }
+    else if (chart && Date.now() - candlesAt >= 14_000) applyCandles(next);
+    applyTrades(out?.trades ?? []);
   };
 
-  stopPoll = poll(() => load(generation, false), 15_000);
+  const tickPrices = async () => {
+    const out = await api(`/api/token-details?view=prices&tokens=${key}`, { signal });
+    const tick = (out?.prices ?? []).find((p) => String(p.contract ?? "").toLowerCase() === address.toLowerCase()) ?? out?.prices?.[0];
+    if (dead || !tick || !(tick.price > 0)) return;
+    const was = price;
+    price = tick.price;
+    flash(q("#tk-price"), tokenPrice(price), was == null ? 0 : Math.sign(price - was));
+    if (tick.change24h != null) { const c = q("#tk-change"); c.textContent = fmtPct(tick.change24h / 100); c.className = dirClass(tick.change24h); }
+    if (tick.marketCap != null) q("#tk-mcap").textContent = fmtUsd(tick.marketCap, { compact: true });
+    if (tick.liquidity != null) q("#tk-liq").textContent = fmtUsd(tick.liquidity, { compact: true });
+    if (tick.volume24H != null) q("#tk-vol").textContent = fmtUsd(tick.volume24H, { compact: true });
+    if (tick.holders > 0) q("#tk-holders").textContent = fmtCompact(tick.holders);
+    liveCandle(price, ms(tick.time) ?? ms(out?.observedAt) ?? Date.now());
+    paintEstimate();
+  };
+
+  if (tab === "holders" || EARLY_TABS.includes(tab)) paintTable();
+  paintCounts();
+  loadEarly();
+  stopSnapshot = poll(() => refresh(generation, false), 5_000);
+  stopPrices = poll(tickPrices, 4_000);
 
   function cleanup() {
     dead = true;
     aborter.abort();
-    if (stopPoll) stopPoll();
+    if (stopSnapshot) stopSnapshot();
+    if (stopPrices) stopPrices();
+    clearTimeout(earlyTimer);
     if (observer) observer.disconnect();
     if (chart) { chart.remove(); chart = null; }
   }

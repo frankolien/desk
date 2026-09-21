@@ -13,6 +13,7 @@ const TOP_LIMIT = 25;
 const CACHE = {
   top: "public, s-maxage=30, stale-while-revalidate=300",
   markets: "public, s-maxage=10, stale-while-revalidate=60",
+  marks: "public, s-maxage=2, stale-while-revalidate=10",
   candles: "public, s-maxage=60, stale-while-revalidate=300",
   slow: "public, s-maxage=60, stale-while-revalidate=600",
   signals: "public, s-maxage=15, stale-while-revalidate=120",
@@ -31,6 +32,7 @@ const PROBLEMS = {
 
 export const ENDPOINTS = [
   { path: "/api/v1/markets", tier: "default", description: "Every open Perpl market: mark, 24h change and volume, open interest, funding, leverage" },
+  { path: "/api/v1/markets/marks", tier: "default", description: "Every market's mark price read off the exchange contract this instant" },
   { path: "/api/v1/markets/{market}/candles", tier: "default", description: "Exchange candles for a market's asset. ?bar=1m|5m|15m|1H|4H|1D" },
   { path: "/api/v1/traders/top", tier: "default", description: "Top traders on Perpl by unrealised PnL. ?limit=1..25" },
   { path: "/api/v1/traders/{address}/history", tier: "expensive", description: "A trader's closed trades and statistics" },
@@ -153,10 +155,18 @@ export function createHandler({
         ]);
         return envelope(200, { day, requestsToday: Number(requests ?? 0), trackedWallets: tracked ?? 0, alertSubscriptions: subs ?? 0 }, CACHE.top);
       }
+      case "marks": {
+        try {
+          const out = await get("markets", () => createMarkets({ now })).marks();
+          return envelope(200, out, CACHE.marks);
+        } catch (error) {
+          return fail(problem("upstream_unavailable", `Marks could not be read: ${error.message}`, instance));
+        }
+      }
       case "markets": {
         try {
-          const { collateral, markets: rows } = await get("markets", () => createMarkets({ now })).context();
-          return envelope(200, { collateral, markets: rows }, CACHE.markets);
+          const { collateral, head, markets: rows } = await get("markets", () => createMarkets({ now })).context();
+          return envelope(200, { collateral, head, markets: rows }, CACHE.markets);
         } catch (error) {
           return fail(problem("upstream_unavailable", `Perpl's market list could not be read: ${error.message}`, instance));
         }
@@ -211,6 +221,7 @@ function match(segments) {
   if (segments.length === 1 && a === "health") return { name: "health", tier: "default" };
   if (segments.length === 1 && a === "stats") return { name: "stats", tier: "default" };
   if (segments.length === 1 && a === "markets") return { name: "markets", tier: "default" };
+  if (segments.length === 2 && a === "markets" && b === "marks") return { name: "marks", tier: "default" };
   if (segments.length === 3 && a === "markets" && c === "candles" && /^[A-Za-z0-9]{1,12}$/.test(b)) return { name: "candles", tier: "default", market: b };
   if (segments.length === 2 && a === "traders" && b === "top") return { name: "top", tier: "default" };
   if (segments.length === 3 && a === "traders" && c === "history") return { name: "history", tier: "expensive", address: b };

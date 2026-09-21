@@ -2,7 +2,12 @@
 /// each market's asset. Perpl publishes no candle history, so the chart is the asset's
 /// own tape on OKX; the mark shown beside it is Perpl's.
 
+import { createPublicClient, http } from "viem";
+
+import { EXCHANGE_VIEWS } from "./_perpl-abi.mjs";
+
 const CONTEXT_URL = "https://app.perpl.xyz/api/v1/pub/context";
+const EXCHANGE = "0x34B6552d57a35a1D042CcAe1951BD1C370112a6F";
 const CANDLE_URL = "https://www.okx.com/api/v5/market/candles";
 const INSTRUMENTS = {
   BTC: "BTC-USDT", ETH: "ETH-USDT", SOL: "SOL-USDT", PUMP: "PUMP-USDT",
@@ -41,15 +46,34 @@ export function describeMarket(market) {
   };
 }
 
+/// Where the chain is and how fast it moves, from the two block stamps every market
+/// carries; entry blocks become times with these.
+export function describeHead(context) {
+  const gas = context?.chain?.gas?.at;
+  const stamps = (context?.markets ?? []).flatMap((m) => [m.config?.at, m.state?.at]).filter((at) => at?.b != null && at?.t != null);
+  const earliest = stamps.reduce((min, at) => (min == null || at.b < min.b ? at : min), null);
+  const latest = stamps.reduce((max, at) => (max == null || at.b > max.b ? at : max), null);
+  const blockMs = earliest && latest && latest.b > earliest.b ? (latest.t - earliest.t) / (latest.b - earliest.b) : 400;
+  const head = gas ?? latest;
+  return head ? { block: Number(head.b), time: Number(head.t), blockMs: Math.round(blockMs) } : null;
+}
+
 export function describeMarkets(context) {
   const rows = (context?.markets ?? []).filter((market) => market?.config?.is_open).map(describeMarket);
   const collateral = (context?.tokens ?? []).find((token) => token.symbol === "AUSD")?.symbol ?? "AUSD";
-  return { collateral, markets: rows };
+  return { collateral, head: describeHead(context), markets: rows };
 }
 
-export function createMarkets({ fetchImpl = fetch, now = Date.now } = {}) {
+export function createMarkets({ fetchImpl = fetch, now = Date.now, readMark = null } = {}) {
   let contextCache = { at: 0, value: null };
   const candleCache = new Map();
+  let client = null;
+  // One page of one position is the cheapest view that carries the mark.
+  const markOf = readMark ?? (async (id) => {
+    client ??= createPublicClient({ transport: http(process.env.MONAD_MAINNET_RPC || "https://rpc.monad.xyz", { timeout: 8_000, batch: true }) });
+    const [, , mark, valid] = await client.readContract({ address: EXCHANGE, abi: EXCHANGE_VIEWS, functionName: "getPositionsV2", args: [BigInt(id), 0n, 1n] });
+    return valid ? Number(mark) : null;
+  });
 
   async function context() {
     if (contextCache.value && now() - contextCache.at < 10_000) return contextCache.value;
@@ -80,5 +104,14 @@ export function createMarkets({ fetchImpl = fetch, now = Date.now } = {}) {
     return value;
   }
 
-  return { context, candles, hasInstrument: (name) => Boolean(INSTRUMENTS[String(name).toUpperCase()]) };
+  /// Every market's mark as the contract holds it this instant, decimal.
+  async function marks() {
+    const { markets: rows } = await context();
+    const read = await Promise.all(rows.map((m) => markOf(m.id).catch(() => null)));
+    const out = {};
+    rows.forEach((m, i) => { if (read[i] != null) out[m.name] = read[i] / 10 ** m.priceDecimals; });
+    return { at: now(), marks: out };
+  }
+
+  return { context, candles, marks, hasInstrument: (name) => Boolean(INSTRUMENTS[String(name).toUpperCase()]) };
 }

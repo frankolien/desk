@@ -1,4 +1,6 @@
-import { $, $$, MARKET_LOGOS, ago, api, dirClass, esc, fmtAmount, fmtCompact, fmtPct, fmtPrice, fmtUsd, handoff, hydratePeople, logo, markets, navigate, person, poll } from "../app.js";
+import { $, $$, MARKET_LOGOS, ago, api, dirClass, esc, fmtAmount, fmtCompact, fmtPct, fmtPrice, fmtUsd, handoff, head, hydratePeople, identity, knownIdentity, logo, markets, navigate, person, poll, short } from "../app.js";
+
+const BAR_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "1H": 3600, "4H": 14400, "1D": 86400 };
 
 const BARS = ["1m", "5m", "15m", "1H", "4H", "1D"];
 const SPOT = { BTC: true, ETH: true, SOL: true, PUMP: true };
@@ -50,6 +52,19 @@ const CSS = `
 .td-kv span { color: var(--muted); }
 .td-bigpos { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
 .td-mobile-pick { display: none; }
+.td-live { display: inline-flex; align-items: center; gap: 8px; margin-left: 14px; vertical-align: middle; }
+.td-live .spark { width: 84px; height: 26px; overflow: visible; }
+.td-live .halo { transform-box: fill-box; transform-origin: center; animation: tdHalo 1.6s ease-out infinite; }
+@keyframes tdHalo { from { transform: scale(1); opacity: .5; } to { transform: scale(2.2); opacity: 0; } }
+.td-faces { position: absolute; inset: 0; pointer-events: none; z-index: 3; overflow: hidden; }
+.td-face { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; overflow: hidden; pointer-events: auto; cursor: pointer; box-shadow: 0 0 0 2px var(--ring), 0 0 0 3px #000; background: var(--chip); transition: transform .12s var(--ease); }
+.td-face:hover { transform: scale(1.25); z-index: 2; }
+.td-face img { width: 100%; height: 100%; object-fit: cover; }
+.td-face span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: 800; color: #fff; }
+.td-face.long { --ring: var(--rise); } .td-face.short { --ring: var(--fall); }
+.td-tip { position: absolute; z-index: 5; pointer-events: none; padding: 10px 12px; min-width: 200px; font-size: 12px; line-height: 1.45; background: #141414; border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: 0 12px 30px rgba(0,0,0,.5); }
+.td-tip b { display: block; font-size: 13px; }
+.td-tip .muted { display: block; }
 @media (max-width: 1320px) { .td-grid { grid-template-columns: minmax(0, 1fr) 320px; } .td-list { display: none; } .td-mobile-pick { display: flex; } }
 @media (max-width: 1000px) { .td-grid { grid-template-columns: 1fr; } .td-chart { height: 340px; } }
 @media (max-width: 720px) { .td-head { gap: 12px; } .td-head .who { min-width: 0; width: 100%; } .td-head .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; } .td-head .stat.mark { grid-column: 1 / -1; } .td-head .stat .num { font-size: 14px; } }
@@ -62,6 +77,7 @@ export default async function mount(el, params) {
   const state = {
     market: null, rows: [], bar: "15m", side: "long", margin: 0, leverage: 3, tab: "crowd",
     chart: null, series: null, volume: null, markLine: null, crowd: null, top: null, watched: watched(), lastBar: null,
+    ring: [], lastCandle: null, faces: [], showFaces: localStorage.getItem("desk.web.chartfaces") !== "off",
   };
 
   let rows = markets();
@@ -84,6 +100,19 @@ export default async function mount(el, params) {
   };
   document.addEventListener("markets", onMarkets);
   stops.push(() => document.removeEventListener("markets", onMarkets));
+  const onMarks = (event) => {
+    const mark = event.detail.marks?.[state.market.name];
+    if (mark == null) return;
+    const was = state.market.mark;
+    state.market = { ...state.market, mark, change: state.market.prev > 0 ? (mark - state.market.prev) / state.market.prev : state.market.change };
+    state.ring.push(mark); if (state.ring.length > 60) state.ring.shift();
+    refreshMark(was);
+    paintSpark();
+    tickCandle(mark, event.detail.at);
+    placeFaces();
+  };
+  document.addEventListener("marks", onMarks);
+  stops.push(() => document.removeEventListener("marks", onMarks));
 
   stops.push(poll(loadCandles, 15_000));
   stops.push(poll(loadCrowd, 30_000));
@@ -108,9 +137,10 @@ export default async function mount(el, params) {
             <div class="row" style="gap:6px">
               <span class="chip chip-brand" style="height:24px;font-size:11px"><i class="dot" style="width:5px;height:5px;background:var(--brand);box-shadow:none"></i>Perpl mark</span>
               <span class="chip" style="height:24px;font-size:11px">OKX tape</span>
+              <button class="chip" style="height:24px;font-size:11px" id="td-facetoggle" aria-pressed="${state.showFaces}">Top traders</button>
             </div>
           </div>
-          <div class="td-chart"><div class="lw" id="td-lw"></div></div>
+          <div class="td-chart"><div class="lw" id="td-lw"></div><div class="td-faces" id="td-faces" ${state.showFaces ? "" : "hidden"}></div></div>
         </div>
         <div class="card">
           <div class="tabs td-tabs" id="td-tabs">
@@ -147,6 +177,12 @@ export default async function mount(el, params) {
       paintTab();
     });
     $("#td-pick", root).addEventListener("click", () => $("#search-open").click());
+    $("#td-facetoggle", root).addEventListener("click", (event) => {
+      state.showFaces = !state.showFaces;
+      localStorage.setItem("desk.web.chartfaces", state.showFaces ? "on" : "off");
+      event.currentTarget.setAttribute("aria-pressed", String(state.showFaces));
+      $("#td-faces", root).hidden = !state.showFaces;
+    });
   }
 
   function paintList() {
@@ -171,7 +207,7 @@ export default async function mount(el, params) {
         </div>
       </div>
       <div class="stats">
-        <div class="stat mark"><span class="eyebrow">Mark</span><span class="num" id="td-mark">${fmtPrice(m.mark, m.priceDecimals)}<small class="${dirClass(m.change)}" id="td-change">${fmtPct(m.change)}</small></span></div>
+        <div class="stat mark"><span class="eyebrow">Mark <span class="muted" style="font-weight:600">· live</span></span><span class="num" id="td-mark">${fmtPrice(m.mark, m.priceDecimals)}<small class="${dirClass(m.change)}" id="td-change">${fmtPct(m.change)}</small><span class="td-live"><svg class="spark" viewBox="0 0 84 26" id="td-spark"></svg></span></span></div>
         <div class="stat"><span class="eyebrow">24h volume</span><span class="num" id="td-vol">${fmtUsd(m.volume24h, { compact: true })}</span></div>
         <div class="stat"><span class="eyebrow">Open interest</span><span class="num" id="td-oi">${fmtUsd(m.openInterest, { compact: true })}</span></div>
         <div class="stat"><span class="eyebrow">Funding</span><span class="num ${m.fundingRate > 0 ? "up" : m.fundingRate < 0 ? "down" : ""}" id="td-funding">${funding}<small class="muted" style="font-weight:600"> / ${interval(m.fundingIntervalSec)}</small></span></div>
@@ -345,6 +381,7 @@ export default async function mount(el, params) {
     try { state.top = (await api("/api/traders?view=top", { ttl: 30_000 })).traders ?? []; }
     catch { state.top = []; }
     if (state.tab === "top") paintTab();
+    buildFaces();
   }
 
   // ── Tabs under the chart ─────────────────────────────
@@ -356,10 +393,10 @@ export default async function mount(el, params) {
       if (!state.crowd) { pane.innerHTML = skeletonRows(3); return; }
       const rows = [...state.crowd].sort((a, b) => (b.market === m.name) - (a.market === m.name) || (Number(b.longValue) + Number(b.shortValue)) - (Number(a.longValue) + Number(a.shortValue)));
       if (!rows.length) { pane.innerHTML = `<div class="empty">No open positions on Perpl right now.</div>`; return; }
-      pane.innerHTML = `<div class="table-wrap"><table class="table table-compact"><thead><tr><th class="left">Market</th><th class="left" style="width:220px">Lean</th><th>Long</th><th>Short</th><th>Traders</th><th class="left">Biggest position</th></tr></thead><tbody>
+      pane.innerHTML = `<div class="table-wrap"><table class="table table-compact"><thead><tr><th class="left">Market</th><th class="left" style="width:150px">Lean</th><th>Long</th><th>Short</th><th>Traders</th><th class="left">Biggest position</th></tr></thead><tbody>
         ${rows.map((r) => { const share = traderShare(r); return `<tr class="link" data-market="${esc(r.market)}" ${r.market === m.name ? 'style="background:rgba(131,110,249,.06)"' : ""}>
           <td><div class="token">${logo(MARKET_LOGOS[r.market], r.market, 24)}<div class="name"><b>${esc(r.market)}</b></div></div></td>
-          <td class="left"><div class="bar bar-thin" style="width:200px"><i style="width:${(share * 100).toFixed(1)}%"></i></div><div style="font-size:11px;margin-top:4px" class="num"><span class="up">${fmtPct(share, { sign: false, digits: 0 })}</span> <span class="faint">/</span> <span class="down">${fmtPct(1 - share, { sign: false, digits: 0 })}</span></div></td>
+          <td class="left"><div class="bar bar-thin" style="width:130px"><i style="width:${(share * 100).toFixed(1)}%"></i></div><div style="font-size:11px;margin-top:4px" class="num"><span class="up">${fmtPct(share, { sign: false, digits: 0 })}</span> <span class="faint">/</span> <span class="down">${fmtPct(1 - share, { sign: false, digits: 0 })}</span></div></td>
           <td class="num up">${fmtUsd(r.longValue, { compact: true })}<div class="muted" style="font-size:11px">${r.longTraders}</div></td>
           <td class="num down">${fmtUsd(r.shortValue, { compact: true })}<div class="muted" style="font-size:11px">${r.shortTraders}</div></td>
           <td class="num">${r.traders}</td>
@@ -430,7 +467,8 @@ export default async function mount(el, params) {
     const volume = chart.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "", color: "rgba(255,255,255,0.12)" });
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
     state.markLine = series.createPriceLine({ price: state.market.mark, color: "#836ef9", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "mark" });
-    const observer = new ResizeObserver(() => chart.applyOptions({ width: host.clientWidth, height: host.clientHeight }));
+    chart.timeScale().subscribeVisibleLogicalRangeChange(() => placeFaces());
+    const observer = new ResizeObserver(() => { chart.applyOptions({ width: host.clientWidth, height: host.clientHeight }); placeFaces(); });
     observer.observe(host);
     stops.push(() => observer.disconnect());
     state.chart = chart; state.series = series; state.volume = volume;
@@ -448,11 +486,94 @@ export default async function mount(el, params) {
       state.volume.setData(rows.map((c) => ({ time: c.time, value: c.volume, color: c.close >= c.open ? "rgba(47,214,123,0.28)" : "rgba(255,92,92,0.28)" })));
       state.chart.timeScale().scrollToRealTime();
       state.lastBar = state.bar;
+      if (!state.ring.length) state.ring = rows.slice(-30).map((c) => c.close);
+      paintSpark();
     } else {
       for (const c of rows.slice(-3)) {
         state.series.update({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close });
         state.volume.update({ time: c.time, value: c.volume, color: c.close >= c.open ? "rgba(47,214,123,0.28)" : "rgba(255,92,92,0.28)" });
       }
+    }
+    state.lastCandle = { ...rows[rows.length - 1] };
+    placeFaces();
+  }
+
+  // The tape's last candle follows the contract mark between candle polls, so the
+  // chart moves every two seconds rather than every minute.
+  function tickCandle(mark, at) {
+    if (!state.series || !state.lastCandle) return;
+    const seconds = BAR_SECONDS[state.bar] ?? 900;
+    const slot = Math.floor(at / 1000 / seconds) * seconds;
+    let c = state.lastCandle;
+    if (slot > c.time) c = { time: slot, open: c.close, high: c.close, low: c.close, close: c.close, volume: 0 };
+    c = { ...c, close: mark, high: Math.max(c.high, mark), low: Math.min(c.low, mark) };
+    state.lastCandle = c;
+    try { state.series.update({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }); } catch { /* older than the series' last bar */ }
+  }
+
+  function paintSpark() {
+    const svg = $("#td-spark", root); if (!svg) return;
+    const points = state.ring;
+    if (points.length < 2) return;
+    const w = 84, h = 26;
+    const min = Math.min(...points), max = Math.max(...points), span = max - min || max * 0.0001 || 1;
+    const step = (w - 8) / (points.length - 1);
+    const coords = points.map((v, i) => [3 + i * step, 3 + (h - 6) * (1 - (v - min) / span)]);
+    const d = coords.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+    const color = points[points.length - 1] >= points[0] ? "var(--rise)" : "var(--fall)";
+    const [lx, ly] = coords[coords.length - 1];
+    svg.innerHTML = `<path class="fill" d="${d} L${lx.toFixed(1)},${h} L3,${h} Z" fill="${color}"/><path d="${d}" stroke="${color}"/><circle class="halo" cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="4" fill="${color}" opacity=".45"/><circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="2.4" fill="${color}"/>`;
+  }
+
+  // ── Faces on the chart: where the top traders got in ────
+
+  function buildFaces() {
+    const m = state.market;
+    const h = head();
+    if (!state.top || !h) { state.faces = []; return; }
+    state.faces = state.top.flatMap((t) => t.positions.filter((p) => p.market === m.name).map((p) => ({
+      address: t.address, side: p.side, leverage: p.leverage, entry: Number(p.entry), value: p.value, pnl: p.pnl, pnlPercent: p.pnlPercent,
+      time: Math.floor((h.time - (h.block - p.entryBlock) * h.blockMs) / 1000),
+    }))).filter((f) => Number.isFinite(f.time) && f.entry > 0).slice(0, 40);
+    const layer = $("#td-faces", root); if (!layer) return;
+    layer.innerHTML = state.faces.map((f, i) => {
+      const id = knownIdentity(f.address);
+      const face = id?.avatar ? `<img src="${esc(id.avatar)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : "";
+      const hue = [...f.address.toLowerCase()].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7);
+      return `<div class="td-face ${f.side}" data-face="${i}" style="background:linear-gradient(135deg,hsl(${hue} 60% 45%),hsl(${(hue + 40) % 360} 60% 30%));display:none"><span>${esc((id?.name ?? f.address.slice(2, 4)).slice(0, 2).toUpperCase())}</span>${face}</div>`;
+    }).join("") + `<div class="td-tip" id="td-tip" hidden></div>`;
+    state.faces.forEach((f) => { if (!knownIdentity(f.address)) identity(f.address).then((id) => { if (id?.avatar || id?.name) buildFaces(); }); });
+    layer.onmouseover = (event) => {
+      const el = event.target.closest("[data-face]"); if (!el) return;
+      const f = state.faces[Number(el.dataset.face)]; const id = knownIdentity(f.address);
+      const tip = $("#td-tip", layer);
+      tip.innerHTML = `<b>${esc(id?.name ?? short(f.address))}</b><span class="muted">${f.side} ${f.leverage}× · entry ${fmtPrice(f.entry, m.priceDecimals)}</span><span class="muted">${fmtUsd(f.value, { compact: true })} · <span class="${dirClass(Number(f.pnl))}">${fmtPct(f.pnlPercent / 100)}</span> · ${ago(f.time * 1000)}</span>`;
+      tip.hidden = false;
+      const x = parseFloat(el.style.left), y = parseFloat(el.style.top);
+      tip.style.left = `${Math.min(x + 16, layer.clientWidth - 220)}px`; tip.style.top = `${Math.max(4, y - 60)}px`;
+    };
+    layer.onmouseout = (event) => { if (event.target.closest("[data-face]")) $("#td-tip", layer).hidden = true; };
+    layer.onclick = (event) => { const el = event.target.closest("[data-face]"); if (el) navigate(`/app/wallet/${state.faces[Number(el.dataset.face)].address}`); };
+    placeFaces();
+  }
+
+  function placeFaces() {
+    const layer = $("#td-faces", root);
+    if (!layer || !state.chart || !state.series || !state.faces.length) return;
+    const seconds = BAR_SECONDS[state.bar] ?? 900;
+    const stacks = new Map();
+    for (const el of $$("[data-face]", layer)) {
+      const f = state.faces[Number(el.dataset.face)];
+      const slot = Math.floor(f.time / seconds) * seconds;
+      const x = state.chart.timeScale().timeToCoordinate(slot);
+      const y = state.series.priceToCoordinate(f.entry);
+      if (x == null || y == null || x < 0) { el.style.display = "none"; continue; }
+      const key = `${slot}:${f.side}`;
+      const n = stacks.get(key) ?? 0; stacks.set(key, n + 1);
+      if (n >= 4) { el.style.display = "none"; continue; }
+      el.style.display = "";
+      el.style.left = `${x.toFixed(1)}px`;
+      el.style.top = `${(y + (f.side === "long" ? -1 : 1) * (14 + n * 9)).toFixed(1)}px`;
     }
   }
 }
