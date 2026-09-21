@@ -22,7 +22,8 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
-html { scroll-behavior: smooth; }
+/* The canvas Safari shows past either end of the page: the nav and footer are both night. */
+html { scroll-behavior: smooth; background: #070907; }
 
 :root {
   --ink: #0b0d0b;
