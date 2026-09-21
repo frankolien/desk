@@ -23,6 +23,8 @@ export const CUSTODY = new Set([
 ]);
 export const NATIVE = "native";
 export const LEDGER_VERSION = 1;
+/// Money, not positions: paying with one of these is not selling it.
+const QUOTE_SYMBOLS = new Set(["MON", "WMON", "USDC", "USDT", "AUSD", "USDE", "SUSDE", "SOL", "WSOL"]);
 export const ledgerKey = (address) => `wl:${address.toLowerCase()}`;
 export const TRACKED_KEY = "wl:tracked";
 export const HEARTBEAT_KEY = "wl:heartbeat";
@@ -107,7 +109,7 @@ export async function applyMovement(ledger, movement, { price, meta }) {
   const legs = [];
   for (const { token, raw } of movement.in) legs.push({ token, raw, side: "in" });
   for (const { token, raw } of movement.out) legs.push({ token, raw, side: "out" });
-  if (movement.paidNative > 0n && movement.kind === "buy") legs.push({ token: NATIVE, raw: movement.paidNative, side: "out" });
+  if (movement.paidNative > 0n && movement.kind === "buy") legs.push({ token: NATIVE, raw: movement.paidNative, side: "out", payment: true });
 
   for (const leg of legs) {
     const info = await meta(leg.token);
@@ -127,24 +129,27 @@ export async function applyMovement(ledger, movement, { price, meta }) {
         position.bought += amount * unit;
       }
     } else {
-      // Tokens without a cost basis leave first; they never touch PnL.
+      // Tokens without a cost basis leave first; they never touch PnL. The sale is
+      // still a sale: it is recorded with its value and no gain.
       const fromUnpriced = Math.min(position.unpriced, amount);
       position.unpriced -= fromUnpriced;
       const priced = Math.min(position.holding, amount - fromUnpriced);
+      let gain = null;
       if (priced > 0) {
         const averageCost = position.holding > 0 ? position.basis / position.holding : 0;
         position.basis -= averageCost * priced;
         position.holding -= priced;
         if (unit != null) {
-          const gain = priced * (unit - averageCost);
+          gain = priced * (unit - averageCost);
           position.realized += gain;
           position.sold += priced * unit;
           ledger.realized += gain;
           if (gain >= 0) ledger.wins += 1; else ledger.losses += 1;
-          if (movement.kind !== "sent") {
-            ledger.trades.push({ time: movement.time, hash: movement.hash, token: leg.token, symbol: info.symbol, side: "sell", amount: priced, price: unit, value: priced * unit, gain });
-          }
         }
+      }
+      const payment = leg.payment || QUOTE_SYMBOLS.has(String(info.symbol).toUpperCase());
+      if (unit != null && movement.kind !== "sent" && (priced > 0 || !payment)) {
+        ledger.trades.push({ time: movement.time, hash: movement.hash, token: leg.token, symbol: info.symbol, side: "sell", amount, price: unit, value: amount * unit, gain });
       }
     }
     if (leg.side === "in" && unit != null && movement.kind !== "received") {

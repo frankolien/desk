@@ -1,3 +1,5 @@
+import { isSolanaAddress } from "./_chains.mjs";
+
 export const MAX_WALLETS = 25;
 export const DEFAULT_MIN_USD = 250;
 export const WALLET_PUSH_CAP = 20;
@@ -64,7 +66,8 @@ export function walletEvents(previous, ledger, { minUsd = DEFAULT_MIN_USD, first
     const trade = trades[index];
     let kind = trade.side;
     if (trade.side === "buy" && firstOf.get(trade.token) === index) kind = "first";
-    if (trade.side === "sell" && lastSellOf.get(trade.token) === index && (ledger.positions?.[trade.token]?.holding ?? 0) <= DUST) kind = "close";
+    const left = (ledger.positions?.[trade.token]?.holding ?? 0) + (ledger.positions?.[trade.token]?.unpriced ?? 0);
+    if (trade.side === "sell" && lastSellOf.get(trade.token) === index && left <= DUST) kind = "close";
 
     const key = `${trade.token}:${trade.side}`;
     let group = open.get(key);
@@ -133,7 +136,7 @@ export function walletPayload(record, wallet, event) {
       name: wallet?.name ?? null,
       token: event.token ?? null,
       symbol: event.symbol ?? null,
-      chainIndex: "143",
+      chainIndex: isSolanaAddress(address ?? "") ? "501" : "143",
       amount: event.amount ?? null,
       valueUsd: event.value ?? null,
       gain: event.gain ?? null,

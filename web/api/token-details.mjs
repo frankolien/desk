@@ -45,7 +45,8 @@ export default async function handler(req, res) {
     const secret = process.env.CRON_SECRET;
     if (!secret || req.headers.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: "Unauthorized." });
     const { chainIndex, contract, bar, after } = req.query;
-    if (!/^\d{1,10}$/.test(String(chainIndex)) || !/^0x[a-fA-F0-9]{40}$/.test(String(contract))
+    const validContract = /^0x[a-fA-F0-9]{40}$/.test(String(contract)) || (String(chainIndex) === "501" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(String(contract)));
+    if (!/^\d{1,10}$/.test(String(chainIndex)) || !validContract
       || !["1m", "1H", "1D"].includes(String(bar)) || !/^\d{1,16}$/.test(String(after))) {
       return res.status(400).json({ error: "chainIndex, contract, bar and after are required." });
     }

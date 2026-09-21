@@ -7,9 +7,12 @@ struct TrackedWallet: Codable, Identifiable, Hashable, Sendable {
     var minUsd: Double
     var firstBuysOnly: Bool
 
-    var id: String { address.lowercased() }
+    var id: String { Self.key(address) }
     var shortAddress: String { address.count > 12 ? "\(address.prefix(6))…\(address.suffix(4))" : address }
     var displayName: String { name.isEmpty ? shortAddress : name }
+
+    /// A Solana address is case-sensitive base58; an EVM one is the same in any case.
+    static func key(_ address: String) -> String { address.hasPrefix("0x") ? address.lowercased() : address }
 }
 
 /// Wallets this phone wants to hear about. The list lives here; the server only sees
@@ -34,9 +37,9 @@ final class TrackedWallets {
 
     var isFull: Bool { list.count >= Self.limit }
 
-    func isTracking(_ address: String) -> Bool { list.contains { $0.id == address.lowercased() } }
+    func isTracking(_ address: String) -> Bool { list.contains { $0.id == TrackedWallet.key(address) } }
 
-    func wallet(for address: String) -> TrackedWallet? { list.first { $0.id == address.lowercased() } }
+    func wallet(for address: String) -> TrackedWallet? { list.first { $0.id == TrackedWallet.key(address) } }
 
     @discardableResult
     func track(_ address: String, name: String = "") -> Bool {
@@ -47,7 +50,7 @@ final class TrackedWallets {
     }
 
     func untrack(_ address: String) {
-        list.removeAll { $0.id == address.lowercased() }
+        list.removeAll { $0.id == TrackedWallet.key(address) }
         persist()
     }
 
@@ -58,11 +61,18 @@ final class TrackedWallets {
     }
 
     var payload: [[String: Any]] {
-        list.map { ["address": $0.address.lowercased(), "name": $0.name, "minUsd": $0.minUsd, "firstBuysOnly": $0.firstBuysOnly] }
+        list.map { ["address": $0.id, "name": $0.name, "minUsd": $0.minUsd, "firstBuysOnly": $0.firstBuysOnly] }
     }
 
-    static func isValid(_ address: String) -> Bool {
+    static func isValid(_ address: String) -> Bool { isEVM(address) || isSolana(address) }
+
+    static func isEVM(_ address: String) -> Bool {
         address.count == 42 && address.hasPrefix("0x") && address.dropFirst(2).allSatisfy(\.isHexDigit)
+    }
+
+    private static let base58 = Set("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
+    static func isSolana(_ address: String) -> Bool {
+        (32...44).contains(address.count) && address.allSatisfy { Self.base58.contains($0) }
     }
 
     private func persist() {

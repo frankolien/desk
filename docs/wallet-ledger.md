@@ -52,3 +52,16 @@ opened wallet at the tip.
 The same code runs the same way with more wallets; the knobs are the worker's round
 pause and per-wallet budget. Past a few thousand tracked wallets, shard the tracked set
 across workers by address prefix. A paid HyperSync tier removes the rate limit.
+
+## Solana
+
+A Solana wallet has the same ledger, written only by the worker. It reads the public
+RPC: each new signature's transaction, the wallet's own token balances before and after,
+and the lamports it paid or received. SOL, wrapped SOL, USDC and USDT legs say which way
+money went and are never positions; the asset leg is priced from the OKX candle as on
+Monad. After each transaction the position is reconciled to the balance the chain
+reports, so tokens bought before Desk looked are held without a basis, and a sale of
+them is recorded with its value and no gain. The cursor is the last signature applied.
+The first look takes the newest page of signatures, not the wallet's whole life.
+
+`SOLANA_RPC` on the worker overrides the public endpoint.

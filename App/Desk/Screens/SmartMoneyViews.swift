@@ -208,7 +208,7 @@ struct TrackWalletSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Address").font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(DeskColor.nightMuted.color)
                 HStack {
-                    TextField("0x…", text: $address)
+                    TextField("0x… or a Solana address", text: $address)
                         .font(.system(size: 14, weight: .medium, design: .monospaced))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -284,7 +284,7 @@ struct TrackWalletSheet: View {
             }
             .font(.system(size: 15, weight: .bold, design: .rounded))
 
-            Text("Pushed within a couple of minutes of the trade landing on Monad. Twenty an hour at most, then a digest.")
+            Text("Pushed within a couple of minutes of the trade landing on Monad or Solana. Twenty an hour at most, then a digest.")
                 .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundStyle(DeskColor.nightMuted.color.opacity(0.8))
                 .fixedSize(horizontal: false, vertical: true)
@@ -300,7 +300,7 @@ struct TrackWalletSheet: View {
             dismiss()
             return
         }
-        guard TrackedWallets.isValid(trimmed) else { problem = "That is not an EVM address."; return }
+        guard TrackedWallets.isValid(trimmed) else { problem = "That is not a wallet address."; return }
         guard !TrackedWallets.shared.isTracking(trimmed) else { problem = "Already tracked."; return }
         guard !TrackedWallets.shared.isFull else { problem = "You can track \(TrackedWallets.limit) wallets."; return }
         TrackedWallets.shared.track(trimmed, name: name)

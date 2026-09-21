@@ -1,5 +1,6 @@
 import { hypersyncClient } from "../api/_history.mjs";
 import { HEARTBEAT_KEY, TRACKED_KEY, indexWallet, ledgerKey } from "../api/_ledger.mjs";
+import { SOLANA, indexSolanaWallet, isSolanaAddress, solanaMetaReader, solanaRpc } from "../api/_solana.mjs";
 import { redisStore } from "../api/_store.mjs";
 import { metaReader, priceReader } from "../api/_wallet.mjs";
 
@@ -17,6 +18,7 @@ const BACKOFF_MS = 60_000;
 
 const store = redisStore();
 const hypersync = hypersyncClient();
+const solana = solanaRpc();
 if (!store || !hypersync) {
   console.error("worker: KV_REST_API_URL, KV_REST_API_TOKEN and HYPERSYNC_TOKEN are required");
   process.exit(1);
@@ -42,6 +44,8 @@ async function round() {
   const wallets = await store.smembers(TRACKED_KEY);
   const price = priceReader({ store, fetchCandles });
   const meta = metaReader({ store });
+  const solPrice = priceReader({ store, chainIndex: SOLANA, fetchCandles });
+  const solMeta = solanaMetaReader({ store, api: DESK_API });
   let indexed = 0;
   let behind = 0;
   const stored = await store.mget(wallets.map(ledgerKey));
@@ -50,9 +54,11 @@ async function round() {
     const known = stored[index] ? JSON.parse(stored[index]) : null;
     if (known && Date.now() - known.indexedAt < FRESH_MS) continue;
     try {
-      const result = await indexWallet(wallet, {
-        store, hypersync, price, meta, backfillBlocks: BACKFILL_BLOCKS, deadline: Date.now() + PER_WALLET_BUDGET_MS,
-      });
+      const result = isSolanaAddress(wallet)
+        ? await indexSolanaWallet(wallet, { store, rpc: solana, price: solPrice, meta: solMeta, deadline: Date.now() + PER_WALLET_BUDGET_MS })
+        : await indexWallet(wallet, {
+          store, hypersync, price, meta, backfillBlocks: BACKFILL_BLOCKS, deadline: Date.now() + PER_WALLET_BUDGET_MS,
+        });
       indexed += 1;
       if (!result.complete) behind += 1;
     } catch (error) {

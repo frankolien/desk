@@ -55,6 +55,8 @@ export const EVM_NATIVE_DECIMALS = 18;
 export const SOLANA_NATIVE = {
   address: "11111111111111111111111111111111", symbol: "SOL", decimals: 9,
 };
+export const SOLANA_WSOL = "So11111111111111111111111111111111111111112";
+export const isSolanaAddress = (value) => typeof value === "string" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
 
 export function chainName(chainIndex) {
   return CHAINS[chainIndex]?.name || `Chain ${chainIndex}`;

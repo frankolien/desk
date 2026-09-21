@@ -10,6 +10,7 @@ import {
   DEFAULT_MIN_USD, DIGEST_WINDOW_S, MAX_WALLETS, WALLET_PUSH_CAP, newestMarker, seenKey, walletCountKey, walletDigestKey,
   walletEvents, walletPayload,
 } from "./_watch.mjs";
+import { isSolanaAddress } from "./_chains.mjs";
 import { chainReader, describePosition, openMarkets, perpIdsFromBitmap } from "./traders.mjs";
 
 /// Trade alerts for followed traders.
@@ -84,12 +85,12 @@ function parseWallets(wallets) {
   const out = [];
   const seen = new Set();
   for (const entry of wallets) {
-    if (!entry || typeof entry !== "object" || !validAddress(entry.address)) return null;
+    if (!entry || typeof entry !== "object" || !(validAddress(entry.address) || isSolanaAddress(entry.address))) return null;
     const { name, minUsd, firstBuysOnly } = entry;
     if (name != null && typeof name !== "string") return null;
     if (minUsd != null && (typeof minUsd !== "number" || !Number.isFinite(minUsd) || minUsd < 0)) return null;
     if (firstBuysOnly != null && typeof firstBuysOnly !== "boolean") return null;
-    const address = entry.address.toLowerCase();
+    const address = validAddress(entry.address) ? entry.address.toLowerCase() : entry.address;
     if (seen.has(address)) continue;
     seen.add(address);
     out.push({
@@ -519,8 +520,8 @@ export function createHandler(resolve) {
               ? "You'll hear when Bitcoin, Ether, Solana or any Perpl market breaks a level or moves 5% in a day."
               : !first && !copied
               ? (tracked.length === 1
-                ? `You'll hear when ${tracked[0].name || shortAddress(tracked[0].address)} trades on Monad.`
-                : `You'll hear when any of your ${tracked.length} tracked wallets trades on Monad.`)
+                ? `You'll hear when ${tracked[0].name || shortAddress(tracked[0].address)} trades on ${isSolanaAddress(tracked[0].address) ? "Solana" : "Monad"}.`
+                : `You'll hear when any of your ${tracked.length} tracked wallets trades.`)
               : !first
               ? `Desk will wake to copy ${copied === 1 ? "your trader" : `your ${copied} traders`} while it's closed.`
               : record.traders.length === 1

@@ -1,4 +1,4 @@
-import { CHAINS, EVM_NATIVE_ADDRESS, rpcEndpoint } from "./_chains.mjs";
+import { CHAINS, EVM_NATIVE_ADDRESS, SOLANA_WSOL, rpcEndpoint } from "./_chains.mjs";
 import { NATIVE } from "./_ledger.mjs";
 import { getAddress } from "viem";
 
@@ -150,12 +150,14 @@ export async function currentPrices(chainIndex, contracts) {
   const map = new Map();
   if (!okxConfigured() || contracts.length === 0) return map;
   try {
+    const native = chainIndex === "501" ? SOLANA_WSOL : EVM_NATIVE_ADDRESS;
+    const keyed = (value) => (String(value).startsWith("0x") ? String(value).toLowerCase() : String(value));
     const rows = await okxPost("/api/v6/dex/market/price-info",
-      contracts.map((contract) => ({ chainIndex, tokenContractAddress: contract === NATIVE ? EVM_NATIVE_ADDRESS : contract })));
+      contracts.map((contract) => ({ chainIndex, tokenContractAddress: contract === NATIVE ? native : contract })));
     for (const row of Array.isArray(rows) ? rows : []) {
-      const contract = String(row.tokenContractAddress ?? "").toLowerCase();
+      const contract = keyed(row.tokenContractAddress ?? "");
       const price = number(row.price);
-      if (price != null) map.set(contract === EVM_NATIVE_ADDRESS ? NATIVE : contract, price);
+      if (price != null) map.set(contract === native ? NATIVE : contract, price);
     }
   } catch { /* unpriced today, marked null */ }
   return map;

@@ -2248,6 +2248,8 @@ private struct WalletProfileScreen: View {
     private var tracked: TrackedWallet? { TrackedWallets.shared.wallet(for: wallet.address) }
     private var isEVM: Bool { wallet.address.hasPrefix("0x") && wallet.address.count == 42 }
     private var isSolana: Bool { !wallet.address.hasPrefix("0x") && (32...44).contains(wallet.address.count) }
+    private var ledgerChain: String { isSolana ? "501" : "143" }
+    private func tokenKey(_ token: String) -> String { isSolana ? token : token.lowercased() }
     private var ledger: WalletResource.Ledger? { resource.map(\.ledger).flatMap { $0.status == "unavailable" ? nil : $0 } }
     private var name: String {
         if let name = identity?.name { return name }
@@ -2301,7 +2303,7 @@ private struct WalletProfileScreen: View {
                         }
                         .buttonStyle(.plain)
                         Spacer(minLength: 8)
-                        if isEVM {
+                        if isEVM || isSolana {
                             action(tracked == nil ? "Follow" : "Following", symbol: nil) {
                                 if identity?.perplAccount != nil, perplDirectory.isFollowing(wallet.address) == (tracked != nil) {
                                     perplDirectory.toggle(wallet.address)
@@ -2535,9 +2537,9 @@ private struct WalletProfileScreen: View {
     private func rows(for tab: Tab) -> [Row] {
         switch tab {
         case .positions:
-            let unrealized = Dictionary((ledger?.tokens ?? []).map { ($0.token.lowercased(), $0) }, uniquingKeysWith: { a, _ in a })
+            let unrealized = Dictionary((ledger?.tokens ?? []).map { (tokenKey($0.token), $0) }, uniquingKeysWith: { a, _ in a })
             return (resource?.holdings ?? []).map { holding in
-                let position = holding.chainIndex == "143" ? unrealized[holding.contract.lowercased()] : nil
+                let position = holding.chainIndex == ledgerChain ? unrealized[tokenKey(holding.contract)] : nil
                 return Row(id: holding.id, symbol: holding.symbol, title: holding.symbol,
                            subtitle: SpotLiveFeed.compactNumber(holding.balance),
                            value: holding.value.map { SpotLiveFeed.compactUSD($0) } ?? "—",
@@ -2552,7 +2554,7 @@ private struct WalletProfileScreen: View {
                 let percent = cost > 0 ? gain / cost * 100 : nil
                 return Row(id: trade.id, symbol: trade.symbol, title: trade.symbol, subtitle: Self.age(trade.time),
                            value: signed(gain), detail: percent.map { String(format: "%@%.1f%%", $0 >= 0 ? "+" : "−", abs($0)) },
-                           tint: tint(gain), badge: nil, day: Self.day(trade.time), contract: trade.token)
+                           tint: tint(gain), badge: nil, day: Self.day(trade.time), chainIndex: ledgerChain, contract: trade.token)
             }
         case .activity:
             if let trades = ledger?.trades, !trades.isEmpty {
@@ -2560,7 +2562,7 @@ private struct WalletProfileScreen: View {
                     Row(id: trade.id, symbol: trade.symbol, title: "\(trade.isBuy ? "Bought" : "Sold") \(trade.symbol)", subtitle: Self.age(trade.time),
                         value: SpotLiveFeed.compactUSD(trade.value),
                         detail: "\(trade.isBuy ? "+" : "−")\(SpotLiveFeed.compactNumber(trade.amount)) \(trade.symbol)",
-                        tint: Color.white.opacity(0.55), badge: trade.isBuy ? "+" : "−", day: Self.day(trade.time), contract: trade.token)
+                        tint: Color.white.opacity(0.55), badge: trade.isBuy ? "+" : "−", day: Self.day(trade.time), chainIndex: ledgerChain, contract: trade.token)
                 }
             }
             guard let token, let feed else { return [] }

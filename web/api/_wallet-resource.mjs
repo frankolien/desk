@@ -2,6 +2,7 @@ import { CHAINS } from "./_chains.mjs";
 import { hypersyncClient } from "./_history.mjs";
 import { resolveIdentities } from "./_identity.mjs";
 import { TRACKED_KEY, indexWallet, ledgerKey, summarize } from "./_ledger.mjs";
+import { SOLANA } from "./_solana.mjs";
 import { currentPrices, describeWallet, logosFor, metaReader, priceReader, walletBalances } from "./_wallet.mjs";
 
 /// Everything Desk knows about a wallet, in one answer: who it is, what it holds on every
@@ -19,8 +20,8 @@ const INDEX_BUDGET_MS = 25_000;
 const MAX_TRACKED = 2_000;
 
 export async function walletResource(address, { chainIndex = MONAD, contract = "", store, fetchImpl = fetch, chain = null, ens = null, hypersync = hypersyncClient(), now = Date.now } = {}) {
-  // A Solana address is case-sensitive base58 and lives on one chain; names and the
-  // ledger are Monad things and do not apply.
+  // A Solana address is case-sensitive base58 and lives on one chain; names are Monad
+  // things and do not apply.
   const solana = !address.startsWith("0x");
   const wanted = solana ? address : address.toLowerCase();
   const chains = Object.keys(CHAINS).filter((index) => CHAINS[index].rpc !== null && index !== "501");
@@ -36,12 +37,12 @@ export async function walletResource(address, { chainIndex = MONAD, contract = "
     wallet.held = match ? { balance: match.balance, value: match.value } : null;
   }
 
-  const ledger = solana ? { status: "unavailable" } : await monadLedger(wanted, { store, hypersync, now });
+  const ledger = solana ? await solanaLedger(wanted, { store, now }) : await monadLedger(wanted, { store, hypersync, now });
   const labels = walletLabels({ identity, ledger, holdings: wallet.holdings, now: now() });
   const logos = await logosFor([
     ...wallet.holdings.map((row) => ({ chainIndex: row.chainIndex, contract: row.contract, symbol: row.symbol })),
     ...(wallet.holdings.some((row) => row.contract === "") ? [{ chainIndex: "143", contract: "" }] : []),
-    ...(ledger.tokens ?? []).map((row) => ({ chainIndex: MONAD, contract: row.token, symbol: row.symbol })),
+    ...(ledger.tokens ?? []).map((row) => ({ chainIndex: solana ? SOLANA : MONAD, contract: row.token, symbol: row.symbol })),
   ], { store });
   return { address: wanted, observedAt: now(), identity, ...wallet, ledger, labels, logos, balanceErrors: lastBalanceErrors() };
 }
@@ -126,6 +127,21 @@ async function balancesAcross(address, chains, chainIndex) {
 }
 
 export function lastBalanceErrors() { return balanceErrors; }
+
+/// The worker indexes Solana wallets from the public RPC; the page reads what it has
+/// written so far and asks for the wallet to be picked up if nothing is there yet.
+async function solanaLedger(address, { store, now }) {
+  if (!store) return { status: "unavailable" };
+  store.sadd(TRACKED_KEY, address).catch(() => {});
+  const stored = await store.get(ledgerKey(address)).catch(() => null);
+  if (!stored) return { status: "indexing", behind: null };
+  const ledger = JSON.parse(stored);
+  const prices = await currentPrices(SOLANA, Object.keys(ledger.positions));
+  return {
+    status: "ready", indexedAt: ledger.indexedAt, behind: 0,
+    ...summarize(ledger, (token) => prices.get(token) ?? null, { now: now() }),
+  };
+}
 
 async function monadLedger(address, { store, hypersync, now }) {
   if (!store || !hypersync) return { status: "unavailable" };
