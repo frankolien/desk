@@ -108,6 +108,33 @@ final class IdentityDirectory {
         persist()
     }
 
+    private struct LookupResponse: Decodable { let address: String; let identity: Identity? }
+
+    /// A typed name to a wallet: .nad, .eth, @farcaster, or an address as itself.
+    func lookup(_ query: String) async -> (address: String, identity: Identity?)? {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 3 else { return nil }
+        var components = URLComponents(string: Self.endpoint)!
+        components.queryItems = [URLQueryItem(name: "view", value: "lookup"), URLQueryItem(name: "q", value: trimmed)]
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let body = try? JSONDecoder().decode(LookupResponse.self, from: data) else { return nil }
+        if let identity = body.identity {
+            identities[body.address.lowercased()] = identity
+            fetchedAt[body.address.lowercased()] = .now
+            persist()
+        }
+        return (body.address, body.identity)
+    }
+
+    /// Names already on this phone that contain the text, for instant matches.
+    func matches(_ query: String, limit: Int = 3) -> [Identity] {
+        let wanted = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard wanted.count >= 2 else { return [] }
+        return Array(identities.values.filter { ($0.name ?? "").lowercased().contains(wanted) }.prefix(limit))
+    }
+
     private func persist() {
         var stored: [String: Entry] = [:]
         for (address, identity) in identities {

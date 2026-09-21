@@ -75,12 +75,29 @@ export function walletLabels({ identity = null, ledger = {}, holdings = [], now 
 /// OKX refuses a whole balance call if one chain in it is not one it serves, and which
 /// chains those are changes. Small groups in parallel, with the chain in view and Monad
 /// in a group of their own, so one refusal costs a few chains rather than all of them.
+const unsupportedChains = new Set();
+
+async function balancesFor(address, group) {
+  let chains = group.filter((index) => !unsupportedChains.has(index));
+  for (let attempt = 0; attempt < 2 && chains.length; attempt += 1) {
+    try {
+      return await walletBalances(address, chains);
+    } catch (error) {
+      const refused = /Unsupported chain IDs?:\s*([\d,\s]+)/i.exec(error.message ?? "");
+      if (!refused) return null;
+      for (const index of refused[1].split(",").map((value) => value.trim())) unsupportedChains.add(index);
+      chains = chains.filter((index) => !unsupportedChains.has(index));
+    }
+  }
+  return null;
+}
+
 async function balancesAcross(address, chains, chainIndex) {
   const first = [...new Set([chainIndex, MONAD])];
   const rest = chains.filter((index) => !first.includes(index));
   const groups = [first];
   for (let start = 0; start < rest.length; start += 4) groups.push(rest.slice(start, start + 4));
-  const answers = await Promise.all(groups.map((group) => walletBalances(address, group).catch(() => null)));
+  const answers = await Promise.all(groups.map((group) => balancesFor(address, group)));
   const rows = answers.filter(Boolean).flat();
   return answers.some(Boolean) ? rows : null;
 }

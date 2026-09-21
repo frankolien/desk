@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { describeIdentity, pickFarcasterUser, resolveIdentities } from "../api/_identity.mjs";
+import { describeIdentity, lookupName, pickFarcasterUser, resolveIdentities } from "../api/_identity.mjs";
 import { memoryStore } from "../api/_store.mjs";
 import { createHandler } from "../api/traders.mjs";
 
@@ -116,4 +116,18 @@ test("of several Farcaster accounts on one address, the one that verified it win
   assert.equal(pickFarcasterUser(address, users).username, "dwr.eth");
   assert.equal(pickFarcasterUser(address, [users[0]]), null);
   assert.equal(pickFarcasterUser(address, [users[1], { username: "big", follower_count: 90 }]).username, "big");
+});
+
+test("a name becomes an address: .nad through the name service, .eth through ENS, @handle through Farcaster", async () => {
+  const fetchImpl = async (url, options) => {
+    if (url.includes("resolved-address/salmo.nad")) return json({ success: true, resolvedAddress: SALMO });
+    if (url.includes("resolved-address/")) return json({ success: false });
+    if (url.includes("by_username?username=vitalik")) { assert.equal(options.headers["x-api-key"], "k"); return json({ user: { verified_addresses: { eth_addresses: [VITALIK] } } }); }
+    return json({}, false);
+  };
+  assert.deepEqual(await lookupName("Salmo.nad", { fetchImpl }), { address: SALMO.toLowerCase(), source: "nad" });
+  assert.equal(await lookupName("nobody.nad", { fetchImpl }), null);
+  assert.deepEqual(await lookupName("vitalik.eth", { fetchImpl, ensAddress: async () => VITALIK }), { address: VITALIK.toLowerCase(), source: "ens" });
+  assert.deepEqual(await lookupName("@vitalik", { fetchImpl, neynarKey: "k" }), { address: VITALIK.toLowerCase(), source: "farcaster" });
+  assert.deepEqual(await lookupName(PLAIN, { fetchImpl }), { address: PLAIN.toLowerCase(), source: "address" });
 });

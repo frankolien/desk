@@ -1,7 +1,7 @@
 import { createPublicClient, http } from "viem";
 
 import { describe, shardKey, shardOf, statistics, tradesKey } from "./_history.mjs";
-import { MAX_ADDRESSES, ensReader, resolveIdentities } from "./_identity.mjs";
+import { MAX_ADDRESSES, ensAddressReader, ensReader, lookupName, resolveIdentities } from "./_identity.mjs";
 import { EXCHANGE_VIEWS } from "./_perpl-abi.mjs";
 import { DEFAULT_WINDOW, WINDOWS, cachedSignals } from "./_signals.mjs";
 import { redisStore } from "./_store.mjs";
@@ -271,6 +271,22 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
   return async function handler(req, res) {
     if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
     const view = String(req.query.view || "top");
+
+    if (view === "lookup") {
+      const query = String(req.query.q ?? "").trim().slice(0, 80);
+      if (!query) return res.status(400).json({ error: "A name or address is required." });
+      const found = await lookupName(query, { fetchImpl, ensAddress: ensAddressReader() });
+      if (!found) {
+        res.setHeader("Cache-Control", "public, s-maxage=60");
+        return res.status(404).json({ error: "No wallet answers to that name." });
+      }
+      const identities = await resolveIdentities([found.address], { fetchImpl, chain, store, ens });
+      const identity = identities[found.address] ?? null;
+      // A name that resolved forward but has no reverse record is still that wallet's name.
+      if (identity && !identity.name && found.source !== "address") { identity.name = query.replace(/^@/, ""); identity.source = found.source; }
+      res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=3600");
+      return res.status(200).json({ query, address: found.address, via: found.source, identity });
+    }
 
     if (view === "identity") {
       const addresses = String(req.query.addresses ?? req.query.address ?? "")

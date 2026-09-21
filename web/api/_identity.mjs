@@ -164,3 +164,42 @@ export async function resolveIdentities(addresses, { fetchImpl = fetch, chain = 
   });
   return identities;
 }
+
+/// A name to an address: a .nad name through the name service, a .eth name through
+/// ENS, an @handle through Farcaster. An address comes back as itself.
+export async function lookupName(query, { fetchImpl = fetch, ensAddress = null, neynarKey = process.env.NEYNAR_API_KEY } = {}) {
+  const text = String(query ?? "").trim();
+  if (/^0x[a-fA-F0-9]{40}$/.test(text)) return { address: text.toLowerCase(), source: "address" };
+  const lower = text.toLowerCase();
+  if (lower.endsWith(".nad")) {
+    try {
+      const response = await fetchImpl(`https://api.nad.domains/v1/protocol/resolved-address/${encodeURIComponent(lower)}?chainId=143`);
+      const body = response.ok ? await response.json() : null;
+      const address = String(body?.resolvedAddress ?? "");
+      if (/^0x[a-fA-F0-9]{40}$/.test(address)) return { address: address.toLowerCase(), source: "nad" };
+    } catch { /* not found */ }
+    return null;
+  }
+  if (lower.endsWith(".eth") && ensAddress) {
+    try {
+      const address = await ensAddress(lower);
+      if (address) return { address: address.toLowerCase(), source: "ens" };
+    } catch { /* not found */ }
+    return null;
+  }
+  const handle = lower.replace(/^@/, "");
+  if (neynarKey && /^[a-z0-9_.-]{1,32}$/.test(handle)) {
+    try {
+      const response = await fetchImpl(`https://api.neynar.com/v2/farcaster/user/by_username?username=${encodeURIComponent(handle)}`, { headers: { "x-api-key": neynarKey } });
+      const user = response.ok ? (await response.json())?.user : null;
+      const address = (user?.verified_addresses?.eth_addresses ?? [])[0] ?? user?.custody_address;
+      if (/^0x[a-fA-F0-9]{40}$/.test(String(address ?? ""))) return { address: String(address).toLowerCase(), source: "farcaster" };
+    } catch { /* not found */ }
+  }
+  return null;
+}
+
+export function ensAddressReader(rpcURL = process.env.ETHEREUM_RPC || "https://ethereum-rpc.publicnode.com") {
+  const client = createPublicClient({ chain: mainnet, transport: http(rpcURL, { timeout: 8_000 }) });
+  return (name) => client.getEnsAddress({ name });
+}

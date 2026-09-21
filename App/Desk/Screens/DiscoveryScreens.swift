@@ -187,7 +187,15 @@ struct MarketSearchScreen: View {
     @State private var query = ""
     @State private var showsMarket = false
     @State private var selectedSpot: TrendingSpotToken?
+    @State private var selectedPerson: SpotWallet?
+    @State private var person: (address: String, identity: Identity?)?
     @StateObject private var discovery = TokenDiscoveryModel()
+
+    /// Names look like names: a dot, an @, or an address.
+    private var looksLikeAName: Bool {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.hasPrefix("@") || text.hasPrefix("0x") || text.contains(".") && !text.contains(" ")
+    }
     @AppStorage("desk.watchlist") private var savedIDs = ""
 
     private var saved: Set<UInt32> {
@@ -208,6 +216,16 @@ struct MarketSearchScreen: View {
             $0.symbol.localizedCaseInsensitiveContains(wanted)
                 || (Self.marketNames[$0.symbol.uppercased()]?.localizedCaseInsensitiveContains(wanted) ?? false)
         }
+    }
+
+    private var peopleRows: [(address: String, identity: Identity?)] {
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        var rows: [(address: String, identity: Identity?)] = []
+        if let person { rows.append(person) }
+        for match in IdentityDirectory.shared.matches(query) where !rows.contains(where: { $0.address.lowercased() == match.address.lowercased() }) {
+            rows.append((match.address, match))
+        }
+        return rows
     }
 
     private var spotResults: [TrendingSpotToken] {
@@ -248,6 +266,43 @@ struct MarketSearchScreen: View {
                     .contentMargins(.horizontal, 20)
                     .padding(.horizontal, -20)
                     .padding(.top, 12)
+
+                    let people = peopleRows
+                    if !people.isEmpty {
+                        Text("People")
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .foregroundStyle(DeskColor.nightText.color)
+                            .padding(.top, 26)
+                        VStack(spacing: 10) {
+                            ForEach(people, id: \.address) { entry in
+                                Button { selectedPerson = SpotWallet(address: entry.address, emoji: "◉", portfolio: "—") } label: {
+                                    HStack(spacing: 13) {
+                                        TraderAvatar(address: entry.address, size: 42)
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(entry.identity?.name ?? TraderSnapshot.short(entry.address))
+                                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                                .foregroundStyle(DeskColor.nightText.color)
+                                                .lineLimit(1)
+                                            Text(entry.identity?.sourceLabel ?? TraderSnapshot.short(entry.address))
+                                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                                .foregroundStyle(DeskColor.nightMuted.color)
+                                                .lineLimit(1)
+                                        }
+                                        Spacer(minLength: 8)
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundStyle(DeskColor.nightMuted.color)
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .frame(height: 64)
+                                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.top, 12)
+                    }
 
                     if !spotResults.isEmpty {
                         HStack {
@@ -369,6 +424,31 @@ struct MarketSearchScreen: View {
             }
             .task { await discovery.run() }
             .task(id: query) { await discovery.search(query) }
+            .task(id: query) {
+                person = nil
+                guard looksLikeAName else { return }
+                try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled else { return }
+                let found = await IdentityDirectory.shared.lookup(query)
+                if !Task.isCancelled { person = found }
+                #if DEBUG
+                if let found, ProcessInfo.processInfo.arguments.contains("-open-person") {
+                    try? await Task.sleep(for: .seconds(2))
+                    selectedPerson = SpotWallet(address: found.address, emoji: "◉", portfolio: "—")
+                }
+                #endif
+            }
+            #if DEBUG
+            // `-search-demo vitalik.eth` types a name into search for capture.
+            .onAppear {
+                let arguments = ProcessInfo.processInfo.arguments
+                if let index = arguments.firstIndex(of: "-search-demo"), arguments.indices.contains(index + 1) { query = arguments[index + 1] }
+            }
+            #endif
+            .navigationDestination(item: $selectedPerson) { wallet in
+                WalletProfileScreen(wallet: wallet, token: nil, model: model)
+                    .toolbar(.hidden, for: .tabBar)
+            }
             .task(id: TokenOpenRequest.shared.pending) {
                 guard let target = TokenOpenRequest.shared.take() else { return }
                 query = target.contract
@@ -2122,8 +2202,9 @@ private struct WalletResource: Decodable {
 
 private struct WalletProfileScreen: View {
     let wallet: SpotWallet
-    let token: TrendingSpotToken
-    @ObservedObject var feed: SpotLiveFeed
+    /// The token the wallet was reached from; nil when it was reached by name.
+    let token: TrendingSpotToken?
+    var feed: SpotLiveFeed? = nil
     let model: AppModel
     @StateObject private var lookup = TokenDiscoveryModel()
     @State private var opened: TrendingSpotToken?
@@ -2156,7 +2237,9 @@ private struct WalletProfileScreen: View {
     }
 
     private func logo(_ chainIndex: String, _ contract: String) -> URL? {
-        if chainIndex == token.chainIndex, contract.caseInsensitiveCompare(token.contract) == .orderedSame, let own = token.artworkURL { return own }
+        // Native coins are in the app's own catalog.
+        if contract.isEmpty { return nil }
+        if let token, chainIndex == token.chainIndex, contract.caseInsensitiveCompare(token.contract) == .orderedSame, let own = token.artworkURL { return own }
         let key = chainIndex == "501" ? contract : contract.lowercased()
         return (resource?.logos?["\(chainIndex):\(key)"]).flatMap(TokenArtwork.url)
     }
@@ -2287,7 +2370,7 @@ private struct WalletProfileScreen: View {
     /// chart and figures; the wallet's own facts when it does not.
     private func open(_ row: Row) {
         guard !row.contract.isEmpty else { return }
-        if row.chainIndex == token.chainIndex, row.contract.caseInsensitiveCompare(token.contract) == .orderedSame {
+        if let token, row.chainIndex == token.chainIndex, row.contract.caseInsensitiveCompare(token.contract) == .orderedSame {
             dismiss()
             return
         }
@@ -2297,7 +2380,7 @@ private struct WalletProfileScreen: View {
                 $0.chainIndex == row.chainIndex && $0.contract.caseInsensitiveCompare(row.contract) == .orderedSame
             }
             opened = match ?? TrendingSpotToken(
-                id: "\(row.chainIndex):\(row.contract)", chainIndex: row.chainIndex, chainName: row.chainName ?? token.chainName,
+                id: "\(row.chainIndex):\(row.contract)", chainIndex: row.chainIndex, chainName: row.chainName ?? token?.chainName ?? "Monad",
                 symbol: row.symbol, name: row.symbol, logoURL: resource?.logos?["\(row.chainIndex):\(row.contract.lowercased())"] ?? "",
                 contract: row.contract, decimals: nil, quotable: nil, buyable: nil, nativeSymbol: nil, explorerURL: "",
                 price: nil, change: nil, marketCap: nil, volume24H: nil, liquidity: nil, holders: nil,
@@ -2398,6 +2481,12 @@ private struct WalletProfileScreen: View {
                 }
             }
         } else {
+            if rows.isEmpty {
+                Text(tab == .positions ? "Nothing held here." : tab == .closed ? "No closed positions on record." : "No trades on record.")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.4))
+                    .padding(.top, 22)
+            }
             let days = Array(NSOrderedSet(array: rows.map(\.day))) as? [String] ?? []
             ForEach(days, id: \.self) { day in
                 if tab != .positions {
@@ -2474,6 +2563,7 @@ private struct WalletProfileScreen: View {
                         tint: Color.white.opacity(0.55), badge: trade.isBuy ? "+" : "−", day: Self.day(trade.time), contract: trade.token)
                 }
             }
+            guard let token, let feed else { return [] }
             return feed.transactions.filter { $0.wallet.address.caseInsensitiveCompare(wallet.address) == .orderedSame }.map { tx in
                 Row(id: tx.id, symbol: token.symbol, title: "\(tx.isBuy ? "Bought" : "Sold") \(token.symbol)", subtitle: "\(tx.age) ago",
                     value: tx.value, detail: "\(tx.isBuy ? "+" : "−")\(tx.amount)", tint: Color.white.opacity(0.55),
@@ -2512,8 +2602,8 @@ private struct WalletProfileScreen: View {
         components.queryItems = [
             URLQueryItem(name: "view", value: "wallet"),
             URLQueryItem(name: "address", value: wallet.address),
-            URLQueryItem(name: "chainIndex", value: token.chainIndex),
-            URLQueryItem(name: "contract", value: token.contract),
+            URLQueryItem(name: "chainIndex", value: token?.chainIndex ?? "143"),
+            URLQueryItem(name: "contract", value: token?.contract ?? ""),
         ]
         guard let url = components.url else { return }
         do {
