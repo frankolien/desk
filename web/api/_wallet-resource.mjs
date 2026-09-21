@@ -43,7 +43,7 @@ export async function walletResource(address, { chainIndex = MONAD, contract = "
     ...(wallet.holdings.some((row) => row.contract === "") ? [{ chainIndex: "143", contract: "" }] : []),
     ...(ledger.tokens ?? []).map((row) => ({ chainIndex: MONAD, contract: row.token, symbol: row.symbol })),
   ], { store });
-  return { address: wanted, observedAt: now(), identity, ...wallet, ledger, labels, logos };
+  return { address: wanted, observedAt: now(), identity, ...wallet, ledger, labels, logos, balanceErrors: lastBalanceErrors() };
 }
 
 /// Descriptions, not verdicts: what the ledger says this wallet is like. Only a
@@ -76,20 +76,40 @@ export function walletLabels({ identity = null, ledger = {}, holdings = [], now 
 /// chains those are changes. Small groups in parallel, with the chain in view and Monad
 /// in a group of their own, so one refusal costs a few chains rather than all of them.
 const unsupportedChains = new Set();
+/// What OKX said when a balance group failed; surfaced so a missing chain is diagnosable.
+let balanceErrors = [];
 
-async function balancesFor(address, group) {
-  let chains = group.filter((index) => !unsupportedChains.has(index));
-  for (let attempt = 0; attempt < 2 && chains.length; attempt += 1) {
-    try {
-      return await walletBalances(address, chains);
-    } catch (error) {
-      const refused = /Unsupported chain IDs?:\s*([\d,\s]+)/i.exec(error.message ?? "");
-      if (!refused) return null;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/// OKX answers a group of chains together and fails the whole group when one chain
+/// is not served — sometimes naming it, sometimes not. A named chain is dropped; an
+/// unnamed refusal splits the group until the guilty chain stands alone and is
+/// remembered. A rate limit waits once.
+async function balancesFor(address, group, depth = 0) {
+  const chains = group.filter((index) => !unsupportedChains.has(index));
+  if (!chains.length) return null;
+  try {
+    return await walletBalances(address, chains);
+  } catch (error) {
+    const message = error.message ?? "";
+    balanceErrors.push(`${chains.join(",")}: ${message}`);
+    const refused = /Unsupported chain IDs?:\s*([\d,\s]+)/i.exec(message);
+    if (refused) {
       for (const index of refused[1].split(",").map((value) => value.trim())) unsupportedChains.add(index);
-      chains = chains.filter((index) => !unsupportedChains.has(index));
+      return balancesFor(address, chains, depth + 1);
     }
+    if (/not support/i.test(message)) {
+      if (chains.length === 1) { unsupportedChains.add(chains[0]); return null; }
+      const half = Math.ceil(chains.length / 2);
+      const [left, right] = [await balancesFor(address, chains.slice(0, half), depth + 1), await balancesFor(address, chains.slice(half), depth + 1)];
+      return left || right ? [...(left ?? []), ...(right ?? [])] : null;
+    }
+    if (/too many/i.test(message) && depth < 2) {
+      await sleep(500);
+      return balancesFor(address, chains, depth + 1);
+    }
+    return null;
   }
-  return null;
 }
 
 async function balancesAcross(address, chains, chainIndex) {
@@ -97,10 +117,15 @@ async function balancesAcross(address, chains, chainIndex) {
   const rest = chains.filter((index) => !first.includes(index));
   const groups = [first];
   for (let start = 0; start < rest.length; start += 4) groups.push(rest.slice(start, start + 4));
-  const answers = await Promise.all(groups.map((group) => balancesFor(address, group)));
+  balanceErrors = [];
+  // One group at a time: OKX rate-limits a burst of parallel balance calls.
+  const answers = [];
+  for (const group of groups) answers.push(await balancesFor(address, group));
   const rows = answers.filter(Boolean).flat();
   return answers.some(Boolean) ? rows : null;
 }
+
+export function lastBalanceErrors() { return balanceErrors; }
 
 async function monadLedger(address, { store, hypersync, now }) {
   if (!store || !hypersync) return { status: "unavailable" };
