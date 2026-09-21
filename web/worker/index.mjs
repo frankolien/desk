@@ -55,7 +55,7 @@ async function round() {
     if (known && Date.now() - known.indexedAt < FRESH_MS) continue;
     try {
       const result = isSolanaAddress(wallet)
-        ? await indexSolanaWallet(wallet, { store, rpc: solana, price: solPrice, meta: solMeta, deadline: Date.now() + PER_WALLET_BUDGET_MS })
+        ? await indexSolanaWallet(wallet, { store, rpc: solana, price: solPrice, meta: solMeta, paceMs: 250, deadline: Date.now() + PER_WALLET_BUDGET_MS })
         : await indexWallet(wallet, {
           store, hypersync, price, meta, backfillBlocks: BACKFILL_BLOCKS, deadline: Date.now() + PER_WALLET_BUDGET_MS,
         });

@@ -64,4 +64,4 @@ reports, so tokens bought before Desk looked are held without a basis, and a sal
 them is recorded with its value and no gain. The cursor is the last signature applied.
 The first look takes the newest page of signatures, not the wallet's whole life.
 
-`SOLANA_RPC` on the worker overrides the public endpoint.
+`SOLANA_RPC` on the worker overrides the endpoint (publicnode by default; the foundation one rate-limits hosted servers).

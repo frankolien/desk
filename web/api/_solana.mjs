@@ -1,4 +1,4 @@
-import { CHAINS, SOLANA_WSOL, isSolanaAddress } from "./_chains.mjs";
+import { SOLANA_WSOL, isSolanaAddress } from "./_chains.mjs";
 import { NATIVE, applyMovement, emptyLedger, ledgerKey } from "./_ledger.mjs";
 
 /// A Solana wallet's ledger, in the same shape as a Monad one, read from the public
@@ -14,8 +14,10 @@ const STABLES = new Set([
 /// Rent for a token account is 0.002 SOL; anything under this is rent or fees, not a payment.
 const SOL_DUST = 5_000_000n;
 const LEDGER_TTL_S = 30 * 24 * 3600;
+/// The foundation endpoint refuses busy hosts; this one does not, so far.
+const PUBLIC_RPC = "https://solana-rpc.publicnode.com";
 
-export function solanaRpc(url = process.env.SOLANA_RPC || CHAINS[SOLANA].rpc, fetchImpl = fetch) {
+export function solanaRpc(url = process.env.SOLANA_RPC || PUBLIC_RPC, fetchImpl = fetch) {
   return async function rpc(method, params) {
     const response = await fetchImpl(url, {
       method: "POST", headers: { "content-type": "application/json" },
@@ -130,7 +132,7 @@ export function solanaMetaReader({ store = null, fetchImpl = fetch, api = "" } =
 /// Brings a wallet's ledger up to its newest signature. The cursor is the last
 /// signature applied, so a round cut short by the deadline resumes where it stopped.
 /// The first look takes only the newest page: a wallet's whole life is not the point.
-export async function indexSolanaWallet(address, { store, rpc, price, meta, now = Date.now, deadline = Infinity, pageSize = 25, maxSignatures = 100 }) {
+export async function indexSolanaWallet(address, { store, rpc, price, meta, now = Date.now, deadline = Infinity, pageSize = 25, maxSignatures = 100, paceMs = 0 }) {
   if (!isSolanaAddress(address)) throw new Error("not a Solana address");
   const key = ledgerKey(address);
   const stored = await store.get(key);
@@ -153,6 +155,8 @@ export async function indexSolanaWallet(address, { store, rpc, price, meta, now 
   let complete = true;
   for (const entry of pending) {
     if (now() >= deadline) { complete = false; break; }
+    // Public endpoints count requests per second; a breath between them keeps the round alive.
+    if (paceMs > 0 && done > 0) await new Promise((resolve) => setTimeout(resolve, paceMs));
     const tx = await rpc("getTransaction", [entry.signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
     const movement = tx ? solanaMovement(address, entry.signature, tx) : null;
     if (movement) {
