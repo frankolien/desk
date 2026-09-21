@@ -2107,32 +2107,49 @@ private struct WalletProfileScreen: View {
     @ObservedObject var feed: SpotLiveFeed
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
-    @State private var looked = false
-    @State private var copied = false
     @State private var resource: WalletResource?
     @State private var resourceFailed = false
     @State private var perplDirectory = TraderDirectory()
     @State private var showsPerpl = false
+    @State private var tab: Tab = .positions
+    @State private var naming = false
+    @State private var draftName = ""
+    @State private var copied = false
+
+    private enum Tab: String, CaseIterable { case positions = "Positions", closed = "Closed", activity = "Activity" }
+
+    private struct Row: Identifiable {
+        let id: String
+        let symbol: String
+        let title: String
+        let subtitle: String
+        let value: String
+        let detail: String?
+        let tint: Color
+        let badge: String?
+        let day: String
+    }
 
     private var identity: Identity? { IdentityDirectory.shared.identity(for: wallet.address) }
-    private var hasProfile: Bool { !(identity?.isEmpty ?? true) }
+    private var tracked: TrackedWallet? { TrackedWallets.shared.wallet(for: wallet.address) }
     private var isEVM: Bool { wallet.address.hasPrefix("0x") && wallet.address.count == 42 }
     private var ledger: WalletResource.Ledger? { resource.map(\.ledger).flatMap { $0.status == "unavailable" ? nil : $0 } }
-    private var liveTrades: [SpotTransaction] {
-        feed.transactions.filter { $0.wallet.address.caseInsensitiveCompare(wallet.address) == .orderedSame }
+    private var name: String {
+        if let name = identity?.name { return name }
+        if let tracked, !tracked.name.isEmpty { return tracked.name }
+        return wallet.displayAddress
     }
     private var portfolioText: String {
         if let value = resource?.portfolio { return SpotLiveFeed.compactUSD(value) }
-        return wallet.portfolio
+        return resource == nil && !resourceFailed ? "—" : wallet.portfolio
     }
     private var portfolioLabel: String {
-        guard let resource, resource.portfolio != nil else { return "Portfolio" }
-        let count = resource.chains.count
-        return count > 1 ? "Across \(count) chains" : (resource.chains.first?.chain ?? token.chainName)
+        guard let resource, resource.portfolio != nil, resource.chains.count > 1 else { return "Portfolio" }
+        return "Across \(resource.chains.count) chains"
     }
-    private var heldText: String {
-        guard let held = resource?.held else { return resourceFailed || resource != nil ? "0" : "—" }
-        return SpotLiveFeed.compactNumber(held.balance)
+    private var totalPnL: Double? {
+        guard let ledger, ledger.realized != nil || ledger.unrealized != nil else { return nil }
+        return (ledger.realized ?? 0) + (ledger.unrealized ?? 0)
     }
 
     var body: some View {
@@ -2146,146 +2163,56 @@ private struct WalletProfileScreen: View {
                         ShareLink(item: wallet.address) { Image(systemName: "square.and.arrow.up").frame(width: 50, height: 50) }.perpSearchGlass(in: Circle())
                     }.font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
 
-                    HStack(spacing: 18) {
+                    HStack(spacing: 0) {
                         avatar
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(portfolioText).font(.system(size: 18, weight: .bold)).monospacedDigit()
-                            Text(portfolioLabel).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
-                        }
-                        Divider().frame(height: 46).overlay(Color.white.opacity(0.12))
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(heldText).font(.system(size: 18, weight: .bold)).monospacedDigit()
-                            Text(token.symbol).foregroundStyle(.secondary)
-                        }
+                        Spacer(minLength: 16)
+                        stat(portfolioText, label: portfolioLabel, tint: .white)
+                        Divider().frame(height: 46).overlay(Color.white.opacity(0.12)).padding(.horizontal, 22)
+                        stat(totalPnL.map(signed) ?? "—", label: "Total PnL", tint: totalPnL.map(tint) ?? .white)
+                        Spacer(minLength: 0)
                     }.padding(.top, 42)
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(identity?.name ?? wallet.displayAddress)
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .lineLimit(1).minimumScaleFactor(0.7)
+                    HStack(spacing: 10) {
                         Button {
                             UIPasteboard.general.string = wallet.address
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             withAnimation(.snappy(duration: 0.2)) { copied = true }
-                            Task { try? await Task.sleep(for: .seconds(1.6)); withAnimation { copied = false } }
+                            Task { try? await Task.sleep(for: .seconds(1.4)); withAnimation { copied = false } }
                         } label: {
-                            HStack(spacing: 6) {
-                                if let label = identity?.sourceLabel {
-                                    Text(label)
-                                    Text("·")
-                                }
-                                Text(copied ? "Address copied" : (identity?.name == nil ? "Tap to copy the address" : wallet.displayAddress))
+                            Text(copied ? "Copied" : name)
+                                .font(.system(size: 26, weight: .bold, design: .rounded))
+                                .lineLimit(1).minimumScaleFactor(0.6)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Spacer(minLength: 8)
+                        if isEVM {
+                            action(tracked == nil ? "Track" : "Tracking", symbol: nil) {
+                                if tracked == nil { TrackedWallets.shared.track(wallet.address, name: identity?.name ?? "") }
+                                else { TrackedWallets.shared.untrack(wallet.address) }
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             }
-                            .font(.system(size: 13, weight: .medium, design: .rounded))
-                            .foregroundStyle(Color.white.opacity(0.55))
+                            action("Set Name", symbol: "pencil") {
+                                draftName = tracked?.name ?? ""
+                                naming = true
+                            }
+                        }
+                    }.padding(.top, 26)
+
+                    if let status = statusLine {
+                        Button { statusAction() } label: {
+                            HStack(spacing: 8) {
+                                Circle().fill(statusTint).frame(width: 9, height: 9)
+                                Text(status).font(.system(size: 15, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.85))
+                            }
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        if let bio = identity?.bio {
-                            Text(bio)
-                                .font(.system(size: 15, weight: .regular))
-                                .foregroundStyle(Color.white.opacity(0.78))
-                                .padding(.top, 8)
-                        }
-                    }.padding(.top, 22)
-
-                    if let labels = resource?.labels, !labels.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(labels) { label in
-                                HStack(spacing: 7) {
-                                    Image(systemName: label.code == "top" ? "trophy.fill" : label.code == "bot" ? "bolt.fill" : label.code == "contract" ? "cpu" : label.code == "perpl" ? "chart.line.uptrend.xyaxis" : "sparkles")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundStyle(label.code == "top" ? DeskColor.rise.color : DeskColor.nightMuted.color)
-                                        .frame(width: 16)
-                                    Text(label.text)
-                                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                                        .foregroundStyle(Color.white.opacity(0.75))
-                                }
-                            }
-                        }
-                        .padding(.top, 14)
+                        .padding(.top, 12)
                     }
 
-                    if isEVM || hasProfile {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                if isEVM {
-                                    let tracking = TrackedWallets.shared.isTracking(wallet.address)
-                                    pill(tracking ? "Tracking" : "Track", symbol: tracking ? "bell.fill" : "bell") {
-                                        if tracking { TrackedWallets.shared.untrack(wallet.address) }
-                                        else { TrackedWallets.shared.track(wallet.address, name: identity?.name ?? "") }
-                                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                    }
-                                }
-                                if let url = identity?.profileURL, let label = identity?.sourceLabel {
-                                    pill("Open on \(label)", symbol: "arrow.up.right") { openURL(url) }
-                                }
-                                if let url = identity?.xURL, let handle = identity?.x {
-                                    pill("@\(handle)", symbol: "at") { openURL(url) }
-                                }
-                                if let account = identity?.perplAccount {
-                                    pill("Perpl account #\(account)", symbol: "chart.line.uptrend.xyaxis",
-                                         action: CopyTrader.current == nil ? nil : { showsPerpl = true })
-                                }
-                            }
-                        }
-                        .padding(.top, 18)
-                    }
-                    if looked, !hasProfile {
-                        Text("No .nad name, nad.fun profile, ENS name or Farcaster account points here.")
-                            .font(.system(size: 13, weight: .medium, design: .rounded))
-                            .foregroundStyle(Color.white.opacity(0.45))
-                            .padding(.top, 14)
-                    }
-
-                    if let ledger {
-                        pnl(ledger)
-                    } else if resource == nil, !resourceFailed {
-                        section("PnL on Monad", trailing: nil) {
-                            SkeletonRow(widthFraction: 0.9).padding(.vertical, 12)
-                            SkeletonRow(widthFraction: 0.5).padding(.vertical, 12)
-                        }
-                    }
-
-                    if token.chainIndex != "143" {
-                        section("Trades on \(token.symbol)", trailing: liveTrades.isEmpty ? nil : "\(liveTrades.count) live") {
-                            if liveTrades.isEmpty {
-                                quiet("None since you opened \(token.symbol). Monad wallets carry their full history above.")
-                            } else {
-                                ForEach(liveTrades.prefix(8)) { tx in
-                                    tradeRow(age: tx.age, isBuy: tx.isBuy, amount: tx.amount, value: tx.value, gain: nil)
-                                }
-                            }
-                        }
-                    }
-
-                    section("Holdings", trailing: resource?.holdings.isEmpty == false ? "by value" : nil) {
-                        if let resource, !resource.holdings.isEmpty {
-                            ForEach(resource.holdings) { row in
-                                HStack(spacing: 10) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(row.symbol).lineLimit(1)
-                                        Text(row.chain ?? row.chainIndex).font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Text(SpotLiveFeed.compactNumber(row.balance)).foregroundStyle(.secondary)
-                                    Text(row.value.map { SpotLiveFeed.compactUSD($0) } ?? "—")
-                                        .frame(width: 82, alignment: .trailing)
-                                }
-                                .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
-                                .frame(height: 48)
-                            }
-                        } else if !isEVM {
-                            quiet("Balances and history are read for EVM wallets. This one is on \(token.chainName).")
-                        } else if resourceFailed {
-                            quiet("Balances could not be read right now.")
-                        } else if resource != nil {
-                            quiet("Nothing held that OKX can price.")
-                        } else {
-                            SkeletonRow(widthFraction: 0.8).padding(.vertical, 12)
-                            SkeletonRow(widthFraction: 0.6).padding(.vertical, 12)
-                        }
-                    }
+                    tabs.padding(.top, 24)
+                    content.padding(.top, 8)
                 }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 40)
             }
         }
@@ -2298,88 +2225,197 @@ private struct WalletProfileScreen: View {
                     directory: perplDirectory, copier: copier, onCopy: { _ in })
             }
         }
-        .task {
-            await IdentityDirectory.shared.resolve([wallet.address])
-            looked = true
+        .alert("Name this wallet", isPresented: $naming) {
+            TextField("Name", text: $draftName)
+            Button("Save") {
+                let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let tracked { TrackedWallets.shared.update(TrackedWallet(address: tracked.address, name: String(trimmed.prefix(24)), minUsd: tracked.minUsd, firstBuysOnly: tracked.firstBuysOnly)) }
+                else { TrackedWallets.shared.track(wallet.address, name: trimmed) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Shown wherever this wallet appears on your phone.")
         }
+        .task { await IdentityDirectory.shared.resolve([wallet.address]) }
         .task { await loadResource() }
+        #if DEBUG
+        .onAppear { if ProcessInfo.processInfo.arguments.contains("-wallet-activity") { tab = .activity } }
+        #endif
     }
+
+    // MARK: Header pieces
+
+    private var avatar: some View {
+        Group {
+            if let url = identity?.avatarURL {
+                AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Text(wallet.emoji).font(.system(size: 50)) }
+            } else {
+                Text(wallet.emoji).font(.system(size: 50))
+            }
+        }
+        .frame(width: 84, height: 84)
+        .clipShape(Circle())
+        .perpSearchGlass(in: Circle())
+    }
+
+    private func stat(_ value: String, label: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value).font(.system(size: 20, weight: .bold, design: .rounded).monospacedDigit()).foregroundStyle(tint)
+                .lineLimit(1).minimumScaleFactor(0.7)
+            Text(label).font(.system(size: 14, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
+                .lineLimit(1).minimumScaleFactor(0.8)
+        }
+    }
+
+    private func action(_ title: String, symbol: String?, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if let symbol { Image(systemName: symbol).font(.system(size: 12, weight: .semibold)) }
+                Text(title).font(.system(size: 15, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .frame(height: 42)
+            .background(Color.black, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.white.opacity(0.35), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var statusLine: String? {
+        var parts: [String] = []
+        if let label = identity?.sourceLabel { parts.append(label) }
+        if let account = identity?.perplAccount { parts.append("Perpl #\(account)") }
+        if parts.isEmpty, let first = resource?.labels?.first { parts.append(first.text) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private var statusTint: Color {
+        if identity?.sourceLabel != nil || identity?.perplAccount != nil { return DeskColor.rise.color }
+        return DeskColor.nightMuted.color
+    }
+
+    private func statusAction() {
+        if identity?.perplAccount != nil, CopyTrader.current != nil { showsPerpl = true }
+        else if let url = identity?.profileURL { openURL(url) }
+    }
+
+    private var tabs: some View {
+        HStack(spacing: 0) {
+            ForEach(Tab.allCases, id: \.self) { item in
+                Button { withAnimation(.snappy(duration: 0.22)) { tab = item } } label: {
+                    VStack(spacing: 12) {
+                        Text(item.rawValue)
+                            .font(.system(size: 17, weight: tab == item ? .bold : .medium, design: .rounded))
+                            .foregroundStyle(tab == item ? .white : Color.white.opacity(0.45))
+                        Rectangle().fill(tab == item ? Color.white : .clear).frame(height: 3)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.1)).frame(height: 0.5) }
+        .padding(.horizontal, -20)
+    }
+
+    // MARK: Content
 
     @ViewBuilder
-    private func pnl(_ ledger: WalletResource.Ledger) -> some View {
-        let indexing = ledger.status == "indexing"
-        let quietWallet = !indexing && (ledger.trades ?? []).isEmpty && (ledger.tokens ?? []).allSatisfy { $0.holding <= 0 }
-        section("PnL on Monad", trailing: indexing ? "still indexing" : (quietWallet ? nil : ledger.last30d.map { "\($0.trades) trades · 30d" })) {
-            if quietWallet {
-                quiet("No priced trades on Monad in the last 45 days.")
-            } else {
-            HStack(spacing: 0) {
-                figure("Realized", signed(ledger.realized ?? 0), tint: tint(ledger.realized ?? 0))
-                figure("Unrealized", ledger.unrealized.map(signed) ?? "—", tint: tint(ledger.unrealized ?? 0))
-                figure("Win rate", ledger.winRate.map { "\(Int(($0 * 100).rounded()))%" } ?? "—", tint: .white)
-            }
-            .padding(.vertical, 14)
-            .padding(.horizontal, 16)
-            .perpSearchGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            if let week = ledger.last7d, week.trades > 0 {
-                Text("Last 7 days: \(signed(week.realized)) realized over \(week.trades) trades")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 8)
-            }
-            if let positions = ledger.tokens?.filter({ $0.holding > 0 }), !positions.isEmpty {
-                ForEach(positions.prefix(6)) { position in
-                    HStack(spacing: 10) {
-                        Text(position.symbol).lineLimit(1)
-                        Spacer()
-                        Text(SpotLiveFeed.compactNumber(position.holding)).foregroundStyle(.secondary)
-                        Text(position.unrealized.map(signed) ?? "—")
-                            .foregroundStyle(tint(position.unrealized ?? 0))
-                            .frame(width: 82, alignment: .trailing)
+    private var content: some View {
+        let rows = rows(for: tab)
+        if resource == nil, !resourceFailed, isEVM, rows.isEmpty {
+            VStack(spacing: 0) {
+                ForEach(0..<3, id: \.self) { _ in
+                    HStack(spacing: 14) {
+                        Circle().fill(Color.white.opacity(0.08)).frame(width: 46, height: 46)
+                        VStack(alignment: .leading, spacing: 8) { SkeletonRow(widthFraction: 0.5); SkeletonRow(widthFraction: 0.3) }
                     }
-                    .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
-                    .frame(height: 44)
-                }
-                .padding(.top, 6)
-            }
-            if let trades = ledger.trades, !trades.isEmpty {
-                Text("Trades").font(.system(size: 13, weight: .bold, design: .rounded)).padding(.top, 14)
-                ForEach(trades.prefix(10)) { trade in
-                    tradeRow(age: Self.day(trade.time), isBuy: trade.isBuy,
-                             amount: "\(SpotLiveFeed.compactNumber(trade.amount)) \(trade.symbol)",
-                             value: SpotLiveFeed.compactUSD(trade.value), gain: trade.gain)
+                    .frame(height: 78)
                 }
             }
+        } else {
+            let days = Array(NSOrderedSet(array: rows.map(\.day))) as? [String] ?? []
+            ForEach(days, id: \.self) { day in
+                if tab != .positions {
+                    Text(day)
+                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 20)
+                        .padding(.bottom, 4)
+                }
+                ForEach(rows.filter { $0.day == day }) { row in
+                    tokenRow(row)
+                }
             }
         }
     }
 
-    private func tradeRow(age: String, isBuy: Bool, amount: String, value: String, gain: Double?) -> some View {
-        HStack(spacing: 12) {
-            Text(age).foregroundStyle(.secondary).frame(width: 46, alignment: .leading)
-            Text(isBuy ? "BUY" : "SELL")
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(DeskColor.onAction.color)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(isBuy ? DeskColor.rise.color : DeskColor.fall.color, in: Capsule())
-            Text(amount).lineLimit(1).minimumScaleFactor(0.7)
-            Spacer()
-            VStack(alignment: .trailing, spacing: 1) {
-                Text(value).foregroundStyle(.secondary)
-                if let gain { Text(signed(gain)).font(.system(size: 11, weight: .semibold, design: .rounded)).foregroundStyle(tint(gain)) }
+    private func tokenRow(_ row: Row) -> some View {
+        HStack(spacing: 14) {
+            MarketTokenLogo(symbol: row.symbol, size: 46)
+                .overlay(alignment: .bottomTrailing) {
+                    if let badge = row.badge {
+                        Image(systemName: badge == "+" ? "plus.circle.fill" : "minus.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(.white, badge == "+" ? DeskColor.rise.color : DeskColor.fall.color)
+                            .background(Circle().fill(.black).padding(1))
+                            .offset(x: 3, y: 3)
+                    }
+                }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.title).font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(1)
+                Text(row.subtitle).font(.system(size: 15, weight: .medium, design: .rounded)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(row.value).font(.system(size: 18, weight: .bold, design: .rounded).monospacedDigit()).foregroundStyle(.white).lineLimit(1)
+                if let detail = row.detail {
+                    Text(detail).font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit()).foregroundStyle(row.tint).lineLimit(1)
+                }
             }
         }
-        .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
-        .frame(height: 46)
+        .frame(height: 78)
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5).padding(.leading, 60) }
     }
 
-    private func figure(_ label: String, _ value: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(value).font(.system(size: 17, weight: .bold, design: .rounded).monospacedDigit()).foregroundStyle(tint)
-                .lineLimit(1).minimumScaleFactor(0.7)
-            Text(label).font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
+    private func rows(for tab: Tab) -> [Row] {
+        switch tab {
+        case .positions:
+            let unrealized = Dictionary((ledger?.tokens ?? []).map { ($0.token.lowercased(), $0) }, uniquingKeysWith: { a, _ in a })
+            return (resource?.holdings ?? []).map { holding in
+                let position = holding.chainIndex == "143" ? unrealized[holding.contract.lowercased()] : nil
+                return Row(id: holding.id, symbol: holding.symbol, title: holding.symbol,
+                           subtitle: SpotLiveFeed.compactNumber(holding.balance),
+                           value: holding.value.map { SpotLiveFeed.compactUSD($0) } ?? "—",
+                           detail: position?.unrealized.map(signed) ?? holding.chain,
+                           tint: position?.unrealized.map(tint) ?? Color.white.opacity(0.45), badge: nil, day: "")
+            }
+        case .closed:
+            return (ledger?.trades ?? []).filter { $0.side == "sell" && $0.gain != nil }.map { trade in
+                let gain = trade.gain ?? 0
+                let cost = trade.value - gain
+                let percent = cost > 0 ? gain / cost * 100 : nil
+                return Row(id: trade.id, symbol: trade.symbol, title: trade.symbol, subtitle: Self.age(trade.time),
+                           value: signed(gain), detail: percent.map { String(format: "%@%.1f%%", $0 >= 0 ? "+" : "−", abs($0)) },
+                           tint: tint(gain), badge: nil, day: Self.day(trade.time))
+            }
+        case .activity:
+            if let trades = ledger?.trades, !trades.isEmpty {
+                return trades.map { trade in
+                    Row(id: trade.id, symbol: trade.symbol, title: "\(trade.isBuy ? "Bought" : "Sold") \(trade.symbol)", subtitle: Self.age(trade.time),
+                        value: SpotLiveFeed.compactUSD(trade.value),
+                        detail: "\(trade.isBuy ? "+" : "−")\(SpotLiveFeed.compactNumber(trade.amount)) \(trade.symbol)",
+                        tint: Color.white.opacity(0.55), badge: trade.isBuy ? "+" : "−", day: Self.day(trade.time))
+                }
+            }
+            return feed.transactions.filter { $0.wallet.address.caseInsensitiveCompare(wallet.address) == .orderedSame }.map { tx in
+                Row(id: tx.id, symbol: token.symbol, title: "\(tx.isBuy ? "Bought" : "Sold") \(token.symbol)", subtitle: "\(tx.age) ago",
+                    value: tx.value, detail: "\(tx.isBuy ? "+" : "−")\(tx.amount)", tint: Color.white.opacity(0.55),
+                    badge: tx.isBuy ? "+" : "−", day: "Today")
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func signed(_ value: Double) -> String {
@@ -2391,11 +2427,18 @@ private struct WalletProfileScreen: View {
         value > 0 ? DeskColor.rise.color : (value < 0 ? DeskColor.fall.color : .white)
     }
 
+    private static func age(_ time: Double) -> String {
+        let seconds = Date.now.timeIntervalSince(Date(timeIntervalSince1970: time / 1000))
+        if seconds < 60 { return "\(max(1, Int(seconds)))s ago" }
+        if seconds < 3_600 { return "\(Int(seconds / 60))m ago" }
+        if seconds < 86_400 { return "\(Int(seconds / 3_600))h ago" }
+        return "\(Int(seconds / 86_400))d ago"
+    }
+
     private static func day(_ time: Double) -> String {
         let date = Date(timeIntervalSince1970: time / 1000)
-        let age = Date.now.timeIntervalSince(date)
-        if age < 3_600 { return "\(max(1, Int(age / 60)))m" }
-        if age < 86_400 { return "\(Int(age / 3_600))h" }
+        if Calendar.current.isDateInToday(date) { return "Today" }
+        if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
         return date.formatted(.dateTime.month(.abbreviated).day())
     }
 
@@ -2412,7 +2455,6 @@ private struct WalletProfileScreen: View {
         do {
             let (data, _) = try await ResponseCache.shared.data(from: url, maxStale: 300)
             resource = try JSONDecoder().decode(WalletResource.self, from: data)
-            // A ledger still being built is worth asking about again in a moment.
             if resource?.ledger.status == "indexing" {
                 try? await Task.sleep(for: .seconds(8))
                 if let (fresh, _) = try? await ResponseCache.shared.data(from: url, maxStale: 0),
@@ -2421,53 +2463,5 @@ private struct WalletProfileScreen: View {
         } catch {
             resourceFailed = true
         }
-    }
-
-    private var avatar: some View {
-        Group {
-            if let url = identity?.avatarURL {
-                AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Text(wallet.emoji).font(.system(size: 50)) }
-            } else {
-                Text(wallet.emoji).font(.system(size: 50))
-            }
-        }
-        .frame(width: 84, height: 84)
-        .clipShape(Circle())
-        .perpSearchGlass(in: Circle())
-    }
-
-    private func section<Content: View>(_ title: String, trailing: String?, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(title).font(.system(size: 15, weight: .bold, design: .rounded))
-                Spacer()
-                if let trailing {
-                    Text(trailing).font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
-                }
-            }
-            .padding(.bottom, 4)
-            content()
-        }
-        .padding(.top, 30)
-    }
-
-    private func quiet(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 13, weight: .medium, design: .rounded))
-            .foregroundStyle(Color.white.opacity(0.45))
-            .padding(.vertical, 8)
-    }
-
-    private func pill(_ title: String, symbol: String, action: (() -> Void)?) -> some View {
-        Button { action?() } label: {
-            Label(title, systemImage: symbol)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(action == nil ? Color.white.opacity(0.6) : .white)
-                .padding(.horizontal, 14)
-                .frame(height: 38)
-        }
-        .buttonStyle(.plain)
-        .disabled(action == nil)
-        .perpSearchGlass(in: Capsule())
     }
 }
