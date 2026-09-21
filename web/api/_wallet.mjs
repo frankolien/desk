@@ -1,13 +1,14 @@
-import { okxConfigured, okxGet } from "./_okx.mjs";
+import { CHAINS, EVM_NATIVE_ADDRESS, rpcEndpoint } from "./_chains.mjs";
+import { NATIVE } from "./_ledger.mjs";
+import { okxConfigured, okxGet, okxPost } from "./_okx.mjs";
 
-/// What a wallet holds on one chain, read from OKX's wallet balance API: total value,
-/// the largest holdings, and how much of one particular token it holds.
-///
-///   GET /api/token-details?view=wallet&address=0x…&chainIndex=143&contract=0x…
-///
-/// A view on token-details for the same reason holdings is: the twelve-function limit.
+/// What a wallet holds, what its tokens are, and what they were worth at a given
+/// minute — the three reads behind the wallet resource, all from OKX and the chain.
 
-const MAX_ROWS = 8;
+const MAX_ROWS = 12;
+const MONAD = "143";
+const SYMBOL_SELECTOR = "0x95d89b41";
+const DECIMALS_SELECTOR = "0x313ce567";
 
 const number = (value) => {
   const parsed = Number(value);
@@ -26,6 +27,8 @@ export function describeWallet(rows, contract) {
       if (balance == null || balance <= 0) continue;
       const price = number(asset?.tokenPrice);
       assets.push({
+        chainIndex: String(asset?.chainIndex ?? ""),
+        chain: CHAINS[String(asset?.chainIndex ?? "")]?.name ?? null,
         contract: String(asset?.tokenContractAddress ?? "").toLowerCase(),
         symbol: String(asset?.symbol ?? "").trim() || "?",
         balance,
@@ -35,29 +38,121 @@ export function describeWallet(rows, contract) {
   }
   assets.sort((a, b) => (b.value ?? -1) - (a.value ?? -1));
   const held = assets.find((asset) => asset.contract === wanted) ?? null;
-  const portfolio = assets.reduce((sum, asset) => sum + (asset.value ?? 0), 0);
+  const priced = assets.filter((asset) => asset.value != null);
+  const byChain = new Map();
+  for (const asset of priced) byChain.set(asset.chainIndex, (byChain.get(asset.chainIndex) ?? 0) + asset.value);
   return {
-    portfolio: assets.some((asset) => asset.value != null) ? portfolio : null,
+    portfolio: priced.length ? priced.reduce((sum, asset) => sum + asset.value, 0) : null,
+    chains: [...byChain].map(([chainIndex, value]) => ({ chainIndex, chain: CHAINS[chainIndex]?.name ?? null, value }))
+      .sort((a, b) => b.value - a.value),
     held: held ? { balance: held.balance, value: held.value } : null,
     holdings: assets.slice(0, MAX_ROWS),
   };
 }
 
-export async function handleWallet(req, res) {
-  const address = String(req.query.address ?? "").toLowerCase();
-  const chainIndex = String(req.query.chainIndex ?? "");
-  const contract = String(req.query.contract ?? "");
-  if (!/^0x[0-9a-f]{40}$/.test(address) || !/^\d{1,10}$/.test(chainIndex)) {
-    return res.status(400).json({ error: "An EVM address and a chain are required." });
-  }
-  if (!okxConfigured()) return res.status(503).json({ error: "Wallet reads aren't configured on this server." });
+export async function walletBalances(address, chains) {
+  if (!okxConfigured()) return null;
+  return okxGet("/api/v6/dex/balance/all-token-balances-by-address", {
+    address, chains: chains.join(","), excludeRiskToken: "0",
+  });
+}
+
+/// Today's price per token, in one call.
+export async function currentPrices(chainIndex, contracts) {
+  const map = new Map();
+  if (!okxConfigured() || contracts.length === 0) return map;
   try {
-    const rows = await okxGet("/api/v6/dex/balance/all-token-balances-by-address", {
-      address, chains: chainIndex, excludeRiskToken: "0",
-    });
-    res.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=120");
-    return res.status(200).json({ address, chainIndex, observedAt: Date.now(), ...describeWallet(rows, contract) });
-  } catch (error) {
-    return res.status(502).json({ error: error.message });
+    const rows = await okxPost("/api/v6/dex/market/price-info",
+      contracts.map((contract) => ({ chainIndex, tokenContractAddress: contract === NATIVE ? EVM_NATIVE_ADDRESS : contract })));
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const contract = String(row.tokenContractAddress ?? "").toLowerCase();
+      const price = number(row.price);
+      if (price != null) map.set(contract === EVM_NATIVE_ADDRESS ? NATIVE : contract, price);
+    }
+  } catch { /* unpriced today, marked null */ }
+  return map;
+}
+
+/// The price of a token at a moment, from the candle that covers it: the minute if OKX
+/// has one, else the hour, else the day. Cached by hour in the store, so a wallet with
+/// a hundred trades in one token costs one call per hour it traded in.
+export function priceReader({ store = null, chainIndex = MONAD, fetchCandles = okxGet } = {}) {
+  const memory = new Map();
+  return async function priceAt(token, time) {
+    if (!(time > 0) || (!okxConfigured() && fetchCandles === okxGet)) return null;
+    const contract = token === NATIVE ? EVM_NATIVE_ADDRESS : token;
+    const hour = Math.floor(time / 3_600_000);
+    const key = `px:${chainIndex}:${contract}:${hour}`;
+    if (memory.has(key)) return memory.get(key);
+    const cached = store ? await store.get(key).catch(() => null) : null;
+    if (cached != null) {
+      const value = cached === "" ? null : Number(cached);
+      memory.set(key, value);
+      return value;
+    }
+    let price = null;
+    for (const bar of ["1m", "1H", "1D"]) {
+      try {
+        const rows = await fetchCandles("/api/v6/dex/market/historical-candles", {
+          chainIndex, tokenContractAddress: contract, bar, limit: "1", after: String(time + span(bar)),
+        });
+        const row = Array.isArray(rows) ? rows[0] : null;
+        const close = row ? number(row[4]) : null;
+        if (close != null && close > 0) { price = close; break; }
+      } catch { /* try a coarser bar */ }
+    }
+    memory.set(key, price);
+    if (store) store.set(key, price == null ? "" : String(price), { ex: 30 * 24 * 3600 }).catch(() => {});
+    return price;
+  };
+}
+
+function span(bar) {
+  return bar === "1m" ? 60_000 : bar === "1H" ? 3_600_000 : 86_400_000;
+}
+
+function decodeString(hex) {
+  const body = String(hex ?? "").slice(2);
+  if (body.length < 128) {
+    // Some old tokens return a bytes32 symbol rather than a string.
+    return Buffer.from(body.slice(0, 64), "hex").toString("utf8").replace(/\0+$/, "");
   }
+  const length = Number(BigInt(`0x${body.slice(64, 128)}`));
+  return Buffer.from(body.slice(128, 128 + length * 2), "hex").toString("utf8");
+}
+
+/// Symbol and decimals of a token, from the chain, remembered for a month.
+export function metaReader({ store = null, chainIndex = MONAD, fetchImpl = fetch } = {}) {
+  const memory = new Map([[NATIVE, { symbol: CHAINS[chainIndex]?.symbol ?? "MON", decimals: 18 }]]);
+  const endpoint = rpcEndpoint(chainIndex);
+  return async function meta(token) {
+    if (memory.has(token)) return memory.get(token);
+    const key = `tk:${chainIndex}:${token}`;
+    const cached = store ? await store.get(key).catch(() => null) : null;
+    if (cached) {
+      const value = JSON.parse(cached);
+      memory.set(token, value);
+      return value;
+    }
+    let value = null;
+    try {
+      const response = await fetchImpl(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify([
+          { jsonrpc: "2.0", id: 0, method: "eth_call", params: [{ to: token, data: SYMBOL_SELECTOR }, "latest"] },
+          { jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: token, data: DECIMALS_SELECTOR }, "latest"] },
+        ]),
+      });
+      const rows = (await response.json()).sort((a, b) => a.id - b.id);
+      const decimals = rows[1]?.result ? Number(BigInt(rows[1].result)) : null;
+      if (Number.isInteger(decimals) && decimals >= 0 && decimals <= 36) {
+        const symbol = rows[0]?.result ? decodeString(rows[0].result).trim() : "";
+        value = { symbol: symbol || `${token.slice(0, 6)}…`, decimals };
+      }
+    } catch { /* not an ERC-20 we can read; skipped */ }
+    memory.set(token, value);
+    if (store && value) store.set(key, JSON.stringify(value), { ex: 30 * 24 * 3600 }).catch(() => {});
+    return value;
+  };
 }

@@ -1,6 +1,5 @@
 import { okxGet, okxPost } from "./_okx.mjs";
 import { handleHoldings } from "./_holdings.mjs";
-import { handleWallet } from "./_wallet.mjs";
 
 const TOKENS = {
   BTC: { chainIndex: "1", address: "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599" },
@@ -12,7 +11,25 @@ const TOKENS = {
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
   if (req.query.view === "holdings") return handleHoldings(req, res);
-  if (req.query.view === "wallet") return handleWallet(req, res);
+  // The worker on Railway prices trades through here, so OKX's key stays on Vercel.
+  if (req.query.view === "candle") {
+    const secret = process.env.CRON_SECRET;
+    if (!secret || req.headers.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: "Unauthorized." });
+    const { chainIndex, contract, bar, after } = req.query;
+    if (!/^\d{1,10}$/.test(String(chainIndex)) || !/^0x[a-fA-F0-9]{40}$/.test(String(contract))
+      || !["1m", "1H", "1D"].includes(String(bar)) || !/^\d{1,16}$/.test(String(after))) {
+      return res.status(400).json({ error: "chainIndex, contract, bar and after are required." });
+    }
+    try {
+      const rows = await okxGet("/api/v6/dex/market/historical-candles", {
+        chainIndex: String(chainIndex), tokenContractAddress: String(contract), bar: String(bar), limit: "1", after: String(after),
+      });
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      return res.status(200).json({ rows: Array.isArray(rows) ? rows : [] });
+    } catch (error) {
+      return res.status(502).json({ error: error.message });
+    }
+  }
   const symbol = String(req.query.symbol || "").toUpperCase();
   const known = TOKENS[symbol];
   const chainIndex = String(req.query.chainIndex || known?.chainIndex || "");

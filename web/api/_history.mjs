@@ -340,5 +340,18 @@ export function hypersyncClient({ token = process.env.HYPERSYNC_TOKEN, url = "ht
         nextBlock: Number(body.next_block),
       };
     },
+    /// Any query, as HyperSync takes it; used by the wallet ledger.
+    async raw(query) {
+      const response = await fetchImpl(`${url}/query`, { method: "POST", headers, body: JSON.stringify(query) });
+      if (!response.ok) throw new Error(`hypersync ${response.status}`);
+      const body = await response.json();
+      const batches = Array.isArray(body.data) ? body.data : [body.data ?? {}];
+      return {
+        logs: batches.flatMap((batch) => batch.logs ?? []),
+        transactions: batches.flatMap((batch) => batch.transactions ?? []),
+        blocks: batches.flatMap((batch) => batch.blocks ?? []),
+        nextBlock: Number(body.next_block),
+      };
+    },
   };
 }

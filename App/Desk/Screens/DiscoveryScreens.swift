@@ -341,7 +341,17 @@ struct MarketSearchScreen: View {
                 let arguments = ProcessInfo.processInfo.arguments
                 guard arguments.contains("-spot-buy") || arguments.contains("-wallet-demo") else { return }
                 while discovery.trending.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
-                selectedSpot = discovery.trending.first { $0.buyable == true } ?? discovery.trending.first
+                if arguments.contains("-wallet-demo") {
+                    // A Monad token, so the holder opened has a ledger to show.
+                    var monad = discovery.trending.first { $0.chainIndex == "143" }
+                    if monad == nil {
+                        await discovery.search("0x5e49e1f85813f2b65858860a3fa231b4186f2e0e")
+                        monad = discovery.searchResults.first { $0.chainIndex == "143" }
+                    }
+                    selectedSpot = monad ?? discovery.trending.first
+                } else {
+                    selectedSpot = discovery.trending.first { $0.buyable == true } ?? discovery.trending.first
+                }
             }
             #endif
             .navigationDestination(item: $selectedSpot) { token in
@@ -1957,18 +1967,55 @@ private struct WalletMark: View {
     }
 }
 
-private struct WalletSummary: Decodable {
+private struct WalletResource: Decodable {
     struct Held: Decodable { let balance: Double; let value: Double? }
-    struct Row: Decodable, Identifiable {
+    struct Holding: Decodable, Identifiable {
+        let chainIndex: String
+        let chain: String?
         let contract: String
         let symbol: String
         let balance: Double
         let value: Double?
-        var id: String { contract }
+        var id: String { chainIndex + ":" + contract }
+    }
+    struct Window: Decodable { let realized: Double; let trades: Int; let winRate: Double? }
+    struct Position: Decodable, Identifiable {
+        let token: String
+        let symbol: String
+        let holding: Double
+        let value: Double?
+        let realized: Double
+        let unrealized: Double?
+        var id: String { token }
+    }
+    struct Trade: Decodable, Identifiable {
+        let time: Double
+        let hash: String
+        let symbol: String
+        let side: String
+        let amount: Double
+        let value: Double
+        let gain: Double?
+        var id: String { hash + symbol + side }
+        var isBuy: Bool { side == "buy" }
+    }
+    struct Ledger: Decodable {
+        let status: String
+        let behind: Int?
+        let realized: Double?
+        let unrealized: Double?
+        let winRate: Double?
+        let last7d: Window?
+        let last30d: Window?
+        let tokens: [Position]?
+        let trades: [Trade]?
     }
     let portfolio: Double?
+    let chains: [WalletChain]
     let held: Held?
-    let holdings: [Row]
+    let holdings: [Holding]
+    let ledger: Ledger
+    struct WalletChain: Decodable { let chainIndex: String; let chain: String?; let value: Double }
 }
 
 private struct WalletProfileScreen: View {
@@ -1979,22 +2026,29 @@ private struct WalletProfileScreen: View {
     @Environment(\.openURL) private var openURL
     @State private var looked = false
     @State private var copied = false
-    @State private var summary: WalletSummary?
-    @State private var summaryFailed = false
+    @State private var resource: WalletResource?
+    @State private var resourceFailed = false
     @State private var perplDirectory = TraderDirectory()
     @State private var showsPerpl = false
 
     private var identity: Identity? { IdentityDirectory.shared.identity(for: wallet.address) }
     private var hasProfile: Bool { !(identity?.isEmpty ?? true) }
-    private var trades: [SpotTransaction] {
+    private var isEVM: Bool { wallet.address.hasPrefix("0x") && wallet.address.count == 42 }
+    private var ledger: WalletResource.Ledger? { resource.map(\.ledger).flatMap { $0.status == "unavailable" ? nil : $0 } }
+    private var liveTrades: [SpotTransaction] {
         feed.transactions.filter { $0.wallet.address.caseInsensitiveCompare(wallet.address) == .orderedSame }
     }
     private var portfolioText: String {
-        if let value = summary?.portfolio { return SpotLiveFeed.compactUSD(value) }
+        if let value = resource?.portfolio { return SpotLiveFeed.compactUSD(value) }
         return wallet.portfolio
     }
+    private var portfolioLabel: String {
+        guard let resource, resource.portfolio != nil else { return "Portfolio" }
+        let count = resource.chains.count
+        return count > 1 ? "Across \(count) chains" : (resource.chains.first?.chain ?? token.chainName)
+    }
     private var heldText: String {
-        guard let held = summary?.held else { return summaryFailed || summary != nil ? "0" : "—" }
+        guard let held = resource?.held else { return resourceFailed || resource != nil ? "0" : "—" }
         return SpotLiveFeed.compactNumber(held.balance)
     }
 
@@ -2013,8 +2067,7 @@ private struct WalletProfileScreen: View {
                         avatar
                         VStack(alignment: .leading, spacing: 3) {
                             Text(portfolioText).font(.system(size: 18, weight: .bold)).monospacedDigit()
-                            Text(summary?.portfolio != nil ? token.chainName : "Portfolio")
-                                .foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
+                            Text(portfolioLabel).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
                         }
                         Divider().frame(height: 46).overlay(Color.white.opacity(0.12))
                         VStack(alignment: .leading, spacing: 3) {
@@ -2076,45 +2129,49 @@ private struct WalletProfileScreen: View {
                             .padding(.top, 14)
                     }
 
-                    section("Trades on \(token.symbol)", trailing: trades.isEmpty ? nil : "\(trades.count) live") {
-                        if trades.isEmpty {
-                            quiet("None in the live window. The feed keeps the last few minutes of trades.")
-                        } else {
-                            ForEach(trades.prefix(8)) { tx in
-                                HStack(spacing: 12) {
-                                    Text(tx.age).foregroundStyle(.secondary).frame(width: 34, alignment: .leading)
-                                    Text(tx.isBuy ? "BUY" : "SELL")
-                                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                                        .foregroundStyle(DeskColor.onAction.color)
-                                        .padding(.horizontal, 8).padding(.vertical, 4)
-                                        .background(tx.isBuy ? DeskColor.rise.color : DeskColor.fall.color, in: Capsule())
-                                    Text(tx.amount).lineLimit(1).minimumScaleFactor(0.7)
-                                    Spacer()
-                                    Text(tx.value).foregroundStyle(.secondary)
+                    if let ledger {
+                        pnl(ledger)
+                    } else if resource == nil, !resourceFailed {
+                        section("PnL on Monad", trailing: nil) {
+                            SkeletonRow(widthFraction: 0.9).padding(.vertical, 12)
+                            SkeletonRow(widthFraction: 0.5).padding(.vertical, 12)
+                        }
+                    }
+
+                    if token.chainIndex != "143" {
+                        section("Trades on \(token.symbol)", trailing: liveTrades.isEmpty ? nil : "\(liveTrades.count) live") {
+                            if liveTrades.isEmpty {
+                                quiet("None since you opened \(token.symbol). Monad wallets carry their full history above.")
+                            } else {
+                                ForEach(liveTrades.prefix(8)) { tx in
+                                    tradeRow(age: tx.age, isBuy: tx.isBuy, amount: tx.amount, value: tx.value, gain: nil)
                                 }
-                                .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
-                                .frame(height: 44)
                             }
                         }
                     }
 
-                    section("Holdings on \(token.chainName)", trailing: nil) {
-                        if let summary, !summary.holdings.isEmpty {
-                            ForEach(summary.holdings) { row in
-                                HStack {
-                                    Text(row.symbol).lineLimit(1)
+                    section("Holdings", trailing: resource?.holdings.isEmpty == false ? "by value" : nil) {
+                        if let resource, !resource.holdings.isEmpty {
+                            ForEach(resource.holdings) { row in
+                                HStack(spacing: 10) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(row.symbol).lineLimit(1)
+                                        Text(row.chain ?? row.chainIndex).font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
+                                    }
                                     Spacer()
                                     Text(SpotLiveFeed.compactNumber(row.balance)).foregroundStyle(.secondary)
                                     Text(row.value.map { SpotLiveFeed.compactUSD($0) } ?? "—")
                                         .frame(width: 82, alignment: .trailing)
                                 }
                                 .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
-                                .frame(height: 44)
+                                .frame(height: 48)
                             }
-                        } else if summaryFailed {
-                            quiet("Balances on \(token.chainName) could not be read right now.")
-                        } else if summary != nil {
-                            quiet("Nothing held on \(token.chainName).")
+                        } else if !isEVM {
+                            quiet("Balances and history are read for EVM wallets. This one is on \(token.chainName).")
+                        } else if resourceFailed {
+                            quiet("Balances could not be read right now.")
+                        } else if resource != nil {
+                            quiet("Nothing held that OKX can price.")
                         } else {
                             SkeletonRow(widthFraction: 0.8).padding(.vertical, 12)
                             SkeletonRow(widthFraction: 0.6).padding(.vertical, 12)
@@ -2136,11 +2193,106 @@ private struct WalletProfileScreen: View {
             await IdentityDirectory.shared.resolve([wallet.address])
             looked = true
         }
-        .task { await loadSummary() }
+        .task { await loadResource() }
     }
 
-    private func loadSummary() async {
-        var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/token-details")!
+    @ViewBuilder
+    private func pnl(_ ledger: WalletResource.Ledger) -> some View {
+        let indexing = ledger.status == "indexing"
+        let quietWallet = !indexing && (ledger.trades ?? []).isEmpty && (ledger.tokens ?? []).allSatisfy { $0.holding <= 0 }
+        section("PnL on Monad", trailing: indexing ? "still indexing" : (quietWallet ? nil : ledger.last30d.map { "\($0.trades) trades · 30d" })) {
+            if quietWallet {
+                quiet("No priced trades on Monad in the last 45 days.")
+            } else {
+            HStack(spacing: 0) {
+                figure("Realized", signed(ledger.realized ?? 0), tint: tint(ledger.realized ?? 0))
+                figure("Unrealized", ledger.unrealized.map(signed) ?? "—", tint: tint(ledger.unrealized ?? 0))
+                figure("Win rate", ledger.winRate.map { "\(Int(($0 * 100).rounded()))%" } ?? "—", tint: .white)
+            }
+            .padding(.vertical, 14)
+            .padding(.horizontal, 16)
+            .perpSearchGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            if let week = ledger.last7d, week.trades > 0 {
+                Text("Last 7 days: \(signed(week.realized)) realized over \(week.trades) trades")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
+            }
+            if let positions = ledger.tokens?.filter({ $0.holding > 0 }), !positions.isEmpty {
+                ForEach(positions.prefix(6)) { position in
+                    HStack(spacing: 10) {
+                        Text(position.symbol).lineLimit(1)
+                        Spacer()
+                        Text(SpotLiveFeed.compactNumber(position.holding)).foregroundStyle(.secondary)
+                        Text(position.unrealized.map(signed) ?? "—")
+                            .foregroundStyle(tint(position.unrealized ?? 0))
+                            .frame(width: 82, alignment: .trailing)
+                    }
+                    .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
+                    .frame(height: 44)
+                }
+                .padding(.top, 6)
+            }
+            if let trades = ledger.trades, !trades.isEmpty {
+                Text("Trades").font(.system(size: 13, weight: .bold, design: .rounded)).padding(.top, 14)
+                ForEach(trades.prefix(10)) { trade in
+                    tradeRow(age: Self.day(trade.time), isBuy: trade.isBuy,
+                             amount: "\(SpotLiveFeed.compactNumber(trade.amount)) \(trade.symbol)",
+                             value: SpotLiveFeed.compactUSD(trade.value), gain: trade.gain)
+                }
+            }
+            }
+        }
+    }
+
+    private func tradeRow(age: String, isBuy: Bool, amount: String, value: String, gain: Double?) -> some View {
+        HStack(spacing: 12) {
+            Text(age).foregroundStyle(.secondary).frame(width: 46, alignment: .leading)
+            Text(isBuy ? "BUY" : "SELL")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(DeskColor.onAction.color)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(isBuy ? DeskColor.rise.color : DeskColor.fall.color, in: Capsule())
+            Text(amount).lineLimit(1).minimumScaleFactor(0.7)
+            Spacer()
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(value).foregroundStyle(.secondary)
+                if let gain { Text(signed(gain)).font(.system(size: 11, weight: .semibold, design: .rounded)).foregroundStyle(tint(gain)) }
+            }
+        }
+        .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
+        .frame(height: 46)
+    }
+
+    private func figure(_ label: String, _ value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(value).font(.system(size: 17, weight: .bold, design: .rounded).monospacedDigit()).foregroundStyle(tint)
+                .lineLimit(1).minimumScaleFactor(0.7)
+            Text(label).font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func signed(_ value: Double) -> String {
+        let body = SpotLiveFeed.compactUSD(abs(value))
+        return value < 0 ? "−" + body : (value > 0 ? "+" + body : body)
+    }
+
+    private func tint(_ value: Double) -> Color {
+        value > 0 ? DeskColor.rise.color : (value < 0 ? DeskColor.fall.color : .white)
+    }
+
+    private static func day(_ time: Double) -> String {
+        let date = Date(timeIntervalSince1970: time / 1000)
+        let age = Date.now.timeIntervalSince(date)
+        if age < 3_600 { return "\(max(1, Int(age / 60)))m" }
+        if age < 86_400 { return "\(Int(age / 3_600))h" }
+        return date.formatted(.dateTime.month(.abbreviated).day())
+    }
+
+    private func loadResource() async {
+        guard isEVM else { resourceFailed = true; return }
+        var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/activity")!
         components.queryItems = [
             URLQueryItem(name: "view", value: "wallet"),
             URLQueryItem(name: "address", value: wallet.address),
@@ -2149,11 +2301,16 @@ private struct WalletProfileScreen: View {
         ]
         guard let url = components.url else { return }
         do {
-            let (data, isStale) = try await ResponseCache.shared.data(from: url, maxStale: 300)
-            summary = try JSONDecoder().decode(WalletSummary.self, from: data)
-            summaryFailed = isStale && summary == nil
+            let (data, _) = try await ResponseCache.shared.data(from: url, maxStale: 300)
+            resource = try JSONDecoder().decode(WalletResource.self, from: data)
+            // A ledger still being built is worth asking about again in a moment.
+            if resource?.ledger.status == "indexing" {
+                try? await Task.sleep(for: .seconds(8))
+                if let (fresh, _) = try? await ResponseCache.shared.data(from: url, maxStale: 0),
+                   let again = try? JSONDecoder().decode(WalletResource.self, from: fresh) { resource = again }
+            }
         } catch {
-            summaryFailed = true
+            resourceFailed = true
         }
     }
 

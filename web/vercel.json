@@ -4,7 +4,8 @@
   "outputDirectory": "public",
   "functions": {
     "api/market-stream.mjs": { "maxDuration": 300 },
-    "api/alerts.mjs": { "maxDuration": 60 }
+    "api/alerts.mjs": { "maxDuration": 60 },
+    "api/activity.mjs": { "maxDuration": 60 }
   },
   "headers": [
     {

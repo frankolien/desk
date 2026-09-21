@@ -1,0 +1,6 @@
+public/
+tools/
+test/
+node_modules/
+.env.local
+.vercel/

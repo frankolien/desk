@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "worker": "node worker/index.mjs"
   },
   "dependencies": {
     "viem": "^2.56.6"

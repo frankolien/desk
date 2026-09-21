@@ -39,7 +39,8 @@ endpoints. Sources are listed by what they are for.
 | Service | Used for | Where | Key |
 |---|---|---|---|
 | Apple Push Notification service — `api.push.apple.com`, sandbox | Trade alerts and the silent wake for away copying | `_apns.mjs`, `alerts.mjs` | `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`, `APNS_TOPIC` |
-| Upstash Redis (Vercel KV) | Alert subscriptions, trader history shards, identity and summary caches | `_store.mjs` | `KV_REST_API_URL`, `KV_REST_API_TOKEN` |
+| Upstash Redis (Vercel KV) | Alert subscriptions, trader history shards, wallet ledgers, identity, price and summary caches | `_store.mjs` | `KV_REST_API_URL`, `KV_REST_API_TOKEN` |
+| Railway | Runs the wallet-ledger worker (`web/worker`) around the clock; same env names as Vercel plus `CRON_SECRET` and `DESK_API` | `web/worker/index.mjs`, `web/Dockerfile` | project `desk-worker` |
 | Anthropic — `api.anthropic.com` (claude-haiku-4-5) | One-paragraph trading-style summary on a trader's Stats tab, cached a day; falls back to figures without it | `traders.mjs` | `ANTHROPIC_API_KEY` |
 
 ## Links only (no data read)

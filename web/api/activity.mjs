@@ -3,6 +3,9 @@
 /// The key stays here. Transfers to and from Perpl's exchange, Agora's faucet and Relay's
 /// depository are labelled as what they are, so a deposit reads "Deposited to Perpl"
 /// rather than "Sent to 0x1964…".
+import { redisStore } from "./_store.mjs";
+import { walletResource } from "./_wallet-resource.mjs";
+
 const ETHERSCAN = "https://api.etherscan.io/v2/api";
 
 export const NETWORKS = {
@@ -72,11 +75,25 @@ async function list(fetchImpl, chainId, action, address, key) {
   throw new Error("etherscan");
 }
 
-export function createHandler(fetchImpl = fetch, key = () => process.env.ETHERSCAN_API_KEY) {
+export function createHandler(fetchImpl = fetch, key = () => process.env.ETHERSCAN_API_KEY, { store = redisStore(), wallet = walletResource } = {}) {
   return async function handler(req, res) {
     res.setHeader("Cache-Control", "private, no-store");
     if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
     const address = String(req.query.address || "");
+
+    if (req.query.view === "wallet") {
+      if (!validAddress(address)) return res.status(400).json({ error: "A wallet address is required." });
+      try {
+        const body = await wallet(address, {
+          chainIndex: String(req.query.chainIndex || "143"), contract: String(req.query.contract || ""), store, fetchImpl,
+        });
+        res.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=300");
+        return res.status(200).json(body);
+      } catch (error) {
+        return res.status(502).json({ error: "The wallet could not be read right now.", detail: error.message });
+      }
+    }
+
     const network = NETWORKS[String(req.query.network || "")];
     if (!validAddress(address) || !network) {
       return res.status(400).json({ error: "A wallet address and network are required." });
