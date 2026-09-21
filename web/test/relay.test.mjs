@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { isBuyable } from "../api/_chains.mjs";
-import { createHandler, depositTransaction, matchesRoute } from "../api/relay-quote.mjs";
-import { createHandler as createStatus, phase } from "../api/relay-status.mjs";
+import { createHandler, depositTransaction, matchesRoute, phase } from "../api/relay-quote.mjs";
 
 const USER = "0x03508bb71268bba25ecacc8f620e01866650532c";
 const TOKEN = "0x532f27101965dd16442e59d40670faf5ebb142e4";
@@ -119,9 +118,12 @@ test("status folds Relay's words into four phases", async () => {
   assert.equal(phase("refunded"), "refunded");
   assert.equal(phase("failure"), "failed");
   for (const status of ["waiting", "pending", "submitted", "delayed", undefined]) assert.equal(phase(status), "pending");
-  const handler = createStatus(respond(200, { status: "success", txHashes: ["0xaa", "0xbb"] }));
-  const result = await handler({ method: "GET", query: { requestId: `0x${"12".repeat(32)}` } }, recorder());
+  const handler = createHandler(respond(200, { status: "success", txHashes: ["0xaa", "0xbb"] }));
+  const result = await handler({ method: "GET", query: { view: "status", requestId: `0x${"12".repeat(32)}` } }, recorder());
   assert.deepEqual(result.body, { phase: "filled", destinationTx: "0xbb" });
-  const bad = await handler({ method: "GET", query: { requestId: "0x12" } }, recorder());
+  // The old path still lands on the status branch even without the rewrite's query.
+  const byPath = await handler({ method: "GET", url: `/api/relay-status?requestId=0x${"12".repeat(32)}`, query: { requestId: `0x${"12".repeat(32)}` } }, recorder());
+  assert.deepEqual(byPath.body, { phase: "filled", destinationTx: "0xbb" });
+  const bad = await handler({ method: "GET", query: { view: "status", requestId: "0x12" } }, recorder());
   assert.equal(bad.status, 400);
 });

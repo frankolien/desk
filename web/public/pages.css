@@ -1,0 +1,116 @@
+/* Inner pages: docs, status, security. The same ground and cards as the front page,
+   with the type set for reading rather than for a sign. */
+
+.page-hero { padding: clamp(48px, 6vw, 88px) 0; }
+.page-title { font-family: var(--display); font-weight: 500; font-size: clamp(38px, 5.6vw, 72px); letter-spacing: -0.035em; line-height: 1.02; max-width: 16ch; }
+.page-hero .site-sub { max-width: 56ch; margin-top: 20px; }
+.page-hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+.page-hero .site-btn-ink { background: var(--fg); color: var(--bg); }
+.page-hero .site-btn-ink:hover { background: var(--fg); opacity: 0.9; }
+
+.page-body { padding: clamp(40px, 5vw, 72px) 0; }
+.page-columns { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: clamp(32px, 5vw, 80px); align-items: start; }
+.page-toc { position: sticky; top: 88px; display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 14px; }
+.page-toc a { display: block; padding: 6px 0; color: var(--fg-muted); border-left: 2px solid transparent; padding-left: 12px; }
+.page-toc a:hover { color: var(--fg); border-color: var(--accent); }
+
+.page-prose { max-width: 76ch; font-size: 16.5px; line-height: 1.6; }
+.page-prose > * + * { margin-top: 18px; }
+.page-prose h2 { font-family: var(--display); font-weight: 500; font-size: 30px; letter-spacing: -0.025em; line-height: 1.1; margin-top: 56px; scroll-margin-top: 96px; }
+.page-prose h2:first-child { margin-top: 0; }
+.page-prose h3 { font-family: var(--display); font-weight: 500; font-size: 20px; letter-spacing: -0.015em; margin-top: 36px; scroll-margin-top: 96px; }
+.page-prose p, .page-prose li { color: var(--fg-muted); text-wrap: pretty; }
+.page-prose p strong, .page-prose li strong { color: var(--fg); font-weight: 600; }
+.page-prose a { color: var(--fg); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+.page-prose ul, .page-prose ol { padding-left: 22px; }
+.page-prose li + li { margin-top: 8px; }
+.page-prose code { font-family: var(--mono); font-size: 0.88em; padding: 2px 6px; border-radius: 6px; background: rgba(11, 13, 11, 0.06); color: var(--fg); }
+.page-prose pre { margin: 0; padding: 18px 20px; border-radius: 18px; background: #111411; color: var(--night-text); font-family: var(--mono); font-size: 13px; line-height: 1.55; overflow-x: auto; }
+.page-prose pre code { padding: 0; background: none; color: inherit; font-size: inherit; }
+.page-prose .page-note { padding: 16px 20px; border-radius: 18px; background: var(--cream); color: var(--ink); border-left: 4px solid var(--amber); }
+.page-prose .page-note p { color: inherit; margin: 0; }
+
+.page-table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+.page-table th, .page-table td { padding: 12px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+.page-table th { font-family: var(--mono); font-size: 11.5px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-muted); }
+.page-table td code { white-space: nowrap; }
+.page-table-wrap { overflow-x: auto; }
+
+.page-endpoint { padding: 22px 24px; border-radius: 22px; border: 1px solid var(--line); background: var(--white); scroll-margin-top: 96px; }
+.page-endpoint + .page-endpoint { margin-top: 14px; }
+.page-endpoint-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.page-method { font-family: var(--mono); font-size: 11.5px; font-weight: 600; letter-spacing: 0.1em; padding: 4px 8px; border-radius: 8px; background: var(--ink); color: var(--white); }
+.page-path { font-family: var(--mono); font-size: 14.5px; font-weight: 500; }
+.page-tier { margin-left: auto; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-muted); }
+.page-endpoint p { margin: 12px 0 0; }
+.page-endpoint pre { margin-top: 14px; }
+
+/* Try it */
+
+.page-try { display: grid; gap: 16px; padding: 28px; border-radius: var(--radius); background: var(--cream); color: var(--ink); }
+.page-try-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; }
+.page-field { display: grid; gap: 6px; }
+.page-field span { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.page-input, .page-select {
+  height: 48px;
+  padding: 0 14px;
+  border: 1.5px solid var(--line);
+  border-radius: 14px;
+  background: var(--white);
+  color: var(--ink);
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 14px;
+  width: 100%;
+  min-width: 0;
+}
+.page-input:focus-visible, .page-select:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.page-try .site-btn { height: 48px; }
+.page-try-url { font-family: var(--mono); font-size: 13px; color: var(--muted); word-break: break-all; }
+.page-try-status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-family: var(--mono); font-size: 13px; }
+.page-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: rgba(11, 13, 11, 0.08); font-family: var(--mono); font-size: 12.5px; font-weight: 500; }
+.page-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.page-pill.is-pass { background: rgba(76, 195, 138, 0.18); color: #1f8a5b; }
+.page-pill.is-warn { background: rgba(232, 179, 57, 0.28); color: var(--bronze); }
+.page-pill.is-fail { background: rgba(229, 72, 77, 0.16); color: #b8262b; }
+.page-pill.is-unknown { background: rgba(11, 13, 11, 0.08); color: var(--muted); }
+.page-output { max-height: 480px; overflow: auto; }
+.page-headers { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+.page-headers b { color: var(--ink); font-weight: 500; }
+
+/* Status */
+
+.status-overall { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.status-overall .page-pill { font-size: 15px; padding: 8px 16px; }
+.status-overall .page-pill::before { width: 10px; height: 10px; }
+.status-meta { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.04em; color: var(--fg-muted); }
+.status-rows { display: grid; gap: 10px; margin: 32px 0 0; padding: 0; list-style: none; }
+.status-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 16px; align-items: center; padding: 18px 22px; border-radius: 18px; background: rgba(241, 240, 236, 0.05); border: 1px solid rgba(241, 240, 236, 0.1); }
+.status-row-name { font-weight: 500; }
+.status-row-what { display: block; margin-top: 3px; font-size: 13px; color: var(--fg-muted); }
+.status-row-value { font-family: var(--mono); font-size: 14px; font-variant-numeric: tabular-nums; color: var(--fg-muted); text-align: right; }
+.status-row .page-pill.is-pass { background: rgba(76, 195, 138, 0.16); color: var(--rise); }
+.status-row .page-pill.is-warn { background: rgba(232, 179, 57, 0.18); color: var(--amber); }
+.status-row .page-pill.is-fail { background: rgba(229, 72, 77, 0.18); color: #f0716f; }
+.status-row .page-pill.is-unknown { background: rgba(241, 240, 236, 0.08); color: var(--fg-muted); }
+.status-overall .page-pill.is-pass { background: rgba(76, 195, 138, 0.16); color: var(--rise); }
+.status-overall .page-pill.is-warn { background: rgba(232, 179, 57, 0.18); color: var(--amber); }
+.status-overall .page-pill.is-fail { background: rgba(229, 72, 77, 0.18); color: #f0716f; }
+.status-overall .page-pill.is-unknown { background: rgba(241, 240, 236, 0.08); color: var(--fg-muted); }
+.status-legend { margin: 28px 0 0; font-size: 14px; color: var(--fg-muted); max-width: 64ch; }
+
+/* Footer, the same lines as the front page's card without the artwork. */
+
+.page-foot { padding: 40px 0 44px; margin-bottom: 16px; }
+
+@media (max-width: 900px) {
+  .page-columns { grid-template-columns: 1fr; }
+  .page-toc { position: static; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .page-toc a { border-left: 0; padding-left: 0; }
+}
+@media (max-width: 720px) {
+  .page-try-row { grid-template-columns: 1fr; }
+  .page-try { padding: 20px; }
+  .status-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .status-row-value { grid-column: 1 / -1; text-align: left; }
+}

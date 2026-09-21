@@ -1,0 +1,5 @@
+Contact: https://github.com/frankolien/desk/security/advisories/new
+Expires: 2027-09-21T00:00:00Z
+Policy: https://trydesk.trade/security
+Preferred-Languages: en
+Canonical: https://trydesk.trade/.well-known/security.txt

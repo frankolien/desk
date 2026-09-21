@@ -84,10 +84,45 @@ function formatUnits(raw, decimals) {
   return fraction ? `${whole}.${fraction}` : whole;
 }
 
+/// Relay's own words, folded to the four states a buyer needs to see.
+export function phase(status) {
+  switch (status) {
+    case "success": return "filled";
+    case "refund": case "refunded": return "refunded";
+    case "failure": return "failed";
+    default: return "pending";
+  }
+}
+
+async function status(fetchImpl, req, res) {
+  const requestId = String(req.query.requestId || "");
+  if (!/^0x[a-fA-F0-9]{64}$/.test(requestId)) {
+    return res.status(400).json({ error: "A request id is required." });
+  }
+  try {
+    const response = await fetchImpl(`${RELAY}/intents/status/v3?requestId=${requestId}`, {
+      headers: process.env.RELAY_API_KEY ? { "x-api-key": process.env.RELAY_API_KEY } : {},
+    });
+    if (!response.ok) return res.status(502).json({ error: "Relay status is unavailable." });
+    const body = await response.json();
+    return res.status(200).json({
+      phase: phase(body.status),
+      destinationTx: Array.isArray(body.txHashes) ? body.txHashes.at(-1) ?? null : null,
+    });
+  } catch {
+    return res.status(502).json({ error: "Relay status is unavailable." });
+  }
+}
+
+// `/api/relay-status` is rewritten here with `view=status`; the path is checked too in
+// case the rewrite ever drops the destination's own query.
+const wantsStatus = (req) => req.query?.view === "status" || String(req.url ?? "").split("?")[0].endsWith("/relay-status");
+
 export function createHandler(fetchImpl = fetch) {
   return async function handler(req, res) {
     res.setHeader("Cache-Control", "private, no-store");
     if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
+    if (wantsStatus(req)) return status(fetchImpl, req, res);
     const user = String(req.query.user || "");
     const chainIndex = String(req.query.chainIndex || "");
     const token = String(req.query.tokenAddress || "");

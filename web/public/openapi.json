@@ -1,0 +1,193 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Desk API",
+    "version": "1",
+    "summary": "Public, read-only data on Monad traders and wallets.",
+    "description": "Keyless and rate-limited. Every response is JSON; successes are wrapped in `{ data, meta }`, errors are RFC 9457 Problem Details. Only public inputs are accepted: addresses, never keys, seeds or signatures.",
+    "license": { "name": "Read-only public data" }
+  },
+  "externalDocs": { "url": "https://trydesk.trade/docs" },
+  "servers": [{ "url": "https://trydesk.trade" }],
+  "paths": {
+    "/api/v1": {
+      "get": {
+        "operationId": "index",
+        "summary": "Index",
+        "responses": { "200": { "description": "Routes, limits and links.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } } } } }
+      }
+    },
+    "/api/v1/traders/top": {
+      "get": {
+        "operationId": "topTraders",
+        "summary": "Top traders on Perpl by unrealised PnL",
+        "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 25, "default": 25 } }],
+        "responses": {
+          "200": { "description": "Ranked traders with their open positions.", "headers": { "$ref": "#/components/headers/RateLimit" }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } } } },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Upstream" }
+        }
+      }
+    },
+    "/api/v1/traders/{address}/history": {
+      "get": {
+        "operationId": "traderHistory",
+        "summary": "A trader's closed trades and statistics",
+        "description": "Expensive tier: 10 requests per minute.",
+        "parameters": [{ "$ref": "#/components/parameters/Address" }],
+        "responses": {
+          "200": { "description": "Statistics, a one-line summary and the closed trades.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } } } },
+          "400": { "$ref": "#/components/responses/InvalidAddress" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Upstream" }
+        }
+      }
+    },
+    "/api/v1/identity/{address}": {
+      "get": {
+        "operationId": "identity",
+        "summary": "Names and avatars for an address",
+        "description": ".nad names, nad.fun profiles, ENS and Farcaster, whichever has verified the address.",
+        "parameters": [{ "$ref": "#/components/parameters/Address" }],
+        "responses": {
+          "200": { "description": "The identity record.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } } } },
+          "400": { "$ref": "#/components/responses/InvalidAddress" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/wallets/{address}": {
+      "get": {
+        "operationId": "wallet",
+        "summary": "What a wallet holds and did on Monad",
+        "description": "Expensive tier: 10 requests per minute. The ledger is indexed on first sight and continued by a worker; `ledger.status` says which.",
+        "parameters": [{ "$ref": "#/components/parameters/Address" }],
+        "responses": {
+          "200": { "description": "Identity, holdings and the Monad ledger.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } } } },
+          "400": { "$ref": "#/components/responses/InvalidAddress" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Upstream" }
+        }
+      }
+    },
+    "/api/v1/tokens/signals": {
+      "get": {
+        "operationId": "tokenSignals",
+        "summary": "Token signals from tracked wallets over a window",
+        "parameters": [{ "name": "window", "in": "query", "schema": { "type": "string", "enum": ["1h", "6h", "24h"], "default": "6h" } }],
+        "responses": {
+          "200": { "description": "Scored tokens for the window.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } } } },
+          "400": { "description": "Unknown window.", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "$ref": "#/components/responses/Upstream" }
+        }
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Service health",
+        "description": "draft-inadarei-api-health-check shape. 200 on pass or warn, 503 on fail. Never cached by clients; memoised server-side for 10 seconds.",
+        "responses": {
+          "200": { "description": "Healthy or degraded.", "content": { "application/health+json": { "schema": { "$ref": "#/components/schemas/Health" } } } },
+          "503": { "description": "A critical check failed.", "content": { "application/health+json": { "schema": { "$ref": "#/components/schemas/Health" } } } }
+        }
+      },
+      "head": { "operationId": "healthHead", "summary": "Service health, status code only", "responses": { "200": { "description": "Healthy or degraded." }, "503": { "description": "A critical check failed." } } }
+    },
+    "/api/v1/stats": {
+      "get": {
+        "operationId": "stats",
+        "summary": "Usage counters",
+        "description": "Counts only: requests served today, tracked wallets, alert subscriptions. No addresses.",
+        "responses": { "200": { "description": "Counters.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } } } } }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "Address": { "name": "address", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/Address" } }
+    },
+    "headers": {
+      "RateLimit": {
+        "X-RateLimit-Limit": { "schema": { "type": "integer" }, "description": "Requests allowed per minute on this route's tier." },
+        "X-RateLimit-Remaining": { "schema": { "type": "integer" }, "description": "Requests left in the current window." },
+        "X-RateLimit-Reset": { "schema": { "type": "integer" }, "description": "Unix seconds when the window resets." }
+      }
+    },
+    "responses": {
+      "InvalidAddress": { "description": "The address is not 0x followed by 40 hex characters.", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } },
+      "NotFound": { "description": "Nothing is known about this address.", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } },
+      "RateLimited": {
+        "description": "Over the limit for this tier.",
+        "headers": { "Retry-After": { "schema": { "type": "integer" }, "description": "Seconds until the window resets." } },
+        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+      },
+      "Upstream": { "description": "Monad, Perpl or Redis could not be read.", "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+    },
+    "schemas": {
+      "Address": { "type": "string", "pattern": "^0x[0-9a-fA-F]{40}$", "examples": ["0x95d2602d30da1179fd13274839e60345857ca648"] },
+      "Envelope": {
+        "type": "object",
+        "required": ["data", "meta"],
+        "properties": {
+          "data": { "description": "The route's payload." },
+          "meta": {
+            "type": "object",
+            "required": ["asOf", "chain", "cached"],
+            "properties": {
+              "asOf": { "type": "string", "format": "date-time" },
+              "chain": { "type": "string", "const": "monad" },
+              "cached": { "type": "boolean" }
+            }
+          }
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "description": "RFC 9457 Problem Details with a stable `code`.",
+        "required": ["type", "title", "status", "detail", "instance", "code"],
+        "properties": {
+          "type": { "type": "string", "format": "uri" },
+          "title": { "type": "string" },
+          "status": { "type": "integer" },
+          "detail": { "type": "string" },
+          "instance": { "type": "string" },
+          "code": { "type": "string", "enum": ["invalid_address", "invalid_request", "not_found", "method_not_allowed", "rate_limited", "upstream_unavailable", "unknown_route"] }
+        }
+      },
+      "Check": {
+        "type": "object",
+        "required": ["status", "observedValue", "observedUnit", "time"],
+        "properties": {
+          "status": { "type": "string", "enum": ["pass", "warn", "fail", "unknown"] },
+          "observedValue": { "type": ["number", "null"] },
+          "observedUnit": { "type": "string", "enum": ["ms", "s"] },
+          "time": { "type": "string", "format": "date-time" },
+          "output": { "type": "string" }
+        }
+      },
+      "Health": {
+        "type": "object",
+        "required": ["status", "version", "checks"],
+        "properties": {
+          "status": { "type": "string", "enum": ["pass", "warn", "fail"] },
+          "version": { "type": "string" },
+          "releaseId": { "type": ["string", "null"] },
+          "time": { "type": "string", "format": "date-time" },
+          "checks": {
+            "type": "object",
+            "properties": {
+              "redis:responseTime": { "type": "array", "items": { "$ref": "#/components/schemas/Check" } },
+              "monad-rpc:responseTime": { "type": "array", "items": { "$ref": "#/components/schemas/Check" } },
+              "perpl:responseTime": { "type": "array", "items": { "$ref": "#/components/schemas/Check" } },
+              "worker:heartbeatAge": { "type": "array", "items": { "$ref": "#/components/schemas/Check" } },
+              "cron:lastRunAge": { "type": "array", "items": { "$ref": "#/components/schemas/Check" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}

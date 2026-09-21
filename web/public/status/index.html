@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Desk Status</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="Live health of Desk's API, its store, Monad RPC, Perpl and the indexing worker.">
+<meta name="theme-color" content="#070907">
+<meta name="robots" content="noindex">
+<link rel="canonical" href="https://trydesk.trade/status">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+<link rel="icon" href="/brand/apple-touch-icon.png">
+<link rel="preload" href="/fonts/geist-variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/pages.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-apple" viewBox="0 0 22 26"><path fill="currentColor" d="M15.7 1.4c0 1.1-.45 2.16-1.19 2.94-.79.83-2.08 1.47-3.15 1.38-.12-1.05.4-2.17 1.15-2.92.8-.83 2.19-1.43 3.19-1.4zM20 16.3c-.57 1.31-.84 1.9-1.58 3.05-1.02 1.6-2.46 3.6-4.25 3.62-1.58.02-2-1.03-4.14-1.02-2.15.01-2.6 1.04-4.18 1.02-1.79-.02-3.15-1.82-4.17-3.43C-1.24 15.2-1.53 9.95.86 7.18a4.9 4.9 0 0 1 3.47-1.64c1.43 0 2.33.78 3.51.78 1.15 0 1.85-.78 3.5-.78 1.24 0 2.56.68 3.5 1.84-3.08 1.68-2.58 6.08.35 7.06z"/></symbol>
+</svg>
+<div class="site-root">
+
+<a href="#site-main" class="site-skip">Skip to content</a>
+
+<header class="site-nav">
+  <div class="site-wrap site-nav-inner">
+    <a href="/" class="site-logo" aria-label="Desk home">
+      <img src="/brand/mark.webp" alt="" width="34" height="34" class="site-logo-mark">
+      <span class="site-logo-word">Desk</span>
+    </a>
+    <nav class="site-nav-links" aria-label="Primary">
+      <a href="/#chain">Copy engine</a>
+      <a href="/#desk">Live desk</a>
+      <a href="/docs">API</a>
+      <a href="/status" aria-current="page">Status</a>
+      <a href="/security">Security</a>
+      <a class="site-btn site-btn-ink site-btn-small" href="/#get">
+        <svg class="site-apple" width="14" height="16" aria-hidden="true"><use href="#i-apple"/></svg>
+        Get the app
+      </a>
+    </nav>
+  </div>
+</header>
+
+<main id="site-main" class="site-main">
+
+  <section class="site-block page-hero page-body" data-tone="dark" aria-labelledby="status-title">
+    <div class="site-wrap">
+      <p class="site-eyebrow">Status</p>
+      <h1 id="status-title" class="page-title">Is Desk up?</h1>
+      <div class="status-overall" style="margin-top:28px" data-overall aria-live="polite">
+        <span class="page-pill is-unknown">Checking…</span>
+      </div>
+      <p class="status-meta" style="margin:14px 0 0" data-meta>Reads <a href="/api/v1/health">/api/v1/health</a> every 30 seconds.</p>
+
+      <ul class="status-rows" data-rows>
+        <li class="status-row" data-check="redis:responseTime">
+          <div><span class="status-row-name">Store</span><span class="status-row-what">Redis answers a read. Critical: caching, limits and ledgers depend on it.</span></div>
+          <span class="page-pill is-unknown" data-badge>unknown</span>
+          <span class="status-row-value" data-value>—</span>
+        </li>
+        <li class="status-row" data-check="worker:heartbeatAge">
+          <div><span class="status-row-name">Indexing worker</span><span class="status-row-what">Time since the ledger worker last checked in. Critical: warn past 4 minutes, fail past 10.</span></div>
+          <span class="page-pill is-unknown" data-badge>unknown</span>
+          <span class="status-row-value" data-value>—</span>
+        </li>
+        <li class="status-row" data-check="monad-rpc:responseTime">
+          <div><span class="status-row-name">Monad RPC</span><span class="status-row-what">eth_blockNumber on rpc.monad.xyz. Positions and ledgers go stale without it.</span></div>
+          <span class="page-pill is-unknown" data-badge>unknown</span>
+          <span class="status-row-value" data-value>—</span>
+        </li>
+        <li class="status-row" data-check="perpl:responseTime">
+          <div><span class="status-row-name">Perpl</span><span class="status-row-what">Perpl's public market list. The trader views need it.</span></div>
+          <span class="page-pill is-unknown" data-badge>unknown</span>
+          <span class="status-row-value" data-value>—</span>
+        </li>
+        <li class="status-row" data-check="cron:lastRunAge">
+          <div><span class="status-row-name">Alerts scan</span><span class="status-row-what">Time since trade alerts last scanned. Warn past 15 minutes, fail past 2 hours.</span></div>
+          <span class="page-pill is-unknown" data-badge>unknown</span>
+          <span class="status-row-value" data-value>—</span>
+        </li>
+      </ul>
+      <p class="status-legend"><strong>pass</strong> is all good; <strong>warn</strong> means a third party is slow or a background job is late, and the app still works; <strong>fail</strong> means a critical piece is down and the API answers 503. Third parties: <a href="https://monad.xyz">Monad</a>, <a href="https://perpl.trade">Perpl</a>, Upstash, Vercel and Railway.</p>
+    </div>
+  </section>
+
+  <section class="site-block page-foot" data-tone="night" aria-label="Footer">
+    <div class="site-wrap">
+      <footer class="site-cta-foot">
+        <p class="site-cta-copy">Copyright &copy; 2026 Desk.</p>
+        <p class="site-cta-fine">Perpetual futures are leveraged instruments. You can lose everything you put in.</p>
+        <nav class="site-footer-links" aria-label="Footer">
+          <a href="/docs">API</a>
+          <a href="/openapi.json">OpenAPI</a>
+          <a href="/status">Status</a>
+          <a href="/security">Security</a>
+          <a href="https://github.com/frankolien/desk" target="_blank" rel="noreferrer">GitHub</a>
+          <a href="https://perpl.trade" target="_blank" rel="noreferrer">Perpl</a>
+          <a href="https://monad.xyz" target="_blank" rel="noreferrer">Monad</a>
+        </nav>
+      </footer>
+    </div>
+  </section>
+
+</main>
+
+</div>
+<script src="/status/status.js" defer></script>
+</body>
+</html>

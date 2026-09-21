@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Desk API</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="Desk's public read-only API: top traders on Perpl, trader history, wallet ledgers, identities and token signals on Monad. Keyless, rate-limited, JSON.">
+<meta name="theme-color" content="#836ef9">
+<link rel="canonical" href="https://trydesk.trade/docs">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://trydesk.trade/docs">
+<meta property="og:title" content="Desk API">
+<meta property="og:description" content="Public read-only data on Monad traders and wallets. No key, JSON, rate-limited.">
+<meta property="og:image" content="https://trydesk.trade/brand/og.jpg">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+<link rel="icon" href="/brand/apple-touch-icon.png">
+<link rel="preload" href="/fonts/geist-variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/pages.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-apple" viewBox="0 0 22 26"><path fill="currentColor" d="M15.7 1.4c0 1.1-.45 2.16-1.19 2.94-.79.83-2.08 1.47-3.15 1.38-.12-1.05.4-2.17 1.15-2.92.8-.83 2.19-1.43 3.19-1.4zM20 16.3c-.57 1.31-.84 1.9-1.58 3.05-1.02 1.6-2.46 3.6-4.25 3.62-1.58.02-2-1.03-4.14-1.02-2.15.01-2.6 1.04-4.18 1.02-1.79-.02-3.15-1.82-4.17-3.43C-1.24 15.2-1.53 9.95.86 7.18a4.9 4.9 0 0 1 3.47-1.64c1.43 0 2.33.78 3.51.78 1.15 0 1.85-.78 3.5-.78 1.24 0 2.56.68 3.5 1.84-3.08 1.68-2.58 6.08.35 7.06z"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M13 6l6 6-6 6"/></symbol>
+</svg>
+<div class="site-root">
+
+<a href="#site-main" class="site-skip">Skip to content</a>
+
+<header class="site-nav">
+  <div class="site-wrap site-nav-inner">
+    <a href="/" class="site-logo" aria-label="Desk home">
+      <img src="/brand/mark.webp" alt="" width="34" height="34" class="site-logo-mark">
+      <span class="site-logo-word">Desk</span>
+    </a>
+    <nav class="site-nav-links" aria-label="Primary">
+      <a href="/#chain">Copy engine</a>
+      <a href="/#desk">Live desk</a>
+      <a href="/docs" aria-current="page">API</a>
+      <a href="/status">Status</a>
+      <a href="/security">Security</a>
+      <a class="site-btn site-btn-ink site-btn-small" href="/#get">
+        <svg class="site-apple" width="14" height="16" aria-hidden="true"><use href="#i-apple"/></svg>
+        Get the app
+      </a>
+    </nav>
+  </div>
+</header>
+
+<main id="site-main" class="site-main">
+
+  <section class="site-block page-hero" data-tone="violet" aria-labelledby="docs-title">
+    <div class="site-wrap">
+      <p class="site-eyebrow">Public API · v1</p>
+      <h1 id="docs-title" class="page-title">The data behind Desk, for anyone.</h1>
+      <p class="site-sub">Top traders on Perpl, a trader&rsquo;s history, what a wallet holds and did on Monad, who an address is, and which tokens tracked wallets are buying. Read-only, no key, JSON, rate-limited.</p>
+      <div class="page-hero-actions">
+        <a class="site-btn site-btn-ink" href="#try">Try it in the browser <svg width="16" height="16" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+        <a class="site-btn site-btn-ghost" href="/openapi.json">OpenAPI 3.1</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="site-block page-body" aria-label="Documentation">
+    <div class="site-wrap page-columns">
+      <nav aria-label="On this page">
+        <ul class="page-toc">
+          <li><a href="#about">What it is</a></li>
+          <li><a href="#inputs">Safe inputs</a></li>
+          <li><a href="#endpoints">Endpoints</a></li>
+          <li><a href="#envelope">Response envelope</a></li>
+          <li><a href="#errors">Errors</a></li>
+          <li><a href="#limits">Rate limits</a></li>
+          <li><a href="#try">Try it</a></li>
+        </ul>
+      </nav>
+
+      <div class="page-prose">
+        <h2 id="about">What it is</h2>
+        <p>The same reads the Desk app makes, at <code>https://trydesk.trade/api/v1</code>. Everything is public chain data and public profiles, so there is nothing to sign up for and no key to send. Every response is JSON with <code>Access-Control-Allow-Origin: *</code>, so a browser can call it straight from a page.</p>
+        <p>It is read-only. Nothing here places an order, moves funds or knows a key. Desk&rsquo;s trading key never leaves the phone it was made on.</p>
+        <p>Data is on Monad mainnet: Perpl&rsquo;s exchange contract for positions, a Hypersync-indexed ledger for wallet history, and .nad, nad.fun, ENS and Farcaster for names. The <code>meta.asOf</code> stamp on every answer says when it was read.</p>
+
+        <h2 id="inputs">Safe inputs</h2>
+        <p>The API takes only things that are already public on chain:</p>
+        <ul>
+          <li><strong>Addresses</strong> — <code>0x</code> followed by 40 hex characters. Anything else is refused with <code>invalid_address</code> before any lookup happens.</li>
+          <li><strong>Transaction hashes and token contracts</strong>, where a route asks for one.</li>
+          <li><strong>.nad names</strong>, resolved to an address on the identity route.</li>
+        </ul>
+        <div class="page-note"><p><strong>Never send a private key, a seed phrase, a passkey or a signature.</strong> No route accepts one, and no route needs one. Anything that asks you for those is not this API.</p></div>
+
+        <h2 id="endpoints">Endpoints</h2>
+        <p>All routes are <code>GET</code> (and <code>HEAD</code>); <code>OPTIONS</code> answers 204 for preflight. Each shows its rate-limit tier.</p>
+
+        <article class="page-endpoint" id="ep-index">
+          <div class="page-endpoint-head"><span class="page-method">GET</span><code class="page-path">/api/v1</code><span class="page-tier">default</span></div>
+          <p>The index: name, version, links and the route list.</p>
+          <pre><code>curl https://trydesk.trade/api/v1</code></pre>
+        </article>
+
+        <article class="page-endpoint" id="ep-top">
+          <div class="page-endpoint-head"><span class="page-method">GET</span><code class="page-path">/api/v1/traders/top?limit=25</code><span class="page-tier">default</span></div>
+          <p>Traders on Perpl ranked by unrealised PnL across their open positions, with each position&rsquo;s market, side, leverage and value. <code>limit</code> is 1 to 25.</p>
+          <pre><code>curl "https://trydesk.trade/api/v1/traders/top?limit=5"</code></pre>
+        </article>
+
+        <article class="page-endpoint" id="ep-history">
+          <div class="page-endpoint-head"><span class="page-method">GET</span><code class="page-path">/api/v1/traders/{address}/history</code><span class="page-tier">expensive</span></div>
+          <p>A trader&rsquo;s closed trades on Perpl with win rate, profit factor, drawdown, average hold and leverage, and a one-line summary of their style. An address with no Perpl account answers <code>stats: null</code>.</p>
+          <pre><code>curl https://trydesk.trade/api/v1/traders/0x95d2602d30da1179fd13274839e60345857ca648/history</code></pre>
+        </article>
+
+        <article class="page-endpoint" id="ep-identity">
+          <div class="page-endpoint-head"><span class="page-method">GET</span><code class="page-path">/api/v1/identity/{address}</code><span class="page-tier">default</span></div>
+          <p>Who an address is: a .nad name, a nad.fun profile, an ENS name or the Farcaster account that verified it. Only accounts that verified the address count; a name is never guessed.</p>
+          <pre><code>curl https://trydesk.trade/api/v1/identity/0x95d2602d30da1179fd13274839e60345857ca648</code></pre>
+        </article>
+
+        <article class="page-endpoint" id="ep-wallets">
+          <div class="page-endpoint-head"><span class="page-method">GET</span><code class="page-path">/api/v1/wallets/{address}</code><span class="page-tier">expensive</span></div>
+          <p>Everything Desk knows about a wallet in one answer: identity, holdings on every chain it reads, and its trade ledger on Monad with realised and unrealised PnL. A wallet seen for the first time is indexed on the spot; <code>ledger.status</code> says whether the ledger is complete or still being built.</p>
+          <pre><code>curl https://trydesk.trade/api/v1/wallets/0x95d2602d30da1179fd13274839e60345857ca648</code></pre>
+        </article>
+
+        <article class="page-endpoint" id="ep-signals">
+          <div class="page-endpoint-head"><span class="page-method">GET</span><code class="page-path">/api/v1/tokens/signals?window=6h</code><span class="page-tier">default</span></div>
+          <p>Tokens that tracked wallets have been buying, scored by how many bought, how much net, how early and how concentrated. <code>window</code> is <code>1h</code>, <code>6h</code> or <code>24h</code>.</p>
+          <pre><code>curl "https://trydesk.trade/api/v1/tokens/signals?window=24h"</code></pre>
+        </article>
+
+        <article class="page-endpoint" id="ep-health">
+          <div class="page-endpoint-head"><span class="page-method">GET</span><code class="page-path">/api/v1/health</code><span class="page-tier">default</span></div>
+          <p>Service health in the <code>application/health+json</code> shape: Redis, Monad RPC, Perpl, the indexing worker and the alerts cron. 200 on <code>pass</code> or <code>warn</code>, 503 on <code>fail</code>. Rendered at <a href="/status">/status</a>.</p>
+          <pre><code>curl -i https://trydesk.trade/api/v1/health</code></pre>
+        </article>
+
+        <article class="page-endpoint" id="ep-stats">
+          <div class="page-endpoint-head"><span class="page-method">GET</span><code class="page-path">/api/v1/stats</code><span class="page-tier">default</span></div>
+          <p>Counters only: requests served today, wallets being tracked, alert subscriptions. No addresses, ever.</p>
+          <pre><code>curl https://trydesk.trade/api/v1/stats</code></pre>
+        </article>
+
+        <h2 id="envelope">Response envelope</h2>
+        <p>Every successful answer wraps its payload the same way. <code>cached</code> is true when the answer came from the server&rsquo;s own memo rather than a fresh read.</p>
+<pre><code>{
+  "data": { ... },
+  "meta": {
+    "asOf": "2026-09-21T12:00:30.000Z",
+    "chain": "monad",
+    "cached": false
+  }
+}</code></pre>
+        <p>Answers also carry a <code>Cache-Control</code> that says how long a shared cache may keep them: 30 seconds for the top list, 60 for history, identity and wallets, 15 for signals, and never for health or errors.</p>
+
+        <h2 id="errors">Errors</h2>
+        <p>Errors are <a href="https://www.rfc-editor.org/rfc/rfc9457">RFC 9457 Problem Details</a>, served as <code>application/problem+json</code> with <code>Cache-Control: no-store</code>. The <code>code</code> field is stable; match on it rather than on <code>detail</code>.</p>
+<pre><code>{
+  "type": "https://trydesk.trade/docs#error-invalid_address",
+  "title": "Invalid address",
+  "status": 400,
+  "detail": "Addresses are 0x followed by 40 hex characters.",
+  "instance": "/api/v1/identity/0x1234",
+  "code": "invalid_address"
+}</code></pre>
+        <div class="page-table-wrap">
+        <table class="page-table">
+          <thead><tr><th>Code</th><th>Status</th><th>When</th></tr></thead>
+          <tbody>
+            <tr id="error-invalid_address"><td><code>invalid_address</code></td><td>400</td><td>The address in the path is not <code>0x</code> + 40 hex characters.</td></tr>
+            <tr id="error-invalid_request"><td><code>invalid_request</code></td><td>400</td><td>A query parameter is out of range, such as an unknown <code>window</code>.</td></tr>
+            <tr id="error-not_found"><td><code>not_found</code></td><td>404</td><td>The address is valid but nothing is known about it.</td></tr>
+            <tr id="error-unknown_route"><td><code>unknown_route</code></td><td>404</td><td>No such path under <code>/api/v1</code>.</td></tr>
+            <tr id="error-method_not_allowed"><td><code>method_not_allowed</code></td><td>405</td><td>Only GET, HEAD and OPTIONS are served.</td></tr>
+            <tr id="error-rate_limited"><td><code>rate_limited</code></td><td>429</td><td>Over the tier&rsquo;s limit. <code>Retry-After</code> says how long to wait.</td></tr>
+            <tr id="error-upstream_unavailable"><td><code>upstream_unavailable</code></td><td>503</td><td>Monad, Perpl or the store could not be read. Retry with backoff.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h2 id="limits">Rate limits</h2>
+        <p>Limits are per client IP over a sliding minute. Two tiers: <strong>default</strong> is 60 requests a minute; <strong>expensive</strong> routes (history and wallets, which read the chain) are 10. Every answer, including errors, carries the tier&rsquo;s headers.</p>
+        <div class="page-table-wrap">
+        <table class="page-table">
+          <thead><tr><th>Header</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>X-RateLimit-Limit</code></td><td>Requests allowed per minute on this route&rsquo;s tier.</td></tr>
+            <tr><td><code>X-RateLimit-Remaining</code></td><td>How many are left in the current window, 0 when over.</td></tr>
+            <tr><td><code>X-RateLimit-Reset</code></td><td>Unix seconds when the current window resets.</td></tr>
+            <tr><td><code>Retry-After</code></td><td>Only on 429: seconds to wait before trying again.</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <p>Shared caches in front of the API mean a popular answer is often served without touching your quota. If you need more, cache on your side using <code>meta.asOf</code> and the <code>Cache-Control</code> hints, and <a href="https://github.com/frankolien/desk">open an issue</a> if that is not enough.</p>
+
+        <h2 id="try">Try it</h2>
+        <p>Runs from this page against the live API; the answer and its rate-limit headers appear below.</p>
+        <form class="page-try" data-try>
+          <div class="page-try-row">
+            <label class="page-field"><span>Endpoint</span>
+              <select class="page-select" name="endpoint">
+                <option value="top">Top traders</option>
+                <option value="history">Trader history</option>
+                <option value="identity" selected>Identity</option>
+                <option value="wallet">Wallet</option>
+                <option value="signals">Token signals</option>
+                <option value="health">Health</option>
+                <option value="stats">Stats</option>
+                <option value="index">Index</option>
+              </select>
+            </label>
+            <label class="page-field"><span>Address</span>
+              <input class="page-input" name="address" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="0x…" value="0x95d2602d30da1179fd13274839e60345857ca648" pattern="0x[0-9a-fA-F]{40}">
+            </label>
+            <button class="site-btn site-btn-ink" type="submit" data-run>Run</button>
+          </div>
+          <div class="page-try-url" data-url aria-live="polite"></div>
+          <div class="page-try-status" data-status aria-live="polite"></div>
+          <ul class="page-headers" data-headers></ul>
+          <pre class="page-output" data-output hidden></pre>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <section class="site-block page-foot" data-tone="night" aria-label="Footer">
+    <div class="site-wrap">
+      <footer class="site-cta-foot">
+        <p class="site-cta-copy">Copyright &copy; 2026 Desk.</p>
+        <p class="site-cta-fine">Perpetual futures are leveraged instruments. You can lose everything you put in.</p>
+        <nav class="site-footer-links" aria-label="Footer">
+          <a href="/docs">API</a>
+          <a href="/openapi.json">OpenAPI</a>
+          <a href="/status">Status</a>
+          <a href="/security">Security</a>
+          <a href="https://github.com/frankolien/desk" target="_blank" rel="noreferrer">GitHub</a>
+          <a href="https://perpl.trade" target="_blank" rel="noreferrer">Perpl</a>
+          <a href="https://monad.xyz" target="_blank" rel="noreferrer">Monad</a>
+        </nav>
+      </footer>
+    </div>
+  </section>
+
+</main>
+
+</div>
+<script src="/docs/docs.js" defer></script>
+</body>
+</html>

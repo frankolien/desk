@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Desk Security</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="How to report a security issue in Desk, what is in scope, and what we promise in return.">
+<meta name="theme-color" content="#e8b339">
+<link rel="canonical" href="https://trydesk.trade/security">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://trydesk.trade/security">
+<meta property="og:title" content="Desk Security">
+<meta property="og:description" content="Responsible disclosure for Desk: scope, rules, safe harbor and how to report.">
+<meta property="og:image" content="https://trydesk.trade/brand/og.jpg">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+<link rel="icon" href="/brand/apple-touch-icon.png">
+<link rel="preload" href="/fonts/geist-variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/pages.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-apple" viewBox="0 0 22 26"><path fill="currentColor" d="M15.7 1.4c0 1.1-.45 2.16-1.19 2.94-.79.83-2.08 1.47-3.15 1.38-.12-1.05.4-2.17 1.15-2.92.8-.83 2.19-1.43 3.19-1.4zM20 16.3c-.57 1.31-.84 1.9-1.58 3.05-1.02 1.6-2.46 3.6-4.25 3.62-1.58.02-2-1.03-4.14-1.02-2.15.01-2.6 1.04-4.18 1.02-1.79-.02-3.15-1.82-4.17-3.43C-1.24 15.2-1.53 9.95.86 7.18a4.9 4.9 0 0 1 3.47-1.64c1.43 0 2.33.78 3.51.78 1.15 0 1.85-.78 3.5-.78 1.24 0 2.56.68 3.5 1.84-3.08 1.68-2.58 6.08.35 7.06z"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M13 6l6 6-6 6"/></symbol>
+</svg>
+<div class="site-root">
+
+<a href="#site-main" class="site-skip">Skip to content</a>
+
+<header class="site-nav">
+  <div class="site-wrap site-nav-inner">
+    <a href="/" class="site-logo" aria-label="Desk home">
+      <img src="/brand/mark.webp" alt="" width="34" height="34" class="site-logo-mark">
+      <span class="site-logo-word">Desk</span>
+    </a>
+    <nav class="site-nav-links" aria-label="Primary">
+      <a href="/#chain">Copy engine</a>
+      <a href="/#desk">Live desk</a>
+      <a href="/docs">API</a>
+      <a href="/status">Status</a>
+      <a href="/security" aria-current="page">Security</a>
+      <a class="site-btn site-btn-ink site-btn-small" href="/#get">
+        <svg class="site-apple" width="14" height="16" aria-hidden="true"><use href="#i-apple"/></svg>
+        Get the app
+      </a>
+    </nav>
+  </div>
+</header>
+
+<main id="site-main" class="site-main">
+
+  <section class="site-block page-hero" data-tone="amber" aria-labelledby="security-title">
+    <div class="site-wrap">
+      <p class="site-eyebrow">Security</p>
+      <h1 id="security-title" class="page-title">Found something? Tell us first.</h1>
+      <p class="site-sub">Desk is non-custodial: the trading key is sealed on the phone and no server of ours holds a key that can trade or withdraw for anyone. That makes the attack surface small, not zero. If you find a way through it, here is how to report it and what you can expect from us.</p>
+      <div class="page-hero-actions">
+        <a class="site-btn site-btn-ink" href="https://github.com/frankolien/desk/security/advisories/new" target="_blank" rel="noreferrer">Report privately on GitHub <svg width="16" height="16" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+        <a class="site-btn site-btn-ghost" href="/.well-known/security.txt">security.txt</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="site-block page-body" aria-label="Disclosure policy">
+    <div class="site-wrap page-columns">
+      <nav aria-label="On this page">
+        <ul class="page-toc">
+          <li><a href="#what">What Desk is</a></li>
+          <li><a href="#scope">Scope</a></li>
+          <li><a href="#out">Out of scope</a></li>
+          <li><a href="#rules">Rules</a></li>
+          <li><a href="#harbor">Safe harbor</a></li>
+          <li><a href="#response">What we do</a></li>
+          <li><a href="#rewards">Rewards</a></li>
+          <li><a href="#report">How to report</a></li>
+        </ul>
+      </nav>
+
+      <div class="page-prose">
+        <h2 id="what">What Desk is</h2>
+        <p>Desk is a native iOS app for trading perpetuals on Monad. The key that signs orders is derived on the phone, held only in the app&rsquo;s memory while it is open and unlocked, and unlocked with Face ID. It is never sent anywhere.</p>
+        <p>The server side, at <code>trydesk.trade</code>, reads public chain data, quotes swaps, sends push notifications and runs a worker that indexes wallet history. It holds credentials for third-party data services and for a testnet faucet, and nothing that could move a real person&rsquo;s money. The <a href="/docs">public API</a> is read-only.</p>
+
+        <h2 id="scope">In scope</h2>
+        <ul>
+          <li><strong>trydesk.trade</strong> — the site and every route under <code>/api</code>.</li>
+          <li><strong>The iOS app</strong> — key handling, Face ID gating, order signing, deep links and the alerts registration.</li>
+          <li><strong>The indexing worker</strong> on Railway and the way it writes to the store.</li>
+          <li>Anything in the <a href="https://github.com/frankolien/desk">open repository</a> that ships to the above.</li>
+        </ul>
+        <p>We care most about: a way to make the app sign something the person did not see; a key or seed leaving the phone; a server credential exposed; one person&rsquo;s alerts, follow list or tracked wallets being read or rewritten by another; and the API returning private data it should not hold.</p>
+
+        <h2 id="out">Out of scope</h2>
+        <ul>
+          <li>Rate-limit exhaustion, enumeration of public addresses, or anything whose only effect is more requests.</li>
+          <li>Public chain data being public: positions, balances, ledgers and names on Monad are visible to everyone by design.</li>
+          <li>Third parties we read from or run on: Monad RPC, Perpl, OKX, nad.fun, Neynar, Vercel, Railway, Upstash. Report those to them.</li>
+          <li>Missing or &ldquo;best practice&rdquo; headers, TLS configuration notes, version disclosure and other reports with no demonstrated impact.</li>
+          <li>Denial of service of any kind.</li>
+          <li>Phishing, social engineering of us or of users, and physical attacks.</li>
+        </ul>
+
+        <h2 id="rules">Rules</h2>
+        <ul>
+          <li>Do not access, change or delete data that is not yours. If a test unexpectedly reaches someone else&rsquo;s data, stop, note what you saw, and tell us.</li>
+          <li>Use your own wallets and test accounts. Do not trade with, or against, anyone else&rsquo;s.</li>
+          <li>Report privately, through the link below, and give us time to fix it before saying anything publicly.</li>
+          <li>Do not run automated scanners against production at volume; the rate limits are there for the people using the app.</li>
+        </ul>
+
+        <h2 id="harbor">Safe harbor</h2>
+        <p>If you make a good-faith effort to follow this policy, we consider your research authorised. We will not pursue or support legal action against you for it, we will work with you to understand and fix the issue quickly, and we will not ask you to sign anything to report. If a third party takes legal action against you for activity conducted in line with this policy, we will make it known that you acted under it.</p>
+        <p>This policy does not authorise anything against systems we do not own. If you are unsure whether something is covered, ask first.</p>
+
+        <h2 id="response">What we do</h2>
+        <ul>
+          <li>Acknowledge your report within <strong>3 business days</strong>.</li>
+          <li>Confirm the issue, agree a severity with you, and tell you what we intend to do.</li>
+          <li>Fix targets by severity: anything that can move funds or sign without consent, <strong>as fast as we can, usually days</strong>; exposure of a server credential or of one person&rsquo;s data to another, <strong>within two weeks</strong>; everything else, <strong>within 90 days</strong>.</li>
+          <li>Tell you when it ships, and agree disclosure with you.</li>
+        </ul>
+
+        <h2 id="rewards">Rewards</h2>
+        <p>No monetary bounty at this time. With your permission we credit you in the release notes and in the repository.</p>
+
+        <h2 id="report">How to report</h2>
+        <p>Open a private security advisory on GitHub: <a href="https://github.com/frankolien/desk/security/advisories/new">github.com/frankolien/desk/security/advisories/new</a>. Only maintainers can read it. Include what you found, how to reproduce it, and what you think it lets an attacker do. A proof of concept against your own accounts is welcome; one against anyone else&rsquo;s is not.</p>
+        <p>The same contact is published at <a href="/.well-known/security.txt">/.well-known/security.txt</a>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="site-block page-foot" data-tone="night" aria-label="Footer">
+    <div class="site-wrap">
+      <footer class="site-cta-foot">
+        <p class="site-cta-copy">Copyright &copy; 2026 Desk.</p>
+        <p class="site-cta-fine">Perpetual futures are leveraged instruments. You can lose everything you put in.</p>
+        <nav class="site-footer-links" aria-label="Footer">
+          <a href="/docs">API</a>
+          <a href="/openapi.json">OpenAPI</a>
+          <a href="/status">Status</a>
+          <a href="/security">Security</a>
+          <a href="https://github.com/frankolien/desk" target="_blank" rel="noreferrer">GitHub</a>
+          <a href="https://perpl.trade" target="_blank" rel="noreferrer">Perpl</a>
+          <a href="https://monad.xyz" target="_blank" rel="noreferrer">Monad</a>
+        </nav>
+      </footer>
+    </div>
+  </section>
+
+</main>
+
+</div>
+</body>
+</html>
