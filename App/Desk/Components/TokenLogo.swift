@@ -35,13 +35,9 @@ struct TokenLogo: View {
             if asset == .ausd {
                 Image("AUSD").resizable().scaledToFit()
             } else {
-                AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
-                    if case .success(let image) = phase {
-                        image.resizable().scaledToFit()
-                    } else {
-                        Image(systemName: "bitcoinsign.circle.fill")
-                            .resizable().scaledToFit().foregroundStyle(.orange)
-                    }
+                RemoteImage(url: url) {
+                    Image(systemName: "bitcoinsign.circle.fill")
+                        .resizable().scaledToFit().foregroundStyle(.orange)
                 }
             }
         }
@@ -94,13 +90,9 @@ struct MarketTokenLogo: View {
             if remoteURL == nil, UIImage(named: symbol.uppercased()) != nil {
                 Image(symbol.uppercased()).resizable().scaledToFit()
             } else {
-                AsyncImage(url: url) { phase in
-                    if case .success(let image) = phase {
-                        image.resizable().scaledToFit()
-                    } else {
-                        Image(systemName: "circle.hexagongrid.fill")
-                            .resizable().scaledToFit().foregroundStyle(.white.opacity(0.5))
-                    }
+                RemoteImage(url: url) {
+                    Image(systemName: "circle.hexagongrid.fill")
+                        .resizable().scaledToFit().foregroundStyle(.white.opacity(0.5))
                 }
             }
         }

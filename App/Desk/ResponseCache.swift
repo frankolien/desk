@@ -43,16 +43,40 @@ actor ResponseCache {
     /// The flag says which it was, for callers that show "as of" when it matters.
     func data(from url: URL, maxStale: TimeInterval = 86_400) async throws -> (Data, isStale: Bool) {
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                throw URLError(.badServerResponse)
-            }
+            let data = try await Self.fetch(url)
             store(data, for: url)
             return (data, false)
         } catch {
             if let data = cached(url, maxAge: maxStale) { return (data, true) }
             throw error
         }
+    }
+
+    /// A timeout, a dropped connection, a 429 or a 5xx gets two more tries with a pause;
+    /// no network at all does not, because the stale copy is the better answer right now.
+    private static func fetch(_ url: URL) async throws -> Data {
+        var pause: Duration = .milliseconds(500)
+        var lastError: Error = URLError(.unknown)
+        for attempt in 0..<3 {
+            if attempt > 0 {
+                try await Task.sleep(for: pause)
+                pause *= 3
+            }
+            do {
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+                if http.statusCode == 200 { return data }
+                lastError = URLError(.badServerResponse)
+                if http.statusCode != 429, http.statusCode < 500 { throw lastError }
+            } catch let error as URLError {
+                lastError = error
+                switch error.code {
+                case .timedOut, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .badServerResponse: continue
+                default: throw error
+                }
+            }
+        }
+        throw lastError
     }
 
     private static func key(_ url: URL) -> String {

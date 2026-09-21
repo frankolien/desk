@@ -41,6 +41,7 @@ struct MarketScreen: View {
                     .padding(.top, 8)
                     .padding(.bottom, 116)
                 }
+                .refreshable { await market.refreshNow() }
             }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showsMarket) {
@@ -303,6 +304,7 @@ struct PerpDetailScreen: View {
                 .padding(.top, 8)
                 .padding(.bottom, 110)
             }
+            .refreshable { await market.refreshNow() }
 
             HStack(spacing: 10) {
                 tradeButton(.up, title: "Long")

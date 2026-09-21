@@ -92,6 +92,7 @@ struct HomeScreen: View {
                 .padding(.top, 4)
                 .padding(.bottom, 116)
             }
+            .refreshable { await model.refreshBalances(); await market.refreshNow(); await spot.refresh() }
         }
         // See MarketScreen: presenting on a boolean let the content be built while
         // `selectedPosition` was still nil, so the sheet came up empty.

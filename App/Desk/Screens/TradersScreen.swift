@@ -381,7 +381,7 @@ struct TraderAvatar: View {
 
     var body: some View {
         if let url = IdentityDirectory.shared.identity(for: address)?.avatarURL {
-            AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { generated }
+            RemoteImage(url: url, fill: true) { generated }
                 .frame(width: size, height: size)
                 .clipShape(Circle())
                 .overlay(Circle().stroke(Color.white.opacity(0.08), lineWidth: 0.5))

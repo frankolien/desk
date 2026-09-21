@@ -121,6 +121,7 @@ struct WatchlistScreen: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 190)
             }
+            .refreshable { await market.refreshNow() }
             .deskSoftBottomEdge()
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -389,6 +390,7 @@ struct MarketSearchScreen: View {
                 // Clears the floating search field as well as the tab bar.
                 .padding(.bottom, 184)
             }
+            .refreshable { await discovery.refresh() }
             }
             .toolbar(.hidden, for: .navigationBar)
             .searchable(text: $query, prompt: "Search anything")
@@ -559,6 +561,11 @@ private final class TokenDiscoveryModel: ObservableObject {
             await load(query: "", intoSearch: false)
             try? await Task.sleep(for: .seconds(30))
         }
+    }
+
+    func refresh() async {
+        await load(query: "", intoSearch: false)
+        if !latestQuery.isEmpty { await load(query: latestQuery, intoSearch: true) }
     }
 
     func search(_ raw: String) async {
@@ -947,6 +954,7 @@ private struct SpotTokenDetailScreen: View {
                 }
                 .padding(.bottom, 120)
             }
+            .refreshable { await feed.refreshNow() }
             tradeBar
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
@@ -1335,6 +1343,11 @@ private final class SpotLiveFeed: ObservableObject {
     func changePeriod(_ value: String) {
         period = value == "LIVE" ? "1s" : value
         isLoading = true
+    }
+
+    func refreshNow() async {
+        await refreshDetails()
+        await refresh()
     }
 
     func run(period initialPeriod: String) async {
@@ -2136,7 +2149,7 @@ private struct WalletMark: View {
 
     var body: some View {
         if let url = IdentityDirectory.shared.identity(for: wallet.address)?.avatarURL {
-            AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Text(wallet.emoji) }
+            RemoteImage(url: url, fill: true) { Text(wallet.emoji) }
                 .frame(width: size, height: size)
                 .clipShape(Circle())
         } else {
@@ -2337,6 +2350,7 @@ private struct WalletProfileScreen: View {
                     content.padding(.top, 4)
                 }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 40)
             }
+            .refreshable { await loadResource(); await IdentityDirectory.shared.resolve([wallet.address]) }
         }
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(isPresented: $showsPerpl) {
@@ -2395,7 +2409,7 @@ private struct WalletProfileScreen: View {
     private var avatar: some View {
         Group {
             if let url = identity?.avatarURL {
-                AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Text(wallet.emoji).font(.system(size: 50)) }
+                RemoteImage(url: url, fill: true) { Text(wallet.emoji).font(.system(size: 50)) }
             } else {
                 Text(wallet.emoji).font(.system(size: 50))
             }

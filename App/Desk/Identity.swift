@@ -97,8 +97,7 @@ final class IdentityDirectory {
                 URLQueryItem(name: "addresses", value: chunk.joined(separator: ",")),
             ]
             guard let url = components.url,
-                  let (data, response) = try? await URLSession.shared.data(from: url),
-                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let (data, _) = try? await ResponseCache.shared.data(from: url, maxStale: 3_600),
                   let body = try? JSONDecoder().decode(Response.self, from: data) else { continue }
             for (address, identity) in body.identities where !pinned.contains(address.lowercased()) {
                 identities[address.lowercased()] = identity

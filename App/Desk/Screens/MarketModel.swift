@@ -129,6 +129,12 @@ final class MarketModel {
         }
     }
 
+    /// A pull on the screen: the context and the candles now, whatever the timer says.
+    func refreshNow() async {
+        await refresh()
+        await refreshCandles()
+    }
+
     func stop() {
         poller?.cancel()
         poller = nil
