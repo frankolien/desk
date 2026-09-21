@@ -217,6 +217,18 @@ final class TradeAlerts {
         scheduleSync()
     }
 
+    /// Tracked wallets ride on the same subscription. Tracking one is a reason to hold a
+    /// token even with no trader alerts on.
+    func trackingChanged() {
+        Task {
+            if !TrackedWallets.shared.list.isEmpty {
+                _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+                if deviceToken == nil { UIApplication.shared.registerForRemoteNotifications() }
+            }
+            scheduleSync()
+        }
+    }
+
     private func persist() {
         UserDefaults.standard.set(alerted, forKey: Self.storageKey)
     }
@@ -248,6 +260,7 @@ final class TradeAlerts {
             "traders": traders,
             "names": nicknames.filter { traders.contains($0.key) },
             "copying": copying,
+            "wallets": TrackedWallets.shared.payload,
             "confirm": confirm,
         ]
         var request = URLRequest(url: Self.endpoint)
@@ -338,7 +351,17 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
-        guard let alert = TradeAlert(userInfo: response.notification.request.content.userInfo) else { return }
+        let userInfo = response.notification.request.content.userInfo
+        if let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "wallet",
+           let token = desk["token"] as? String {
+            let wallet = desk["wallet"] as? String ?? ""
+            let chainIndex = desk["chainIndex"] as? String ?? "143"
+            // Only wallets this phone tracks can open a token from a push, for the same reason as below.
+            guard await TrackedWallets.shared.isTracking(wallet) else { return }
+            await MainActor.run { TokenOpenRequest.shared.open(.init(chainIndex: chainIndex, contract: token)) }
+            return
+        }
+        guard let alert = TradeAlert(userInfo: userInfo) else { return }
         // A payload naming a trader this phone does not follow did not come from a
         // subscription this phone made. Nothing here can trade, but it can put a stranger's
         // position in front of someone with a Copy button beside it.

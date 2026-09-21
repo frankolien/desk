@@ -225,6 +225,7 @@ final class TraderDirectory {
 
     /// Scores from indexed history, by lowercased address.
     private(set) var scores: [String: Int] = [:]
+    private(set) var records: [String: TraderRecord] = [:]
     private var scoresFetchedAt: Date?
 
     func refreshScores() async {
@@ -235,6 +236,7 @@ final class TraderDirectory {
               let fetched = try? await ResponseCache.shared.data(from: url),
               let body = try? JSONDecoder().decode(ScoresResponse.self, from: fetched.0) else { return }
         scores = Dictionary(body.traders.map { ($0.address.lowercased(), $0.score) }, uniquingKeysWith: max)
+        records = Dictionary(body.traders.map { ($0.address.lowercased(), TraderRecord(score: $0.score, trades: $0.trades, winRate: $0.winRate, realised: $0.realised)) }, uniquingKeysWith: { a, _ in a })
         scoresFetchedAt = .now
     }
 
@@ -247,7 +249,24 @@ final class TraderDirectory {
     }
 
     private struct ScoresResponse: Decodable {
-        struct Row: Decodable { let address: String; let score: Int }
+        struct Row: Decodable {
+            let address: String
+            let score: Int
+            let trades: Int?
+            let winRate: Double?
+            let realised: Double?
+
+            init(from decoder: Decoder) throws {
+                let box = try decoder.container(keyedBy: Keys.self)
+                address = try box.decode(String.self, forKey: .address)
+                score = try box.decode(Int.self, forKey: .score)
+                trades = try? box.decode(Int.self, forKey: .trades)
+                winRate = try? box.decode(Double.self, forKey: .winRate)
+                // Realised comes as a number or a fixed-point string depending on the path that wrote it.
+                realised = (try? box.decode(Double.self, forKey: .realised)) ?? (try? box.decode(String.self, forKey: .realised)).flatMap(Double.init)
+            }
+            private enum Keys: String, CodingKey { case address, score, trades, winRate, realised }
+        }
         let traders: [Row]
     }
 
@@ -391,11 +410,57 @@ struct TraderAvatar: View {
     }
 }
 
+struct TraderRecord: Sendable {
+    let score: Int
+    let trades: Int?
+    let winRate: Double?
+    let realised: Double?
+}
+
+enum LeaderSort: String, CaseIterable, Identifiable {
+    case openPnL = "Open PnL", score = "Score", winRate = "Win rate", realised = "Realized"
+    var id: String { rawValue }
+}
+
 struct TradersFeed: View {
     let directory: TraderDirectory
     let copier: CopyTrader
     let onOpenCopying: () -> Void
     let onSelect: (TraderSnapshot) -> Void
+    @State private var sort: LeaderSort = .openPnL
+
+    /// Traders without a record sort last on every measure but open PnL, which every row has.
+    private var sortedTop: [TraderSnapshot] {
+        let top = directory.top
+        let key: (TraderSnapshot) -> Double? = { trader in
+            let record = directory.records[trader.id]
+            switch sort {
+            case .openPnL: return nil
+            case .score: return record.map { Double($0.score) }
+            case .winRate: return record?.winRate
+            case .realised: return record?.realised
+            }
+        }
+        if sort == .openPnL { return top }
+        return top.enumerated().sorted { a, b in
+            switch (key(a.element), key(b.element)) {
+            case let (x?, y?): return x == y ? a.offset < b.offset : x > y
+            case (nil, nil): return a.offset < b.offset
+            case (nil, _): return false
+            case (_, nil): return true
+            }
+        }.map(\.element)
+    }
+
+    private func metric(for trader: TraderSnapshot) -> String? {
+        guard sort != .openPnL, let record = directory.records[trader.id] else { return nil }
+        switch sort {
+        case .openPnL: return nil
+        case .score: return "Score \(record.score)"
+        case .winRate: return record.winRate.map { "Win \(Int(($0 * 100).rounded()))% · \(record.trades ?? 0) trades" }
+        case .realised: return record.realised.map { "\($0 >= 0 ? "+" : "−")\(TraderFormat.compact(abs($0))) realized" }
+        }
+    }
 
     private var followedSnapshots: [TraderSnapshot] {
         directory.followed.map { address in
@@ -426,7 +491,26 @@ struct TradersFeed: View {
                 .padding(.bottom, 28)
             }
 
-            header("Top traders", trailing: "Open PnL")
+            HStack(alignment: .firstTextBaseline) {
+                Text("Top traders")
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightText.color)
+                Spacer()
+                Menu {
+                    ForEach(LeaderSort.allCases) { option in
+                        Button { withAnimation(.snappy(duration: 0.22)) { sort = option } } label: {
+                            if sort == option { Label(option.rawValue, systemImage: "checkmark") } else { Text(option.rawValue) }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(sort.rawValue)
+                        Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .bold))
+                    }
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                }
+            }
 
             if directory.top.isEmpty, let problem = directory.topProblem {
                 Label(problem, systemImage: "exclamationmark.circle.fill")
@@ -443,12 +527,13 @@ struct TradersFeed: View {
                                 .redacted(reason: .placeholder)
                         }
                     } else {
-                        ForEach(Array(directory.top.enumerated()), id: \.element.id) { index, trader in
+                        let rows = sortedTop
+                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, trader in
                             Button { onSelect(trader) } label: {
                                 LeaderRow(trader: trader, rank: index + 1, name: directory.name(for: trader.address),
-                                          score: directory.scores[trader.id],
+                                          score: directory.scores[trader.id], metric: metric(for: trader),
                                           isFollowed: directory.isFollowing(trader.address),
-                                          isLast: index == directory.top.count - 1)
+                                          isLast: index == rows.count - 1)
                             }
                             .buttonStyle(.plain)
                         }
@@ -522,10 +607,12 @@ private struct LeaderRow: View {
     let rank: Int
     let name: String
     var score: Int? = nil
+    var metric: String? = nil
     var isFollowed = false
     let isLast: Bool
 
     private var detail: String {
+        if let metric { return metric }
         let count = trader.positions.count
         let noun = count == 1 ? "position" : "positions"
         return "\(count) \(noun) · \(TraderFormat.compact(trader.positionValue))" + (score.map { " · Score \($0)" } ?? "")

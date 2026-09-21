@@ -360,6 +360,16 @@ struct MarketSearchScreen: View {
             }
             .task { await discovery.run() }
             .task(id: query) { await discovery.search(query) }
+            .task(id: TokenOpenRequest.shared.pending) {
+                guard let target = TokenOpenRequest.shared.take() else { return }
+                query = target.contract
+                for _ in 0..<20 {
+                    if let match = (discovery.searchResults + discovery.trending).first(where: {
+                        $0.chainIndex == target.chainIndex && $0.contract.caseInsensitiveCompare(target.contract) == .orderedSame
+                    }) { selectedSpot = match; return }
+                    try? await Task.sleep(for: .milliseconds(300))
+                }
+            }
         }
     }
 
@@ -499,10 +509,14 @@ private struct TrendingSpotRow: View {
         HStack(spacing: 13) {
             MarketTokenLogo(symbol: token.symbol, size: 42, remoteURL: token.artworkURL)
             VStack(alignment: .leading, spacing: 3) {
-                Text(token.name)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(DeskColor.nightText.color)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(token.name)
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .lineLimit(1)
+                    let quick = TokenRisk.quick(riskLevel: token.riskLevel, liquidity: token.liquidity, communityRecognized: token.communityRecognized)
+                    if quick.needsAttention { RiskChip(level: quick, compact: true) }
+                }
                 Text(token.symbol + " · " + token.chainName)
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
@@ -801,6 +815,12 @@ private struct SpotTokenDetailScreen: View {
     @State private var tab: SpotDetailTab = .transactions
     @State private var range = "1H"
     @State private var selectedWallet: SpotWallet?
+    @State private var risk = TokenRiskModel()
+    @State private var showsRisk = false
+
+    private var quickRisk: RiskLevel {
+        TokenRisk.quick(riskLevel: token.riskLevel, liquidity: token.liquidity, communityRecognized: token.communityRecognized)
+    }
     @State private var tradeSide: String?
     @AppStorage("desk.spotWatchlist") private var savedSpotData = ""
 
@@ -857,6 +877,12 @@ private struct SpotTokenDetailScreen: View {
             set: { if !$0 { tradeSide = nil } }
         )) {
             SpotTradeTicket(token: token, side: tradeSide ?? "Buy", model: model)
+                .fittedSheet()
+                .presentationDragIndicator(.visible)
+        }
+        .task { await risk.load(chainIndex: token.chainIndex, contract: token.contract, riskLevel: token.riskLevel, communityRecognized: token.communityRecognized) }
+        .sheet(isPresented: $showsRisk) {
+            RiskSheet(symbol: token.symbol, risk: risk.risk, fallback: quickRisk, failed: risk.failed)
                 .fittedSheet()
                 .presentationDragIndicator(.visible)
         }
@@ -920,6 +946,8 @@ private struct SpotTokenDetailScreen: View {
                 AmountText((feed.latestPrice ?? token.price).map(spotPrice) ?? "$—", size: 36)
                     .minimumScaleFactor(0.7)
                 Spacer()
+                Button { showsRisk = true } label: { RiskChip(level: risk.risk?.level ?? quickRisk) }
+                    .buttonStyle(.plain)
                 Text("SPOT")
                     .font(.system(size: 11, weight: .heavy, design: .rounded)).tracking(1)
                     .padding(.horizontal, 12).padding(.vertical, 7)
@@ -1087,18 +1115,25 @@ private struct SpotTokenDetailScreen: View {
             infoRow("Liquidity", feed.details?.liquidity ?? "—", "drop.fill")
             infoRow("Holders", feed.details?.holderCount ?? "—", "person.2.fill")
             infoRow("Network", token.chainName, "network")
-            if token.communityRecognized == false {
-                Label("Community recognition is not verified. Confirm the contract before trading.", systemImage: "exclamationmark.shield.fill")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.yellow)
-                    .padding(14)
-                    .background(Color.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            Button { showsRisk = true } label: {
+                HStack {
+                    Label("Risk", systemImage: "shield.lefthalf.filled").foregroundStyle(.secondary)
+                    Spacer()
+                    RiskChip(level: risk.risk?.level ?? quickRisk)
+                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
+                }
+                .font(.system(size: 14, design: .rounded)).frame(height: 58)
+                .padding(.horizontal, 14)
+                .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                .padding(.bottom, 7)
+                .contentShape(Rectangle())
             }
-            if let liquidity = token.liquidity, liquidity < 10_000 {
-                Label(liquidity < 1_000 ? "Extremely low liquidity" : "Low liquidity", systemImage: "drop.triangle.fill")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(liquidity < 1_000 ? .red : .yellow)
-                    .padding(.top, 8)
+            .buttonStyle(.plain)
+            if let first = risk.risk?.reasons.first {
+                Text(first.text)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(first.severity == "high" ? DeskColor.fall.color : DeskColor.action.color)
+                    .padding(.bottom, 4)
             }
             liveCaption("OKX token snapshot · refreshed every 30 seconds")
         }.padding(.horizontal, 20)
@@ -1394,6 +1429,38 @@ private struct SpotBuyTicket: View {
         return balance.raw < typed.raw + Self.gasReserve.raw
     }
     private var isBuyable: Bool { token.buyable ?? false }
+    @State private var risk = TokenRiskModel()
+    @State private var acknowledged = false
+    @State private var quoteAge = 0
+
+    private var firstTimeHere: Bool {
+        guard let address = model.address else { return false }
+        return !SpotPurchases.load(for: address).contains { $0.contract.caseInsensitiveCompare(token.contract) == .orderedSame }
+    }
+
+    private var presignWarnings: [PreSignWarning] {
+        var out: [PreSignWarning] = []
+        if let impact = purchase.quoted?.impactPercent.flatMap(Double.init) {
+            let loss = -impact
+            if loss >= 5 { out.append(.init(text: String(format: "Impact %.1f%%. You'd get about %.0f%% less than mid.", loss, loss), level: .high)) }
+            else if loss >= 3 { out.append(.init(text: String(format: "Impact %.1f%%. Larger pools lose less.", loss), level: .caution)) }
+            else if loss >= 1 { out.append(.init(text: String(format: "Impact %.1f%%.", loss), level: .info)) }
+        }
+        if quoteAge > 15 { out.append(.init(text: "Quote is \(quoteAge)s old. It is refreshed before signing.", level: .info)) }
+        if let level = risk.risk?.level, level == .high, let reason = risk.risk?.reasons.first {
+            out.append(.init(text: "High risk: \(reason.text.lowercased()).", level: .high))
+        }
+        if firstTimeHere { out.append(.init(text: "First time you're trading \(token.symbol).", level: .info)) }
+        return out
+    }
+
+    private var presignSentence: String? {
+        guard let quoted = purchase.quoted, let typed else { return nil }
+        var parts = ["Buy ≈ \(SpotFormat.amount(quoted.receive.amount)) \(quoted.receive.symbol ?? token.symbol) with \(typed.display()) MON"]
+        parts.append("fee $\(quoted.feeUsd)")
+        if let seconds = quoted.seconds { parts.append("~\(seconds)s") }
+        return parts.joined(separator: " · ")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -1404,6 +1471,9 @@ private struct SpotBuyTicket: View {
             } else {
                 receipt
                 notices
+                if let sentence = presignSentence {
+                    PreSignPreview(sentence: sentence, warnings: presignWarnings, acknowledged: $acknowledged)
+                }
             }
             Spacer(minLength: 0)
             action
@@ -1415,6 +1485,16 @@ private struct SpotBuyTicket: View {
         .padding(24)
         .preferredColorScheme(.dark)
         .task { await model.refreshMainnetMON() }
+        .task { await risk.load(chainIndex: token.chainIndex, contract: token.contract, riskLevel: token.riskLevel, communityRecognized: token.communityRecognized) }
+        #if DEBUG
+        .onAppear { if ProcessInfo.processInfo.arguments.contains("-spot-buy"), amount.isEmpty { amount = "5" } }
+        #endif
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                quoteAge = purchase.quoted == nil ? 0 : Int(Date.now.timeIntervalSince(purchase.quotedAt))
+            }
+        }
         .task(id: amount) {
             guard isBuyable, !purchase.phase.isActive, let address = model.address else { return }
             await purchase.quote(token: token, amount: amount, user: address)
@@ -1510,9 +1590,9 @@ private struct SpotBuyTicket: View {
 
     private var progress: some View {
         VStack(alignment: .leading, spacing: 12) {
-            step("Confirm with Face ID", state: purchase.phase.stepState(0))
-            step("Deposit MON on Monad", state: purchase.phase.stepState(1))
-            step("Fill on \(token.chainName)", state: purchase.phase.stepState(2))
+            step("Signed with Face ID", state: purchase.phase.stepState(0))
+            step("MON deposited on Monad · not filled yet", state: purchase.phase.stepState(1))
+            step("Filled on \(token.chainName)", state: purchase.phase.stepState(2))
             switch purchase.phase {
             case .filled:
                 Text("Bought ≈ \(SpotFormat.amount(purchase.quoted?.receive.amount)) \(token.symbol)")
@@ -1593,6 +1673,7 @@ private struct SpotBuyTicket: View {
                 title: purchase.quoted == nil ? "Enter an amount" : "Hold to buy \(token.symbol)",
                 tint: DeskColor.rise,
                 isEnabled: purchase.quoted != nil && typed != nil && !purchase.isQuoting
+                    && (!presignWarnings.contains { $0.level == .high } || acknowledged)
             ) {
                 guard let typed else { return }
                 Task { await purchase.buy(token: token, amount: amount, typed: typed, model: model) }
@@ -1687,7 +1768,7 @@ private final class SpotPurchaseModel: ObservableObject {
     @Published private(set) var quoteError: String?
     @Published private(set) var isQuoting = false
     @Published private(set) var phase: Phase = .idle
-    private var quotedAt = Date.distantPast
+    private(set) var quotedAt = Date.distantPast
     private var requestId: String?
 
     private static let host = "https://web-lovat-nine-49.vercel.app"
@@ -2015,7 +2096,9 @@ private struct WalletResource: Decodable {
     let held: Held?
     let holdings: [Holding]
     let ledger: Ledger
+    let labels: [WalletLabel]?
     struct WalletChain: Decodable { let chainIndex: String; let chain: String?; let value: Double }
+    struct WalletLabel: Decodable, Identifiable { let code: String; let text: String; var id: String { code } }
 }
 
 private struct WalletProfileScreen: View {
@@ -2106,9 +2189,34 @@ private struct WalletProfileScreen: View {
                         }
                     }.padding(.top, 22)
 
-                    if hasProfile {
+                    if let labels = resource?.labels, !labels.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(labels) { label in
+                                HStack(spacing: 7) {
+                                    Image(systemName: label.code == "top" ? "trophy.fill" : label.code == "bot" ? "bolt.fill" : label.code == "contract" ? "cpu" : label.code == "perpl" ? "chart.line.uptrend.xyaxis" : "sparkles")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(label.code == "top" ? DeskColor.rise.color : DeskColor.nightMuted.color)
+                                        .frame(width: 16)
+                                    Text(label.text)
+                                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                                        .foregroundStyle(Color.white.opacity(0.75))
+                                }
+                            }
+                        }
+                        .padding(.top, 14)
+                    }
+
+                    if isEVM || hasProfile {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
+                                if isEVM {
+                                    let tracking = TrackedWallets.shared.isTracking(wallet.address)
+                                    pill(tracking ? "Tracking" : "Track", symbol: tracking ? "bell.fill" : "bell") {
+                                        if tracking { TrackedWallets.shared.untrack(wallet.address) }
+                                        else { TrackedWallets.shared.track(wallet.address, name: identity?.name ?? "") }
+                                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    }
+                                }
                                 if let url = identity?.profileURL, let label = identity?.sourceLabel {
                                     pill("Open on \(label)", symbol: "arrow.up.right") { openURL(url) }
                                 }
@@ -2122,7 +2230,8 @@ private struct WalletProfileScreen: View {
                             }
                         }
                         .padding(.top, 18)
-                    } else if looked {
+                    }
+                    if looked, !hasProfile {
                         Text("No .nad name, nad.fun profile, ENS name or Farcaster account points here.")
                             .font(.system(size: 13, weight: .medium, design: .rounded))
                             .foregroundStyle(Color.white.opacity(0.45))

@@ -93,6 +93,7 @@ struct TradingShell: View {
             }
         }
         .tint(.white)
+        .onChange(of: TokenOpenRequest.shared.pending) { _, target in if target != nil { tab = .search } }
         .sheet(isPresented: $showsAccount) {
             AccountScreen(model: model)
                 .presentationDetents([.large])

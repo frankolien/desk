@@ -11,7 +11,7 @@ struct SignalsScreen: View {
     let onOrderFilled: (Direction, String) -> Void
 
     private enum Section: String, CaseIterable, Identifiable {
-        case traders = "Traders", market = "Market"
+        case traders = "Traders", smart = "Smart money", market = "Market"
         var id: String { rawValue }
     }
 
@@ -30,6 +30,9 @@ struct SignalsScreen: View {
     @State private var tradeAlert: TradeAlert?
     @State private var showsCopying = false
     @State private var afterAlert: (() -> Void)?
+    @State private var smartMoney = SignalsModel()
+    @State private var trackedEditing: TrackedWallet?
+    @State private var showsTrackNew = false
     #if DEBUG
     @State private var debugPrimer: TraderSnapshot?
     @State private var debugAutoCopy: TraderSnapshot?
@@ -60,11 +63,20 @@ struct SignalsScreen: View {
 
                         switch section {
                         case .traders:
+                            TrackedWalletsStrip(onOpen: { trackedEditing = $0 }, onAdd: { showsTrackNew = true })
+                                .padding(.top, 20)
                             TradersFeed(directory: directory, copier: copier, onOpenCopying: { showsCopying = true }) {
                                 selectedTrader = $0
                             }
+                                .padding(.top, 28)
+                                .padding(.bottom, 130)
+                        case .smart:
+                            SmartMoneyFeed(model: smartMoney) { signal in
+                                TokenOpenRequest.shared.open(.init(chainIndex: signal.chainIndex, contract: signal.token))
+                            }
                                 .padding(.top, 20)
                                 .padding(.bottom, 130)
+                                .task { await smartMoney.run() }
                         case .market:
                             marketReadings
                         }
@@ -78,6 +90,22 @@ struct SignalsScreen: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
+            #if DEBUG
+            // `-smart-money` opens the Smart money segment; `-track-demo` seeds a tracked wallet.
+            .task {
+                let arguments = ProcessInfo.processInfo.arguments
+                if arguments.contains("-track-demo"), TrackedWallets.shared.list.isEmpty {
+                    TrackedWallets.shared.track("0x52ac212e7187a799a7382c7a768cb35b72a3e20a", name: "moncat degen")
+                }
+                if arguments.contains("-smart-money") { section = .smart }
+            }
+            #endif
+            .sheet(item: $trackedEditing) { wallet in
+                TrackWalletSheet(existing: wallet).fittedSheet().presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showsTrackNew) {
+                TrackWalletSheet(existing: nil).fittedSheet().presentationDragIndicator(.visible)
+            }
             .navigationDestination(item: $selectedTrader) { trader in
                 TraderProfileScreen(initial: trader, directory: directory, copier: copier) { copy($0) }
                     .toolbar(.hidden, for: .tabBar)

@@ -54,6 +54,16 @@ struct MarketScreen: View {
             }
             #if DEBUG
             .task { if ProcessInfo.processInfo.arguments.contains("-open-withdraw") { showsWithdraw = true } }
+            #if DEBUG
+            .task {
+                guard ProcessInfo.processInfo.arguments.contains("-open-ticket") else { return }
+                while market.allMarkets.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
+                guard let first = market.allMarkets.first else { return }
+                market.select(first)
+                await session.selectMarket(first)
+                showsMarket = true
+            }
+            #endif
             #endif
             .sheet(isPresented: $showsWithdraw) {
                 WithdrawSheet(model: model) { showsWithdraw = false }
