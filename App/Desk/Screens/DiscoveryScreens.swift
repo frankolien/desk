@@ -2208,9 +2208,14 @@ private struct WalletProfileScreen: View {
                         .buttonStyle(.plain)
                         Spacer(minLength: 8)
                         if isEVM {
-                            action(tracked == nil ? "Track" : "Tracking", symbol: nil) {
-                                if tracked == nil { TrackedWallets.shared.track(wallet.address, name: identity?.name ?? "") }
-                                else { TrackedWallets.shared.untrack(wallet.address) }
+                            action(tracked == nil ? "Follow" : "Following", symbol: nil) {
+                                if identity?.perplAccount != nil, perplDirectory.isFollowing(wallet.address) == (tracked != nil) {
+                                    perplDirectory.toggle(wallet.address)
+                                } else if tracked == nil {
+                                    TrackedWallets.shared.track(wallet.address, name: identity?.name ?? "")
+                                } else {
+                                    TrackedWallets.shared.untrack(wallet.address)
+                                }
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             }
                             action("Set Name", symbol: "pencil") {

@@ -221,6 +221,9 @@ final class TradeAlerts {
     /// token even with no trader alerts on.
     func trackingChanged() {
         Task {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-track-demo") { scheduleSync(); return }
+            #endif
             if !TrackedWallets.shared.list.isEmpty {
                 _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
                 if deviceToken == nil { UIApplication.shared.registerForRemoteNotifications() }

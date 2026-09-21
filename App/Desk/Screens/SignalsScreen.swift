@@ -63,12 +63,10 @@ struct SignalsScreen: View {
 
                         switch section {
                         case .traders:
-                            TrackedWalletsStrip(onOpen: { trackedEditing = $0 }, onAdd: { showsTrackNew = true })
+                            TradersFeed(directory: directory, copier: copier, onOpenCopying: { showsCopying = true },
+                                        onSelect: { selectedTrader = $0 },
+                                        onOpenTracked: { trackedEditing = $0 }, onAdd: { showsTrackNew = true })
                                 .padding(.top, 20)
-                            TradersFeed(directory: directory, copier: copier, onOpenCopying: { showsCopying = true }) {
-                                selectedTrader = $0
-                            }
-                                .padding(.top, 28)
                                 .padding(.bottom, 130)
                         case .smart:
                             SmartMoneyFeed(model: smartMoney) { signal in

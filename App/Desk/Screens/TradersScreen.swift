@@ -118,15 +118,19 @@ final class TraderDirectory {
         followed.contains { $0.caseInsensitiveCompare(address) == .orderedSame }
     }
 
+    /// Following is one idea: a followed trader's wallet is tracked as well, so their
+    /// Monad swaps arrive alongside their perps.
     func toggle(_ address: String) {
         if isFollowing(address) {
             followed.removeAll { $0.caseInsensitiveCompare(address) == .orderedSame }
             following.removeAll { $0.id == address.lowercased() }
             TradeAlerts.shared.turnOff(for: address)
+            TrackedWallets.shared.untrack(address)
         } else {
             guard followed.count < 20 else { return }
             followed.append(address)
             if let known = top.first(where: { $0.id == address.lowercased() }) { following.append(known) }
+            TrackedWallets.shared.track(address, name: nicknames[address.lowercased()] ?? "")
         }
         UserDefaults.standard.set(followed, forKey: Self.storageKey)
         Task { await refreshFollowing() }
@@ -161,6 +165,8 @@ final class TraderDirectory {
     }
 
     func refreshFollowing() async {
+        // Another screen may have followed someone through its own directory.
+        followed = UserDefaults.standard.stringArray(forKey: Self.storageKey) ?? followed
         guard !followed.isEmpty else { following = []; return }
         guard let traders = await fetch(["view": "following", "addresses": followed.joined(separator: ",")]) else { return }
         following = traders.filter { isFollowing($0.address) }
@@ -427,7 +433,11 @@ struct TradersFeed: View {
     let copier: CopyTrader
     let onOpenCopying: () -> Void
     let onSelect: (TraderSnapshot) -> Void
+    let onOpenTracked: (TrackedWallet) -> Void
+    let onAdd: () -> Void
     @State private var sort: LeaderSort = .openPnL
+
+    private var trackedOnly: [TrackedWallet] { TrackedWallets.shared.list.filter { !directory.isFollowing($0.address) } }
 
     /// Traders without a record sort last on every measure but open PnL, which every row has.
     private var sortedTop: [TraderSnapshot] {
@@ -475,21 +485,40 @@ struct TradersFeed: View {
                 CopyStatusCard(copier: copier, onOpen: onOpenCopying)
                     .padding(.bottom, 24)
             }
-            if !directory.followed.isEmpty {
-                header("Following", trailing: "\(directory.followed.count)")
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(followedSnapshots) { trader in
-                            FollowedCard(trader: trader, name: directory.name(for: trader.address),
-                                         isAlerting: TradeAlerts.shared.isOn(for: trader.address)) { onSelect(trader) }
-                        }
+            let tracked = trackedOnly
+            header("Following", trailing: directory.followed.isEmpty && tracked.isEmpty ? "Traders and wallets" : "\(directory.followed.count + tracked.count)")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(followedSnapshots) { trader in
+                        FollowedCard(trader: trader, name: directory.name(for: trader.address),
+                                     isAlerting: TradeAlerts.shared.isOn(for: trader.address)) { onSelect(trader) }
                     }
-                    .padding(.horizontal, 20)
+                    ForEach(tracked) { wallet in
+                        TrackedCard(wallet: wallet) { onOpenTracked(wallet) }
+                    }
+                    Button(action: onAdd) {
+                        VStack(spacing: 8) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(DeskColor.nightText.color)
+                                .frame(width: 36, height: 36)
+                                .background(Color.white.opacity(0.1), in: Circle())
+                            Text(directory.followed.isEmpty && tracked.isEmpty ? "Follow a wallet" : "Add")
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundStyle(DeskColor.nightText.color)
+                                .lineLimit(1)
+                        }
+                        .frame(width: directory.followed.isEmpty && tracked.isEmpty ? 138 : 84, height: 98)
+                        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
                 }
-                .padding(.horizontal, -20)
-                .padding(.top, 12)
-                .padding(.bottom, 28)
+                .padding(.horizontal, 20)
             }
+            .padding(.horizontal, -20)
+            .padding(.top, 12)
+            .padding(.bottom, 28)
 
             HStack(alignment: .firstTextBaseline) {
                 Text("Top traders")
@@ -591,6 +620,42 @@ private struct FollowedCard: View {
                         .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
                         .foregroundStyle(trader.pnl == nil ? DeskColor.nightMuted.color
                                          : (trader.isProfit ? DeskColor.rise : DeskColor.fall).color)
+                }
+            }
+            .padding(14)
+            .frame(width: 138, alignment: .leading)
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// A wallet followed for its Monad swaps rather than its perps: same card, its alert
+/// floor where the trader card shows open PnL.
+private struct TrackedCard: View {
+    let wallet: TrackedWallet
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top) {
+                    TraderAvatar(address: wallet.address, size: 36)
+                    Spacer(minLength: 0)
+                    Image(systemName: "bell.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.5))
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(IdentityDirectory.shared.name(for: wallet.address) ?? wallet.displayName)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .lineLimit(1)
+                    Text(wallet.firstBuysOnly ? "First buys · $\(Int(wallet.minUsd))+" : "Swaps · $\(Int(wallet.minUsd))+")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .lineLimit(1)
                 }
             }
             .padding(14)
