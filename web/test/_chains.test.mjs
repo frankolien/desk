@@ -190,3 +190,15 @@ test("Only GET is answered", async () => {
   const result = await handler({ method: "POST", query: {} }, recorder());
   assert.equal(result.status, 405);
 });
+
+import { rankSearch } from "../api/token-discovery.mjs";
+
+test("search ranks the exact symbol first, then prefixes, then market cap", () => {
+  const rows = [
+    { tokenSymbol: "SOLAR", tokenName: "Solar", marketCap: "900" },
+    { tokenSymbol: "WSOL", tokenName: "Wrapped SOL", marketCap: "5000" },
+    { tokenSymbol: "SOL", tokenName: "Solana", marketCap: "100" },
+    { tokenSymbol: "SOLX", tokenName: "Solx", marketCap: "9000" },
+  ];
+  assert.deepEqual(rankSearch(rows, "sol").map((row) => row.tokenSymbol), ["SOL", "SOLX", "SOLAR", "WSOL"]);
+});

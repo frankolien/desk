@@ -62,16 +62,49 @@ function normalize(row) {
 }
 
 // Every chain Desk can show, so a Monad or BNB contract pasted into search is found.
-const SEARCH_CHAINS = Object.keys(CHAINS).filter((index) => CHAINS[index].rpc !== null).join(",");
+// OKX's search refuses a call naming a chain it does not index, and says which; those
+// are dropped and the call retried, and the surviving list is kept for the process.
+let searchChains = Object.keys(CHAINS).filter((index) => CHAINS[index].rpc !== null);
+
+export async function searchTokens(query, { search = okxGet } = {}) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const rows = await search("/api/v6/dex/market/token/search", { chains: searchChains.join(","), search: query, limit: "40" });
+      return rankSearch(Array.isArray(rows) ? rows : [], query);
+    } catch (error) {
+      const refused = /Unsupported chain IDs?:\s*([\d,\s]+)/i.exec(error.message ?? "");
+      if (!refused) throw error;
+      const drop = new Set(refused[1].split(",").map((value) => value.trim()));
+      searchChains = searchChains.filter((index) => !drop.has(index));
+    }
+  }
+  throw new Error("Token search is unavailable.");
+}
+
+/// What was typed comes first: an exact symbol, then a symbol or name that starts
+/// with it, then everything else by market cap.
+export function rankSearch(rows, query) {
+  const wanted = String(query).trim().toLowerCase();
+  const tier = (row) => {
+    const symbol = String(row.tokenSymbol ?? "").toLowerCase();
+    const name = String(row.tokenName ?? "").toLowerCase();
+    if (symbol === wanted || String(row.tokenContractAddress ?? "").toLowerCase() === wanted) return 0;
+    if (symbol.startsWith(wanted) || name.startsWith(wanted)) return 1;
+    if (name.includes(wanted) || symbol.includes(wanted)) return 2;
+    return 3;
+  };
+  return rows
+    .map((row, index) => ({ row, index, tier: tier(row), cap: Number(row.marketCap) || 0 }))
+    .sort((a, b) => a.tier - b.tier || b.cap - a.cap || a.index - b.index)
+    .map(({ row }) => row);
+}
 
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
   const query = String(req.query.q || "").trim().slice(0, 100);
   try {
     const rows = query
-      ? await okxGet("/api/v6/dex/market/token/search", {
-          chains: SEARCH_CHAINS, search: query, limit: "30",
-        })
+      ? await searchTokens(query)
       : await okxGet("/api/v6/dex/market/token/hot-token", {
           rankingType: "4", rankingTimeFrame: "4", riskFilter: "true",
           stableTokenFilter: "true", limit: "20",

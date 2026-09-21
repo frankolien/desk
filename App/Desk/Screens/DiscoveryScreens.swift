@@ -194,10 +194,19 @@ struct MarketSearchScreen: View {
         Set(savedIDs.split(separator: ",").compactMap { UInt32($0) })
     }
 
+    /// "Solana" finds SOL: the market's common name counts as much as its ticker.
+    private static let marketNames: [String: String] = [
+        "BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "MON": "Monad", "ZEC": "Zcash",
+        "HYPE": "Hyperliquid", "LIT": "Lighter", "PUMP": "Pump", "DOGE": "Dogecoin", "XRP": "Ripple",
+        "BNB": "BNB", "AVAX": "Avalanche", "LINK": "Chainlink", "ARB": "Arbitrum", "OP": "Optimism", "SUI": "Sui",
+    ]
+
     private var results: [Market] {
-        guard !query.isEmpty else { return market.allMarkets }
+        let wanted = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !wanted.isEmpty else { return market.allMarkets }
         return market.allMarkets.filter {
-            $0.symbol.localizedCaseInsensitiveContains(query)
+            $0.symbol.localizedCaseInsensitiveContains(wanted)
+                || (Self.marketNames[$0.symbol.uppercased()]?.localizedCaseInsensitiveContains(wanted) ?? false)
         }
     }
 
