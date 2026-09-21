@@ -72,7 +72,7 @@ struct SignalsScreen: View {
                                 .padding(.bottom, 130)
                         case .smart:
                             SmartMoneyFeed(model: smartMoney) { signal in
-                                TokenOpenRequest.shared.open(.init(chainIndex: signal.chainIndex, contract: signal.token))
+                                TokenOpenRequest.shared.open(.init(chainIndex: signal.chainIndex, contract: signal.token, symbol: signal.symbol))
                             }
                                 .padding(.top, 20)
                                 .padding(.bottom, 130)

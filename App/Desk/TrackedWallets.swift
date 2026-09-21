@@ -79,6 +79,7 @@ final class TokenOpenRequest {
     struct Target: Equatable, Sendable {
         let chainIndex: String
         let contract: String
+        var symbol: String? = nil
     }
 
     static let shared = TokenOpenRequest()

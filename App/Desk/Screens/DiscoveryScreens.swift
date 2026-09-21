@@ -363,12 +363,20 @@ struct MarketSearchScreen: View {
             .task(id: TokenOpenRequest.shared.pending) {
                 guard let target = TokenOpenRequest.shared.take() else { return }
                 query = target.contract
-                for _ in 0..<20 {
+                for _ in 0..<12 {
                     if let match = (discovery.searchResults + discovery.trending).first(where: {
                         $0.chainIndex == target.chainIndex && $0.contract.caseInsensitiveCompare(target.contract) == .orderedSame
                     }) { selectedSpot = match; return }
                     try? await Task.sleep(for: .milliseconds(300))
                 }
+                // OKX's search skips most Monad tokens; the page still opens on what is known.
+                selectedSpot = TrendingSpotToken(
+                    id: "\(target.chainIndex):\(target.contract)", chainIndex: target.chainIndex,
+                    chainName: target.chainIndex == "143" ? "Monad" : "Chain \(target.chainIndex)",
+                    symbol: target.symbol ?? "TOKEN", name: target.symbol ?? "Token", logoURL: "", contract: target.contract,
+                    decimals: nil, quotable: nil, buyable: nil, nativeSymbol: nil, explorerURL: "",
+                    price: nil, change: nil, marketCap: nil, volume24H: nil, liquidity: nil, holders: nil,
+                    communityRecognized: nil, riskLevel: nil)
             }
         }
     }
@@ -869,7 +877,7 @@ private struct SpotTokenDetailScreen: View {
         .task(id: feed.holders.map(\.id)) { await IdentityDirectory.shared.resolve(feed.holders.map(\.wallet.address)) }
         .task(id: feed.transactions.map(\.wallet.address)) { await IdentityDirectory.shared.resolve(feed.transactions.map(\.wallet.address)) }
         .navigationDestination(item: $selectedWallet) { wallet in
-            WalletProfileScreen(wallet: wallet, token: token, feed: feed)
+            WalletProfileScreen(wallet: wallet, token: token, feed: feed, model: model)
                 .toolbar(.hidden, for: .tabBar)
         }
         .sheet(isPresented: Binding(
@@ -2072,6 +2080,7 @@ private struct WalletResource: Decodable {
     struct Trade: Decodable, Identifiable {
         let time: Double
         let hash: String
+        let token: String
         let symbol: String
         let side: String
         let amount: Double
@@ -2097,6 +2106,7 @@ private struct WalletResource: Decodable {
     let holdings: [Holding]
     let ledger: Ledger
     let labels: [WalletLabel]?
+    let logos: [String: String]?
     struct WalletChain: Decodable { let chainIndex: String; let chain: String?; let value: Double }
     struct WalletLabel: Decodable, Identifiable { let code: String; let text: String; var id: String { code } }
 }
@@ -2105,6 +2115,9 @@ private struct WalletProfileScreen: View {
     let wallet: SpotWallet
     let token: TrendingSpotToken
     @ObservedObject var feed: SpotLiveFeed
+    let model: AppModel
+    @StateObject private var lookup = TokenDiscoveryModel()
+    @State private var opened: TrendingSpotToken?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var resource: WalletResource?
@@ -2128,6 +2141,13 @@ private struct WalletProfileScreen: View {
         let tint: Color
         let badge: String?
         let day: String
+        var chainIndex = "143"
+        var contract = ""
+        var chainName: String? = nil
+    }
+
+    private func logo(_ chainIndex: String, _ contract: String) -> URL? {
+        (resource?.logos?["\(chainIndex):\(contract.lowercased())"]).flatMap(TokenArtwork.url)
     }
 
     private var identity: Identity? { IdentityDirectory.shared.identity(for: wallet.address) }
@@ -2165,12 +2185,12 @@ private struct WalletProfileScreen: View {
 
                     HStack(spacing: 0) {
                         avatar
-                        Spacer(minLength: 16)
+                        Spacer(minLength: 14)
                         stat(portfolioText, label: portfolioLabel, tint: .white)
-                        Divider().frame(height: 46).overlay(Color.white.opacity(0.12)).padding(.horizontal, 22)
+                        Divider().frame(height: 38).overlay(Color.white.opacity(0.12)).padding(.horizontal, 18)
                         stat(totalPnL.map(signed) ?? "—", label: "Total PnL", tint: totalPnL.map(tint) ?? .white)
                         Spacer(minLength: 0)
-                    }.padding(.top, 42)
+                    }.padding(.top, 30)
 
                     HStack(spacing: 10) {
                         Button {
@@ -2180,7 +2200,7 @@ private struct WalletProfileScreen: View {
                             Task { try? await Task.sleep(for: .seconds(1.4)); withAnimation { copied = false } }
                         } label: {
                             Text(copied ? "Copied" : name)
-                                .font(.system(size: 26, weight: .bold, design: .rounded))
+                                .font(.system(size: 21, weight: .bold, design: .rounded))
                                 .lineLimit(1).minimumScaleFactor(0.6)
                                 .contentShape(Rectangle())
                         }
@@ -2197,22 +2217,22 @@ private struct WalletProfileScreen: View {
                                 naming = true
                             }
                         }
-                    }.padding(.top, 26)
+                    }.padding(.top, 20)
 
                     if let status = statusLine {
                         Button { statusAction() } label: {
-                            HStack(spacing: 8) {
-                                Circle().fill(statusTint).frame(width: 9, height: 9)
-                                Text(status).font(.system(size: 15, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.85))
+                            HStack(spacing: 7) {
+                                Circle().fill(statusTint).frame(width: 7, height: 7)
+                                Text(status).font(.system(size: 13, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.8))
                             }
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .padding(.top, 12)
+                        .padding(.top, 10)
                     }
 
-                    tabs.padding(.top, 24)
-                    content.padding(.top, 8)
+                    tabs.padding(.top, 18)
+                    content.padding(.top, 4)
                 }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 40)
             }
         }
@@ -2238,9 +2258,34 @@ private struct WalletProfileScreen: View {
         }
         .task { await IdentityDirectory.shared.resolve([wallet.address]) }
         .task { await loadResource() }
+        .navigationDestination(item: $opened) { token in
+            SpotTokenDetailScreen(token: token, model: model)
+        }
         #if DEBUG
         .onAppear { if ProcessInfo.processInfo.arguments.contains("-wallet-activity") { tab = .activity } }
         #endif
+    }
+
+    /// The real listing when the discovery feed knows the token, so the page has its
+    /// chart and figures; the wallet's own facts when it does not.
+    private func open(_ row: Row) {
+        guard !row.contract.isEmpty else { return }
+        if row.chainIndex == token.chainIndex, row.contract.caseInsensitiveCompare(token.contract) == .orderedSame {
+            dismiss()
+            return
+        }
+        Task {
+            await lookup.search(row.contract)
+            let match = (lookup.searchResults + lookup.trending).first {
+                $0.chainIndex == row.chainIndex && $0.contract.caseInsensitiveCompare(row.contract) == .orderedSame
+            }
+            opened = match ?? TrendingSpotToken(
+                id: "\(row.chainIndex):\(row.contract)", chainIndex: row.chainIndex, chainName: row.chainName ?? token.chainName,
+                symbol: row.symbol, name: row.symbol, logoURL: resource?.logos?["\(row.chainIndex):\(row.contract.lowercased())"] ?? "",
+                contract: row.contract, decimals: nil, quotable: nil, buyable: nil, nativeSymbol: nil, explorerURL: "",
+                price: nil, change: nil, marketCap: nil, volume24H: nil, liquidity: nil, holders: nil,
+                communityRecognized: nil, riskLevel: nil)
+        }
     }
 
     // MARK: Header pieces
@@ -2253,16 +2298,16 @@ private struct WalletProfileScreen: View {
                 Text(wallet.emoji).font(.system(size: 50))
             }
         }
-        .frame(width: 84, height: 84)
+        .frame(width: 68, height: 68)
         .clipShape(Circle())
         .perpSearchGlass(in: Circle())
     }
 
     private func stat(_ value: String, label: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(value).font(.system(size: 20, weight: .bold, design: .rounded).monospacedDigit()).foregroundStyle(tint)
+        VStack(alignment: .leading, spacing: 3) {
+            Text(value).font(.system(size: 17, weight: .bold, design: .rounded).monospacedDigit()).foregroundStyle(tint)
                 .lineLimit(1).minimumScaleFactor(0.7)
-            Text(label).font(.system(size: 14, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
+            Text(label).font(.system(size: 12, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
                 .lineLimit(1).minimumScaleFactor(0.8)
         }
     }
@@ -2270,12 +2315,12 @@ private struct WalletProfileScreen: View {
     private func action(_ title: String, symbol: String?, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                if let symbol { Image(systemName: symbol).font(.system(size: 12, weight: .semibold)) }
-                Text(title).font(.system(size: 15, weight: .semibold, design: .rounded))
+                if let symbol { Image(systemName: symbol).font(.system(size: 11, weight: .semibold)) }
+                Text(title).font(.system(size: 13, weight: .semibold, design: .rounded))
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .frame(height: 42)
+            .padding(.horizontal, 13)
+            .frame(height: 34)
             .background(Color.black, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.white.opacity(0.35), lineWidth: 1))
         }
@@ -2304,11 +2349,11 @@ private struct WalletProfileScreen: View {
         HStack(spacing: 0) {
             ForEach(Tab.allCases, id: \.self) { item in
                 Button { withAnimation(.snappy(duration: 0.22)) { tab = item } } label: {
-                    VStack(spacing: 12) {
+                    VStack(spacing: 10) {
                         Text(item.rawValue)
-                            .font(.system(size: 17, weight: tab == item ? .bold : .medium, design: .rounded))
+                            .font(.system(size: 14, weight: tab == item ? .bold : .medium, design: .rounded))
                             .foregroundStyle(tab == item ? .white : Color.white.opacity(0.45))
-                        Rectangle().fill(tab == item ? Color.white : .clear).frame(height: 3)
+                        Rectangle().fill(tab == item ? Color.white : .clear).frame(height: 2)
                     }
                     .frame(maxWidth: .infinity)
                     .contentShape(Rectangle())
@@ -2340,44 +2385,45 @@ private struct WalletProfileScreen: View {
             ForEach(days, id: \.self) { day in
                 if tab != .positions {
                     Text(day)
-                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundStyle(.secondary)
-                        .padding(.top, 20)
-                        .padding(.bottom, 4)
+                        .padding(.top, 16)
+                        .padding(.bottom, 2)
                 }
                 ForEach(rows.filter { $0.day == day }) { row in
-                    tokenRow(row)
+                    Button { open(row) } label: { tokenRow(row) }.buttonStyle(.plain)
                 }
             }
         }
     }
 
     private func tokenRow(_ row: Row) -> some View {
-        HStack(spacing: 14) {
-            MarketTokenLogo(symbol: row.symbol, size: 46)
+        HStack(spacing: 12) {
+            MarketTokenLogo(symbol: row.symbol, size: 38, remoteURL: logo(row.chainIndex, row.contract))
                 .overlay(alignment: .bottomTrailing) {
                     if let badge = row.badge {
                         Image(systemName: badge == "+" ? "plus.circle.fill" : "minus.circle.fill")
-                            .font(.system(size: 18))
+                            .font(.system(size: 15))
                             .foregroundStyle(.white, badge == "+" ? DeskColor.rise.color : DeskColor.fall.color)
                             .background(Circle().fill(.black).padding(1))
                             .offset(x: 3, y: 3)
                     }
                 }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(row.title).font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(1)
-                Text(row.subtitle).font(.system(size: 15, weight: .medium, design: .rounded)).foregroundStyle(.secondary).lineLimit(1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(row.title).font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(1)
+                Text(row.subtitle).font(.system(size: 12, weight: .medium, design: .rounded)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(row.value).font(.system(size: 18, weight: .bold, design: .rounded).monospacedDigit()).foregroundStyle(.white).lineLimit(1)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(row.value).font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit()).foregroundStyle(.white).lineLimit(1)
                 if let detail = row.detail {
-                    Text(detail).font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit()).foregroundStyle(row.tint).lineLimit(1)
+                    Text(detail).font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit()).foregroundStyle(row.tint).lineLimit(1)
                 }
             }
         }
-        .frame(height: 78)
-        .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5).padding(.leading, 60) }
+        .frame(height: 62)
+        .contentShape(Rectangle())
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5).padding(.leading, 50) }
     }
 
     private func rows(for tab: Tab) -> [Row] {
@@ -2390,7 +2436,8 @@ private struct WalletProfileScreen: View {
                            subtitle: SpotLiveFeed.compactNumber(holding.balance),
                            value: holding.value.map { SpotLiveFeed.compactUSD($0) } ?? "—",
                            detail: position?.unrealized.map(signed) ?? holding.chain,
-                           tint: position?.unrealized.map(tint) ?? Color.white.opacity(0.45), badge: nil, day: "")
+                           tint: position?.unrealized.map(tint) ?? Color.white.opacity(0.45), badge: nil, day: "",
+                           chainIndex: holding.chainIndex, contract: holding.contract, chainName: holding.chain)
             }
         case .closed:
             return (ledger?.trades ?? []).filter { $0.side == "sell" && $0.gain != nil }.map { trade in
@@ -2399,7 +2446,7 @@ private struct WalletProfileScreen: View {
                 let percent = cost > 0 ? gain / cost * 100 : nil
                 return Row(id: trade.id, symbol: trade.symbol, title: trade.symbol, subtitle: Self.age(trade.time),
                            value: signed(gain), detail: percent.map { String(format: "%@%.1f%%", $0 >= 0 ? "+" : "−", abs($0)) },
-                           tint: tint(gain), badge: nil, day: Self.day(trade.time))
+                           tint: tint(gain), badge: nil, day: Self.day(trade.time), contract: trade.token)
             }
         case .activity:
             if let trades = ledger?.trades, !trades.isEmpty {
@@ -2407,13 +2454,13 @@ private struct WalletProfileScreen: View {
                     Row(id: trade.id, symbol: trade.symbol, title: "\(trade.isBuy ? "Bought" : "Sold") \(trade.symbol)", subtitle: Self.age(trade.time),
                         value: SpotLiveFeed.compactUSD(trade.value),
                         detail: "\(trade.isBuy ? "+" : "−")\(SpotLiveFeed.compactNumber(trade.amount)) \(trade.symbol)",
-                        tint: Color.white.opacity(0.55), badge: trade.isBuy ? "+" : "−", day: Self.day(trade.time))
+                        tint: Color.white.opacity(0.55), badge: trade.isBuy ? "+" : "−", day: Self.day(trade.time), contract: trade.token)
                 }
             }
             return feed.transactions.filter { $0.wallet.address.caseInsensitiveCompare(wallet.address) == .orderedSame }.map { tx in
                 Row(id: tx.id, symbol: token.symbol, title: "\(tx.isBuy ? "Bought" : "Sold") \(token.symbol)", subtitle: "\(tx.age) ago",
                     value: tx.value, detail: "\(tx.isBuy ? "+" : "−")\(tx.amount)", tint: Color.white.opacity(0.55),
-                    badge: tx.isBuy ? "+" : "−", day: "Today")
+                    badge: tx.isBuy ? "+" : "−", day: "Today", chainIndex: token.chainIndex, contract: token.contract, chainName: token.chainName)
             }
         }
     }

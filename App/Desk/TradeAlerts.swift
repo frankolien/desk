@@ -358,7 +358,8 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
             let chainIndex = desk["chainIndex"] as? String ?? "143"
             // Only wallets this phone tracks can open a token from a push, for the same reason as below.
             guard await TrackedWallets.shared.isTracking(wallet) else { return }
-            await MainActor.run { TokenOpenRequest.shared.open(.init(chainIndex: chainIndex, contract: token)) }
+            let symbol = desk["symbol"] as? String
+            await MainActor.run { TokenOpenRequest.shared.open(.init(chainIndex: chainIndex, contract: token, symbol: symbol)) }
             return
         }
         guard let alert = TradeAlert(userInfo: userInfo) else { return }

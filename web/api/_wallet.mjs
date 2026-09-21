@@ -29,7 +29,7 @@ export function describeWallet(rows, contract) {
       assets.push({
         chainIndex: String(asset?.chainIndex ?? ""),
         chain: CHAINS[String(asset?.chainIndex ?? "")]?.name ?? null,
-        contract: String(asset?.tokenContractAddress ?? "").toLowerCase(),
+        contract: String(asset?.tokenContractAddress ?? asset?.tokenAddress ?? "").toLowerCase(),
         symbol: String(asset?.symbol ?? "").trim() || "?",
         balance,
         value: price == null ? null : balance * price,
@@ -48,6 +48,42 @@ export function describeWallet(rows, contract) {
     held: held ? { balance: held.balance, value: held.value } : null,
     holdings: assets.slice(0, MAX_ROWS),
   };
+}
+
+/// Artwork for tokens the balance API names but does not picture: one search per
+/// token, remembered for a month. Native tokens are drawn from the app's own catalog.
+export async function logosFor(items, { store = null, search = okxGet } = {}) {
+  const wanted = [...new Map(items
+    .filter((item) => /^0x[0-9a-f]{40}$/.test(item.contract) && /^\d+$/.test(item.chainIndex))
+    .map((item) => [`${item.chainIndex}:${item.contract}`, item])).values()].slice(0, 24);
+  const logos = {};
+  if (!wanted.length || !okxConfigured()) return logos;
+  const keys = wanted.map((item) => `logo:${item.chainIndex}:${item.contract}`);
+  const cached = store ? await store.mget(keys).catch(() => keys.map(() => null)) : keys.map(() => null);
+  await Promise.all(wanted.map(async (item, index) => {
+    const id = `${item.chainIndex}:${item.contract}`;
+    if (cached[index] != null) { if (cached[index]) logos[id] = cached[index]; return; }
+    let url = "";
+    try {
+      const rows = await search("/api/v6/dex/market/token/search", { chains: item.chainIndex, search: item.contract, limit: "3" });
+      const row = (Array.isArray(rows) ? rows : []).find((candidate) =>
+        String(candidate.tokenContractAddress ?? "").toLowerCase() === item.contract) ?? (Array.isArray(rows) ? rows[0] : null);
+      url = String(row?.tokenLogoUrl ?? "");
+    } catch { /* drawn from the symbol instead */ }
+    // OKX's search does not index most Monad tokens; nad.fun pictures the ones it launched.
+    if (!url && item.chainIndex === "143") {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3_000);
+        const response = await fetch(`https://api.nad.fun/token/${item.contract}`, { signal: controller.signal });
+        clearTimeout(timer);
+        if (response.ok) url = String((await response.json())?.token_info?.image_uri ?? "");
+      } catch { /* no picture */ }
+    }
+    if (url) logos[id] = url;
+    if (store) store.set(keys[index], url, { ex: 30 * 24 * 3600 }).catch(() => {});
+  }));
+  return logos;
 }
 
 export async function walletBalances(address, chains) {

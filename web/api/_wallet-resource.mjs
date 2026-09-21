@@ -2,7 +2,7 @@ import { CHAINS } from "./_chains.mjs";
 import { hypersyncClient } from "./_history.mjs";
 import { resolveIdentities } from "./_identity.mjs";
 import { TRACKED_KEY, indexWallet, ledgerKey, summarize } from "./_ledger.mjs";
-import { currentPrices, describeWallet, metaReader, priceReader, walletBalances } from "./_wallet.mjs";
+import { currentPrices, describeWallet, logosFor, metaReader, priceReader, walletBalances } from "./_wallet.mjs";
 
 /// Everything Desk knows about a wallet, in one answer: who it is, what it holds on every
 /// chain OKX reads, and its trade ledger on Monad with realised and unrealised PnL.
@@ -35,7 +35,11 @@ export async function walletResource(address, { chainIndex = MONAD, contract = "
 
   const ledger = await monadLedger(wanted, { store, hypersync, now });
   const labels = walletLabels({ identity, ledger, holdings: wallet.holdings, now: now() });
-  return { address: wanted, observedAt: now(), identity, ...wallet, ledger, labels };
+  const logos = await logosFor([
+    ...wallet.holdings.map((row) => ({ chainIndex: row.chainIndex, contract: row.contract })),
+    ...(ledger.tokens ?? []).map((row) => ({ chainIndex: MONAD, contract: row.token })),
+  ], { store });
+  return { address: wanted, observedAt: now(), identity, ...wallet, ledger, labels, logos };
 }
 
 /// Descriptions, not verdicts: what the ledger says this wallet is like. Only a

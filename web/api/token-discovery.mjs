@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { chainName, isBuyable, isQuotable, nativeToken } from "./_chains.mjs";
+import { chainName, isBuyable, isQuotable, nativeToken, CHAINS } from "./_chains.mjs";
 
 function authHeaders(timestamp, requestPath) {
   const signature = crypto.createHmac("sha256", process.env.OKX_SECRET_KEY)
@@ -61,13 +61,16 @@ function normalize(row) {
   };
 }
 
+// Every chain Desk can show, so a Monad or BNB contract pasted into search is found.
+const SEARCH_CHAINS = Object.keys(CHAINS).filter((index) => CHAINS[index].rpc !== null).join(",");
+
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
   const query = String(req.query.q || "").trim().slice(0, 100);
   try {
     const rows = query
       ? await okxGet("/api/v6/dex/market/token/search", {
-          chains: "1,501", search: query, limit: "30",
+          chains: SEARCH_CHAINS, search: query, limit: "30",
         })
       : await okxGet("/api/v6/dex/market/token/hot-token", {
           rankingType: "4", rankingTimeFrame: "4", riskFilter: "true",
