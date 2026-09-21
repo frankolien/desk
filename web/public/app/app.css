@@ -407,12 +407,18 @@ h3 { font-size: 14px; font-weight: 700; }
 .menu a, .menu button { display: flex; align-items: center; height: 36px; padding: 0 12px; border-radius: 9px; font-size: 13px; font-weight: 600; text-align: left; }
 .menu a:hover, .menu button:hover { background: var(--chip); }
 .menu [data-disconnect] { color: var(--fall); }
-.connect-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border-radius: 14px; background: var(--card-2); border: 1px solid var(--line); text-align: left; transition: background .12s var(--ease); }
-.connect-row:hover { background: var(--chip); }
+.popover { position: absolute; right: 0; top: calc(100% + 10px); width: 340px; padding: 16px; display: grid; gap: 8px; background: #0e0e0e; border: 1px solid var(--line-strong); border-radius: 20px; box-shadow: 0 24px 60px rgba(0,0,0,.6); z-index: 40; animation: sheetIn .2s var(--ease); }
+.popover h2 { text-align: center; font-size: 17px; margin-bottom: 6px; }
+.popover-or { display: flex; align-items: center; gap: 10px; color: var(--faint); font-size: 12px; margin: 4px 0; }
+.popover-or .divider { flex: 1; }
+.connect-row { display: flex; align-items: center; gap: 14px; width: 100%; height: 72px; padding: 0 14px; border-radius: 16px; background: #161616; text-align: left; transition: background .12s var(--ease); }
+.connect-row:hover { background: #1c1c1c; }
 .connect-row .name { flex: 1; display: grid; gap: 2px; }
-.connect-row .name b { font-size: 15px; }
+.connect-row .name b { font-size: 17px; font-weight: 600; }
 .connect-row .name span { font-size: 12px; color: var(--muted); }
 .connect-row > svg { color: var(--muted); }
+.connect-row .logo.sq { border-radius: 11px; }
+@media (max-width: 720px) { .popover { position: fixed; left: 12px; right: 12px; top: auto; bottom: 72px; width: auto; } }
 
 /* ── Responsive ───────────────────────────────────────── */
 

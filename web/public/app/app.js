@@ -300,7 +300,8 @@ function startWallet() {
   const sheet = $("#connect-sheet");
   const menu = $("#wallet-menu");
   const note = $("#connect-note");
-  const open = () => { note.textContent = ""; sheet.hidden = false; };
+  const NOTE = "Accounts live in the app and sign with Face ID.";
+  const open = () => { note.textContent = NOTE; sheet.hidden = false; };
   const close = () => { sheet.hidden = true; };
 
   $("#connect").addEventListener("click", (event) => {
@@ -312,7 +313,7 @@ function startWallet() {
     if (event.target.closest("[data-disconnect]")) { setWallet(null); menu.hidden = true; }
     else if (event.target.closest("a")) menu.hidden = true;
   });
-  sheet.addEventListener("click", (event) => { if (event.target === sheet) close(); });
+  document.addEventListener("click", (event) => { if (!sheet.hidden && !event.target.closest("#connect-sheet, #connect")) close(); });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !sheet.hidden) close(); });
 
   const adopt = (address, via) => {
@@ -324,7 +325,18 @@ function startWallet() {
   sheet.addEventListener("click", async (event) => {
     const row = event.target.closest("[data-connect]");
     if (!row) return;
-    if (row.dataset.connect === "desk") { close(); handoff({ title: "Desk on iPhone", sub: "Your account lives in the app and signs with Face ID. Scan to get Desk." }); return; }
+    if (row.dataset.connect === "desk" || row.dataset.connect === "create") {
+      close();
+      handoff({ title: row.dataset.connect === "create" ? "Create your account in Desk" : "Desk on iPhone", sub: "Your account lives in the app and signs with Face ID. Scan to get Desk." });
+      return;
+    }
+    if (row.dataset.connect === "watch") {
+      const form = $("#watch-form");
+      form.hidden = !form.hidden;
+      row.setAttribute("aria-expanded", String(!form.hidden));
+      if (!form.hidden) $("#watch-input").focus();
+      return;
+    }
     if (!window.ethereum) { note.textContent = "No browser wallet found on this device."; return; }
     try {
       const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
