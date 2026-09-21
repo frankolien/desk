@@ -268,6 +268,96 @@ export function handoff({ title = "Trade this in Desk", sub = "Every order signs
   $("#handoff").hidden = false;
 }
 
+// ── Wallet ──────────────────────────────────────────────
+// Read-only: the web watches an address, it never holds a key. Connecting a browser
+// wallet only asks which address to watch.
+
+const WALLET_KEY = "desk.web.connected";
+let wallet = null;
+try { wallet = JSON.parse(localStorage.getItem(WALLET_KEY) ?? "null"); } catch { wallet = null; }
+export const connectedWallet = () => wallet;
+
+function setWallet(next) {
+  wallet = next;
+  try { next ? localStorage.setItem(WALLET_KEY, JSON.stringify(next)) : localStorage.removeItem(WALLET_KEY); } catch { /* private window */ }
+  paintWalletButton();
+  document.dispatchEvent(new CustomEvent("wallet", { detail: next }));
+}
+
+function paintWalletButton() {
+  const button = $("#connect");
+  if (!wallet) { button.className = "btn btn-primary"; button.textContent = "Connect wallet"; return; }
+  const id = knownIdentity(wallet.address);
+  const face = id?.avatar
+    ? `<span class="logo logo-28"><img src="${esc(id.avatar)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()"></span>`
+    : `<span class="logo logo-28" style="background:linear-gradient(135deg,hsl(${hue(wallet.address)} 60% 45%),hsl(${(hue(wallet.address) + 40) % 360} 60% 30%))"></span>`;
+  button.className = "wallet-pill";
+  button.innerHTML = `${face}${id?.name ? `<span>${esc(id.name)}</span>` : `<span class="addr">${esc(short(wallet.address))}</span>`}<svg width="14" height="14" style="color:var(--muted);transform:rotate(90deg)"><use href="#i-chevron"/></svg>`;
+  if (!id) identity(wallet.address).then((found) => { if (found && wallet) paintWalletButton(); });
+}
+
+function startWallet() {
+  const sheet = $("#connect-sheet");
+  const menu = $("#wallet-menu");
+  const note = $("#connect-note");
+  const open = () => { note.textContent = ""; sheet.hidden = false; };
+  const close = () => { sheet.hidden = true; };
+
+  $("#connect").addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (wallet) menu.hidden = !menu.hidden; else open();
+  });
+  document.addEventListener("click", (event) => { if (!event.target.closest("#wallet-menu")) menu.hidden = true; });
+  menu.addEventListener("click", (event) => {
+    if (event.target.closest("[data-disconnect]")) { setWallet(null); menu.hidden = true; }
+    else if (event.target.closest("a")) menu.hidden = true;
+  });
+  sheet.addEventListener("click", (event) => { if (event.target === sheet) close(); });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !sheet.hidden) close(); });
+
+  const adopt = (address, via) => {
+    setWallet({ address, via, at: Date.now() });
+    close();
+    navigate(`/app/wallet/${address}`);
+  };
+
+  sheet.addEventListener("click", async (event) => {
+    const row = event.target.closest("[data-connect]");
+    if (!row) return;
+    if (row.dataset.connect === "desk") { close(); handoff({ title: "Desk on iPhone", sub: "Your account lives in the app and signs with Face ID. Scan to get Desk." }); return; }
+    if (!window.ethereum) { note.textContent = "No browser wallet found on this device."; return; }
+    try {
+      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+      const address = String(accounts?.[0] ?? "");
+      if (!/^0x[0-9a-fA-F]{40}$/.test(address)) { note.textContent = "The wallet gave no address."; return; }
+      adopt(address, "browser");
+    } catch (error) {
+      note.textContent = error?.code === 4001 ? "Request dismissed." : "The wallet did not answer.";
+    }
+  });
+
+  $("#watch-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const q = $("#watch-input").value.trim();
+    if (!q) return;
+    if (/^0x[0-9a-fA-F]{40}$/.test(q) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(q)) return adopt(q, "watch");
+    note.textContent = "Looking up…";
+    try {
+      const out = await api(`/api/traders?view=lookup&q=${encodeURIComponent(q)}`, { ttl: 60_000 });
+      if (out?.address) return adopt(out.address, "watch");
+      note.textContent = "No wallet by that name.";
+    } catch { note.textContent = "No wallet by that name."; }
+  });
+
+  window.ethereum?.on?.("accountsChanged", (accounts) => {
+    if (wallet?.via !== "browser") return;
+    const address = String(accounts?.[0] ?? "");
+    if (/^0x[0-9a-fA-F]{40}$/.test(address)) setWallet({ ...wallet, address }); else setWallet(null);
+  });
+
+  paintWalletButton();
+}
+
 // ── Router ──────────────────────────────────────────────
 
 const ROUTES = [
@@ -475,7 +565,7 @@ function startSearch() {
 
 // ── Boot ────────────────────────────────────────────────
 
-$("#get-app").addEventListener("click", () => handoff({ title: "Desk for iPhone", sub: "Perps with Face ID, copy trading, alerts. Scan to get it." }));
+startWallet();
 $("#handoff").addEventListener("click", (event) => { if (event.target === $("#handoff") || event.target.closest("[data-close]")) $("#handoff").hidden = true; });
 startTicker();
 startSearch();

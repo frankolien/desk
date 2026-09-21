@@ -397,6 +397,23 @@ h3 { font-size: 14px; font-weight: 700; }
 .toast small { color: var(--muted); font-size: 11px; }
 .toast .amt { margin-left: auto; font-family: var(--mono); font-weight: 600; }
 
+/* ── Wallet ───────────────────────────────────────────── */
+
+.top-actions { position: relative; }
+.wallet-pill { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px 0 6px; border-radius: 999px; background: var(--chip); border: 1px solid var(--line-strong); font-weight: 700; font-size: 13px; }
+.wallet-pill .logo { flex: none; }
+.wallet-pill .addr { font-family: var(--mono); font-weight: 600; font-size: 12px; }
+.menu { position: absolute; right: 0; top: calc(100% + 8px); min-width: 170px; padding: 6px; background: #121212; border: 1px solid var(--line-strong); border-radius: 14px; box-shadow: 0 16px 40px rgba(0,0,0,.5); z-index: 40; display: grid; gap: 2px; }
+.menu a, .menu button { display: flex; align-items: center; height: 36px; padding: 0 12px; border-radius: 9px; font-size: 13px; font-weight: 600; text-align: left; }
+.menu a:hover, .menu button:hover { background: var(--chip); }
+.menu [data-disconnect] { color: var(--fall); }
+.connect-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border-radius: 14px; background: var(--card-2); border: 1px solid var(--line); text-align: left; transition: background .12s var(--ease); }
+.connect-row:hover { background: var(--chip); }
+.connect-row .name { flex: 1; display: grid; gap: 2px; }
+.connect-row .name b { font-size: 15px; }
+.connect-row .name span { font-size: 12px; color: var(--muted); }
+.connect-row > svg { color: var(--muted); }
+
 /* ── Responsive ───────────────────────────────────────── */
 
 @media (max-width: 1100px) {
@@ -417,7 +434,7 @@ h3 { font-size: 14px; font-weight: 700; }
   .top { grid-template-columns: minmax(0, 1fr) auto; padding: 0 12px; gap: 8px; }
   .top-search { margin-left: 0; width: 100%; }
   .top-actions .icon-btn { display: none; }
-  #get-app { padding: 0 12px; }
+  #connect { padding: 0 12px; font-size: 13px; }
   .view { padding: 14px 12px 90px; }
   .table td { height: 52px; }
 }

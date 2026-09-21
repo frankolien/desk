@@ -1,4 +1,4 @@
-import { $, $$, esc, api, fmtUsd, fmtPct, fmtAmount, short, ago, dirClass, logo, nativeLogo, person, hydratePeople, handoff, navigate } from "../app.js";
+import { $, $$, esc, api, connectedWallet, fmtUsd, fmtPct, fmtAmount, short, ago, dirClass, logo, nativeLogo, person, hydratePeople, handoff, navigate } from "../app.js";
 
 const CSS = `<style>
 .wl { max-width: 760px; margin: 0 auto; display: grid; gap: 26px; }
@@ -58,6 +58,7 @@ const recent = () => { try { return JSON.parse(localStorage.getItem(RECENT_KEY) 
 const remember = (address) => { try { localStorage.setItem(RECENT_KEY, JSON.stringify([address, ...recent().filter((a) => a.toLowerCase() !== address.toLowerCase())].slice(0, 5))); } catch { /* private window */ } };
 
 export default async function mount(el, params) {
+  if (!params.address && connectedWallet()) { navigate(`/app/wallet/${connectedWallet().address}`, { replace: true }); return () => {}; }
   if (!params.address) return mountPicker(el);
   const address = params.address;
   const isEvm = EVM.test(address);

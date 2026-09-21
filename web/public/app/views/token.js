@@ -1,6 +1,7 @@
 import { $, $$, esc, api, poll, fmtUsd, fmtSmall, fmtCompact, fmtPct, fmtAmount, short, ago, dirClass, logo, nativeLogo, person, hydratePeople, handoff, identity, knownIdentity, navigate } from "../app.js";
 
 const STYLE = `<style>
+.tk-tx { display: inline-flex; color: var(--muted); } .tk-tx:hover { color: var(--text); } .tk-tx svg { width: 13px; height: 13px; }
 .tk-back { margin-bottom: 12px; }
 .tk-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
 .tk-id { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -547,16 +548,28 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     return num(hit?.amount);
   };
 
-  const tradeRow = (t, fresh = false) => `
+  const TX_EXPLORERS = { "143": "https://monadscan.com/tx/", "501": "https://solscan.io/tx/", "1": "https://etherscan.io/tx/", "8453": "https://basescan.org/tx/", "56": "https://bscscan.com/tx/", "42161": "https://arbiscan.io/tx/", "10": "https://optimistic.etherscan.io/tx/", "137": "https://polygonscan.com/tx/" };
+  // The other leg of the swap: what was paid for a buy, what was received for a sell.
+  const quoteLeg = (t) => (t.changedTokenInfo ?? []).find((c) => String(c.tokenAddress ?? "").toLowerCase() !== address.toLowerCase() && c.tokenSymbol !== symbol);
+  const txLink = (t) => {
+    const base = TX_EXPLORERS[String(chainIndex)];
+    const hash = String(t.txHashUrl ?? t.txHash ?? "");
+    if (!base || !hash) return "";
+    return `<a class="tk-tx" href="${esc(/^https?:/.test(hash) ? hash : base + hash)}" target="_blank" rel="noopener" aria-label="Transaction">${icon("i-ext")}</a>`;
+  };
+  const tradeRow = (t, fresh = false) => {
+    const q = quoteLeg(t);
+    return `
         <tr class="${fresh ? "enter" : ""}" data-key="${esc(tradeKey(t))}">
-          <td>${person(t.userAddress)}</td>
+          <td><span class="row" style="gap:8px">${person(t.userAddress)}${t.dexName ? `<span class="via">${esc(t.dexName)}</span>` : ""}</span></td>
           <td class="left"><span class="side-chip ${t.type === "buy" ? "buy" : "sell"}">${t.type === "buy" ? "BUY" : "SELL"}</span></td>
-          <td class="num">${fmtUsd(num(t.volume))}</td>
+          <td class="num ${t.type === "buy" ? "up" : "down"}">${fmtUsd(num(t.volume))}</td>
           <td class="num">${fmtAmount(tokenAmount(t))}</td>
           <td class="num">${tokenPrice(num(t.price))}</td>
-          <td class="left muted">${esc(t.dexName ?? "")}</td>
-          <td class="mono muted tk-ago">${ago(Number(t.time), { suffix: false })}</td>
+          <td class="num">${q ? `${fmtAmount(num(q.amount))} <span class="muted">${esc(q.tokenSymbol ?? "")}</span>` : "—"}</td>
+          <td class="mono muted"><span class="row" style="gap:8px;justify-content:flex-end">${txLink(t)}<span class="tk-ago">${ago(Number(t.time), { suffix: false })}</span></span></td>
         </tr>`;
+  };
 
   const traderRows = () => {
     const by = new Map();
@@ -634,7 +647,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     const host = q("#tk-table");
     if (tab === "trades") {
       host.innerHTML = trades.length
-        ? `<table class="table table-compact"><thead><tr><th>Wallet</th><th class="left">Type</th><th>USD</th><th>Amount</th><th>Price</th><th class="left">Venue</th><th>Time</th></tr></thead><tbody>${trades.map((t) => tradeRow(t, fresh.has(tradeKey(t)))).join("")}</tbody></table>`
+        ? `<table class="table table-compact"><thead><tr><th>Wallet</th><th class="left">Type</th><th>USD</th><th>${esc(symbol)}</th><th>Price</th><th>Quote</th><th>Txn · Time</th></tr></thead><tbody>${trades.map((t) => tradeRow(t, fresh.has(tradeKey(t)))).join("")}</tbody></table>`
         : `<div class="empty">No trades yet.</div>`;
     } else if (tab === "holders") {
       if (!holders.length) { host.innerHTML = `<div class="empty">No holders listed.</div>`; return; }
@@ -678,6 +691,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     return true;
   };
   const refreshAgo = () => $$(".tk-ago", q("#tk-table")).forEach((td, i) => { if (trades[i]) td.textContent = ago(Number(trades[i].time), { suffix: false }); });
+  const agoTimer = setInterval(refreshAgo, 1000);
   const hasTable = () => !!q("#tk-table table");
 
   const applyTrades = (incoming) => {
@@ -799,6 +813,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   stopPrices = poll(tickPrices, 4_000);
 
   function cleanup() {
+    clearInterval(agoTimer);
     dead = true;
     aborter.abort();
     if (stopSnapshot) stopSnapshot();
