@@ -52,7 +52,10 @@ struct MarketScreen: View {
                     })
                     .toolbar(.hidden, for: .tabBar)
             }
+            .task { await openRequestedMarket() }
+            .onChange(of: MarketOpenRequest.shared.pending) { _, symbol in if symbol != nil { Task { await openRequestedMarket() } } }
             #if DEBUG
+            .task { if ProcessInfo.processInfo.arguments.contains("-price-demo") { MarketOpenRequest.shared.open("ETH") } }
             .task { if ProcessInfo.processInfo.arguments.contains("-open-withdraw") { showsWithdraw = true } }
             #if DEBUG
             .task {
@@ -449,5 +452,17 @@ private extension View {
         } else {
             background(.ultraThinMaterial, in: shape)
         }
+    }
+}
+
+extension MarketScreen {
+    /// A market named by a push: wait for the list if it is still loading, then open it.
+    fileprivate func openRequestedMarket() async {
+        guard let symbol = MarketOpenRequest.shared.take() else { return }
+        for _ in 0..<40 where market.allMarkets.isEmpty { try? await Task.sleep(for: .milliseconds(250)) }
+        guard let found = market.allMarkets.first(where: { $0.symbol.caseInsensitiveCompare(symbol) == .orderedSame }) else { return }
+        market.select(found)
+        await session.selectMarket(found)
+        showsMarket = true
     }
 }

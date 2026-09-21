@@ -61,6 +61,8 @@ targets:
           - webcredentials:desk-trading-opia.vercel.app
         # Trade alerts. Automatic signing turns this into "production" for TestFlight.
         aps-environment: development
+        # Price alerts break through Focus like a market does.
+        com.apple.developer.usernotifications.time-sensitive: true
         # Shared with the widget extension: auto-copy's switch and the glance it shows.
         com.apple.security.application-groups:
           - group.com.opia.desk

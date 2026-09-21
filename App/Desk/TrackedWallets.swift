@@ -92,3 +92,18 @@ final class TokenOpenRequest {
         return pending
     }
 }
+
+/// A perp market a push asked to see. The perps tab picks it up and opens it.
+@MainActor
+@Observable
+final class MarketOpenRequest {
+    static let shared = MarketOpenRequest()
+    private(set) var pending: String?
+
+    func open(_ symbol: String) { pending = symbol.uppercased() }
+
+    func take() -> String? {
+        defer { pending = nil }
+        return pending
+    }
+}

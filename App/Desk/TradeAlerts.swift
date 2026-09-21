@@ -68,6 +68,10 @@ final class TradeAlerts {
     private var syncTask: Task<Void, Never>?
 
     private static let storageKey = "desk.alertedTraders"
+    private static let pricesKey = "desk.alerts.prices"
+    /// Levels broken and big days on every Perpl market. On unless switched off.
+    private(set) var priceAlerts = UserDefaults.standard.object(forKey: "desk.alerts.prices") == nil
+        || UserDefaults.standard.bool(forKey: "desk.alerts.prices")
     private static let nicknameKey = "desk.traderNicknames"
     private static let primerKey = "desk.alertsPrimerShown"
     private static let endpoint = URL(string: "https://web-lovat-nine-49.vercel.app/api/alerts")!
@@ -122,8 +126,26 @@ final class TradeAlerts {
     /// Re-registers on launch, which also refreshes the server's copy before it expires.
     func resume() async {
         await refreshPermission()
-        guard !alerted.isEmpty, permission == .allowed else { return }
+        guard permission == .allowed, !alerted.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty else { return }
         UIApplication.shared.registerForRemoteNotifications()
+    }
+
+    /// Asks iOS if it has not been asked; false when notifications are off for Desk.
+    @discardableResult
+    func setPriceAlerts(_ on: Bool) async -> Bool {
+        if on {
+            let center = UNUserNotificationCenter.current()
+            if await center.notificationSettings().authorizationStatus == .notDetermined {
+                _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+            }
+            await refreshPermission()
+            guard permission == .allowed else { return false }
+        }
+        priceAlerts = on
+        UserDefaults.standard.set(on, forKey: Self.pricesKey)
+        if on { UIApplication.shared.registerForRemoteNotifications() }
+        scheduleSync()
+        return true
     }
 
     /// Asks iOS if it has not been asked, then watches the trader. False when notifications
@@ -264,6 +286,7 @@ final class TradeAlerts {
             "names": nicknames.filter { traders.contains($0.key) },
             "copying": copying,
             "wallets": TrackedWallets.shared.payload,
+            "prices": priceAlerts,
             "confirm": confirm,
         ]
         var request = URLRequest(url: Self.endpoint)
@@ -355,6 +378,11 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
         let userInfo = response.notification.request.content.userInfo
+        if let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "price",
+           let market = desk["market"] as? String {
+            await MainActor.run { MarketOpenRequest.shared.open(market) }
+            return
+        }
         if let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "wallet",
            let token = desk["token"] as? String {
             let wallet = desk["wallet"] as? String ?? ""

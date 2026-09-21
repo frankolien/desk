@@ -63,6 +63,17 @@ struct AccountScreen: View {
                             sectionDivider
 
                             SettingsRow(
+                                icon: "bell.badge.fill",
+                                tint: .purple,
+                                title: "Price alerts",
+                                subtitle: "Levels broken, 5% days",
+                                value: TradeAlerts.shared.priceAlerts ? "On" : "Off",
+                                action: { Task { await TradeAlerts.shared.setPriceAlerts(!TradeAlerts.shared.priceAlerts) } }
+                            )
+
+                            sectionDivider
+
+                            SettingsRow(
                                 icon: "network",
                                 tint: model.network.holdsRealFunds ? .orange : .purple,
                                 title: "Network",

@@ -3,6 +3,8 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { apnsClient, isDeadToken } from "./_apns.mjs";
 import { hypersyncClient, indexHistory } from "./_history.mjs";
 import { TRACKED_KEY, ledgerKey } from "./_ledger.mjs";
+import { createMarkets } from "./_markets.mjs";
+import { priceDeliveries } from "./_prices.mjs";
 import { redisStore } from "./_store.mjs";
 import {
   DEFAULT_MIN_USD, DIGEST_WINDOW_S, MAX_WALLETS, WALLET_PUSH_CAP, newestMarker, seenKey, walletCountKey, walletDigestKey,
@@ -41,7 +43,7 @@ const validAddress = (value) => typeof value === "string" && /^0x[a-fA-F0-9]{40}
 /// The subscription as stored, or the sentence explaining why it was refused.
 export function parseSubscription(body) {
   if (!body || typeof body !== "object") return { error: "A JSON body is required." };
-  const { install, token, environment, traders, names, copying, wallets } = body;
+  const { install, token, environment, traders, names, copying, wallets, prices } = body;
   if (typeof install !== "string" || !/^[0-9a-f]{64}$/.test(install)) return { error: "A valid install secret is required." };
   if (typeof token !== "string" || !/^[0-9a-fA-F]{64,200}$/.test(token)) return { error: "A valid device token is required." };
   if (!Array.isArray(traders) || traders.length > MAX_TRADERS || !traders.every(validAddress)) {
@@ -70,7 +72,9 @@ export function parseSubscription(body) {
       copying: copied,
       names: labels,
       wallets: tracked,
+      prices: prices !== false,
     },
+    wantsPrices: prices === true,
   };
 }
 
@@ -310,17 +314,19 @@ async function walletDeliveries({ store, watchers, now }) {
   return { deliveries, markers, events };
 }
 
-export async function scan({ store, chain, apns, markets, now = Date.now() }) {
+export async function scan({ store, chain, apns, markets, quotes = [], now = Date.now() }) {
   const ids = await store.smembers(SUBSCRIPTIONS);
-  if (ids.length === 0) return { subscriptions: 0, traders: 0, sent: 0, wallets: { watched: 0, events: 0, sent: 0 } };
+  if (ids.length === 0) return { subscriptions: 0, traders: 0, sent: 0, wallets: { watched: 0, events: 0, sent: 0 }, prices: { events: 0, sent: 0 } };
 
   const records = await store.mget(ids.map(subscriptionKey));
   const expired = [];
   const followers = new Map();
   const watchers = new Map();
+  const everyone = [];
   ids.forEach((id, index) => {
     if (!records[index]) return expired.push(id);
     const record = JSON.parse(records[index]);
+    everyone.push({ id, record });
     for (const address of new Set([...record.traders, ...(record.copying ?? [])])) {
       followers.set(address, [...(followers.get(address) ?? []), { id, record }]);
     }
@@ -366,6 +372,9 @@ export async function scan({ store, chain, apns, markets, now = Date.now() }) {
   await store.setMany(tracked.markers, SEEN_TTL);
   const traderDeliveries = deliveries.length;
   deliveries.push(...tracked.deliveries);
+  const walletDeliveriesCount = tracked.deliveries.length;
+  const priced = await priceDeliveries({ store, quotes, subscribers: everyone, now });
+  deliveries.push(...priced.deliveries);
 
   const results = await inBatches(deliveries, 10, ({ record, payload, collapseId, background }) =>
     apns.send(record, payload, { collapseId, background }));
@@ -391,7 +400,11 @@ export async function scan({ store, chain, apns, markets, now = Date.now() }) {
     wallets: {
       watched: watchers.size,
       events: tracked.events,
-      sent: results.slice(traderDeliveries).filter((result) => result.status === 200).length,
+      sent: results.slice(traderDeliveries, traderDeliveries + walletDeliveriesCount).filter((result) => result.status === 200).length,
+    },
+    prices: {
+      events: priced.events,
+      sent: results.slice(traderDeliveries + walletDeliveriesCount).filter((result) => result.status === 200).length,
     },
   };
 }
@@ -442,7 +455,8 @@ export function createHandler(resolve) {
         const markets = await deps.markets();
         for (let round = 0; round < rounds; round += 1) {
           if (round > 0) await deps.sleep(ROUND_INTERVAL_MS);
-          const report = await scan({ store, chain: deps.chain, apns, markets });
+          const quotes = deps.quotes ? await deps.quotes().catch(() => []) : [];
+          const report = await scan({ store, chain: deps.chain, apns, markets, quotes });
           reports.push(report);
           // Nobody to alert: later rounds would only spend commands.
           if (report.subscriptions === 0) break;
@@ -472,10 +486,10 @@ export function createHandler(resolve) {
 
     const parsed = parseSubscription(body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
-    const { id, record } = parsed;
+    const { id, record, wantsPrices } = parsed;
 
-    // Nothing to follow, copy or track is a request to be forgotten.
-    if (record.traders.length === 0 && record.copying.length === 0 && record.wallets.length === 0) {
+    // Nothing to follow, copy, track or watch for is a request to be forgotten.
+    if (record.traders.length === 0 && record.copying.length === 0 && record.wallets.length === 0 && !wantsPrices) {
       await store.del(subscriptionKey(id));
       await store.srem(SUBSCRIPTIONS, id);
       return res.status(200).json({ traders: 0 });
@@ -500,8 +514,10 @@ export function createHandler(resolve) {
       const result = await apns.send(record, {
         aps: {
           alert: {
-            title: first ? "Trade alerts are on" : copied ? "Away copying is on" : "Wallet alerts are on",
-            body: !first && !copied
+            title: first ? "Trade alerts are on" : copied ? "Away copying is on" : tracked.length ? "Wallet alerts are on" : "Price alerts are on",
+            body: !first && !copied && !tracked.length
+              ? "You'll hear when Bitcoin, Ether, Solana or any Perpl market breaks a level or moves 5% in a day."
+              : !first && !copied
               ? (tracked.length === 1
                 ? `You'll hear when ${tracked[0].name || shortAddress(tracked[0].address)} trades on Monad.`
                 : `You'll hear when any of your ${tracked.length} tracked wallets trades on Monad.`)
@@ -541,6 +557,15 @@ export default createHandler(() => (production ??= {
   hypersync: hypersyncClient(),
   chain: chainReader(),
   markets: () => openMarkets(),
+  quotes: (() => {
+    let source = null;
+    // Marks off the exchange contract, so a level is crossed when the venue says so.
+    return async () => {
+      source ??= createMarkets();
+      const [{ markets: rows }, { marks }] = await Promise.all([source.context(), source.marks()]);
+      return rows.map((row) => ({ name: row.name, mark: marks[row.name] ?? row.mark, prev: row.prev }));
+    };
+  })(),
   secret: process.env.CRON_SECRET,
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }));
