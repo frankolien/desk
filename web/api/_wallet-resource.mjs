@@ -34,7 +34,34 @@ export async function walletResource(address, { chainIndex = MONAD, contract = "
   }
 
   const ledger = await monadLedger(wanted, { store, hypersync, now });
-  return { address: wanted, observedAt: now(), identity, ...wallet, ledger };
+  const labels = walletLabels({ identity, ledger, holdings: wallet.holdings, now: now() });
+  return { address: wanted, observedAt: now(), identity, ...wallet, ledger, labels };
+}
+
+/// Descriptions, not verdicts: what the ledger says this wallet is like. Only a
+/// sanctions source would justify a red label, and there is none in the stack.
+export function walletLabels({ identity = null, ledger = {}, holdings = [], now = Date.now() } = {}) {
+  const labels = [];
+  const trades = ledger.trades ?? [];
+  const day = trades.filter((trade) => now - trade.time < 86_400_000).length;
+  const decided = (ledger.tokens ?? []).length;
+  const sells = trades.filter((trade) => trade.side === "sell");
+  const wins = sells.filter((trade) => trade.gain >= 0).length;
+  if (day >= 50) labels.push({ code: "bot", text: `Trades like a bot: ${day} trades today` });
+  if (ledger.status === "ready" && trades.length === 0 && (ledger.tokens ?? []).some((token) => token.unpriced > 0 && token.holding === 0)) {
+    labels.push({ code: "contract", text: "Never sends a transaction — likely a contract" });
+  }
+  if (sells.length >= 20 && wins / sells.length >= 0.55 && (ledger.realized ?? 0) > 0) {
+    labels.push({ code: "top", text: `Wins ${Math.round((wins / sells.length) * 100)}% of ${sells.length} closed trades` });
+  }
+  if (identity?.perplAccount) labels.push({ code: "perpl", text: `Trades perps here · Perpl #${identity.perplAccount}` });
+  if (trades.length > 0) {
+    const first = Math.min(...trades.map((trade) => trade.time));
+    const days = (now - first) / 86_400_000;
+    if (days < 7 && ledger.status === "ready") labels.push({ code: "fresh", text: `First trade seen ${Math.max(1, Math.round(days))} day${Math.round(days) === 1 ? "" : "s"} ago` });
+  }
+  void decided; void holdings;
+  return labels;
 }
 
 /// OKX refuses a whole balance call if one chain in it is not one it serves, and which

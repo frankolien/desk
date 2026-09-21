@@ -1,5 +1,6 @@
 import { okxGet, okxPost } from "./_okx.mjs";
 import { handleHoldings } from "./_holdings.mjs";
+import { handleRisk } from "./_risk.mjs";
 
 const TOKENS = {
   BTC: { chainIndex: "1", address: "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599" },
@@ -11,6 +12,7 @@ const TOKENS = {
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
   if (req.query.view === "holdings") return handleHoldings(req, res);
+  if (req.query.view === "risk") return handleRisk(req, res);
   // The worker on Railway prices trades through here, so OKX's key stays on Vercel.
   if (req.query.view === "candle") {
     const secret = process.env.CRON_SECRET;

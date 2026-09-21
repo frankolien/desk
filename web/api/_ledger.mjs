@@ -25,6 +25,7 @@ export const NATIVE = "native";
 export const LEDGER_VERSION = 1;
 export const ledgerKey = (address) => `wl:${address.toLowerCase()}`;
 export const TRACKED_KEY = "wl:tracked";
+export const HEARTBEAT_KEY = "wl:heartbeat";
 const KEEP_TRADES = 300;
 
 const lower = (value) => String(value ?? "").toLowerCase();

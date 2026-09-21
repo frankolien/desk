@@ -2,7 +2,12 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 import { apnsClient, isDeadToken } from "./_apns.mjs";
 import { hypersyncClient, indexHistory } from "./_history.mjs";
+import { TRACKED_KEY, ledgerKey } from "./_ledger.mjs";
 import { redisStore } from "./_store.mjs";
+import {
+  DEFAULT_MIN_USD, DIGEST_WINDOW_S, MAX_WALLETS, WALLET_PUSH_CAP, newestMarker, seenKey, walletCountKey, walletDigestKey,
+  walletEvents, walletPayload,
+} from "./_watch.mjs";
 import { chainReader, describePosition, openMarkets, perpIdsFromBitmap } from "./traders.mjs";
 
 /// Trade alerts for followed traders.
@@ -21,6 +26,7 @@ const MAX_SCANNED = 300;
 const MAX_EVENTS_PER_TRADER = 4;
 const SUBSCRIPTION_TTL = 60 * 24 * 3600;
 const SNAPSHOT_TTL = 7 * 24 * 3600;
+const SEEN_TTL = 30 * 24 * 3600;
 const ROUND_INTERVAL_MS = 14_000;
 const MAX_ROUNDS = 4;
 const SUBSCRIPTIONS = "alerts:subs";
@@ -35,7 +41,7 @@ const validAddress = (value) => typeof value === "string" && /^0x[a-fA-F0-9]{40}
 /// The subscription as stored, or the sentence explaining why it was refused.
 export function parseSubscription(body) {
   if (!body || typeof body !== "object") return { error: "A JSON body is required." };
-  const { install, token, environment, traders, names, copying } = body;
+  const { install, token, environment, traders, names, copying, wallets } = body;
   if (typeof install !== "string" || !/^[0-9a-f]{64}$/.test(install)) return { error: "A valid install secret is required." };
   if (typeof token !== "string" || !/^[0-9a-fA-F]{64,200}$/.test(token)) return { error: "A valid device token is required." };
   if (!Array.isArray(traders) || traders.length > MAX_TRADERS || !traders.every(validAddress)) {
@@ -44,6 +50,8 @@ export function parseSubscription(body) {
   if (copying != null && (!Array.isArray(copying) || copying.length > MAX_TRADERS || !copying.every(validAddress))) {
     return { error: `Up to ${MAX_TRADERS} copied addresses are allowed.` };
   }
+  const tracked = wallets == null ? [] : parseWallets(wallets);
+  if (!tracked) return { error: `Up to ${MAX_WALLETS} tracked wallets are allowed, each with an address, an optional name and a minimum in dollars.` };
   const followed = [...new Set(traders.map((address) => address.toLowerCase()))];
   const copied = [...new Set((copying ?? []).map((address) => address.toLowerCase()))];
   const labels = {};
@@ -61,8 +69,33 @@ export function parseSubscription(body) {
       traders: followed,
       copying: copied,
       names: labels,
+      wallets: tracked,
     },
   };
+}
+
+/// The tracked wallets as stored, or null when any entry is malformed.
+function parseWallets(wallets) {
+  if (!Array.isArray(wallets) || wallets.length > MAX_WALLETS) return null;
+  const out = [];
+  const seen = new Set();
+  for (const entry of wallets) {
+    if (!entry || typeof entry !== "object" || !validAddress(entry.address)) return null;
+    const { name, minUsd, firstBuysOnly } = entry;
+    if (name != null && typeof name !== "string") return null;
+    if (minUsd != null && (typeof minUsd !== "number" || !Number.isFinite(minUsd) || minUsd < 0)) return null;
+    if (firstBuysOnly != null && typeof firstBuysOnly !== "boolean") return null;
+    const address = entry.address.toLowerCase();
+    if (seen.has(address)) continue;
+    seen.add(address);
+    out.push({
+      address,
+      name: typeof name === "string" && name.trim() ? name.trim().slice(0, 24) : null,
+      minUsd: minUsd ?? DEFAULT_MIN_USD,
+      firstBuysOnly: firstBuysOnly === true,
+    });
+  }
+  return out;
 }
 
 /// Wakes the app in the background so the copy loop can take the copy itself. Nothing
@@ -230,18 +263,69 @@ async function inBatches(items, size, work) {
   return out;
 }
 
-export async function scan({ store, chain, apns, markets }) {
+/// Pushes for tracked wallets' new trades, and the seen markers to write before sending.
+async function walletDeliveries({ store, watchers, now }) {
+  const addresses = [...watchers.keys()];
+  if (addresses.length === 0) return { deliveries: [], markers: [], events: 0 };
+  const [ledgers, seen] = await Promise.all([
+    store.mget(addresses.map(ledgerKey)),
+    store.mget(addresses.map(seenKey)),
+  ]);
+  const markers = [];
+  const deliveries = [];
+  const perSubscription = new Map();
+  let events = 0;
+  addresses.forEach((address, index) => {
+    if (!ledgers[index]) return;
+    const ledger = JSON.parse(ledgers[index]);
+    markers.push([seenKey(address), JSON.stringify(newestMarker(ledger))]);
+    // The first reading is the baseline, as with trader books.
+    if (seen[index] == null) return;
+    const previous = JSON.parse(seen[index]);
+    for (const { id, record, wallet } of watchers.get(address)) {
+      const found = walletEvents(previous, ledger, { minUsd: wallet.minUsd, firstBuysOnly: wallet.firstBuysOnly });
+      if (found.length === 0) continue;
+      events += found.length;
+      const bucket = perSubscription.get(id) ?? { record, wallets: new Set(), pending: [] };
+      bucket.wallets.add(address);
+      for (const event of found) bucket.pending.push({ wallet, event });
+      perSubscription.set(id, bucket);
+    }
+  });
+
+  const hour = Math.floor(now / 3_600_000);
+  for (const [id, { record, wallets, pending }] of perSubscription) {
+    let capped = false;
+    for (const { wallet, event } of pending) {
+      const count = await store.incr(walletCountKey(id, hour));
+      if (count === 1) await store.expire(walletCountKey(id, hour), 3600);
+      if (count > WALLET_PUSH_CAP) { capped = true; continue; }
+      deliveries.push({ id, record, payload: walletPayload(record, wallet, event),
+        collapseId: `w-${wallet.address.slice(2, 14)}-${String(event.token).slice(2, 10)}-${event.kind}` });
+    }
+    if (capped && await store.set(walletDigestKey(id), "1", { ex: DIGEST_WINDOW_S, nx: true })) {
+      deliveries.push({ id, record, payload: walletPayload(record, null, { kind: "digest", count: wallets.size }), collapseId: "w-digest" });
+    }
+  }
+  return { deliveries, markers, events };
+}
+
+export async function scan({ store, chain, apns, markets, now = Date.now() }) {
   const ids = await store.smembers(SUBSCRIPTIONS);
-  if (ids.length === 0) return { subscriptions: 0, traders: 0, sent: 0 };
+  if (ids.length === 0) return { subscriptions: 0, traders: 0, sent: 0, wallets: { watched: 0, events: 0, sent: 0 } };
 
   const records = await store.mget(ids.map(subscriptionKey));
   const expired = [];
   const followers = new Map();
+  const watchers = new Map();
   ids.forEach((id, index) => {
     if (!records[index]) return expired.push(id);
     const record = JSON.parse(records[index]);
     for (const address of new Set([...record.traders, ...(record.copying ?? [])])) {
       followers.set(address, [...(followers.get(address) ?? []), { id, record }]);
+    }
+    for (const wallet of record.wallets ?? []) {
+      watchers.set(wallet.address, [...(watchers.get(wallet.address) ?? []), { id, record, wallet }]);
     }
   });
   await store.srem(SUBSCRIPTIONS, ...expired);
@@ -278,6 +362,11 @@ export async function scan({ store, chain, apns, markets }) {
   // Saved before anything is sent, so a scan that dies mid-delivery cannot repeat itself.
   await store.setMany(snapshots, SNAPSHOT_TTL);
 
+  const tracked = await walletDeliveries({ store, watchers, now });
+  await store.setMany(tracked.markers, SEEN_TTL);
+  const traderDeliveries = deliveries.length;
+  deliveries.push(...tracked.deliveries);
+
   const results = await inBatches(deliveries, 10, ({ record, payload, collapseId, background }) =>
     apns.send(record, payload, { collapseId, background }));
   const dead = new Set();
@@ -299,6 +388,11 @@ export async function scan({ store, chain, apns, markets }) {
     traders: addresses.length,
     sent: results.filter((result) => result.status === 200).length,
     failed: results.filter((result) => result.status !== 200).length,
+    wallets: {
+      watched: watchers.size,
+      events: tracked.events,
+      sent: results.slice(traderDeliveries).filter((result) => result.status === 200).length,
+    },
   };
 }
 
@@ -353,6 +447,7 @@ export function createHandler(resolve) {
           // Nobody to alert: later rounds would only spend commands.
           if (report.subscriptions === 0) break;
         }
+        await store.set("alerts:lastScan", new Date().toISOString(), { ex: 7 * 86400 }).catch(() => {});
         return res.status(200).json({ rounds: reports });
       } catch {
         return res.status(502).json({ error: "The scan could not finish.", rounds: reports });
@@ -379,8 +474,8 @@ export function createHandler(resolve) {
     if (parsed.error) return res.status(400).json({ error: parsed.error });
     const { id, record } = parsed;
 
-    // Nothing to follow and nothing to copy is a request to be forgotten.
-    if (record.traders.length === 0 && record.copying.length === 0) {
+    // Nothing to follow, copy or track is a request to be forgotten.
+    if (record.traders.length === 0 && record.copying.length === 0 && record.wallets.length === 0) {
       await store.del(subscriptionKey(id));
       await store.srem(SUBSCRIPTIONS, id);
       return res.status(200).json({ traders: 0 });
@@ -401,11 +496,16 @@ export function createHandler(resolve) {
       const first = record.traders[0];
       const who = first ? (record.names[first] || shortAddress(first)) : null;
       const copied = record.copying.length;
+      const tracked = record.wallets;
       const result = await apns.send(record, {
         aps: {
           alert: {
-            title: first ? "Trade alerts are on" : "Away copying is on",
-            body: !first
+            title: first ? "Trade alerts are on" : copied ? "Away copying is on" : "Wallet alerts are on",
+            body: !first && !copied
+              ? (tracked.length === 1
+                ? `You'll hear when ${tracked[0].name || shortAddress(tracked[0].address)} trades on Monad.`
+                : `You'll hear when any of your ${tracked.length} tracked wallets trades on Monad.`)
+              : !first
               ? `Desk will wake to copy ${copied === 1 ? "your trader" : `your ${copied} traders`} while it's closed.`
               : record.traders.length === 1
                 ? `You'll hear the moment ${who} opens, adds to or closes a position.`
@@ -429,7 +529,8 @@ export function createHandler(resolve) {
 
     await store.set(subscriptionKey(id), JSON.stringify({ ...record, environment }), { ex: SUBSCRIPTION_TTL });
     await store.sadd(SUBSCRIPTIONS, id);
-    return res.status(200).json({ traders: record.traders.length, confirmed });
+    for (const wallet of record.wallets) await store.sadd(TRACKED_KEY, wallet.address);
+    return res.status(200).json({ traders: record.traders.length, ...(record.wallets.length ? { wallets: record.wallets.length } : {}), confirmed });
   };
 }
 

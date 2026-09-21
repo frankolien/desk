@@ -3,6 +3,7 @@ import { createPublicClient, http } from "viem";
 import { describe, shardKey, shardOf, statistics, tradesKey } from "./_history.mjs";
 import { MAX_ADDRESSES, ensReader, resolveIdentities } from "./_identity.mjs";
 import { EXCHANGE_VIEWS } from "./_perpl-abi.mjs";
+import { DEFAULT_WINDOW, WINDOWS, cachedSignals } from "./_signals.mjs";
 import { redisStore } from "./_store.mjs";
 
 /// Perpl mainnet, read-only. Following is about real traders, so it reads the live venue
@@ -314,6 +315,18 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
         });
       } catch {
         return res.status(502).json({ error: "Trader history could not be read right now." });
+      }
+    }
+
+    if (view === "signals") {
+      if (!store) return res.status(503).json({ error: "Token signals aren't configured on this server." });
+      const window = WINDOWS[String(req.query.window ?? "")] ? String(req.query.window) : DEFAULT_WINDOW;
+      try {
+        const signals = await cachedSignals({ store, window });
+        res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
+        return res.status(200).json(signals);
+      } catch {
+        return res.status(502).json({ error: "Token signals could not be computed right now." });
       }
     }
 

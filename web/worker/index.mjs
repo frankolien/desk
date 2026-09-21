@@ -1,5 +1,5 @@
 import { hypersyncClient } from "../api/_history.mjs";
-import { TRACKED_KEY, indexWallet, ledgerKey } from "../api/_ledger.mjs";
+import { HEARTBEAT_KEY, TRACKED_KEY, indexWallet, ledgerKey } from "../api/_ledger.mjs";
 import { redisStore } from "../api/_store.mjs";
 import { metaReader, priceReader } from "../api/_wallet.mjs";
 
@@ -61,6 +61,8 @@ async function round() {
     }
   }
   console.log(`worker: ${indexed}/${wallets.length} wallets, ${behind} still behind`);
+  // The health endpoint reads this to say whether the indexer is alive.
+  await store.set(HEARTBEAT_KEY, JSON.stringify({ at: Date.now(), wallets: wallets.length, indexed, behind }), { ex: 3600 }).catch(() => {});
 }
 
 while (!stopping) {

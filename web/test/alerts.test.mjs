@@ -163,6 +163,7 @@ test("the scan needs the scheduler's secret and runs one at a time", async () =>
   const res = await handler({ method: "GET", query: { job: "scan", rounds: "2" }, headers: { authorization: "Bearer s3cret" } }, recorder());
   // No subscribers: the first round says so and the rest are skipped.
   assert.equal(res.body.rounds.length, 1);
+  assert.ok(Date.parse(store.values.get("alerts:lastScan")) > 0);
   await store.set("alerts:lock", "1");
   const skipped = await handler({ method: "GET", query: { job: "scan" }, headers: { authorization: "Bearer s3cret" } }, recorder());
   assert.equal(skipped.body.skipped, true);
