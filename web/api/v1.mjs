@@ -1,4 +1,5 @@
 import { createHealth } from "./_health.mjs";
+import { BARS, createMarkets } from "./_markets.mjs";
 import { TIERS, clientIp, rateLimit } from "./_ratelimit.mjs";
 import { redisStore } from "./_store.mjs";
 import { createHandler as activityHandler } from "./activity.mjs";
@@ -11,6 +12,8 @@ const TOP_LIMIT = 25;
 
 const CACHE = {
   top: "public, s-maxage=30, stale-while-revalidate=300",
+  markets: "public, s-maxage=10, stale-while-revalidate=60",
+  candles: "public, s-maxage=60, stale-while-revalidate=300",
   slow: "public, s-maxage=60, stale-while-revalidate=600",
   signals: "public, s-maxage=15, stale-while-revalidate=120",
   none: "no-store",
@@ -27,6 +30,8 @@ const PROBLEMS = {
 };
 
 export const ENDPOINTS = [
+  { path: "/api/v1/markets", tier: "default", description: "Every open Perpl market: mark, 24h change and volume, open interest, funding, leverage" },
+  { path: "/api/v1/markets/{market}/candles", tier: "default", description: "Exchange candles for a market's asset. ?bar=1m|5m|15m|1H|4H|1D" },
   { path: "/api/v1/traders/top", tier: "default", description: "Top traders on Perpl by unrealised PnL. ?limit=1..25" },
   { path: "/api/v1/traders/{address}/history", tier: "expensive", description: "A trader's closed trades and statistics" },
   { path: "/api/v1/identity/{address}", tier: "default", description: "Names and avatars for an address (.nad, nad.fun, ENS, Farcaster)" },
@@ -78,9 +83,10 @@ export function createHandler({
   traders = null,
   activity = null,
   health = null,
+  markets = null,
   now = Date.now,
 } = {}) {
-  const deps = { traders, activity, health };
+  const deps = { traders, activity, health, markets };
   const get = (name, make) => (deps[name] ??= make());
 
   return async function handler(req, res) {
@@ -147,6 +153,26 @@ export function createHandler({
         ]);
         return envelope(200, { day, requestsToday: Number(requests ?? 0), trackedWallets: tracked ?? 0, alertSubscriptions: subs ?? 0 }, CACHE.top);
       }
+      case "markets": {
+        try {
+          const { collateral, markets: rows } = await get("markets", () => createMarkets({ now })).context();
+          return envelope(200, { collateral, markets: rows }, CACHE.markets);
+        } catch (error) {
+          return fail(problem("upstream_unavailable", `Perpl's market list could not be read: ${error.message}`, instance));
+        }
+      }
+      case "candles": {
+        const bar = String(query.bar ?? "15m");
+        if (!BARS.has(bar)) return fail(problem("invalid_request", "bar must be one of 1m, 5m, 15m, 1H, 4H, 1D.", instance));
+        const source = get("markets", () => createMarkets({ now }));
+        if (!source.hasInstrument(route.market)) return fail(problem("not_found", `No candles for ${route.market}.`, instance));
+        try {
+          const rows = await source.candles(route.market, bar);
+          return envelope(200, { market: route.market.toUpperCase(), bar, candles: rows ?? [] }, CACHE.candles);
+        } catch (error) {
+          return fail(problem("upstream_unavailable", `Candles could not be read: ${error.message}`, instance));
+        }
+      }
       case "top": {
         const wanted = Math.min(TOP_LIMIT, Math.max(1, Number.parseInt(String(query.limit ?? TOP_LIMIT), 10) || TOP_LIMIT));
         const out = relay(await capture(get("traders", () => tradersHandler({ store })), { view: "top" }), instance);
@@ -184,6 +210,8 @@ function match(segments) {
   if (segments.length === 0) return { name: "index", tier: "default" };
   if (segments.length === 1 && a === "health") return { name: "health", tier: "default" };
   if (segments.length === 1 && a === "stats") return { name: "stats", tier: "default" };
+  if (segments.length === 1 && a === "markets") return { name: "markets", tier: "default" };
+  if (segments.length === 3 && a === "markets" && c === "candles" && /^[A-Za-z0-9]{1,12}$/.test(b)) return { name: "candles", tier: "default", market: b };
   if (segments.length === 2 && a === "traders" && b === "top") return { name: "top", tier: "default" };
   if (segments.length === 3 && a === "traders" && c === "history") return { name: "history", tier: "expensive", address: b };
   if (segments.length === 2 && a === "identity") return { name: "identity", tier: "default", address: b };

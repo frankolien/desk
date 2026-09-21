@@ -10,6 +10,7 @@
   "externalDocs": { "url": "https://trydesk.trade/docs" },
   "servers": [{ "url": "https://trydesk.trade" }],
   "tags": [
+    { "name": "Markets", "description": "Perpl's open markets and exchange candles for their assets." },
     { "name": "Traders", "description": "Perpl traders: the leaderboard and one trader's closed trades." },
     { "name": "Identity", "description": "Names and avatars for an address." },
     { "name": "Wallets", "description": "Holdings and the Monad ledger of a wallet." },
@@ -34,7 +35,11 @@
                   "data": {
                     "name": "Desk API", "version": "1", "docs": "https://trydesk.trade/docs", "openapi": "https://trydesk.trade/openapi.json", "health": "/api/v1/health",
                     "rateLimits": { "default": "60/min", "expensive": "10/min" },
-                    "endpoints": [{ "path": "/api/v1/traders/top", "tier": "default", "description": "Top traders on Perpl by unrealised PnL. ?limit=1..25" }]
+                    "endpoints": [
+                      { "path": "/api/v1/markets", "tier": "default", "description": "Every open Perpl market: mark, 24h change and volume, open interest, funding, leverage" },
+                      { "path": "/api/v1/markets/{market}/candles", "tier": "default", "description": "Exchange candles for a market's asset. ?bar=1m|5m|15m|1H|4H|1D" },
+                      { "path": "/api/v1/traders/top", "tier": "default", "description": "Top traders on Perpl by unrealised PnL. ?limit=1..25" }
+                    ]
                   },
                   "meta": { "asOf": "2026-09-21T03:06:42.396Z", "chain": "monad", "cached": false }
                 }
@@ -42,6 +47,95 @@
             }
           },
           "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/markets": {
+      "get": {
+        "operationId": "listMarkets",
+        "tags": ["Markets"],
+        "summary": "Every open Perpl market",
+        "description": "Perpl's market list read from its public context and turned into decimal numbers: mark and previous mark, 24h change and volume, open interest, TVL, funding, the leverage cap, fees and margin. Prices are at each market's own scale (`priceDecimals`), money is in the collateral token. Closed markets are left out. Default tier; cached 10 s.",
+        "responses": {
+          "200": {
+            "description": "The collateral token and every open market.",
+            "headers": { "$ref": "#/components/headers/RateLimit" },
+            "content": {
+              "application/json": {
+                "schema": { "allOf": [{ "$ref": "#/components/schemas/Envelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Markets" } } }] },
+                "example": {
+                  "data": {
+                    "collateral": "AUSD",
+                    "markets": [
+                      { "id": 1, "name": "BTC", "mark": 81336.1, "prev": 80450.8, "change": 0.011004241101393683, "volume24h": 40231735.848404, "openInterest": 444435.90425900003, "tvl": 165893.458031, "fundingRate": 0.00004, "fundingIntervalSec": 2580, "maxLeverage": 15, "priceDecimals": 1, "sizeDecimals": 5, "makerFee": 90, "takerFee": 690, "maintenanceMargin": 2500, "isOpen": true },
+                      { "id": 10, "name": "MON", "mark": 0.024766, "prev": 0.024106, "change": 0.027379075748776276, "volume24h": 455063.158205, "openInterest": 173152.47964, "tvl": 116062.974387, "fundingRate": 0, "fundingIntervalSec": 2580, "maxLeverage": 10, "priceDecimals": 6, "sizeDecimals": 0, "makerFee": 90, "takerFee": 690, "maintenanceMargin": 2000, "isOpen": true }
+                    ]
+                  },
+                  "meta": { "asOf": "2026-09-21T04:37:15.970Z", "chain": "monad", "cached": false }
+                }
+              }
+            }
+          },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": {
+            "description": "Perpl's market list could not be read. Retry with backoff.",
+            "headers": { "$ref": "#/components/headers/RateLimit" },
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" }, "example": { "type": "https://trydesk.trade/docs#error-upstream_unavailable", "title": "Upstream unavailable", "status": 503, "detail": "Perpl's market list could not be read: Perpl HTTP 502", "instance": "/api/v1/markets", "code": "upstream_unavailable" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/markets/{market}/candles": {
+      "get": {
+        "operationId": "marketCandles",
+        "tags": ["Markets"],
+        "summary": "Exchange candles for a market's asset",
+        "description": "Perpl publishes no candle history, so these are the asset's own tape on OKX (`BTC-USDT` for the BTC market, and so on); the mark shown beside them in the app is Perpl's. Up to 300 candles, oldest first, at the `bar` size asked for. A market Desk has no instrument for answers `not_found`. Default tier; cached 60 s.",
+        "parameters": [
+          { "$ref": "#/components/parameters/Market" },
+          {
+            "name": "bar", "in": "query", "required": false,
+            "description": "Candle size. Case matters: minutes are lowercase, hours and days uppercase. Anything else is refused with `invalid_request`.",
+            "schema": { "type": "string", "enum": ["1m", "5m", "15m", "1H", "4H", "1D"], "default": "15m" },
+            "example": "1H"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Candles for the market's asset, oldest first.",
+            "headers": { "$ref": "#/components/headers/RateLimit" },
+            "content": {
+              "application/json": {
+                "schema": { "allOf": [{ "$ref": "#/components/schemas/Envelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/MarketCandles" } } }] },
+                "example": {
+                  "data": {
+                    "market": "BTC", "bar": "1H",
+                    "candles": [
+                      { "time": 1789959600, "open": 81318.5, "high": 81581.1, "low": 81250.1, "close": 81444.6, "volume": 110.48540878 },
+                      { "time": 1789963200, "open": 81444.6, "high": 81477.4, "low": 81234.6, "close": 81366.9, "volume": 79.72985612 }
+                    ]
+                  },
+                  "meta": { "asOf": "2026-09-21T04:37:21.649Z", "chain": "monad", "cached": false }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown bar.",
+            "headers": { "$ref": "#/components/headers/RateLimit" },
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" }, "example": { "type": "https://trydesk.trade/docs#error-invalid_request", "title": "Invalid request", "status": 400, "detail": "bar must be one of 1m, 5m, 15m, 1H, 4H, 1D.", "instance": "/api/v1/markets/BTC/candles", "code": "invalid_request" } } }
+          },
+          "404": {
+            "description": "The market name is well-formed but Desk has no exchange instrument for it.",
+            "headers": { "$ref": "#/components/headers/RateLimit" },
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" }, "example": { "type": "https://trydesk.trade/docs#error-not_found", "title": "Not found", "status": 404, "detail": "No candles for DOGE.", "instance": "/api/v1/markets/DOGE/candles", "code": "not_found" } } }
+          },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": {
+            "description": "The exchange did not answer or refused the request. Retry with backoff.",
+            "headers": { "$ref": "#/components/headers/RateLimit" },
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" }, "example": { "type": "https://trydesk.trade/docs#error-upstream_unavailable", "title": "Upstream unavailable", "status": 503, "detail": "Candles could not be read: OKX HTTP 503", "instance": "/api/v1/markets/BTC/candles", "code": "upstream_unavailable" } } }
+          }
         }
       }
     },
@@ -301,6 +395,12 @@
         "description": "A wallet address: 0x followed by 40 hex characters, in any case. Anything else is refused with `invalid_address` before any lookup.",
         "schema": { "$ref": "#/components/schemas/Address" },
         "example": "0x95d2602d30da1179fd13274839e60345857ca648"
+      },
+      "Market": {
+        "name": "market", "in": "path", "required": true,
+        "description": "A market name as listed by `/api/v1/markets`: letters and digits, 1 to 12 characters, in any case. Anything else is not a route (`unknown_route`); a well-formed name with no instrument is `not_found`.",
+        "schema": { "type": "string", "pattern": "^[A-Za-z0-9]{1,12}$", "examples": ["BTC", "ETH", "SOL", "MON", "HYPE", "ZEC", "LIT", "PUMP"] },
+        "example": "BTC"
       }
     },
     "headers": {
@@ -379,6 +479,58 @@
           "health": { "type": "string" },
           "rateLimits": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Tier name to \"N/min\"." },
           "endpoints": { "type": "array", "items": { "type": "object", "required": ["path", "tier", "description"], "properties": { "path": { "type": "string" }, "tier": { "type": "string", "enum": ["default", "expensive"] }, "description": { "type": "string" } } } }
+        }
+      },
+      "Market": {
+        "type": "object",
+        "required": ["id", "name", "mark", "prev", "change", "volume24h", "openInterest", "tvl", "fundingRate", "fundingIntervalSec", "maxLeverage", "priceDecimals", "sizeDecimals", "makerFee", "takerFee", "maintenanceMargin", "isOpen"],
+        "properties": {
+          "id": { "type": "integer", "description": "Perpl's numeric perp id; the same number as `positions[].marketId` on the leaderboard." },
+          "name": { "type": "string", "description": "Market symbol, e.g. BTC. The value `{market}` takes on the candles route." },
+          "mark": { "type": "number", "description": "Current mark price as a decimal number at the market's own scale: BTC 81336.1 with `priceDecimals` 1, MON 0.024766 with 6." },
+          "prev": { "type": "number", "description": "The mark 24 hours ago, same scale." },
+          "change": { "type": ["number", "null"], "description": "24h move as a fraction of `prev`: 0.011 is +1.1%. null when `prev` is 0." },
+          "volume24h": { "type": "number", "description": "Notional traded in the last 24 hours, in the collateral token." },
+          "openInterest": { "type": "number", "description": "Open interest in the collateral token: units open × `mark`." },
+          "tvl": { "type": "number", "description": "Collateral locked in the market." },
+          "fundingRate": { "type": ["number", "null"], "description": "Funding as a fraction per interval: 0.00004 is 0.004% every `fundingIntervalSec` seconds. The contract calls it fundingRatePct100k. null when the venue reports none." },
+          "fundingIntervalSec": { "type": ["integer", "null"], "description": "Seconds between funding payments." },
+          "maxLeverage": { "type": "integer", "description": "Whole-number leverage cap: 100 over the initial-margin percentage, rounded down." },
+          "priceDecimals": { "type": "integer", "description": "Decimals the market quotes prices in; `mark`, `prev` and the candles are already scaled by it." },
+          "sizeDecimals": { "type": "integer", "description": "Decimals the market sizes positions in." },
+          "makerFee": { "type": "integer", "description": "Maker fee in micros of notional: 90 is 0.009%." },
+          "takerFee": { "type": "integer", "description": "Taker fee in micros of notional: 690 is 0.069%." },
+          "maintenanceMargin": { "type": "integer", "description": "Perpl's maintenance divisor in hundredths: the maintenance fraction is 100 / value, so 2500 is 4%." },
+          "isOpen": { "type": "boolean", "const": true, "description": "Always true here; closed markets are filtered out." }
+        }
+      },
+      "Markets": {
+        "type": "object",
+        "required": ["collateral", "markets"],
+        "properties": {
+          "collateral": { "type": "string", "description": "Symbol of the collateral token every money figure is in; AUSD." },
+          "markets": { "type": "array", "items": { "$ref": "#/components/schemas/Market" }, "description": "Every open market, in the venue's order." }
+        }
+      },
+      "Candle": {
+        "type": "object",
+        "required": ["time", "open", "high", "low", "close", "volume"],
+        "properties": {
+          "time": { "type": "integer", "description": "Unix seconds the candle opened." },
+          "open": { "type": "number", "description": "Exchange price at the open, quoted in USDT." },
+          "high": { "type": "number" },
+          "low": { "type": "number" },
+          "close": { "type": "number" },
+          "volume": { "type": "number", "description": "Base-asset units traded on the exchange in the candle." }
+        }
+      },
+      "MarketCandles": {
+        "type": "object",
+        "required": ["market", "bar", "candles"],
+        "properties": {
+          "market": { "type": "string", "description": "The market asked for, uppercased." },
+          "bar": { "type": "string", "enum": ["1m", "5m", "15m", "1H", "4H", "1D"], "description": "The candle size the answer covers." },
+          "candles": { "type": "array", "maxItems": 300, "items": { "$ref": "#/components/schemas/Candle" }, "description": "Oldest first; the last one is still forming." }
         }
       },
       "Position": {

@@ -125,7 +125,7 @@ async function nadfunToken(address, fetchImpl) {
 export async function handleRisk(req, res, { fetchImpl = fetch, okx = { get: okxGet, post: okxPost } } = {}) {
   const chainIndex = String(req.query.chainIndex ?? "");
   const address = String(req.query.address ?? "");
-  if (!/^\d{1,10}$/.test(chainIndex) || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+  if (!/^\d{1,10}$/.test(chainIndex) || !(/^0x[a-fA-F0-9]{40}$/.test(address) || (chainIndex === "501" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)))) {
     return res.status(400).json({ error: "chainIndex and a token address are required." });
   }
   const identity = { chainIndex, tokenContractAddress: address };
