@@ -839,7 +839,7 @@ private struct SpotTokenDetailScreen: View {
         .task(id: feed.holders.map(\.id)) { await IdentityDirectory.shared.resolve(feed.holders.map(\.wallet.address)) }
         .task(id: feed.transactions.map(\.wallet.address)) { await IdentityDirectory.shared.resolve(feed.transactions.map(\.wallet.address)) }
         .navigationDestination(item: $selectedWallet) { wallet in
-            WalletProfileScreen(wallet: wallet)
+            WalletProfileScreen(wallet: wallet, token: token, feed: feed)
                 .toolbar(.hidden, for: .tabBar)
         }
         .sheet(isPresented: Binding(
@@ -1336,7 +1336,7 @@ private final class SpotLiveFeed: ObservableObject {
         return nil
     }
 
-    nonisolated private static func compactUSD(_ value: Double?) -> String {
+    nonisolated fileprivate static func compactUSD(_ value: Double?) -> String {
         guard let value, value.isFinite, value != 0 else { return "—" }
         return "$" + compactNumber(value)
     }
@@ -1346,7 +1346,7 @@ private final class SpotLiveFeed: ObservableObject {
         return value.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
     }
 
-    nonisolated private static func compactNumber(_ value: Double?) -> String {
+    nonisolated fileprivate static func compactNumber(_ value: Double?) -> String {
         guard let value, value.isFinite else { return "—" }
         return value.formatted(.number.notation(.compactName).precision(.fractionLength(0...2)))
     }
@@ -1957,15 +1957,46 @@ private struct WalletMark: View {
     }
 }
 
+private struct WalletSummary: Decodable {
+    struct Held: Decodable { let balance: Double; let value: Double? }
+    struct Row: Decodable, Identifiable {
+        let contract: String
+        let symbol: String
+        let balance: Double
+        let value: Double?
+        var id: String { contract }
+    }
+    let portfolio: Double?
+    let held: Held?
+    let holdings: [Row]
+}
+
 private struct WalletProfileScreen: View {
     let wallet: SpotWallet
+    let token: TrendingSpotToken
+    @ObservedObject var feed: SpotLiveFeed
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var looked = false
     @State private var copied = false
+    @State private var summary: WalletSummary?
+    @State private var summaryFailed = false
+    @State private var perplDirectory = TraderDirectory()
+    @State private var showsPerpl = false
 
     private var identity: Identity? { IdentityDirectory.shared.identity(for: wallet.address) }
     private var hasProfile: Bool { !(identity?.isEmpty ?? true) }
+    private var trades: [SpotTransaction] {
+        feed.transactions.filter { $0.wallet.address.caseInsensitiveCompare(wallet.address) == .orderedSame }
+    }
+    private var portfolioText: String {
+        if let value = summary?.portfolio { return SpotLiveFeed.compactUSD(value) }
+        return wallet.portfolio
+    }
+    private var heldText: String {
+        guard let held = summary?.held else { return summaryFailed || summary != nil ? "0" : "—" }
+        return SpotLiveFeed.compactNumber(held.balance)
+    }
 
     var body: some View {
         ZStack {
@@ -1980,9 +2011,16 @@ private struct WalletProfileScreen: View {
 
                     HStack(spacing: 18) {
                         avatar
-                        VStack(alignment: .leading, spacing: 3) { Text(wallet.portfolio).font(.system(size: 18, weight: .bold)); Text("Portfolio").foregroundStyle(.secondary) }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(portfolioText).font(.system(size: 18, weight: .bold)).monospacedDigit()
+                            Text(summary?.portfolio != nil ? token.chainName : "Portfolio")
+                                .foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
+                        }
                         Divider().frame(height: 46).overlay(Color.white.opacity(0.12))
-                        VStack(alignment: .leading, spacing: 3) { Text("—").font(.system(size: 18, weight: .bold)); Text("Total PnL").foregroundStyle(.secondary) }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(heldText).font(.system(size: 18, weight: .bold)).monospacedDigit()
+                            Text(token.symbol).foregroundStyle(.secondary)
+                        }
                     }.padding(.top, 42)
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -2015,36 +2053,107 @@ private struct WalletProfileScreen: View {
                         }
                     }.padding(.top, 22)
 
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            if let url = identity?.profileURL, let label = identity?.sourceLabel {
-                                pill("Open on \(label)", symbol: "arrow.up.right") { openURL(url) }
+                    if hasProfile {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                if let url = identity?.profileURL, let label = identity?.sourceLabel {
+                                    pill("Open on \(label)", symbol: "arrow.up.right") { openURL(url) }
+                                }
+                                if let url = identity?.xURL, let handle = identity?.x {
+                                    pill("@\(handle)", symbol: "at") { openURL(url) }
+                                }
+                                if let account = identity?.perplAccount {
+                                    pill("Perpl account #\(account)", symbol: "chart.line.uptrend.xyaxis",
+                                         action: CopyTrader.current == nil ? nil : { showsPerpl = true })
+                                }
                             }
-                            if let url = identity?.xURL, let handle = identity?.x {
-                                pill("@\(handle)", symbol: "at") { openURL(url) }
-                            }
-                            if let account = identity?.perplAccount {
-                                pill("Perpl account #\(account)", symbol: "chart.line.uptrend.xyaxis", action: nil)
+                        }
+                        .padding(.top, 18)
+                    } else if looked {
+                        Text("No .nad name, nad.fun profile, ENS name or Farcaster account points here.")
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(Color.white.opacity(0.45))
+                            .padding(.top, 14)
+                    }
+
+                    section("Trades on \(token.symbol)", trailing: trades.isEmpty ? nil : "\(trades.count) live") {
+                        if trades.isEmpty {
+                            quiet("None in the live window. The feed keeps the last few minutes of trades.")
+                        } else {
+                            ForEach(trades.prefix(8)) { tx in
+                                HStack(spacing: 12) {
+                                    Text(tx.age).foregroundStyle(.secondary).frame(width: 34, alignment: .leading)
+                                    Text(tx.isBuy ? "BUY" : "SELL")
+                                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                                        .foregroundStyle(DeskColor.onAction.color)
+                                        .padding(.horizontal, 8).padding(.vertical, 4)
+                                        .background(tx.isBuy ? DeskColor.rise.color : DeskColor.fall.color, in: Capsule())
+                                    Text(tx.amount).lineLimit(1).minimumScaleFactor(0.7)
+                                    Spacer()
+                                    Text(tx.value).foregroundStyle(.secondary)
+                                }
+                                .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
+                                .frame(height: 44)
                             }
                         }
                     }
-                    .padding(.top, 18)
-                    .opacity(hasProfile ? 1 : 0)
 
-                    if looked, !hasProfile {
-                        ContentUnavailableView(
-                            "Nothing public on this wallet",
-                            systemImage: "person.crop.circle.badge.questionmark",
-                            description: Text("No .nad name, nad.fun profile, ENS name or Farcaster account points here."))
-                            .padding(.top, 10)
+                    section("Holdings on \(token.chainName)", trailing: nil) {
+                        if let summary, !summary.holdings.isEmpty {
+                            ForEach(summary.holdings) { row in
+                                HStack {
+                                    Text(row.symbol).lineLimit(1)
+                                    Spacer()
+                                    Text(SpotLiveFeed.compactNumber(row.balance)).foregroundStyle(.secondary)
+                                    Text(row.value.map { SpotLiveFeed.compactUSD($0) } ?? "—")
+                                        .frame(width: 82, alignment: .trailing)
+                                }
+                                .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
+                                .frame(height: 44)
+                            }
+                        } else if summaryFailed {
+                            quiet("Balances on \(token.chainName) could not be read right now.")
+                        } else if summary != nil {
+                            quiet("Nothing held on \(token.chainName).")
+                        } else {
+                            SkeletonRow(widthFraction: 0.8).padding(.vertical, 12)
+                            SkeletonRow(widthFraction: 0.6).padding(.vertical, 12)
+                        }
                     }
                 }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 40)
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .navigationDestination(isPresented: $showsPerpl) {
+            if let copier = CopyTrader.current {
+                TraderProfileScreen(
+                    initial: TraderSnapshot(accountId: identity?.perplAccount, address: wallet.address,
+                                            pnl: nil, balance: nil, positions: []),
+                    directory: perplDirectory, copier: copier, onCopy: { _ in })
+            }
+        }
         .task {
             await IdentityDirectory.shared.resolve([wallet.address])
             looked = true
+        }
+        .task { await loadSummary() }
+    }
+
+    private func loadSummary() async {
+        var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/token-details")!
+        components.queryItems = [
+            URLQueryItem(name: "view", value: "wallet"),
+            URLQueryItem(name: "address", value: wallet.address),
+            URLQueryItem(name: "chainIndex", value: token.chainIndex),
+            URLQueryItem(name: "contract", value: token.contract),
+        ]
+        guard let url = components.url else { return }
+        do {
+            let (data, isStale) = try await ResponseCache.shared.data(from: url, maxStale: 300)
+            summary = try JSONDecoder().decode(WalletSummary.self, from: data)
+            summaryFailed = isStale && summary == nil
+        } catch {
+            summaryFailed = true
         }
     }
 
@@ -2059,6 +2168,28 @@ private struct WalletProfileScreen: View {
         .frame(width: 84, height: 84)
         .clipShape(Circle())
         .perpSearchGlass(in: Circle())
+    }
+
+    private func section<Content: View>(_ title: String, trailing: String?, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title).font(.system(size: 15, weight: .bold, design: .rounded))
+                Spacer()
+                if let trailing {
+                    Text(trailing).font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.bottom, 4)
+            content()
+        }
+        .padding(.top, 30)
+    }
+
+    private func quiet(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .medium, design: .rounded))
+            .foregroundStyle(Color.white.opacity(0.45))
+            .padding(.vertical, 8)
     }
 
     private func pill(_ title: String, symbol: String, action: (() -> Void)?) -> some View {

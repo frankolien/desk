@@ -1,5 +1,6 @@
 import { okxGet, okxPost } from "./_okx.mjs";
 import { handleHoldings } from "./_holdings.mjs";
+import { handleWallet } from "./_wallet.mjs";
 
 const TOKENS = {
   BTC: { chainIndex: "1", address: "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599" },
@@ -11,6 +12,7 @@ const TOKENS = {
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
   if (req.query.view === "holdings") return handleHoldings(req, res);
+  if (req.query.view === "wallet") return handleWallet(req, res);
   const symbol = String(req.query.symbol || "").toUpperCase();
   const known = TOKENS[symbol];
   const chainIndex = String(req.query.chainIndex || known?.chainIndex || "");
