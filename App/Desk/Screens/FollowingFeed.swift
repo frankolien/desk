@@ -22,10 +22,15 @@ struct FollowingTrade: Decodable, Identifiable, Sendable {
 @MainActor
 @Observable
 final class FollowingFeedModel {
+    struct Sync: Decodable {
+        let workerDelayed: Bool
+        let pushDelayed: Bool
+    }
     private struct Response: Decodable {
         let events: [FollowingTrade]
         let pending: [String]
         let stale: [String]?
+        let sync: Sync?
     }
 
     private(set) var events: [FollowingTrade] = []
@@ -33,10 +38,11 @@ final class FollowingFeedModel {
     private(set) var stale: [String] = []
     private(set) var loaded = false
     private(set) var problem: String?
+    private(set) var sync: Sync?
 
     func run(addresses: [String]) async {
         guard !addresses.isEmpty else {
-            events = []; pending = []; stale = []; loaded = true; problem = nil
+            events = []; pending = []; stale = []; loaded = true; problem = nil; sync = nil
             return
         }
         while !Task.isCancelled {
@@ -47,7 +53,7 @@ final class FollowingFeedModel {
 
     func load(addresses: [String]) async {
         guard !addresses.isEmpty else {
-            events = []; pending = []; stale = []; loaded = true; problem = nil
+            events = []; pending = []; stale = []; loaded = true; problem = nil; sync = nil
             return
         }
         var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/activity")!
@@ -64,6 +70,7 @@ final class FollowingFeedModel {
             events = feed.events
             pending = feed.pending
             stale = feed.stale ?? []
+            sync = feed.sync
             problem = nil
         } catch {
             guard !Task.isCancelled else { return }
@@ -97,7 +104,7 @@ struct FollowingFeed: View {
                 }
             }
 
-            Text("Confirmed token trades from wallets you follow. The feed may lag the chain while a wallet indexes.")
+            Text("Confirmed token trades from wallets you follow. The feed shows indexed trades; push alerts use each wallet's minimum trade size.")
                 .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundStyle(DeskColor.nightMuted.color)
                 .fixedSize(horizontal: false, vertical: true)
@@ -112,6 +119,21 @@ struct FollowingFeed: View {
                     .padding(.bottom, 12)
             } else if let notificationProblem {
                 Label(notificationProblem, systemImage: "bell.badge")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 12)
+            }
+
+            if model.sync?.workerDelayed == true {
+                Label("Wallet indexing is delayed. This feed may miss recent trades until the service recovers.", systemImage: "clock.badge.exclamationmark")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 12)
+            }
+            if model.sync?.pushDelayed == true && !notificationsOff {
+                Label("Push delivery is delayed. Recent trades may still appear in this feed.", systemImage: "bell.slash")
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
                     .fixedSize(horizontal: false, vertical: true)

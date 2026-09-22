@@ -438,6 +438,8 @@ enum LeaderSort: String, CaseIterable, Identifiable {
 }
 
 struct TradersFeed: View {
+    enum Content: Equatable { case following, top }
+    let content: Content
     let directory: TraderDirectory
     let copier: CopyTrader
     let onOpenCopying: () -> Void
@@ -491,6 +493,7 @@ struct TradersFeed: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if content == .following {
             if !copier.traders.isEmpty || !copier.log.isEmpty {
                 CopyStatusCard(copier: copier, onOpen: onOpenCopying)
                     .padding(.bottom, 24)
@@ -529,7 +532,9 @@ struct TradersFeed: View {
             .padding(.horizontal, -20)
             .padding(.top, 12)
             .padding(.bottom, 28)
+            }
 
+            if content == .top {
             HStack(alignment: .firstTextBaseline) {
                 Text("Top traders")
                     .font(.system(size: 20, weight: .bold, design: .rounded))
@@ -586,6 +591,7 @@ struct TradersFeed: View {
                 .foregroundStyle(DeskColor.nightMuted.color.opacity(0.7))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 18)
+            }
         }
     }
 

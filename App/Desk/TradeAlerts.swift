@@ -247,8 +247,16 @@ final class TradeAlerts {
             if ProcessInfo.processInfo.arguments.contains("-track-demo") { scheduleSync(); return }
             #endif
             if !TrackedWallets.shared.list.isEmpty {
-                _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
-                if deviceToken == nil { UIApplication.shared.registerForRemoteNotifications() }
+                let center = UNUserNotificationCenter.current()
+                if await center.notificationSettings().authorizationStatus == .notDetermined {
+                    _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+                }
+                await refreshPermission()
+                if permission == .allowed {
+                    // APNs tokens can rotate; ask iOS for the current one even if an
+                    // older token was cached for a background mute operation.
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
             }
             scheduleSync()
         }

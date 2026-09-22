@@ -11,7 +11,7 @@ struct SignalsScreen: View {
     let onOrderFilled: (Direction, String) -> Void
 
     private enum Section: String, CaseIterable, Identifiable {
-        case traders = "Following", smart = "Smart money", market = "Market"
+        case traders = "Following", top = "Top traders", market = "Market"
         var id: String { rawValue }
     }
 
@@ -35,6 +35,7 @@ struct SignalsScreen: View {
     @State private var followingFeed = FollowingFeedModel()
     @State private var trackedEditing: TrackedWallet?
     @State private var showsTrackNew = false
+    @State private var showsSmartMoney = false
     #if DEBUG
     @State private var debugPrimer: TraderSnapshot?
     @State private var debugAutoCopy: TraderSnapshot?
@@ -84,18 +85,38 @@ struct SignalsScreen: View {
                                           notificationProblem: TradeAlerts.shared.problem)
                                 .padding(.top, 20)
                                 .padding(.bottom, 28)
-                            TradersFeed(directory: directory, copier: copier, onOpenCopying: { showsCopying = true },
+                            TradersFeed(content: .following, directory: directory, copier: copier, onOpenCopying: { showsCopying = true },
                                         onSelect: { selectedTrader = $0 },
                                         onOpenTracked: { selectedTrackedWallet = $0 },
                                         onEditTracked: { trackedEditing = $0 }, onAdd: { showsTrackNew = true })
                                 .padding(.bottom, 130)
-                        case .smart:
-                            SmartMoneyFeed(model: smartMoney) { signal in
-                                TokenOpenRequest.shared.open(.init(chainIndex: signal.chainIndex, contract: signal.token, symbol: signal.symbol))
+                        case .top:
+                            Button { showsSmartMoney = true } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "waveform.path.ecg").font(.system(size: 19, weight: .semibold))
+                                        .frame(width: 38, height: 38)
+                                        .background(DeskColor.action.color.opacity(0.16), in: Circle())
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text("Smart money").font(.system(size: 15, weight: .bold, design: .rounded))
+                                        Text("See what proven wallets are buying")
+                                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                                            .foregroundStyle(DeskColor.nightMuted.color)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold))
+                                }
+                                .foregroundStyle(DeskColor.nightText.color)
+                                .padding(15)
+                                .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 18))
                             }
-                                .padding(.top, 20)
+                            .buttonStyle(.plain)
+                            .padding(.top, 20)
+                            TradersFeed(content: .top, directory: directory, copier: copier, onOpenCopying: { showsCopying = true },
+                                        onSelect: { selectedTrader = $0 },
+                                        onOpenTracked: { selectedTrackedWallet = $0 },
+                                        onEditTracked: { trackedEditing = $0 }, onAdd: { showsTrackNew = true })
+                                .padding(.top, 26)
                                 .padding(.bottom, 130)
-                                .task { await smartMoney.run() }
                         case .market:
                             marketReadings
                         }
@@ -111,13 +132,13 @@ struct SignalsScreen: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             #if DEBUG
-            // `-smart-money` opens the Smart money segment; `-track-demo` seeds a tracked wallet.
+            // `-smart-money` opens the Smart money destination; `-track-demo` seeds a tracked wallet.
             .task {
                 let arguments = ProcessInfo.processInfo.arguments
                 if arguments.contains("-track-demo"), TrackedWallets.shared.list.isEmpty {
                     TrackedWallets.shared.track("0x52ac212e7187a799a7382c7a768cb35b72a3e20a", name: "moncat degen")
                 }
-                if arguments.contains("-smart-money") { section = .smart }
+                if arguments.contains("-smart-money") { section = .top; showsSmartMoney = true }
             }
             #endif
             .sheet(item: $trackedEditing) { wallet in
@@ -137,6 +158,25 @@ struct SignalsScreen: View {
             .navigationDestination(isPresented: $showsCopying) {
                 CopyActivityScreen(copier: copier, directory: directory)
                     .toolbar(.hidden, for: .tabBar)
+            }
+            .navigationDestination(isPresented: $showsSmartMoney) {
+                ZStack {
+                    DeskBackground()
+                    ScrollView(showsIndicators: false) {
+                        SmartMoneyFeed(model: smartMoney) { signal in
+                            TokenOpenRequest.shared.open(.init(chainIndex: signal.chainIndex, contract: signal.token, symbol: signal.symbol))
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 20)
+                        .padding(.bottom, 90)
+                    }
+                    .refreshable { await smartMoney.load() }
+                }
+                .navigationTitle("Smart money")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar(.visible, for: .navigationBar)
+                .toolbar(.hidden, for: .tabBar)
+                .task { await smartMoney.run() }
             }
         }
         .task { await directory.run() }
