@@ -54,11 +54,11 @@ export function describeWallet(rows, contract) {
   };
 }
 
-/// Artwork for tokens the balance API names but does not picture: one search per
-/// token, remembered for a month. Native tokens are drawn from the app's own catalog.
+/// Artwork for tokens the balance API names but does not picture. Native tokens
+/// are drawn from the app's own catalog.
 const TRUST_WALLET_CHAINS = {
   "1": "ethereum", "10": "optimism", "56": "smartchain", "137": "polygon", "8453": "base", "42161": "arbitrum",
-  "43114": "avalanchec", "59144": "linea", "534352": "scroll", "5000": "mantle", "146": "sonic",
+  "43114": "avalanchec", "59144": "linea", "534352": "scroll", "5000": "mantle", "146": "sonic", "501": "solana",
 };
 const NATIVE_LOGOS = {
   "1": "https://assets.coingecko.com/coins/images/279/large/ethereum.png",
@@ -92,33 +92,35 @@ export async function logosFor(items, { store = null, search = okxGet } = {}) {
     .filter((item) => (/^0x[0-9a-f]{40}$/.test(item.contract) || (item.chainIndex === "501" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(item.contract))) && /^\d+$/.test(item.chainIndex))
     .map((item) => [`${item.chainIndex}:${item.contract}`, item])).values()].slice(0, 24);
   if (!wanted.length || !okxConfigured()) return logos;
-  const keys = wanted.map((item) => `logo3:${item.chainIndex}:${item.contract}`);
+  const keys = wanted.map((item) => `logo4:${item.chainIndex}:${item.contract}`);
   const cached = store ? await store.mget(keys).catch(() => keys.map(() => null)) : keys.map(() => null);
   await Promise.all(wanted.map(async (item, index) => {
     const id = `${item.chainIndex}:${item.contract}`;
     if (cached[index] != null) { if (cached[index]) logos[id] = cached[index]; return; }
     let url = "";
+    const same = (candidate) => item.chainIndex === "501"
+      ? String(candidate.tokenContractAddress ?? "") === item.contract
+      : String(candidate.tokenContractAddress ?? "").toLowerCase() === item.contract.toLowerCase();
     try {
       const rows = await search("/api/v6/dex/market/token/search", { chains: item.chainIndex, search: item.contract, limit: "3" });
-      const same = (candidate) => item.chainIndex === "501"
-        ? String(candidate.tokenContractAddress ?? "") === item.contract
-        : String(candidate.tokenContractAddress ?? "").toLowerCase() === item.contract;
-      const row = (Array.isArray(rows) ? rows : []).find(same) ?? (Array.isArray(rows) ? rows[0] : null);
+      // Search may rank an unrelated token first. An incorrect logo is worse than
+      // an honest fallback on a wallet profile.
+      const row = (Array.isArray(rows) ? rows : []).find(same);
       url = String(row?.tokenLogoUrl ?? "");
     } catch { /* drawn from the symbol instead */ }
     // Search by symbol finds what search by contract does not, as long as the contract agrees.
     if (!url && item.symbol) {
       try {
         const rows = await search("/api/v6/dex/market/token/search", { chains: item.chainIndex, search: item.symbol, limit: "10" });
-        const row = (Array.isArray(rows) ? rows : []).find((candidate) =>
-          String(candidate.tokenContractAddress ?? "").toLowerCase() === item.contract);
+        const row = (Array.isArray(rows) ? rows : []).find(same);
         url = String(row?.tokenLogoUrl ?? "");
       } catch { /* next source */ }
     }
     // Trust Wallet's asset list pictures the established tokens OKX's search skips.
     if (!url && TRUST_WALLET_CHAINS[item.chainIndex]) {
       try {
-        const candidate = `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${TRUST_WALLET_CHAINS[item.chainIndex]}/assets/${getAddress(item.contract)}/logo.png`;
+        const assetAddress = item.chainIndex === "501" ? item.contract : getAddress(item.contract);
+        const candidate = `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${TRUST_WALLET_CHAINS[item.chainIndex]}/assets/${assetAddress}/logo.png`;
         if (await exists(candidate)) url = candidate;
       } catch { /* not a valid address for a checksum */ }
     }
@@ -133,7 +135,8 @@ export async function logosFor(items, { store = null, search = okxGet } = {}) {
       } catch { /* no picture */ }
     }
     if (url) logos[id] = url;
-    if (store) store.set(keys[index], url, { ex: 30 * 24 * 3600 }).catch(() => {});
+    // Missing art is often a transient index/CDN failure, not a permanent fact.
+    if (store) store.set(keys[index], url, { ex: url ? 30 * 24 * 3600 : 3600 }).catch(() => {});
   }));
   return logos;
 }

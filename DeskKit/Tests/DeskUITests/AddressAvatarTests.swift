@@ -29,6 +29,13 @@ struct AddressAvatarTests {
         #expect(lower == mixed)
     }
 
+    @Test("Solana base58 casing changes the mark")
+    func solanaCaseSensitive() {
+        let upper = AddressAvatar.seed(for: "Fw1ETanDZafof7xEULsnq9UY6o71Tpds89tNwPkWLb1v")
+        let lower = AddressAvatar.seed(for: "fw1ETanDZafof7xEULsnq9UY6o71Tpds89tNwPkWLb1v")
+        #expect(upper != lower)
+    }
+
     /// An address differing in one nibble must not land on the same hue, or the second
     /// device in the recovery demo looks identical to the first while holding nothing.
     @Test("Addresses one character apart get different hues", arguments: [

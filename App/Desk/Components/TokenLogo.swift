@@ -1,4 +1,5 @@
 import DeskMoney
+import DeskUI
 import SwiftUI
 import UIKit
 
@@ -63,6 +64,25 @@ enum TokenArtwork {
     }
 }
 
+/// A stable, clearly non-official mark when a token has no usable artwork.
+struct TokenSymbolBadge: View {
+    let symbol: String
+    let seed: String
+    let size: CGFloat
+
+    var body: some View {
+        let hue = AddressAvatar.seed(for: seed).primary / 360
+        Text(String(symbol.prefix(2)).uppercased())
+            .font(.system(size: size * 0.35, weight: .heavy, design: .rounded))
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            .frame(width: size, height: size)
+            .background(Color(hue: hue, saturation: 0.55, brightness: 0.50), in: Circle())
+            .accessibilityLabel("\(symbol) logo unavailable")
+    }
+}
+
 struct MarketTokenLogo: View {
     let symbol: String
     var size: CGFloat = 38
@@ -91,8 +111,7 @@ struct MarketTokenLogo: View {
                 Image(symbol.uppercased()).resizable().scaledToFit()
             } else {
                 RemoteImage(url: url) {
-                    Image(systemName: "circle.hexagongrid.fill")
-                        .resizable().scaledToFit().foregroundStyle(.white.opacity(0.5))
+                    TokenSymbolBadge(symbol: symbol, seed: symbol, size: size)
                 }
             }
         }
@@ -140,7 +159,7 @@ struct TokenAdaptiveCardBackground: View {
            let (downloaded, _) = try? await URLSession.shared.data(from: artworkURL) {
             data = downloaded
         } else if ["MON", "LIT", "PUMP"].contains(key) {
-            data = UIImage(named: key)?.pngData()
+            data = await Task.detached(priority: .utility) { UIImage(named: key)?.pngData() }.value
         } else if let url = MarketTokenLogo.artworkURL(for: key),
                   let (downloaded, _) = try? await URLSession.shared.data(from: url) {
             data = downloaded

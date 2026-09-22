@@ -17,7 +17,8 @@ public struct AddressAvatar: View {
     /// would give the same account a different face on every launch.
     public static func seed(for address: String) -> (primary: Double, secondary: Double, tilt: Double) {
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325
-        for byte in address.lowercased().utf8 {
+        let canonical = address.hasPrefix("0x") ? address.lowercased() : address
+        for byte in canonical.utf8 {
             hash ^= UInt64(byte)
             hash &*= 0x0000_0100_0000_01B3
         }

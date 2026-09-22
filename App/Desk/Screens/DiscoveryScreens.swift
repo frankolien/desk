@@ -347,7 +347,7 @@ struct MarketSearchScreen: View {
                         .foregroundStyle(DeskColor.nightText.color)
                         .padding(.top, 26)
 
-                        VStack(spacing: 10) {
+                        LazyVStack(spacing: 10) {
                             ForEach(spotResults) { token in
                                 Button { selectedSpot = token } label: {
                                     TrendingSpotRow(token: token).contentShape(Rectangle())
@@ -395,7 +395,7 @@ struct MarketSearchScreen: View {
                             .foregroundStyle(DeskColor.nightMuted.color)
                             .padding(.top, 28)
                     } else {
-                        VStack(spacing: 10) {
+                        LazyVStack(spacing: 10) {
                             ForEach(results, id: \.id) { entry in
                                 MarketRow(
                                     model: market,
@@ -490,11 +490,11 @@ struct MarketSearchScreen: View {
                 if let index = arguments.firstIndex(of: "-search-demo"), arguments.indices.contains(index + 1) { query = arguments[index + 1] }
             }
             #endif
-            .navigationDestination(item: $selectedPerson) { wallet in
-                WalletProfileScreen(wallet: wallet, token: nil, model: model, onBack: { selectedPerson = nil })
-                    .navigationBarBackButtonHidden(true)
-                    .toolbar(.hidden, for: .navigationBar)
-                    .toolbar(.hidden, for: .tabBar)
+            .fullScreenCover(item: $selectedPerson) { wallet in
+                NavigationStack {
+                    WalletProfileScreen(wallet: wallet, token: nil, model: model, onBack: { selectedPerson = nil })
+                        .toolbar(.hidden, for: .navigationBar)
+                }
             }
             .task(id: TokenOpenRequest.shared.pending) {
                 guard let target = TokenOpenRequest.shared.take() else { return }
@@ -628,9 +628,13 @@ private final class TokenDiscoveryModel: ObservableObject {
         let url = components.url!
         // What this list showed last time, at once; the network's answer replaces it.
         if (intoSearch ? searchResults : trending).isEmpty,
-           let cached = await ResponseCache.shared.cached(url),
-           let tokens = try? JSONDecoder().decode(Response.self, from: cached).tokens {
-            if intoSearch { searchResults = tokens } else { trending = tokens }
+           let cached = await ResponseCache.shared.cached(url) {
+            let tokens = try? await Task.detached(priority: .utility) {
+                try JSONDecoder().decode(Response.self, from: cached).tokens
+            }.value
+            if let tokens {
+                if intoSearch { searchResults = tokens } else { trending = tokens }
+            }
         }
         isLoading = (intoSearch ? searchResults : trending).isEmpty
         if isLoading { errorText = nil }
@@ -2281,6 +2285,8 @@ private struct WalletProfileScreen: View {
     @Environment(\.openURL) private var openURL
     @State private var resource: WalletResource?
     @State private var resourceFailed = false
+    @State private var profileReady = false
+    @State private var preparedArtwork: [URL: UIImage] = [:]
     @State private var perplDirectory = TraderDirectory()
     @State private var showsPerpl = false
     @State private var tab: Tab = .positions
@@ -2341,16 +2347,36 @@ private struct WalletProfileScreen: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
+            VStack(spacing: 0) {
+                HStack {
+                    Button {
+                        if let onBack { onBack() } else { dismiss() }
+                    } label: { Image(systemName: "chevron.left").frame(width: 50, height: 50) }.perpSearchGlass(in: Circle())
+                    Spacer()
+                    ShareLink(item: wallet.address) { Image(systemName: "square.and.arrow.up").frame(width: 50, height: 50) }.perpSearchGlass(in: Circle())
+                }
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+
+            if !profileReady {
+                ProgressView("Preparing wallet profile…")
+                    .tint(DeskColor.action.color)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if resourceFailed && resource == nil {
+                ContentUnavailableView {
+                    Label("Wallet unavailable", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text("The wallet data couldn't be loaded right now.")
+                } actions: {
+                    Button("Try again") { Task { await loadResource() } }
+                }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack {
-                        Button {
-                            if let onBack { onBack() } else { dismiss() }
-                        } label: { Image(systemName: "chevron.left").frame(width: 50, height: 50) }.perpSearchGlass(in: Circle())
-                        Spacer()
-                        ShareLink(item: wallet.address) { Image(systemName: "square.and.arrow.up").frame(width: 50, height: 50) }.perpSearchGlass(in: Circle())
-                    }.font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
-
                     HStack(spacing: 0) {
                         avatar
                         Spacer(minLength: 14)
@@ -2358,7 +2384,7 @@ private struct WalletProfileScreen: View {
                         Divider().frame(height: 38).overlay(Color.white.opacity(0.12)).padding(.horizontal, 18)
                         stat(totalPnL.map(signed) ?? "—", label: "Total PnL", tint: totalPnL.map(tint) ?? .white)
                         Spacer(minLength: 0)
-                    }.padding(.top, 30)
+                    }.padding(.top, 22)
 
                     HStack(spacing: 10) {
                         if identity?.source == "sns" {
@@ -2408,9 +2434,11 @@ private struct WalletProfileScreen: View {
 
                     tabs.padding(.top, 18)
                     content.padding(.top, 4)
-                }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 40)
+                }.padding(.horizontal, 20).padding(.bottom, 40)
             }
-            .refreshable { await loadResource(); await IdentityDirectory.shared.resolve([wallet.address]) }
+            .refreshable { await IdentityDirectory.shared.resolve([wallet.address]); await loadResource() }
+            }
+            }
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
@@ -2433,8 +2461,16 @@ private struct WalletProfileScreen: View {
         } message: {
             Text("Shown wherever this wallet appears on your phone.")
         }
-        .task { await IdentityDirectory.shared.resolve([wallet.address]) }
-        .task { await loadResource() }
+        .task {
+            await IdentityDirectory.shared.resolve([wallet.address])
+            await loadResource()
+        }
+        .task(id: profileReady) {
+            guard profileReady, resource?.ledger.status == "indexing" else { return }
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled else { return }
+            await loadResource()
+        }
         .navigationDestination(item: $opened) { token in
             SpotTokenDetailScreen(token: token, model: model)
         }
@@ -2458,7 +2494,7 @@ private struct WalletProfileScreen: View {
             }
             opened = match ?? TrendingSpotToken(
                 id: "\(row.chainIndex):\(row.contract)", chainIndex: row.chainIndex, chainName: row.chainName ?? token?.chainName ?? "Monad",
-                symbol: row.symbol, name: row.symbol, logoURL: resource?.logos?["\(row.chainIndex):\(row.contract.lowercased())"] ?? "",
+                symbol: row.symbol, name: row.symbol, logoURL: logo(row.chainIndex, row.contract)?.absoluteString ?? "",
                 contract: row.contract, decimals: nil, quotable: nil, buyable: nil, nativeSymbol: nil, explorerURL: "",
                 price: nil, change: nil, marketCap: nil, volume24H: nil, liquidity: nil, holders: nil,
                 communityRecognized: nil, riskLevel: nil)
@@ -2469,10 +2505,10 @@ private struct WalletProfileScreen: View {
 
     private var avatar: some View {
         Group {
-            if let url = identity?.avatarURL {
-                RemoteImage(url: url, fill: true) { Text(wallet.emoji).font(.system(size: 50)) }
+            if let url = identity?.avatarURL, let image = preparedArtwork[url] {
+                Image(uiImage: image).resizable().scaledToFill()
             } else {
-                Text(wallet.emoji).font(.system(size: 50))
+                AddressAvatar(address: wallet.address, size: 68)
             }
         }
         .frame(width: 68, height: 68)
@@ -2591,9 +2627,24 @@ private struct WalletProfileScreen: View {
         }
     }
 
+    @ViewBuilder
+    private func profileLogo(_ row: Row) -> some View {
+        if let url = logo(row.chainIndex, row.contract), let image = preparedArtwork[url] {
+            Image(uiImage: image).resizable().scaledToFit()
+                .frame(width: 38, height: 38).clipShape(Circle())
+                .accessibilityLabel(row.symbol)
+        } else if UIImage(named: row.symbol.uppercased()) != nil {
+            Image(row.symbol.uppercased()).resizable().scaledToFit()
+                .frame(width: 38, height: 38).clipShape(Circle())
+                .accessibilityLabel(row.symbol)
+        } else {
+            TokenSymbolBadge(symbol: row.symbol, seed: row.contract.isEmpty ? row.symbol : row.contract, size: 38)
+        }
+    }
+
     private func tokenRow(_ row: Row) -> some View {
         HStack(spacing: 12) {
-            MarketTokenLogo(symbol: row.symbol, size: 38, remoteURL: logo(row.chainIndex, row.contract))
+            profileLogo(row)
                 .overlay(alignment: .bottomTrailing) {
                     if let badge = row.badge {
                         Image(systemName: badge == "+" ? "plus.circle.fill" : "minus.circle.fill")
@@ -2685,7 +2736,7 @@ private struct WalletProfileScreen: View {
     }
 
     private func loadResource() async {
-        guard isEVM || isSolana else { resourceFailed = true; return }
+        guard isEVM || isSolana else { resourceFailed = true; profileReady = true; return }
         var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/activity")!
         components.queryItems = [
             URLQueryItem(name: "view", value: "wallet"),
@@ -2693,17 +2744,47 @@ private struct WalletProfileScreen: View {
             URLQueryItem(name: "chainIndex", value: token?.chainIndex ?? ledgerChain),
             URLQueryItem(name: "contract", value: token?.contract ?? ""),
         ]
-        guard let url = components.url else { return }
+        guard let url = components.url else { resourceFailed = true; profileReady = true; return }
         do {
             let (data, _) = try await ResponseCache.shared.data(from: url, maxStale: 300)
-            resource = try JSONDecoder().decode(WalletResource.self, from: data)
-            if resource?.ledger.status == "indexing" {
-                try? await Task.sleep(for: .seconds(8))
-                if let (fresh, _) = try? await ResponseCache.shared.data(from: url, maxStale: 0),
-                   let again = try? JSONDecoder().decode(WalletResource.self, from: fresh) { resource = again }
-            }
+            let snapshot = try JSONDecoder().decode(WalletResource.self, from: data)
+            let artwork = await prepareArtwork(for: snapshot)
+            guard !Task.isCancelled else { return }
+            // Commit the data and its available art together: rows never appear with
+            // a random subset of remote images still popping in one by one.
+            preparedArtwork = artwork
+            resource = snapshot
+            resourceFailed = false
         } catch {
+            guard !Task.isCancelled else { return }
             resourceFailed = true
+        }
+        profileReady = true
+    }
+
+    private func prepareArtwork(for snapshot: WalletResource) async -> [URL: UIImage] {
+        var urls = Set((snapshot.logos ?? [:]).values.compactMap(TokenArtwork.url))
+        if let url = token?.artworkURL { urls.insert(url) }
+        if let url = identity?.avatarURL { urls.insert(url) }
+        return await withTaskGroup(of: (URL, UIImage?).self, returning: [URL: UIImage].self) { group in
+            for url in urls.prefix(32) {
+                group.addTask {
+                    if let cached = await ResponseCache.shared.cached(url, maxAge: 7 * 86_400),
+                       let image = UIImage(data: cached) { return (url, image) }
+                    var request = URLRequest(url: url)
+                    request.timeoutInterval = 3
+                    guard let (data, response) = try? await URLSession.shared.data(for: request),
+                          (response as? HTTPURLResponse)?.statusCode == 200,
+                          let image = UIImage(data: data) else { return (url, nil) }
+                    await ResponseCache.shared.store(data, for: url)
+                    return (url, image)
+                }
+            }
+            var ready: [URL: UIImage] = [:]
+            for await (url, image) in group {
+                if let image { ready[url] = image }
+            }
+            return ready
         }
     }
 }
