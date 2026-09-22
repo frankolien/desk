@@ -25,7 +25,8 @@ export const NATIVE = "native";
 export const LEDGER_VERSION = 1;
 /// Money, not positions: paying with one of these is not selling it.
 const QUOTE_SYMBOLS = new Set(["MON", "WMON", "USDC", "USDT", "AUSD", "USDE", "SUSDE", "SOL", "WSOL"]);
-export const ledgerKey = (address) => `wl:${address.toLowerCase()}`;
+// EVM is case-insensitive; Solana base58 is not. Never merge distinct Solana wallets.
+export const ledgerKey = (address) => `wl:${address.startsWith("0x") ? address.toLowerCase() : address}`;
 export const TRACKED_KEY = "wl:tracked";
 export const HEARTBEAT_KEY = "wl:heartbeat";
 const KEEP_TRADES = 300;

@@ -5,6 +5,7 @@
 /// rather than "Sent to 0x1964…".
 import { redisStore } from "./_store.mjs";
 import { walletResource } from "./_wallet-resource.mjs";
+import { ledgerKey, TRACKED_KEY } from "./_ledger.mjs";
 
 const ETHERSCAN = "https://api.etherscan.io/v2/api";
 
@@ -22,6 +23,40 @@ const COUNTERPARTIES = {
 
 const validAddress = (value) => /^0x[a-fA-F0-9]{40}$/.test(value);
 const validSolana = (value) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
+
+/// A bounded, read-only timeline from the same indexed trades used by wallet alerts.
+/// Missing ledgers are queued for indexing; a missing ledger is not an empty history.
+export async function followingFeed(store, addresses, now = Date.now()) {
+  const values = await store.mget(addresses.map(ledgerKey));
+  let trackedCount = await store.scard(TRACKED_KEY);
+  const pending = [];
+  const stale = [];
+  const events = [];
+  for (let index = 0; index < addresses.length; index += 1) {
+    const address = addresses[index];
+    let ledger;
+    try { ledger = values[index] ? JSON.parse(values[index]) : null; } catch { ledger = null; }
+    if (!ledger) {
+      pending.push(address);
+      if (trackedCount < 2_000) {
+        await store.sadd(TRACKED_KEY, address);
+        trackedCount += 1;
+      }
+      continue;
+    }
+    if (!Number.isFinite(ledger.indexedAt) || now - ledger.indexedAt > 10 * 60_000) stale.push(address);
+    const chainIndex = address.startsWith("0x") ? "143" : "501";
+    for (const trade of Array.isArray(ledger.trades) ? ledger.trades : []) {
+      if (!Number.isFinite(trade.time) || trade.time > now + 60_000 || trade.time < now - 14 * 86_400_000) continue;
+      if (!["buy", "sell"].includes(trade.side) || !Number.isFinite(trade.value) || trade.value <= 0) continue;
+      events.push({ wallet: address, chainIndex, time: trade.time, hash: trade.hash,
+        token: trade.token, symbol: trade.symbol, side: trade.side,
+        amount: trade.amount, value: trade.value, gain: trade.gain ?? null });
+    }
+  }
+  events.sort((a, b) => b.time - a.time);
+  return { events: events.slice(0, 80), pending, stale, observedAt: now };
+}
 
 export function formatUnits(raw, decimals) {
   if (!/^\d+$/.test(String(raw ?? "")) || !Number.isInteger(decimals) || decimals < 0) return null;
@@ -81,6 +116,18 @@ export function createHandler(fetchImpl = fetch, key = () => process.env.ETHERSC
     res.setHeader("Cache-Control", "private, no-store");
     if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
     const address = String(req.query.address || "");
+
+    if (req.query.view === "feed") {
+      const raw = String(req.query.addresses || "");
+      const addresses = [...new Set(raw.split(",").filter(Boolean).map((value) => value.startsWith("0x") ? value.toLowerCase() : value))];
+      if (!addresses.length || addresses.length > 25 || raw.length > 1_200
+          || addresses.some((value) => !validAddress(value) && !validSolana(value))) {
+        return res.status(400).json({ error: "Supply 1–25 valid wallet addresses." });
+      }
+      if (!store) return res.status(503).json({ error: "Wallet feed is not configured." });
+      try { return res.status(200).json(await followingFeed(store, addresses)); }
+      catch { return res.status(502).json({ error: "Following activity could not be read right now." }); }
+    }
 
     if (req.query.view === "wallet") {
       if (!validAddress(address) && !validSolana(address)) return res.status(400).json({ error: "A wallet address is required." });

@@ -92,7 +92,7 @@ test("the indexer takes the newest page first, then only what is new, and prices
   assert.equal(trade.symbol, "Bonk");
   assert.equal(trade.amount, 1000);
   assert.ok(Math.abs(trade.value - 0.0032) < 1e-12);
-  assert.equal(JSON.parse(await store.get(`wl:${WALLET.toLowerCase()}`)).cursor, "fresh");
+  assert.equal(JSON.parse(await store.get(`wl:${WALLET}`)).cursor, "fresh");
   assert.ok(calls.every(([method, params]) => method !== "getSignaturesForAddress" || params[0] === WALLET));
 });
 

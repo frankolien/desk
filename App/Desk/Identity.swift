@@ -19,6 +19,7 @@ struct Identity: Codable, Hashable, Sendable {
         case "nad": "Nad Name Service"
         case "nadfun": "nad.fun"
         case "ens": "ENS"
+        case "sns": "Solana Name Service"
         case "farcaster": "Farcaster"
         default: nil
         }
@@ -43,6 +44,12 @@ struct Identity: Codable, Hashable, Sendable {
 @MainActor
 @Observable
 final class IdentityDirectory {
+    enum NameResult {
+        case wallet(address: String, identity: Identity?)
+        case solana(name: String, address: String)
+        case notFound
+        case unavailable
+    }
     static let shared = IdentityDirectory()
 
     private(set) var identities: [String: Identity] = [:]
@@ -71,16 +78,29 @@ final class IdentityDirectory {
         }
     }
 
-    func identity(for address: String) -> Identity? { identities[address.lowercased()] }
+    private func key(for address: String) -> String { address.hasPrefix("0x") ? address.lowercased() : address }
+
+    func identity(for address: String) -> Identity? { identities[key(for: address)] }
     func name(for address: String) -> String? { identity(for: address)?.name }
+
+    @discardableResult
+    func rememberSolana(name: String, address: String) -> Identity {
+        let identity = Identity(address: address, name: name, source: "sns", avatar: nil,
+                                bio: nil, x: nil, farcaster: nil, perplAccount: nil)
+        identities[address] = identity
+        fetchedAt[address] = .now
+        persist()
+        return identity
+    }
 
     func resolve(_ addresses: [String]) async {
         let now = Date.now
         var wanted: [String] = []
         var seen: Set<String> = []
         for raw in addresses {
-            let address = raw.lowercased()
-            guard address.count == 42, address.hasPrefix("0x"), seen.insert(address).inserted,
+            let address = key(for: raw)
+            let evm = address.count == 42 && address.hasPrefix("0x")
+            guard (evm || TrackedWallets.isSolana(address)), seen.insert(address).inserted,
                   !inFlight.contains(address) else { continue }
             if let at = fetchedAt[address], now.timeIntervalSince(at) < Self.maxAge { continue }
             wanted.append(address)
@@ -99,32 +119,89 @@ final class IdentityDirectory {
             guard let url = components.url,
                   let (data, _) = try? await ResponseCache.shared.data(from: url, maxStale: 3_600),
                   let body = try? JSONDecoder().decode(Response.self, from: data) else { continue }
-            for (address, identity) in body.identities where !pinned.contains(address.lowercased()) {
-                identities[address.lowercased()] = identity
-                fetchedAt[address.lowercased()] = now
+            for (address, identity) in body.identities where !pinned.contains(key(for: address)) {
+                let key = key(for: address)
+                // A searched .sol name may not be the owner's primary domain. Do not
+                // replace that verified forward lookup with an empty reverse result.
+                if identity.name == nil, identities[key]?.source == "sns", identities[key]?.name != nil {
+                    fetchedAt[key] = now
+                    continue
+                }
+                identities[key] = identity
+                fetchedAt[key] = now
             }
         }
         persist()
     }
 
-    private struct LookupResponse: Decodable { let address: String; let identity: Identity? }
+    private struct LookupResponse: Decodable {
+        let address: String?
+        let identity: Identity?
+        let name: String?
+        let chain: String?
+    }
 
-    /// A typed name to a wallet: .nad, .eth, @farcaster, or an address as itself.
-    func lookup(_ query: String) async -> (address: String, identity: Identity?)? {
+    private struct SNSResponse: Decodable {
+        let s: String
+        let result: String?
+    }
+
+    private func lookupSNS(_ query: String) async -> NameResult {
+        let name = query.lowercased().hasSuffix(".solana")
+            ? String(query.dropLast(".solana".count)) + ".sol" : query
+        guard let url = URL(string: "https://sdk-proxy-v2.sns.id/resolve/")?.appendingPathComponent(name) else {
+            return .unavailable
+        }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let status = (response as? HTTPURLResponse)?.statusCode else { return .unavailable }
+            if status == 404 { return .notFound }
+            guard status == 200, let body = try? JSONDecoder().decode(SNSResponse.self, from: data) else {
+                return .unavailable
+            }
+            guard body.s == "ok", let address = body.result,
+                  (32...44).contains(address.count),
+                  address.rangeOfCharacter(from: CharacterSet(charactersIn: "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz").inverted) == nil else {
+                return .notFound
+            }
+            return .solana(name: name, address: address)
+        } catch {
+            return .unavailable
+        }
+    }
+
+    /// A typed blockchain name may resolve to either an EVM or Solana address.
+    func lookup(_ query: String) async -> NameResult {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 3 else { return nil }
+        guard trimmed.count >= 3 else { return .notFound }
+        if TrackedWallets.isSolana(trimmed) { return .solana(name: trimmed, address: trimmed) }
+        if TrackedWallets.isEVM(trimmed) {
+            return .wallet(address: trimmed.lowercased(), identity: identity(for: trimmed))
+        }
+        // SNS names resolve independently of the EVM identity API. Keep this
+        // working even while an older Desk server deployment is still live.
+        let lower = trimmed.lowercased()
+        if lower.hasSuffix(".sol") || lower.hasSuffix(".solana") || lower.hasSuffix(".sns") {
+            return await lookupSNS(trimmed)
+        }
         var components = URLComponents(string: Self.endpoint)!
         components.queryItems = [URLQueryItem(name: "view", value: "lookup"), URLQueryItem(name: "q", value: trimmed)]
         guard let url = components.url,
               let (data, response) = try? await URLSession.shared.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              let body = try? JSONDecoder().decode(LookupResponse.self, from: data) else { return nil }
+              let status = (response as? HTTPURLResponse)?.statusCode else { return .unavailable }
+        if status == 404 { return .notFound }
+        guard status == 200,
+              let body = try? JSONDecoder().decode(LookupResponse.self, from: data),
+              let address = body.address else { return .unavailable }
+        if body.chain == "solana" {
+            return .solana(name: body.name ?? trimmed, address: address)
+        }
         if let identity = body.identity {
-            identities[body.address.lowercased()] = identity
-            fetchedAt[body.address.lowercased()] = .now
+            identities[address.lowercased()] = identity
+            fetchedAt[address.lowercased()] = .now
             persist()
         }
-        return (body.address, body.identity)
+        return .wallet(address: address, identity: body.identity)
     }
 
     /// Names already on this phone that contain the text, for instant matches.

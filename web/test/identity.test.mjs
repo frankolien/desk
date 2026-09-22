@@ -8,6 +8,7 @@ import { createHandler } from "../api/traders.mjs";
 const SALMO = "0xeaC3D06097Fc94956FC1eEE65d503Ff9a739A7C6";
 const PLAIN = "0x95D2602d30DA1179fd13274839e60345857ca648";
 const VITALIK = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
+const SOLANA = "Fw1ETanDZafof7xEULsnq9UY6o71Tpds89tNwPkWLb1v";
 
 const json = (body, ok = true) => ({ ok, json: async () => body });
 
@@ -130,4 +131,81 @@ test("a name becomes an address: .nad through the name service, .eth through ENS
   assert.deepEqual(await lookupName("vitalik.eth", { fetchImpl, ensAddress: async () => VITALIK }), { address: VITALIK.toLowerCase(), source: "ens" });
   assert.deepEqual(await lookupName("@vitalik", { fetchImpl, neynarKey: "k" }), { address: VITALIK.toLowerCase(), source: "farcaster" });
   assert.deepEqual(await lookupName(PLAIN, { fetchImpl }), { address: PLAIN.toLowerCase(), source: "address" });
+});
+
+test("Solana names resolve to Solana addresses, never EVM trader identities", async () => {
+  const solana = SOLANA;
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(String(url));
+    return json({ s: "ok", result: solana });
+  };
+  assert.deepEqual(await lookupName("Bonfida.sol", { fetchImpl }), {
+    address: solana, source: "sns", chain: "solana", name: "bonfida.sol",
+  });
+  assert.deepEqual(await lookupName("Bonfida.solana", { fetchImpl }), {
+    address: solana, source: "sns", chain: "solana", name: "bonfida.sol",
+  });
+  assert.ok(calls.every((url) => url.includes("sdk-proxy-v2.sns.id/resolve/bonfida.sol")));
+
+  const handler = createHandler({
+    chain: { async accountByAddress() { throw new Error("Solana name reached Perpl"); } },
+    fetchImpl, store: null, ens: null, ensAddress: async () => null,
+  });
+  const response = { status(code) { this.code = code; return this; }, json(body) { return { status: this.code, body }; }, setHeader() {} };
+  const result = await handler({ method: "GET", query: { view: "lookup", q: "Bonfida.sol" } }, response);
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, { query: "Bonfida.sol", address: solana, name: "bonfida.sol", via: "sns", chain: "solana" });
+});
+
+test("Solana primary names preserve address case and never call EVM-only identity providers", async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(String(url));
+    if (String(url).startsWith("https://sns-api.bonfida.com/v2/user/fav-domains/")) {
+      return json({ [SOLANA]: "iamgifted" });
+    }
+    throw new Error(`unexpected ${url}`);
+  };
+  const store = memoryStore();
+  const chain = { async accountByAddress() { throw new Error("Solana reached Perpl"); } };
+  const identities = await resolveIdentities([SOLANA], { fetchImpl, chain, store, neynarKey: null });
+  assert.equal(identities[SOLANA].address, SOLANA);
+  assert.equal(identities[SOLANA].name, "iamgifted.sol");
+  assert.equal(identities[SOLANA].source, "sns");
+  assert.equal(calls.length, 1);
+  assert.equal((await resolveIdentities([SOLANA], { fetchImpl, chain, store, neynarKey: null }))[SOLANA].name, "iamgifted.sol");
+  assert.equal(calls.length, 1);
+  const handler = createHandler({ chain, fetchImpl, store, ens: null });
+  const response = { status(code) { this.code = code; return this; }, json(body) { return { status: this.code, body }; }, setHeader() {} };
+  const result = await handler({ method: "GET", query: { view: "identity", addresses: SOLANA } }, response);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.identities[SOLANA].name, "iamgifted.sol");
+});
+
+test("Solana Farcaster profile requires the exact verified address", async () => {
+  const users = [
+    { username: "unrelated", follower_count: 100_000, verified_addresses: { sol_addresses: [] } },
+    { username: "owner", verified_addresses: { sol_addresses: [SOLANA] } },
+  ];
+  assert.equal(pickFarcasterUser(SOLANA, users)?.username, "owner");
+  assert.equal(pickFarcasterUser(SOLANA, [users[0]]), null);
+});
+
+test("typed ENS name remains visible even when another profile is the primary identity", async () => {
+  const { fetchImpl } = sources({ fun: { [VITALIK.toLowerCase()]: { nickname: "Different name" } } });
+  const handler = createHandler({ chain: null, fetchImpl, store: null, ens: null, ensAddress: async () => VITALIK });
+  const response = { status(code) { this.code = code; return this; }, json(body) { return { status: this.code, body }; }, setHeader() {} };
+  const result = await handler({ method: "GET", query: { view: "lookup", q: "vitalik.eth" } }, response);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.identity.name, "vitalik.eth");
+  assert.equal(result.body.identity.source, "ens");
+});
+
+test("name-service outages are not reported as unregistered names", async () => {
+  const handler = createHandler({ chain: null, store: null, ens: null, ensAddress: async () => { throw new Error("RPC down"); } });
+  const response = { status(code) { this.code = code; return this; }, json(body) { return { status: this.code, body }; }, setHeader() {} };
+  const result = await handler({ method: "GET", query: { view: "lookup", q: "vitalik.eth" } }, response);
+  assert.equal(result.status, 503);
+  assert.match(result.body.error, /unavailable/i);
 });

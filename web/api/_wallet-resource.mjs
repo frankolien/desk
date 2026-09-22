@@ -20,14 +20,13 @@ const INDEX_BUDGET_MS = 25_000;
 const MAX_TRACKED = 2_000;
 
 export async function walletResource(address, { chainIndex = MONAD, contract = "", store, fetchImpl = fetch, chain = null, ens = null, hypersync = hypersyncClient(), now = Date.now } = {}) {
-  // A Solana address is case-sensitive base58 and lives on one chain; names are Monad
-  // things and do not apply.
+  // A Solana address is case-sensitive base58 and lives on one chain.
   const solana = !address.startsWith("0x");
   const wanted = solana ? address : address.toLowerCase();
   const chains = Object.keys(CHAINS).filter((index) => CHAINS[index].rpc !== null && index !== "501");
 
   const [identities, balances] = await Promise.all([
-    solana ? {} : resolveIdentities([wanted], { fetchImpl, chain, store, ens }).catch(() => ({})),
+    resolveIdentities([wanted], { fetchImpl, chain, store, ens }).catch(() => ({})),
     solana ? walletBalances(wanted, ["501"]).catch(() => null) : balancesAcross(wanted, chains, chainIndex),
   ]);
   const identity = identities[wanted] ?? null;

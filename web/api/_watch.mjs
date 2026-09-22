@@ -7,7 +7,7 @@ export const DIGEST_WINDOW_S = 900;
 export const COLLAPSE_MS = 5 * 60_000;
 const DUST = 1e-9;
 
-export const seenKey = (address) => `alerts:seen:${address.toLowerCase()}`;
+export const seenKey = (address) => `alerts:seen:${isSolanaAddress(address) ? address : address.toLowerCase()}`;
 export const walletCountKey = (id, hour) => `alerts:wcount:${id}:${hour}`;
 export const walletDigestKey = (id) => `alerts:wdigest:${id}`;
 

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { memoryStore } from "../api/_store.mjs";
-import { newestMarker, walletEvents, walletPayload } from "../api/_watch.mjs";
+import { newestMarker, seenKey, walletEvents, walletPayload } from "../api/_watch.mjs";
 import { createHandler, parseSubscription, scan, subscriptionId } from "../api/alerts.mjs";
 
 const WHALE = "0x06b6000000000000000000000000000000006911";
@@ -13,6 +13,12 @@ const MOYAKI = "0xcccc000000000000000000000000000000000003";
 const INSTALL = "ab".repeat(32);
 const TOKEN = "cd".repeat(32);
 const MIN = 60_000;
+
+test("alert markers preserve case-sensitive Solana wallet keys", () => {
+  const solana = "Fw1ETanDZafof7xEULsnq9UY6o71Tpds89tNwPkWLb1v";
+  assert.equal(seenKey(solana), `alerts:seen:${solana}`);
+  assert.equal(seenKey(WHALE.toUpperCase().replace("0X", "0x")), `alerts:seen:${WHALE}`);
+});
 
 let hashes = 0;
 const trade = (time, token, symbol, side, amount, value, gain = null) =>

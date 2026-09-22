@@ -84,3 +84,4 @@ scratch/
 *.swiftmodule
 *.swiftsourceinfo
 *.swiftdoc
+.vercel

@@ -12,14 +12,36 @@ import { mainnet } from "viem/chains";
 /// functions per deployment.
 
 export const MAX_ADDRESSES = 50;
+export class NameLookupUnavailable extends Error {}
 const MONAD_CHAIN_ID = "143";
 const NNS_URL = "https://api.nad.domains/v1/protocol/profiles";
 const NADFUN_URL = "https://api.nad.fun/profile/";
 const NEYNAR_URL = "https://api.neynar.com/v2/farcaster/user/bulk-by-address/";
+const SNS_PRIMARY_URL = "https://sns-api.bonfida.com/v2/user/fav-domains/";
 const TTL_SECONDS = 24 * 3600;
 const NADFUN_DEFAULT_IMAGE = /\/default_profile_\d+\.png$/i;
 
 const text = (value) => (typeof value === "string" && value.trim() ? value.trim() : null);
+const evmAddress = (value) => /^0x[a-fA-F0-9]{40}$/.test(value);
+const solanaAddress = (value) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
+const identityKey = (address) => evmAddress(address) ? address.toLowerCase() : address;
+
+async function snsPrimary(addresses, fetchImpl) {
+  const found = new Map();
+  for (let start = 0; start < addresses.length; start += 20) {
+    const batch = addresses.slice(start, start + 20);
+    try {
+      const response = await fetchImpl(`${SNS_PRIMARY_URL}${batch.join(",")}`);
+      if (!response.ok) continue;
+      const body = await response.json();
+      for (const address of batch) {
+        const domain = text(body?.[address]);
+        if (domain) found.set(address, { name: domain.endsWith(".sol") ? domain : `${domain}.sol` });
+      }
+    } catch { /* a missing SNS profile must not hide other identities */ }
+  }
+  return found;
+}
 
 export function ensReader(rpcURL = process.env.ETHEREUM_RPC || "https://ethereum-rpc.publicnode.com") {
   const client = createPublicClient({ chain: mainnet, transport: http(rpcURL, { timeout: 8_000, batch: true }) });
@@ -73,10 +95,12 @@ async function nadFun(address, fetchImpl) {
 /// most followed.
 export function pickFarcasterUser(address, users) {
   const lower = address.toLowerCase();
+  const solana = solanaAddress(address);
   const verified = (user) => (user?.verified_addresses?.eth_addresses ?? [])
     .some((entry) => String(entry).toLowerCase() === lower);
   return (Array.isArray(users) ? users : [])
     .filter((user) => text(user?.username) && !user.username.startsWith("!"))
+    .filter((user) => !solana || (user?.verified_addresses?.sol_addresses ?? []).includes(address))
     .sort((a, b) => (Number(verified(b)) - Number(verified(a))) || ((b.follower_count ?? 0) - (a.follower_count ?? 0)))[0] ?? null;
 }
 
@@ -91,7 +115,7 @@ async function farcaster(addresses, fetchImpl, key) {
       const user = pickFarcasterUser(address, users);
       const username = text(user?.username);
       if (!username) continue;
-      found.set(address.toLowerCase(), {
+      found.set(identityKey(address), {
         name: text(user.display_name) ?? username,
         username,
         avatar: text(user.pfp_url),
@@ -102,11 +126,12 @@ async function farcaster(addresses, fetchImpl, key) {
   return found;
 }
 
-export function describeIdentity(address, { nad = null, fun = null, ens = null, cast = null, perpl = null } = {}) {
+export function describeIdentity(address, { nad = null, fun = null, ens = null, sns = null, cast = null, perpl = null } = {}) {
   const sources = [
     nad && { source: "nad", name: nad.name, avatar: nad.avatar ?? null },
     fun && { source: "nadfun", name: fun.name, avatar: fun.avatar ?? null, bio: fun.bio ?? null },
     ens && { source: "ens", name: ens.name, avatar: ens.avatar ?? null, x: ens.x ?? null },
+    sns && { source: "sns", name: sns.name, avatar: sns.avatar ?? null },
     cast && { source: "farcaster", name: cast.name, avatar: cast.avatar ?? null, bio: cast.bio ?? null },
   ].filter(Boolean);
   const named = sources.find((entry) => entry.name);
@@ -126,7 +151,7 @@ export function describeIdentity(address, { nad = null, fun = null, ens = null, 
 const cacheKey = (address) => `id:${address}`;
 
 export async function resolveIdentities(addresses, { fetchImpl = fetch, chain = null, store = null, ens = null, neynarKey = process.env.NEYNAR_API_KEY, fresh = false } = {}) {
-  const wanted = [...new Set(addresses.map((value) => value.toLowerCase()))];
+  const wanted = [...new Set(addresses.map(identityKey).filter((value) => evmAddress(value) || solanaAddress(value)))];
   const identities = {};
   let missing = wanted;
 
@@ -144,12 +169,15 @@ export async function resolveIdentities(addresses, { fetchImpl = fetch, chain = 
   }
   if (missing.length === 0) return identities;
 
-  const [nad, casts, funs, enses, perpls] = await Promise.all([
-    nadNames(missing, fetchImpl),
+  const evm = missing.filter(evmAddress);
+  const solana = missing.filter(solanaAddress);
+  const [nad, sns, casts, funs, enses, perpls] = await Promise.all([
+    nadNames(evm, fetchImpl),
+    snsPrimary(solana, fetchImpl),
     farcaster(missing, fetchImpl, neynarKey),
-    Promise.all(missing.map((address) => nadFun(address, fetchImpl))),
-    Promise.all(missing.map((address) => (ens ? ens(address).catch(() => null) : null))),
-    Promise.all(missing.map((address) => (chain
+    Promise.all(missing.map((address) => (evmAddress(address) ? nadFun(address, fetchImpl) : null))),
+    Promise.all(missing.map((address) => (evmAddress(address) && ens ? ens(address).catch(() => null) : null))),
+    Promise.all(missing.map((address) => (evmAddress(address) && chain
       ? chain.accountByAddress(address).then((account) =>
         (account && account.accountId !== 0n ? account.accountId.toString() : null)).catch(() => null)
       : null))),
@@ -157,7 +185,7 @@ export async function resolveIdentities(addresses, { fetchImpl = fetch, chain = 
 
   missing.forEach((address, index) => {
     const identity = describeIdentity(address, {
-      nad: nad.get(address), fun: funs[index], ens: enses[index], cast: casts.get(address), perpl: perpls[index],
+      nad: nad.get(address), fun: funs[index], ens: enses[index], sns: sns.get(address), cast: casts.get(address), perpl: perpls[index],
     });
     identities[address] = identity;
     if (store) store.set(cacheKey(address), JSON.stringify(identity), { ex: TTL_SECONDS }).catch(() => {});
@@ -165,12 +193,30 @@ export async function resolveIdentities(addresses, { fetchImpl = fetch, chain = 
   return identities;
 }
 
-/// A name to an address: a .nad name through the name service, a .eth name through
-/// ENS, an @handle through Farcaster. An address comes back as itself.
+/// A name to an address: .nad on Monad, .eth on Ethereum, .sol/.sns on
+/// Solana, or an @handle on Farcaster. Keep the chain with the result: a
+/// Solana public key must never be treated as a Perpl/EVM trader address.
 export async function lookupName(query, { fetchImpl = fetch, ensAddress = null, neynarKey = process.env.NEYNAR_API_KEY } = {}) {
   const text = String(query ?? "").trim();
   if (/^0x[a-fA-F0-9]{40}$/.test(text)) return { address: text.toLowerCase(), source: "address" };
   const lower = text.toLowerCase();
+  if (/\.(sol|sns|solana)$/.test(lower)) {
+    // .solana is a common spelling mistake, not an SNS TLD. Resolve its .sol
+    // equivalent, and return the canonical name so the UI does not endorse it.
+    const name = lower.endsWith(".solana") ? `${lower.slice(0, -7)}.sol` : lower;
+    if (!/^(?:[a-z0-9-]+\.){1,2}(?:sol|sns)$/.test(name)) return null;
+    try {
+      const response = await fetchImpl(`https://sdk-proxy-v2.sns.id/resolve/${encodeURIComponent(name)}`);
+      if (response.status >= 500) throw new NameLookupUnavailable("Solana name service is unavailable.");
+      const body = response.ok ? await response.json() : null;
+      const address = String(body?.s === "ok" ? body.result : "");
+      if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) return { address, source: "sns", chain: "solana", name };
+    } catch (error) {
+      if (error instanceof NameLookupUnavailable) throw error;
+      throw new NameLookupUnavailable("Solana name service is unavailable.");
+    }
+    return null;
+  }
   if (lower.endsWith(".nad")) {
     try {
       const response = await fetchImpl(`https://api.nad.domains/v1/protocol/resolved-address/${encodeURIComponent(lower)}?chainId=143`);
@@ -184,7 +230,7 @@ export async function lookupName(query, { fetchImpl = fetch, ensAddress = null, 
     try {
       const address = await ensAddress(lower);
       if (address) return { address: address.toLowerCase(), source: "ens" };
-    } catch { /* not found */ }
+    } catch { throw new NameLookupUnavailable("ENS lookup is unavailable."); }
     return null;
   }
   const handle = lower.replace(/^@/, "");

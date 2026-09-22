@@ -11,7 +11,7 @@ struct SignalsScreen: View {
     let onOrderFilled: (Direction, String) -> Void
 
     private enum Section: String, CaseIterable, Identifiable {
-        case traders = "Traders", smart = "Smart money", market = "Market"
+        case traders = "Following", smart = "Smart money", market = "Market"
         var id: String { rawValue }
     }
 
@@ -24,6 +24,7 @@ struct SignalsScreen: View {
     @State private var section: Section = .traders
     @State private var directory = TraderDirectory()
     @State private var selectedTrader: TraderSnapshot?
+    @State private var selectedTrackedWallet: TrackedWallet?
     @State private var copyOrder: CopyOrder?
     @State private var pendingCopy: CopyOrder?
     @State private var unlistedMarket: String?
@@ -31,6 +32,7 @@ struct SignalsScreen: View {
     @State private var showsCopying = false
     @State private var afterAlert: (() -> Void)?
     @State private var smartMoney = SignalsModel()
+    @State private var followingFeed = FollowingFeedModel()
     @State private var trackedEditing: TrackedWallet?
     @State private var showsTrackNew = false
     #if DEBUG
@@ -63,10 +65,29 @@ struct SignalsScreen: View {
 
                         switch section {
                         case .traders:
+                            FollowingFeed(model: followingFeed,
+                                          addresses: TrackedWallets.shared.list.map(\.address),
+                                          name: { address in
+                                              let tracked = TrackedWallets.shared.wallet(for: address)
+                                              return tracked?.name.isEmpty == false ? tracked!.name
+                                                  : (IdentityDirectory.shared.name(for: address) ?? tracked?.shortAddress ?? address)
+                                          }, onAdd: { showsTrackNew = true },
+                                          unalertedTraderCount: directory.followed.filter { !TradeAlerts.shared.isOn(for: $0) }.count,
+                                          onEnableTraderAlerts: {
+                                              Task {
+                                                  for address in directory.followed where !TradeAlerts.shared.isOn(for: address) {
+                                                      _ = await TradeAlerts.shared.turnOn(for: address)
+                                                  }
+                                              }
+                                          },
+                                          notificationsOff: TradeAlerts.shared.permission == .denied,
+                                          notificationProblem: TradeAlerts.shared.problem)
+                                .padding(.top, 20)
+                                .padding(.bottom, 28)
                             TradersFeed(directory: directory, copier: copier, onOpenCopying: { showsCopying = true },
                                         onSelect: { selectedTrader = $0 },
-                                        onOpenTracked: { trackedEditing = $0 }, onAdd: { showsTrackNew = true })
-                                .padding(.top, 20)
+                                        onOpenTracked: { selectedTrackedWallet = $0 },
+                                        onEditTracked: { trackedEditing = $0 }, onAdd: { showsTrackNew = true })
                                 .padding(.bottom, 130)
                         case .smart:
                             SmartMoneyFeed(model: smartMoney) { signal in
@@ -84,7 +105,8 @@ struct SignalsScreen: View {
                 .refreshable {
                     async let top: Void = directory.refreshTop()
                     async let following: Void = directory.refreshFollowing()
-                    _ = await (top, following)
+                    async let activity: Void = followingFeed.load(addresses: TrackedWallets.shared.list.map(\.address))
+                    _ = await (top, following, activity)
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -108,12 +130,24 @@ struct SignalsScreen: View {
                 TraderProfileScreen(initial: trader, directory: directory, copier: copier) { copy($0) }
                     .toolbar(.hidden, for: .tabBar)
             }
+            .navigationDestination(item: $selectedTrackedWallet) { wallet in
+                TrackedWalletProfile(address: wallet.address, model: model)
+                    .toolbar(.hidden, for: .tabBar)
+            }
             .navigationDestination(isPresented: $showsCopying) {
                 CopyActivityScreen(copier: copier, directory: directory)
                     .toolbar(.hidden, for: .tabBar)
             }
         }
         .task { await directory.run() }
+        .task { await TradeAlerts.shared.refreshPermission() }
+        .task(id: TrackedWallets.shared.list.map(\.id).joined(separator: ",")) {
+            let addresses = TrackedWallets.shared.list.map(\.address)
+            await followingFeed.run(addresses: addresses)
+        }
+        .task(id: TrackedWallets.shared.list.map(\.id).joined(separator: ",")) {
+            await IdentityDirectory.shared.resolve(TrackedWallets.shared.list.map(\.address))
+        }
         #if DEBUG
         .task { if ProcessInfo.processInfo.arguments.contains("-copy-activity") { showsCopying = true } }
         .task {

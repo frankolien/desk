@@ -190,12 +190,16 @@ struct MarketSearchScreen: View {
     @State private var selectedSpot: TrendingSpotToken?
     @State private var selectedPerson: SpotWallet?
     @State private var person: (address: String, identity: Identity?)?
+    @State private var isLookingUpName = false
+    @State private var nameWasNotFound = false
+    @State private var nameLookupUnavailable = false
     @StateObject private var discovery = TokenDiscoveryModel()
 
     /// Names look like names: a dot, an @, or an address.
     private var looksLikeAName: Bool {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.hasPrefix("@") || text.hasPrefix("0x") || text.contains(".") && !text.contains(" ")
+        return text.hasPrefix("@") || text.hasPrefix("0x") || TrackedWallets.isSolana(text)
+            || text.contains(".") && !text.contains(" ")
     }
     @AppStorage("desk.watchlist") private var savedIDs = ""
 
@@ -247,30 +251,27 @@ struct MarketSearchScreen: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, 10)
 
-                    Text("Perp Cards")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(DeskColor.nightText.color)
-                        .padding(.top, 32)
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(Array(market.allMarkets.prefix(4)), id: \.id) { entry in
-                                Button { open(entry) } label: {
-                                    SearchMarketCard(model: market, market: entry)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    // Full bleed: the inset lives inside the scroller, so cards reach the
-                    // screen edge instead of being cropped short of it.
-                    .contentMargins(.horizontal, 20)
-                    .padding(.horizontal, -20)
-                    .padding(.top, 12)
-
                     let people = peopleRows
+                    if looksLikeAName && isLookingUpName {
+                        ProgressView("Looking up name…")
+                            .font(DeskType.caption)
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                            .padding(.top, 18)
+                    } else if looksLikeAName && nameWasNotFound && people.isEmpty {
+                        Text(query.lowercased().hasSuffix(".solana")
+                             ? "No .sol name found. .solana is not an SNS extension."
+                             : "No blockchain name or wallet found for “\(query)”.")
+                            .font(DeskType.caption)
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                            .padding(.top, 18)
+                    } else if looksLikeAName && nameLookupUnavailable && people.isEmpty {
+                        Text("Name lookup is unavailable. Check your connection and try again.")
+                            .font(DeskType.caption)
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                            .padding(.top, 18)
+                    }
                     if !people.isEmpty {
-                        Text("People")
+                        Text("Wallets")
                             .font(.system(size: 18, weight: .bold, design: .rounded))
                             .foregroundStyle(DeskColor.nightText.color)
                             .padding(.top, 26)
@@ -278,13 +279,21 @@ struct MarketSearchScreen: View {
                             ForEach(people, id: \.address) { entry in
                                 Button { selectedPerson = SpotWallet(address: entry.address, emoji: "◉", portfolio: "—") } label: {
                                     HStack(spacing: 13) {
-                                        TraderAvatar(address: entry.address, size: 42)
+                                        if TrackedWallets.isSolana(entry.address) {
+                                            Image(systemName: "circle.hexagongrid.fill")
+                                                .font(.system(size: 19, weight: .medium))
+                                                .foregroundStyle(DeskColor.action.color)
+                                                .frame(width: 42, height: 42)
+                                                .background(DeskColor.action.color.opacity(0.14), in: Circle())
+                                        } else {
+                                            TraderAvatar(address: entry.address, size: 42)
+                                        }
                                         VStack(alignment: .leading, spacing: 3) {
                                             Text(entry.identity?.name ?? TraderSnapshot.short(entry.address))
                                                 .font(.system(size: 16, weight: .bold, design: .rounded))
                                                 .foregroundStyle(DeskColor.nightText.color)
                                                 .lineLimit(1)
-                                            Text(entry.identity?.sourceLabel ?? TraderSnapshot.short(entry.address))
+                                            Text("\(entry.identity?.sourceLabel ?? (TrackedWallets.isSolana(entry.address) ? "Solana wallet" : "Wallet")) · \(TraderSnapshot.short(entry.address))")
                                                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                                                 .foregroundStyle(DeskColor.nightMuted.color)
                                                 .lineLimit(1)
@@ -304,6 +313,26 @@ struct MarketSearchScreen: View {
                         }
                         .padding(.top, 12)
                     }
+
+                    if !looksLikeAName {
+                    Text("Perp Cards")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .padding(.top, 32)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(Array(market.allMarkets.prefix(4)), id: \.id) { entry in
+                                Button { open(entry) } label: {
+                                    SearchMarketCard(model: market, market: entry)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .contentMargins(.horizontal, 20)
+                    .padding(.horizontal, -20)
+                    .padding(.top, 12)
 
                     if !spotResults.isEmpty {
                         HStack {
@@ -385,6 +414,7 @@ struct MarketSearchScreen: View {
                         .foregroundStyle(DeskColor.nightMuted.color.opacity(0.8))
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 24)
+                    }
                 }
                 .padding(.horizontal, 20)
                 // Clears the floating search field as well as the tab bar.
@@ -428,15 +458,28 @@ struct MarketSearchScreen: View {
             .task(id: query) { await discovery.search(query) }
             .task(id: query) {
                 person = nil
+                nameWasNotFound = false
+                nameLookupUnavailable = false
+                isLookingUpName = false
                 guard looksLikeAName else { return }
                 try? await Task.sleep(for: .milliseconds(350))
                 guard !Task.isCancelled else { return }
+                isLookingUpName = true
                 let found = await IdentityDirectory.shared.lookup(query)
-                if !Task.isCancelled { person = found }
+                guard !Task.isCancelled else { return }
+                isLookingUpName = false
+                switch found {
+                case .wallet(let address, let identity): person = (address, identity)
+                case .solana(let name, let address):
+                    let identity = name == address ? nil : IdentityDirectory.shared.rememberSolana(name: name, address: address)
+                    person = (address, identity)
+                case .notFound: nameWasNotFound = true
+                case .unavailable: nameLookupUnavailable = true
+                }
                 #if DEBUG
-                if let found, ProcessInfo.processInfo.arguments.contains("-open-person") {
+                if let person, ProcessInfo.processInfo.arguments.contains("-open-person") {
                     try? await Task.sleep(for: .seconds(2))
-                    selectedPerson = SpotWallet(address: found.address, emoji: "◉", portfolio: "—")
+                    selectedPerson = SpotWallet(address: person.address, emoji: "◉", portfolio: "—")
                 }
                 #endif
             }
@@ -448,7 +491,9 @@ struct MarketSearchScreen: View {
             }
             #endif
             .navigationDestination(item: $selectedPerson) { wallet in
-                WalletProfileScreen(wallet: wallet, token: nil, model: model)
+                WalletProfileScreen(wallet: wallet, token: nil, model: model, onBack: { selectedPerson = nil })
+                    .navigationBarBackButtonHidden(true)
+                    .toolbar(.hidden, for: .navigationBar)
                     .toolbar(.hidden, for: .tabBar)
             }
             .task(id: TokenOpenRequest.shared.pending) {
@@ -2213,12 +2258,23 @@ private struct WalletResource: Decodable {
     struct WalletLabel: Decodable, Identifiable { let code: String; let text: String; var id: String { code } }
 }
 
+/// Reuses the discovery wallet profile for a wallet followed from Signals.
+struct TrackedWalletProfile: View {
+    let address: String
+    let model: AppModel
+
+    var body: some View {
+        WalletProfileScreen(wallet: SpotWallet(address: address, emoji: "◉", portfolio: "—"), token: nil, model: model)
+    }
+}
+
 private struct WalletProfileScreen: View {
     let wallet: SpotWallet
     /// The token the wallet was reached from; nil when it was reached by name.
     let token: TrendingSpotToken?
     var feed: SpotLiveFeed? = nil
     let model: AppModel
+    var onBack: (() -> Void)? = nil
     @StateObject private var lookup = TokenDiscoveryModel()
     @State private var opened: TrendingSpotToken?
     @Environment(\.dismiss) private var dismiss
@@ -2288,7 +2344,9 @@ private struct WalletProfileScreen: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
-                        Button { dismiss() } label: { Image(systemName: "chevron.left").frame(width: 50, height: 50) }.perpSearchGlass(in: Circle())
+                        Button {
+                            if let onBack { onBack() } else { dismiss() }
+                        } label: { Image(systemName: "chevron.left").frame(width: 50, height: 50) }.perpSearchGlass(in: Circle())
                         Spacer()
                         ShareLink(item: wallet.address) { Image(systemName: "square.and.arrow.up").frame(width: 50, height: 50) }.perpSearchGlass(in: Circle())
                     }.font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
@@ -2303,18 +2361,24 @@ private struct WalletProfileScreen: View {
                     }.padding(.top, 30)
 
                     HStack(spacing: 10) {
-                        Button {
-                            UIPasteboard.general.string = wallet.address
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            withAnimation(.snappy(duration: 0.2)) { copied = true }
-                            Task { try? await Task.sleep(for: .seconds(1.4)); withAnimation { copied = false } }
-                        } label: {
-                            Text(copied ? "Copied" : name)
+                        if identity?.source == "sns" {
+                            Text(name)
                                 .font(.system(size: 21, weight: .bold, design: .rounded))
                                 .lineLimit(1).minimumScaleFactor(0.6)
-                                .contentShape(Rectangle())
+                        } else {
+                            Button {
+                                UIPasteboard.general.string = wallet.address
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                withAnimation(.snappy(duration: 0.2)) { copied = true }
+                                Task { try? await Task.sleep(for: .seconds(1.4)); withAnimation { copied = false } }
+                            } label: {
+                                Text(copied ? "Copied" : name)
+                                    .font(.system(size: 21, weight: .bold, design: .rounded))
+                                    .lineLimit(1).minimumScaleFactor(0.6)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                         Spacer(minLength: 8)
                         if isEVM || isSolana {
                             action(tracked == nil ? "Follow" : "Following", symbol: nil) {
@@ -2327,23 +2391,19 @@ private struct WalletProfileScreen: View {
                                 }
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             }
-                            action("Set Name", symbol: "pencil") {
-                                draftName = tracked?.name ?? ""
-                                naming = true
+                            if identity?.source != "sns" {
+                                action("Set Name", symbol: "pencil") {
+                                    draftName = tracked?.name ?? ""
+                                    naming = true
+                                }
                             }
                         }
                     }.padding(.top, 20)
 
-                    if let status = statusLine {
-                        Button { statusAction() } label: {
-                            HStack(spacing: 7) {
-                                Circle().fill(statusTint).frame(width: 7, height: 7)
-                                Text(status).font(.system(size: 13, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.8))
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.top, 10)
+                    if identity?.source != "sns", let status = statusLine {
+                        Button { statusAction() } label: { statusLabel(status) }
+                            .buttonStyle(.plain)
+                            .padding(.top, 10)
                     }
 
                     tabs.padding(.top, 18)
@@ -2352,6 +2412,7 @@ private struct WalletProfileScreen: View {
             }
             .refreshable { await loadResource(); await IdentityDirectory.shared.resolve([wallet.address]) }
         }
+        .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(isPresented: $showsPerpl) {
             if let copier = CopyTrader.current {
@@ -2456,6 +2517,14 @@ private struct WalletProfileScreen: View {
         return DeskColor.nightMuted.color
     }
 
+    private func statusLabel(_ status: String) -> some View {
+        HStack(spacing: 7) {
+            Circle().fill(statusTint).frame(width: 7, height: 7)
+            Text(status).font(.system(size: 13, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.8))
+        }
+        .contentShape(Rectangle())
+    }
+
     private func statusAction() {
         if identity?.perplAccount != nil, CopyTrader.current != nil { showsPerpl = true }
         else if let url = identity?.profileURL { openURL(url) }
@@ -2466,7 +2535,7 @@ private struct WalletProfileScreen: View {
             ForEach(Tab.allCases, id: \.self) { item in
                 Button { withAnimation(.snappy(duration: 0.22)) { tab = item } } label: {
                     VStack(spacing: 10) {
-                        Text(item.rawValue)
+                        Text(isSolana && item == .positions ? "Holdings" : item.rawValue)
                             .font(.system(size: 14, weight: tab == item ? .bold : .medium, design: .rounded))
                             .foregroundStyle(tab == item ? .white : Color.white.opacity(0.45))
                         Rectangle().fill(tab == item ? Color.white : .clear).frame(height: 2)
@@ -2498,7 +2567,10 @@ private struct WalletProfileScreen: View {
             }
         } else {
             if rows.isEmpty {
-                Text(tab == .positions ? "Nothing held here." : tab == .closed ? "No closed positions on record." : "No trades on record.")
+                Text(ledger?.status == "indexing" ? "Analyzing this wallet’s on-chain history…"
+                     : ledger == nil && resource != nil && tab != .positions ? "Trade history is unavailable right now."
+                     : tab == .positions ? "No holdings found for this wallet."
+                     : tab == .closed ? "No closed trades on record." : "No trades on record.")
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(Color.white.opacity(0.4))
                     .padding(.top, 22)
@@ -2618,7 +2690,7 @@ private struct WalletProfileScreen: View {
         components.queryItems = [
             URLQueryItem(name: "view", value: "wallet"),
             URLQueryItem(name: "address", value: wallet.address),
-            URLQueryItem(name: "chainIndex", value: token?.chainIndex ?? "143"),
+            URLQueryItem(name: "chainIndex", value: token?.chainIndex ?? ledgerChain),
             URLQueryItem(name: "contract", value: token?.contract ?? ""),
         ]
         guard let url = components.url else { return }

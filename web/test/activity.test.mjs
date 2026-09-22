@@ -2,11 +2,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createHandler, formatUnits, normalize } from "../api/activity.mjs";
+import { createHandler, followingFeed, formatUnits, normalize } from "../api/activity.mjs";
+import { memoryStore } from "../api/_store.mjs";
+import { ledgerKey, TRACKED_KEY } from "../api/_ledger.mjs";
 
 const ME = "0x82ec56aaf7aa35c6ac62b598e6c964a4b186f775";
 const PERPL = "0x34b6552d57a35a1d042ccae1951bd1c370112a6f";
 const OTHER = "0x1111111111111111111111111111111111111111";
+const SOLANA = "Fw1ETanDZafof7xEULsnq9UY6o71Tpds89tNwPkWLb1v";
 
 function recorder() {
   const out = { status: null, body: null };
@@ -57,4 +60,36 @@ test("the handler needs a key, and an empty history is an answer", async () => {
   const broken = async () => ({ json: async () => ({ status: "0", result: "Max rate limit reached" }) });
   assert.equal((await createHandler(broken, () => "k")({ method: "GET", query }, recorder())).status, 502);
   assert.equal((await createHandler(empty, () => "k")({ method: "GET", query: { address: "0x1", network: "mainnet" } }, recorder())).status, 400);
+});
+
+test("following feed sorts indexed buys and sells, and queues missing wallets", async () => {
+  const store = memoryStore();
+  const now = Date.now();
+  await store.set(ledgerKey(ME), JSON.stringify({ trades: [
+    { time: now - 20_000, hash: "0x1", token: OTHER, symbol: "ONE", side: "buy", amount: 2, value: 30 },
+    { time: now - 10_000, hash: "0x2", token: OTHER, symbol: "ONE", side: "sell", amount: 1, value: 20, gain: 5 },
+    { time: now - 15 * 86_400_000, hash: "0xold", token: OTHER, symbol: "ONE", side: "buy", value: 10 },
+  ] }));
+  const result = await followingFeed(store, [ME, OTHER], now);
+  assert.deepEqual(result.events.map((event) => event.hash), ["0x2", "0x1"]);
+  assert.equal(result.events[0].gain, 5);
+  assert.deepEqual(result.pending, [OTHER]);
+  assert.deepEqual(await store.smembers(TRACKED_KEY), [OTHER]);
+  const response = await createHandler(fetch, () => undefined, { store })(
+    { method: "GET", query: { view: "feed", addresses: `${ME},${OTHER}` } }, recorder());
+  assert.equal(response.status, 200);
+  assert.equal(response.body.events.length, 2);
+  const invalid = await createHandler(fetch, () => undefined, { store })(
+    { method: "GET", query: { view: "feed", addresses: "0xbad" } }, recorder());
+  assert.equal(invalid.status, 400);
+});
+
+test("following feed reports stale indexing and keeps Solana ledger keys case-sensitive", async () => {
+  const store = memoryStore();
+  const now = Date.now();
+  assert.equal(ledgerKey(SOLANA), `wl:${SOLANA}`);
+  await store.set(ledgerKey(SOLANA), JSON.stringify({ indexedAt: now - 11 * 60_000, trades: [] }));
+  const result = await followingFeed(store, [SOLANA], now);
+  assert.deepEqual(result.stale, [SOLANA]);
+  assert.deepEqual(result.pending, []);
 });

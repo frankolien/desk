@@ -128,9 +128,17 @@ final class TraderDirectory {
             TrackedWallets.shared.untrack(address)
         } else {
             guard followed.count < 20 else { return }
+            guard TrackedWallets.shared.isTracking(address) || !TrackedWallets.shared.isFull else { return }
             followed.append(address)
             if let known = top.first(where: { $0.id == address.lowercased() }) { following.append(known) }
             TrackedWallets.shared.track(address, name: nicknames[address.lowercased()] ?? "")
+            // Following a Perpl trader includes their position movements. Wallet tracking
+            // above covers spot swaps; this opt-in covers opened, changed and closed perps.
+            Task {
+                if await TradeAlerts.shared.turnOn(for: address), !isFollowing(address) {
+                    TradeAlerts.shared.turnOff(for: address)
+                }
+            }
         }
         UserDefaults.standard.set(followed, forKey: Self.storageKey)
         Task { await refreshFollowing() }
@@ -356,6 +364,7 @@ struct TraderAvatar: View {
     /// single-character Strings for one avatar, on a screen that draws twenty of them and
     /// replaces them every twenty seconds.
     private static func seed(of address: String) -> [UInt8] {
+        if !address.hasPrefix("0x") { return Array(address.utf8) }
         var out: [UInt8] = []
         out.reserveCapacity(40)
         for character in address.lowercased().dropFirst(2) {
@@ -434,6 +443,7 @@ struct TradersFeed: View {
     let onOpenCopying: () -> Void
     let onSelect: (TraderSnapshot) -> Void
     let onOpenTracked: (TrackedWallet) -> Void
+    let onEditTracked: (TrackedWallet) -> Void
     let onAdd: () -> Void
     @State private var sort: LeaderSort = .openPnL
 
@@ -494,7 +504,7 @@ struct TradersFeed: View {
                                      isAlerting: TradeAlerts.shared.isOn(for: trader.address)) { onSelect(trader) }
                     }
                     ForEach(tracked) { wallet in
-                        TrackedCard(wallet: wallet) { onOpenTracked(wallet) }
+                        TrackedCard(wallet: wallet, onTap: { onOpenTracked(wallet) }, onEdit: { onEditTracked(wallet) })
                     }
                     Button(action: onAdd) {
                         VStack(spacing: 8) {
@@ -636,6 +646,7 @@ private struct FollowedCard: View {
 private struct TrackedCard: View {
     let wallet: TrackedWallet
     let onTap: () -> Void
+    let onEdit: () -> Void
 
     var body: some View {
         Button(action: onTap) {
@@ -643,9 +654,7 @@ private struct TrackedCard: View {
                 HStack(alignment: .top) {
                     TraderAvatar(address: wallet.address, size: 36)
                     Spacer(minLength: 0)
-                    Image(systemName: "bell.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.5))
+                    Color.clear.frame(width: 28, height: 28)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(IdentityDirectory.shared.name(for: wallet.address) ?? wallet.displayName)
@@ -664,6 +673,18 @@ private struct TrackedCard: View {
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
+        .overlay(alignment: .topTrailing) {
+            Button(action: onEdit) {
+                Image(systemName: "bell.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.65))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Alert settings for \(wallet.displayName)")
+            .padding(9)
+        }
     }
 }
 
