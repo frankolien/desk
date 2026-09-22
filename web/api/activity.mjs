@@ -5,7 +5,7 @@
 /// rather than "Sent to 0x1964…".
 import { redisStore } from "./_store.mjs";
 import { walletResource } from "./_wallet-resource.mjs";
-import { ledgerKey, TRACKED_KEY } from "./_ledger.mjs";
+import { HEARTBEAT_KEY, ledgerKey, TRACKED_KEY, URGENT_KEY } from "./_ledger.mjs";
 
 const ETHERSCAN = "https://api.etherscan.io/v2/api";
 
@@ -27,7 +27,10 @@ const validSolana = (value) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
 /// A bounded, read-only timeline from the same indexed trades used by wallet alerts.
 /// Missing ledgers are queued for indexing; a missing ledger is not an empty history.
 export async function followingFeed(store, addresses, now = Date.now()) {
-  const values = await store.mget(addresses.map(ledgerKey));
+  const [values, service] = await Promise.all([
+    store.mget(addresses.map(ledgerKey)),
+    store.mget([HEARTBEAT_KEY, "alerts:lastScan"]).catch(() => [null, null]),
+  ]);
   let trackedCount = await store.scard(TRACKED_KEY);
   const pending = [];
   const stale = [];
@@ -40,11 +43,15 @@ export async function followingFeed(store, addresses, now = Date.now()) {
       pending.push(address);
       if (trackedCount < 2_000) {
         await store.sadd(TRACKED_KEY, address);
+        await store.sadd(URGENT_KEY, address);
         trackedCount += 1;
       }
       continue;
     }
-    if (!Number.isFinite(ledger.indexedAt) || now - ledger.indexedAt > 10 * 60_000) stale.push(address);
+    if (!Number.isFinite(ledger.indexedAt) || now - ledger.indexedAt > 10 * 60_000) {
+      stale.push(address);
+      await store.sadd(URGENT_KEY, address);
+    }
     const chainIndex = address.startsWith("0x") ? "143" : "501";
     for (const trade of Array.isArray(ledger.trades) ? ledger.trades : []) {
       if (!Number.isFinite(trade.time) || trade.time > now + 60_000 || trade.time < now - 14 * 86_400_000) continue;
@@ -55,7 +62,15 @@ export async function followingFeed(store, addresses, now = Date.now()) {
     }
   }
   events.sort((a, b) => b.time - a.time);
-  return { events: events.slice(0, 80), pending, stale, observedAt: now };
+  let workerAt = null;
+  try { workerAt = JSON.parse(service[0])?.at ?? null; } catch { /* no heartbeat */ }
+  const scanAt = service[1] ? Date.parse(service[1]) : null;
+  return { events: events.slice(0, 80), pending, stale, observedAt: now,
+    sync: {
+      workerDelayed: !Number.isFinite(workerAt) || now - workerAt > 10 * 60_000,
+      pushDelayed: !Number.isFinite(scanAt) || now - scanAt > 15 * 60_000,
+    },
+  };
 }
 
 export function formatUnits(raw, decimals) {

@@ -28,6 +28,7 @@ const QUOTE_SYMBOLS = new Set(["MON", "WMON", "USDC", "USDT", "AUSD", "USDE", "S
 // EVM is case-insensitive; Solana base58 is not. Never merge distinct Solana wallets.
 export const ledgerKey = (address) => `wl:${address.startsWith("0x") ? address.toLowerCase() : address}`;
 export const TRACKED_KEY = "wl:tracked";
+export const URGENT_KEY = "wl:urgent";
 export const HEARTBEAT_KEY = "wl:heartbeat";
 const KEEP_TRADES = 300;
 

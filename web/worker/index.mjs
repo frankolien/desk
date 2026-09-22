@@ -1,12 +1,13 @@
 import { hypersyncClient } from "../api/_history.mjs";
-import { HEARTBEAT_KEY, TRACKED_KEY, indexWallet, ledgerKey } from "../api/_ledger.mjs";
+import { HEARTBEAT_KEY, TRACKED_KEY, URGENT_KEY, indexWallet, ledgerKey } from "../api/_ledger.mjs";
 import { SOLANA, indexSolanaWallet, isSolanaAddress, solanaMetaReader, solanaRpc } from "../api/_solana.mjs";
 import { redisStore } from "../api/_store.mjs";
 import { metaReader, priceReader } from "../api/_wallet.mjs";
+import { selectWallets } from "./queue.mjs";
 
 /// The person at the back. Every wallet anyone has opened is in `wl:tracked`; this
-/// loop brings each ledger up to the chain tip, round after round, so a page never
-/// has to index on demand twice. Runs on Railway with the same env names as Vercel.
+/// loop brings ledgers up to the chain tip in bounded rounds, prioritizing newly
+/// followed wallets without starving older ones. Runs on Railway with Vercel's env names.
 
 const ROUND_PAUSE_MS = Number(process.env.WORKER_PAUSE_MS || 90_000);
 const PER_WALLET_BUDGET_MS = 20_000;
@@ -15,6 +16,7 @@ const BACKFILL_BLOCKS = 45 * 216_000;
 /// shared with the alerts index and rate-limits when asked too often.
 const FRESH_MS = 5 * 60_000;
 const BACKOFF_MS = 60_000;
+let queueCursor = 0;
 
 const store = redisStore();
 const hypersync = hypersyncClient();
@@ -41,7 +43,10 @@ process.on("SIGINT", () => { stopping = true; });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function round() {
-  const wallets = await store.smembers(TRACKED_KEY);
+  const [allWallets, urgent] = await Promise.all([store.smembers(TRACKED_KEY), store.smembers(URGENT_KEY)]);
+  const selected = selectWallets(allWallets, urgent, queueCursor);
+  queueCursor = selected.nextCursor;
+  const wallets = selected.wallets;
   const price = priceReader({ store, fetchCandles });
   const meta = metaReader({ store });
   const solPrice = priceReader({ store, chainIndex: SOLANA, fetchCandles });
@@ -52,7 +57,10 @@ async function round() {
   for (const [index, wallet] of wallets.entries()) {
     if (stopping) break;
     const known = stored[index] ? JSON.parse(stored[index]) : null;
-    if (known && Date.now() - known.indexedAt < FRESH_MS) continue;
+    if (known && Date.now() - known.indexedAt < FRESH_MS) {
+      await store.srem(URGENT_KEY, wallet);
+      continue;
+    }
     try {
       const result = isSolanaAddress(wallet)
         ? await indexSolanaWallet(wallet, { store, rpc: solana, price: solPrice, meta: solMeta, paceMs: 250, deadline: Date.now() + PER_WALLET_BUDGET_MS })
@@ -61,14 +69,15 @@ async function round() {
         });
       indexed += 1;
       if (!result.complete) behind += 1;
+      if (result.complete) await store.srem(URGENT_KEY, wallet);
     } catch (error) {
       console.error(`worker: ${wallet} ${error.message}`);
       if (/429/.test(error.message)) { await sleep(BACKOFF_MS); }
     }
   }
-  console.log(`worker: ${indexed}/${wallets.length} wallets, ${behind} still behind`);
+  console.log(`worker: ${indexed}/${wallets.length} selected of ${allWallets.length} wallets, ${behind} still behind`);
   // The health endpoint reads this to say whether the indexer is alive.
-  await store.set(HEARTBEAT_KEY, JSON.stringify({ at: Date.now(), wallets: wallets.length, indexed, behind }), { ex: 3600 }).catch(() => {});
+  await store.set(HEARTBEAT_KEY, JSON.stringify({ at: Date.now(), wallets: allWallets.length, indexed, behind }), { ex: 3600 }).catch(() => {});
 }
 
 while (!stopping) {

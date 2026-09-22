@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 import { apnsClient, isDeadToken } from "./_apns.mjs";
 import { hypersyncClient, indexHistory } from "./_history.mjs";
-import { TRACKED_KEY, ledgerKey } from "./_ledger.mjs";
+import { TRACKED_KEY, URGENT_KEY, ledgerKey } from "./_ledger.mjs";
 import { createMarkets } from "./_markets.mjs";
 import { priceDeliveries } from "./_prices.mjs";
 import { redisStore } from "./_store.mjs";
@@ -546,7 +546,10 @@ export function createHandler(resolve) {
 
     await store.set(subscriptionKey(id), JSON.stringify({ ...record, environment }), { ex: SUBSCRIPTION_TTL });
     await store.sadd(SUBSCRIPTIONS, id);
-    for (const wallet of record.wallets) await store.sadd(TRACKED_KEY, wallet.address);
+    for (const wallet of record.wallets) {
+      await store.sadd(TRACKED_KEY, wallet.address);
+      await store.sadd(URGENT_KEY, wallet.address);
+    }
     return res.status(200).json({ traders: record.traders.length, ...(record.wallets.length ? { wallets: record.wallets.length } : {}), confirmed });
   };
 }

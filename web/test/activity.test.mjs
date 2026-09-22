@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 import { createHandler, followingFeed, formatUnits, normalize } from "../api/activity.mjs";
 import { memoryStore } from "../api/_store.mjs";
-import { ledgerKey, TRACKED_KEY } from "../api/_ledger.mjs";
+import { ledgerKey, TRACKED_KEY, URGENT_KEY } from "../api/_ledger.mjs";
 
 const ME = "0x82ec56aaf7aa35c6ac62b598e6c964a4b186f775";
 const PERPL = "0x34b6552d57a35a1d042ccae1951bd1c370112a6f";
@@ -75,6 +75,9 @@ test("following feed sorts indexed buys and sells, and queues missing wallets", 
   assert.equal(result.events[0].gain, 5);
   assert.deepEqual(result.pending, [OTHER]);
   assert.deepEqual(await store.smembers(TRACKED_KEY), [OTHER]);
+  assert.deepEqual(await store.smembers(URGENT_KEY), [ME, OTHER]);
+  assert.equal(result.sync.workerDelayed, true);
+  assert.equal(result.sync.pushDelayed, true);
   const response = await createHandler(fetch, () => undefined, { store })(
     { method: "GET", query: { view: "feed", addresses: `${ME},${OTHER}` } }, recorder());
   assert.equal(response.status, 200);
@@ -92,4 +95,17 @@ test("following feed reports stale indexing and keeps Solana ledger keys case-se
   const result = await followingFeed(store, [SOLANA], now);
   assert.deepEqual(result.stale, [SOLANA]);
   assert.deepEqual(result.pending, []);
+  assert.deepEqual(await store.smembers(URGENT_KEY), [SOLANA]);
+});
+
+test("following feed distinguishes healthy indexing and push scans from a missing timeline", async () => {
+  const store = memoryStore();
+  const now = Date.now();
+  await store.set("wl:heartbeat", JSON.stringify({ at: now - 30_000 }));
+  await store.set("alerts:lastScan", new Date(now - 60_000).toISOString());
+  await store.set(ledgerKey(SOLANA), JSON.stringify({ indexedAt: now - 30_000, trades: [] }));
+  const feed = await followingFeed(store, [SOLANA], now);
+  assert.deepEqual(feed.sync, { workerDelayed: false, pushDelayed: false });
+  assert.deepEqual(feed.pending, []);
+  assert.deepEqual(feed.stale, []);
 });

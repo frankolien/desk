@@ -140,6 +140,7 @@ test("tracking a wallet asks the worker to index it, and a wallet-only subscript
   assert.equal(apns.sent[0].payload.aps.alert.title, "Wallet alerts are on");
   assert.equal(apns.sent[0].payload.aps.alert.body, "You'll hear when Whale trades on Monad.");
   assert.deepEqual(await store.smembers("wl:tracked"), [WHALE]);
+  assert.deepEqual(await store.smembers("wl:urgent"), [WHALE]);
   assert.equal(await store.scard("alerts:subs"), 1);
   const off = await handler({ method: "POST", query: {}, body: subscribe({ wallets: [] }) }, recorder());
   assert.equal(off.body.traders, 0);
