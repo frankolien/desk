@@ -58,11 +58,16 @@ export function solanaMovement(wallet, signature, tx) {
 
   let paid = lamports < -SOL_DUST;
   let received = lamports > SOL_DUST;
+  let stableDeltaUsd = 0;
   const inn = [];
   const out = [];
   for (const [token, { raw, after, decimals }] of deltas) {
     if (raw === 0n) continue;
-    if (STABLES.has(token)) { if (raw < 0n) paid = true; else received = true; continue; }
+    if (STABLES.has(token)) {
+      stableDeltaUsd += Number(raw) / 10 ** decimals;
+      if (raw < 0n) paid = true; else received = true;
+      continue;
+    }
     if (raw > 0n) inn.push({ token, raw, after, decimals }); else out.push({ token, raw: -raw, after, decimals });
   }
   if (inn.length === 0 && out.length === 0) return null;
@@ -72,7 +77,12 @@ export function solanaMovement(wallet, signature, tx) {
   else kind = received ? "sell" : "sent";
   return {
     hash: signature, block: Number(tx.slot ?? 0), time: Number(tx.blockTime ?? 0) * 1000, kind,
-    paidNative: kind === "buy" && lamports < -SOL_DUST ? -lamports : 0n, in: inn, out,
+    paidNative: kind === "buy" && lamports < -SOL_DUST ? -lamports : 0n,
+    receivedNative: kind === "sell" && lamports > SOL_DUST ? lamports : 0n, in: inn, out,
+    // Stablecoin legs give an on-chain USD execution value when a new token has no
+    // historical price candle. A fee/rent-only SOL change is not a quote.
+    quoteUsd: ((kind === "buy" && stableDeltaUsd < 0) || (kind === "sell" && stableDeltaUsd > 0))
+      ? Math.abs(stableDeltaUsd) : null,
   };
 }
 
@@ -161,7 +171,23 @@ export async function indexSolanaWallet(address, { store, rpc, price, meta, now 
     const movement = tx ? solanaMovement(address, entry.signature, tx) : null;
     if (movement) {
       for (const leg of [...movement.in, ...movement.out]) meta.learn?.(leg.token, leg.decimals);
-      await applyMovement(ledger, movement, { price: (token, time) => price(token === NATIVE ? SOLANA_WSOL : token, time), meta });
+      const assetLegs = [...movement.in, ...movement.out];
+      await applyMovement(ledger, movement, { price: async (token, time) => {
+        const quoted = await price(token === NATIVE ? SOLANA_WSOL : token, time);
+        if (quoted != null) return quoted;
+        if (assetLegs.length !== 1 || assetLegs[0].token !== token) return null;
+        let usd = movement.quoteUsd;
+        if (usd == null && movement.kind === "buy" && movement.paidNative > 0n) {
+          const solUsd = await price(SOLANA_WSOL, time);
+          if (solUsd != null) usd = Number(movement.paidNative) / 1e9 * solUsd;
+        }
+        if (usd == null && movement.kind === "sell" && movement.receivedNative > 0n) {
+          const solUsd = await price(SOLANA_WSOL, time);
+          if (solUsd != null) usd = Number(movement.receivedNative) / 1e9 * solUsd;
+        }
+        const amount = Number(assetLegs[0].raw) / 10 ** assetLegs[0].decimals;
+        return usd != null && usd > 0 && amount > 0 ? usd / amount : null;
+      }, meta });
       for (const leg of [...movement.in, ...movement.out]) reconcile(ledger, leg);
     }
     ledger.cursor = entry.signature;

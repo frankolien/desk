@@ -36,9 +36,44 @@ test("a token out for USDC in is a sell, and stablecoin legs are not positions",
   const tx = transaction({ pre: [[USDC, 181_946, 6], [BONK, 190_444_222_564, 5]], post: [[USDC, 183_614, 6], [BONK, 190_394_222_564, 5]] });
   const movement = solanaMovement(WALLET, "sig1", tx);
   assert.equal(movement.kind, "sell");
+  assert.ok(Math.abs(movement.quoteUsd - 0.001668) < 1e-9);
   assert.deepEqual(movement.in, []);
   assert.deepEqual(movement.out, [{ token: BONK, raw: 50_000_000n, after: 190_394_222_564n, decimals: 5 }]);
   assert.equal(movement.time, 1_789_990_473_000);
+});
+
+test("a stablecoin swap remains visible when the traded mint has no price candle", async () => {
+  const store = memoryStore();
+  const buy = transaction({
+    pre: [[USDC, 25_000_000, 6]],
+    post: [[USDC, 15_000_000, 6], [BONK, 2_000_000, 5]],
+  });
+  const rpc = async (method) => method === "getSignaturesForAddress"
+    ? [{ signature: "stable-buy", err: null }] : buy;
+  const meta = solanaMetaReader({ store, fetchImpl: async () => ({ ok: true, json: async () => ({ tokens: [
+    { chainIndex: "501", contract: BONK, symbol: "BONK" },
+  ] }) }), api: "" });
+  const result = await indexSolanaWallet(WALLET, { store, rpc, price: async () => null, meta });
+  assert.equal(result.ledger.trades.length, 1);
+  assert.equal(result.ledger.trades[0].side, "buy");
+  assert.equal(result.ledger.trades[0].value, 10);
+});
+
+test("a stablecoin sale remains visible when the traded mint has no price candle", async () => {
+  const store = memoryStore();
+  const sell = transaction({
+    pre: [[USDC, 15_000_000, 6], [BONK, 2_000_000, 5]],
+    post: [[USDC, 25_000_000, 6], [BONK, 0, 5]],
+  });
+  const rpc = async (method) => method === "getSignaturesForAddress"
+    ? [{ signature: "stable-sell", err: null }] : sell;
+  const meta = solanaMetaReader({ store, fetchImpl: async () => ({ ok: true, json: async () => ({ tokens: [
+    { chainIndex: "501", contract: BONK, symbol: "BONK" },
+  ] }) }), api: "" });
+  const result = await indexSolanaWallet(WALLET, { store, rpc, price: async () => null, meta });
+  assert.equal(result.ledger.trades.length, 1);
+  assert.equal(result.ledger.trades[0].side, "sell");
+  assert.equal(result.ledger.trades[0].value, 10);
 });
 
 test("SOL paid beyond fees and rent makes a buy; a bare transfer in is only received", () => {
