@@ -217,90 +217,117 @@ struct TokenAdaptiveCardBackground: View {
 struct AddFundsSheet: View {
     let model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @State private var copied = false
 
     private var walletAmount: Money { model.walletAUSD.value ?? .zero }
 
     var body: some View {
-        NavigationStack {
-            GlassPage {
-                GlassSection(footer: "Move your wallet AUSD into Perpl collateral before placing an order.") {
-                    HStack(spacing: 10) {
-                        TokenLogo(asset: .ausd, size: 30)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Fund trading balance").fontWeight(.semibold)
-                            Text("AUSD on \(model.network.name)").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    GlassRow("Wallet", value: "\(model.walletAUSD.value?.display() ?? "—") AUSD")
-                    GlassRow("Available to trade", value: "\(model.collateral.value?.display() ?? "—") AUSD")
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                TokenLogo(asset: .ausd, size: 42)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Add funds").font(.system(size: 22, weight: .heavy, design: .rounded))
+                    Text("AUSD on \(model.network.name)")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
                 }
-
-                VStack(spacing: 10) {
-                    Button { Task { await model.depositAUSD(walletAmount) } } label: {
-                        HStack(spacing: 8) {
-                            if model.deposit.isBusy { ProgressView().tint(.black).controlSize(.small) }
-                            Text(model.deposit.isBusy ? "Moving AUSD…" : "Move \(walletAmount.display()) AUSD to trading")
-                        }
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.black)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 2)
-                    }
-                    .controlSize(.large)
-                    .deskProminentButton()
-                    .disabled(walletAmount == .zero || model.deposit.isBusy)
-
-                    if model.network.hasFaucet && (walletAmount == .zero || !model.hasSetupGas) {
-                        Button { Task { await model.fundWallet() } } label: {
-                            HStack(spacing: 8) {
-                                if model.isWorking { ProgressView().controlSize(.small) } else { Image(systemName: "sparkles") }
-                                Text(model.isWorking ? "Sending test funds…" : "Get 10,000 test AUSD")
-                            }
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 2)
-                        }
-                        .controlSize(.large)
-                        .deskSecondaryButton()
-                        .disabled(model.isWorking)
-                    }
-
-                    Button { model.copyAddress() } label: {
-                        Label("Copy wallet address", systemImage: "doc.on.doc")
-                            .font(.footnote.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                    }
-                    .controlSize(.regular)
-                    .deskSecondaryButton()
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark.circle.fill").font(.title2).contentShape(Circle())
                 }
-                .tint(.white)
-
-                Group {
-                    if case .failed(let sentence) = model.deposit {
-                        Label(sentence, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
-                    }
-                    if case .sent = model.deposit {
-                        Label("AUSD is now available to trade.", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                    }
-                    if let sentence = model.fundingStatus {
-                        Label(sentence, systemImage: "hourglass").foregroundStyle(.secondary)
-                    }
-                    if let sentence = model.fundingProblem {
-                        Label(sentence, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
-                    }
-                }
-                .font(.caption.weight(.medium))
-                .padding(.horizontal, 14)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
             }
-            .navigationTitle("Add funds")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+
+            VStack(spacing: 0) {
+                row("Wallet", value: "\(model.walletAUSD.value?.display() ?? Unavailable.text) AUSD")
+                Divider().overlay(Color.white.opacity(0.08))
+                row("Available to trade", value: "\(model.collateral.value?.display() ?? Unavailable.text) AUSD")
+            }
+            .padding(.horizontal, 16)
+            .deskGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+            VStack(spacing: 10) {
+                Button { Task { await model.depositAUSD(walletAmount) } } label: {
+                    HStack(spacing: 8) {
+                        if model.deposit.isBusy { ProgressView().tint(.black).controlSize(.small) }
+                        Text(model.deposit.isBusy ? "Moving AUSD…" : "Move \(walletAmount.display()) AUSD to trading")
+                    }
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 54)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .background(walletAmount == .zero || model.deposit.isBusy ? Color.white.opacity(0.1) : DeskColor.action.color, in: Capsule())
+                .disabled(walletAmount == .zero || model.deposit.isBusy)
+
+                if model.network.hasFaucet && (walletAmount == .zero || !model.hasSetupGas) {
+                    Button { Task { await model.fundWallet() } } label: {
+                        HStack(spacing: 8) {
+                            if model.isWorking { ProgressView().controlSize(.small) } else { Image(systemName: "sparkles") }
+                            Text(model.isWorking ? "Sending test funds…" : "Get 10,000 test AUSD")
+                        }
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .deskGlass(interactive: true, in: Capsule())
+                    .disabled(model.isWorking)
+                }
+
+                Button {
+                    model.copyAddress()
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(.snappy(duration: 0.2)) { copied = true }
+                    Task { try? await Task.sleep(for: .seconds(1.4)); withAnimation { copied = false } }
+                } label: {
+                    Label(copied ? "Address copied" : "Copy wallet address", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .deskGlass(interactive: true, in: Capsule())
+            }
+            .foregroundStyle(.white)
+
+            Group {
+                if case .failed(let sentence) = model.deposit {
+                    Label(sentence, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
+                }
+                if case .sent = model.deposit {
+                    Label("AUSD is now available to trade.", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                }
+                if let sentence = model.fundingStatus {
+                    Label(sentence, systemImage: "hourglass").foregroundStyle(.secondary)
+                }
+                if let sentence = model.fundingProblem {
+                    Label(sentence, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
+                }
+            }
+            .font(.system(size: 12, weight: .medium, design: .rounded))
+            .fixedSize(horizontal: false, vertical: true)
         }
-        .presentationDetents([.fraction(0.68), .large])
+        .padding(24)
+        .preferredColorScheme(.dark)
+        .fittedSheet()
+        .presentationDragIndicator(.visible)
         .task { await model.refreshBalances() }
         .onDisappear { model.clearDeposit() }
     }
 
+    private func row(_ label: String, value: String) -> some View {
+        HStack {
+            Text(label).font(.system(size: 15, weight: .medium, design: .rounded))
+            Spacer()
+            Text(value).font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit()).foregroundStyle(.secondary)
+        }
+        .frame(height: 48)
+    }
 }
 
 private extension View {
