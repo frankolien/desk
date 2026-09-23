@@ -66,8 +66,9 @@ export function memoryStore() {
     smembers: async (key) => [...(sets.get(key) ?? [])],
     async sadd(key, member) {
       const set = sets.get(key) ?? new Set();
+      const added = set.has(member) ? 0 : 1;
       sets.set(key, set.add(member));
-      return 1;
+      return added;
     },
     async srem(key, ...members) {
       members.forEach((member) => sets.get(key)?.delete(member));

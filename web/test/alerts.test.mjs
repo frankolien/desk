@@ -231,3 +231,18 @@ test("a phone is woken at most a dozen times an hour", async () => {
   assert.equal(allowed, WAKE_CAP);
   assert.equal(await withinWakeBudget(store, "sub", 1_000 + 3_600_000), true);
 });
+
+test("the waitlist takes an email once, refuses what is not one, and reads back to the scheduler", async () => {
+  const store = memoryStore();
+  const apns = fakeAPNs();
+  const handler = createHandler(() => ({ store, apns, chain: {}, markets: async () => markets, secret: "s3cret", sleep: async () => {} }));
+  const post = (email) => handler({ method: "POST", query: {}, headers: {}, body: { action: "waitlist", email } }, recorder());
+  assert.equal((await post("Someone@Example.com")).status, 200);
+  const again = await post("someone@example.com");
+  assert.equal(again.status, 200);
+  assert.equal(again.body.already, true);
+  assert.equal((await post("not an email")).status, 400);
+  const list = await handler({ method: "GET", query: { job: "waitlist" }, headers: { authorization: "Bearer s3cret" } }, recorder());
+  assert.deepEqual(list.body.emails, ["someone@example.com"]);
+  assert.equal((await handler({ method: "GET", query: { job: "waitlist" }, headers: {} }, recorder())).status, 401);
+});

@@ -5,6 +5,7 @@ import { hypersyncClient, indexHistory } from "./_history.mjs";
 import { TRACKED_KEY, URGENT_KEY, WATCHED_KEY, ledgerKey } from "./_ledger.mjs";
 import { createMarkets } from "./_markets.mjs";
 import { priceDeliveries } from "./_prices.mjs";
+import { clientIp } from "./_ratelimit.mjs";
 import { redisStore } from "./_store.mjs";
 import {
   DEFAULT_MIN_USD, DIGEST_WINDOW_S, MAX_WALLETS, WALLET_PUSH_CAP, newestMarker, seenKey, walletCountKey, walletDigestKey,
@@ -24,6 +25,8 @@ import { chainReader, describePosition, openMarkets, perpIdsFromBitmap } from ".
 /// learns a device token or a followed address can read or rewrite someone's alerts.
 
 export const MAX_TRADERS = 20;
+/// People waiting for the TestFlight invite. Read with `?job=waitlist` and the scheduler's secret.
+export const WAITLIST_KEY = "waitlist:emails";
 export const MAX_SUBSCRIPTIONS = 5_000;
 const MAX_SCANNED = 300;
 /// Background wakes a phone may get in an hour. iOS throttles silent pushes hard, so a
@@ -506,8 +509,29 @@ export function createHandler(resolve) {
       }
     }
 
+    if (req.query?.job === "waitlist") {
+      if (!authorized(req, deps.secret)) return res.status(401).json({ error: "Unauthorized." });
+      const emails = (await store.smembers(WAITLIST_KEY)).sort();
+      return res.status(200).json({ count: emails.length, emails });
+    }
+
     if (req.method !== "POST") return res.status(405).json({ error: "POST required" });
     const body = typeof req.body === "string" ? safeJSON(req.body) : req.body;
+
+    if (body?.action === "waitlist") {
+      const email = String(body.email ?? "").trim().toLowerCase();
+      if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+        return res.status(400).json({ error: "That doesn't look like an email address." });
+      }
+      // One address a minute per phone or browser is plenty for a form; more is a script.
+      const ip = clientIp(req.headers);
+      const attempts = await store.incr(`waitlist:ip:${ip}`);
+      if (attempts === 1) await store.expire(`waitlist:ip:${ip}`, 3600);
+      if (attempts > 20) return res.status(429).json({ error: "Too many sign-ups from here. Try again later." });
+      const added = await store.sadd(WAITLIST_KEY, email);
+      if (added) await store.set(`waitlist:at:${email}`, new Date().toISOString(), { ex: 400 * 86400 }).catch(() => {});
+      return res.status(200).json({ joined: true, already: !added });
+    }
 
     if (body?.action === "unsubscribe") {
       if (typeof body.install !== "string" || !/^[0-9a-f]{64}$/.test(body.install)) {
