@@ -126,7 +126,9 @@ final class TradeAlerts {
     /// Re-registers on launch, which also refreshes the server's copy before it expires.
     func resume() async {
         await refreshPermission()
-        guard permission == .allowed, !alerted.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty else { return }
+        // A silent wake needs a token but no permission, so copying registers regardless.
+        let wantsAlerts = !alerted.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty
+        guard (permission == .allowed && wantsAlerts) || !copying.isEmpty else { return }
         UIApplication.shared.registerForRemoteNotifications()
     }
 
@@ -190,8 +192,10 @@ final class TradeAlerts {
     /// them for sixty days, refreshed on every launch. Nothing called this, so signing out
     /// left all of it in place and being renewed.
     func signOut() async {
-        let hadSubscription = !alerted.isEmpty
+        let hadSubscription = !alerted.isEmpty || !copying.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty
         alerted = []
+        copying = []
+        AutoCopyAway.isOn = false
         persist()
         syncTask?.cancel()
         if hadSubscription, let install = InstallSecret.value() {
@@ -206,7 +210,7 @@ final class TradeAlerts {
         problem = nil
         opened = nil
         openedToCopy = false
-        for key in [Self.storageKey, Self.nicknameKey, Self.tokenKey, Self.primerKey] {
+        for key in [Self.storageKey, Self.nicknameKey, Self.tokenKey, Self.primerKey, Self.copyingKey] {
             UserDefaults.standard.removeObject(forKey: key)
         }
         deviceToken = nil
@@ -371,7 +375,11 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     func application(
         _ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any]
     ) async -> UIBackgroundFetchResult {
-        guard let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "wake" else { return .noData }
+        guard let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "wake",
+              let trader = desk["trader"] as? String else { return .noData }
+        // The push is a hint, not an instruction: the loop runs only for a trader this phone
+        // still copies, and only while away copying is on.
+        guard await MainActor.run(body: { AutoCopyAway.isOn && CopyTrader.current?.isCopying(trader) == true }) else { return .noData }
         let copier = await MainActor.run { CopyTrader.current }
         return await copier?.wake() == true ? .newData : .noData
     }

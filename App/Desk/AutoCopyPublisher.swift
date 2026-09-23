@@ -59,9 +59,12 @@ final class AutoCopyPublisher {
         updateActivity(glance: glance, copier: copier)
     }
 
+    private var dismissedByUser = false
+
     private func updateActivity(glance: AutoCopyGlance, copier: CopyTrader) {
         let activities = Activity<AutoCopyActivityAttributes>.activities
         guard glance.isSetUp, Self.showsLiveActivity, ActivityAuthorizationInfo().areActivitiesEnabled else {
+            dismissedByUser = false
             if !activities.isEmpty {
                 lastState = nil
                 Task { await Self.endAll() }
@@ -77,13 +80,18 @@ final class AutoCopyPublisher {
         if activities.isEmpty {
             // ActivityKit refuses for reasons that do not clear immediately — the system limit,
             // a focus mode, the user turning activities off — so a refusal waits rather than
-            // being retried on the next tick.
-            guard UIApplication.shared.applicationState == .active,
+            // being retried on the next tick. One the person swiped away stays away.
+            guard !dismissedByUser, UIApplication.shared.applicationState == .active,
                   Date.now.timeIntervalSince(lastRequest) > Self.requestBackoff else { return }
             lastRequest = .now
-            guard (try? Activity.request(attributes: AutoCopyActivityAttributes(), content: content)) != nil else { return }
+            guard let activity = try? Activity.request(attributes: AutoCopyActivityAttributes(), content: content) else { return }
             lastState = state
             lastPush = .now
+            Task { [weak self] in
+                for await activityState in activity.activityStateUpdates where activityState == .dismissed {
+                    await MainActor.run { self?.dismissedByUser = true }
+                }
+            }
             return
         }
         // A heartbeat keeps the stale date ahead while Desk is open.
@@ -104,12 +112,11 @@ final class AutoCopyPublisher {
     }
 
     private static func glance(of copier: CopyTrader) -> AutoCopyGlance {
-        let live = copier.figures(shadow: false)
-        let shadow = copier.figures(shadow: true)
-        let closed = live.closed + shadow.closed
-        let rate: Double? = closed == 0 ? nil
-            : ((live.winRate ?? 0) * Double(live.closed) + (shadow.winRate ?? 0) * Double(shadow.closed)) / Double(closed)
+        // One mode at a time: money when there is any, paper otherwise, never the sum.
+        let shadowOnly = !copier.showsLiveFigures
+        let figures = copier.figures(shadow: shadowOnly)
         let moves = copier.log.lazy
+            .filter { $0.shadowed == shadowOnly }
             .filter { $0.kind == .opened || (($0.kind == .closed || $0.kind == .protected) && $0.pnl != nil) }
             .prefix(3)
             .map { entry in
@@ -119,10 +126,9 @@ final class AutoCopyPublisher {
                     leverage: entry.leverage, pnl: entry.pnl)
             }
         return AutoCopyGlance(
-            traders: copier.traders.count, openCopies: copier.open.count, today: copier.realisedToday,
-            realised: live.realised + shadow.realised, closedTrades: closed, winRate: rate,
-            isShadow: !copier.traders.isEmpty && copier.traders.allSatisfy { $0.rules.mode == .shadow },
-            moves: Array(moves), updatedAt: .now)
+            traders: copier.traders.count, openCopies: copier.open.filter { $0.shadowed == shadowOnly }.count,
+            today: figures.today, realised: figures.realised, closedTrades: figures.closed, winRate: figures.winRate,
+            isShadow: shadowOnly, moves: Array(moves), updatedAt: .now)
     }
 }
 

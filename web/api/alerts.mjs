@@ -121,7 +121,7 @@ export function tradeEvents(before, after) {
     const was = before[id];
     if (!was) events.push({ kind: "opened", position: now });
     else if (was.side !== now.side) events.push({ kind: "flipped", position: now });
-    else if (Number(now.size) >= Number(was.size) * 1.1) events.push({ kind: "added", position: now, previous: was });
+    else if (Number(was.size) > 0 && Number(now.size) >= Number(was.size) * 1.1) events.push({ kind: "added", position: now, previous: was });
   }
   for (const [id, was] of Object.entries(before)) {
     if (!after[id]) events.push({ kind: "closed", position: was });
@@ -328,7 +328,8 @@ export async function scan({ store, chain, apns, markets, quotes = [], now = Dat
     if (!records[index]) return expired.push(id);
     const record = JSON.parse(records[index]);
     everyone.push({ id, record });
-    for (const address of new Set([...record.traders, ...(record.copying ?? [])])) {
+    // Copied first: money moves on those, so they take the subscription's share before alerts.
+    for (const address of new Set([...(record.copying ?? []), ...record.traders])) {
       followers.set(address, [...(followers.get(address) ?? []), { id, record }]);
     }
     for (const wallet of record.wallets ?? []) {
@@ -361,7 +362,8 @@ export async function scan({ store, chain, apns, markets, quotes = [], now = Dat
           deliveries.push({ id, record, payload: alertPayload(address, record.names?.[address], event),
             collapseId: `${address.slice(2, 14)}-${event.position.marketId}-${event.kind}` });
         }
-        if (record.copying?.includes(address)) {
+        // The loop copies opens, flips and closes; an add would wake the phone for nothing.
+        if (record.copying?.includes(address) && event.kind !== "added") {
           deliveries.push({ id, record, payload: wakePayload(address, event),
             collapseId: `wake-${address.slice(2, 14)}`, background: true });
         }

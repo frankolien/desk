@@ -82,6 +82,8 @@ export function apnsClient({
         resolve({ status, reason });
       });
       request.on("error", () => resolve({ status: 0, reason: "Unreachable" }));
+      // A stream closed by the timeout ends without "end"; it must still answer.
+      request.on("close", () => resolve({ status, reason: status ? null : "Timeout" }));
       request.end(JSON.stringify(payload));
     });
   }

@@ -7,12 +7,26 @@ private struct CopyRulesSections: View {
     @Binding var rules: CopyRules
     let network: DeskNetwork
 
+    @State private var lastStop = 25
+    @State private var lastTake = 50
+
     private var stopLoss: Binding<Bool> {
-        Binding(get: { rules.stopLossPercent != nil }, set: { rules.stopLossPercent = $0 ? 25 : nil })
+        Binding(get: { rules.stopLossPercent != nil }, set: { on in
+            if let stop = rules.stopLossPercent { lastStop = stop }
+            rules.stopLossPercent = on ? lastStop : nil
+        })
     }
 
     private var takeProfit: Binding<Bool> {
-        Binding(get: { rules.takeProfitPercent != nil }, set: { rules.takeProfitPercent = $0 ? 50 : nil })
+        Binding(get: { rules.takeProfitPercent != nil }, set: { on in
+            if let take = rules.takeProfitPercent { lastTake = take }
+            rules.takeProfitPercent = on ? lastTake : nil
+        })
+    }
+
+    /// The presets plus whatever the rules hold, so a saved value never renders blank.
+    private static func options(_ presets: [Int], including value: Int) -> [Int] {
+        presets.contains(value) ? presets : (presets + [value]).sorted()
     }
 
     var body: some View {
@@ -46,7 +60,7 @@ private struct CopyRulesSections: View {
         GlassSection("Size", footer: sizeFooter) {
             GlassRow(rules.sizing == .conviction ? "Base margin" : "Margin per trade") {
                 Picker("Margin per trade", selection: $rules.marginPerTrade) {
-                    ForEach([5, 10, 25, 50, 100, 250], id: \.self) { Text("\($0) AUSD").tag($0) }
+                    ForEach(Self.options([5, 10, 25, 50, 100, 250], including: rules.marginPerTrade), id: \.self) { Text("\($0) AUSD").tag($0) }
                 }
                 .labelsHidden()
             }
@@ -67,7 +81,7 @@ private struct CopyRulesSections: View {
             if let stop = rules.stopLossPercent {
                 GlassRow("Loss of margin") {
                     Picker("Stop loss", selection: Binding(get: { stop }, set: { rules.stopLossPercent = $0 })) {
-                        ForEach([10, 15, 25, 35, 50], id: \.self) { Text("−\($0)%").tag($0) }
+                        ForEach(Self.options([10, 15, 25, 35, 50], including: stop), id: \.self) { Text("−\($0)%").tag($0) }
                     }
                     .labelsHidden()
                 }
@@ -76,7 +90,7 @@ private struct CopyRulesSections: View {
             if let take = rules.takeProfitPercent {
                 GlassRow("Gain on margin") {
                     Picker("Take profit", selection: Binding(get: { take }, set: { rules.takeProfitPercent = $0 })) {
-                        ForEach([25, 50, 100, 200], id: \.self) { Text("+\($0)%").tag($0) }
+                        ForEach(Self.options([25, 50, 100, 200], including: take), id: \.self) { Text("+\($0)%").tag($0) }
                     }
                     .labelsHidden()
                 }
@@ -87,7 +101,7 @@ private struct CopyRulesSections: View {
             Toggle("Close when they close", isOn: $rules.closeWithTrader)
             GlassRow("Max from their entry") {
                 Picker("Max from their entry", selection: $rules.maxChaseBps) {
-                    ForEach([25, 50, 100, 200], id: \.self) { Text(String(format: "%.2g%%", Double($0) / 100)).tag($0) }
+                    ForEach(Self.options([25, 50, 100, 200], including: rules.maxChaseBps), id: \.self) { Text(String(format: "%.2g%%", Double($0) / 100)).tag($0) }
                 }
                 .labelsHidden()
             }
@@ -120,7 +134,7 @@ private struct CopyRulesSections: View {
             return "Without a stop, a copy stays open until they close or you do."
         }
         let move = Double(stop) / Double(rules.maxLeverage)
-        return String(format: "At %d×, a −%d%% stop is a %.1f%% price move against you. Live stops are placed on Perpl, so they hold after Desk closes.",
+        return String(format: "At your %d× cap a −%d%% stop is a %.1f%% price move against you; at lower leverage it sits further away. Live stops are placed on Perpl.",
                       rules.maxLeverage, stop, move)
     }
 }
@@ -237,7 +251,7 @@ struct CopyBasketSheet: View {
     var body: some View {
         NavigationStack {
             GlassPage {
-                GlassSection("Basket", footer: "Desk copies the top traders on Perpl's leaderboard who are in the market, and re-picks them on this schedule. Traders who drop out stop being copied; their open copies keep their stops.") {
+                GlassSection("Basket", footer: "The leaderboard's best, re-picked on this schedule. Open copies keep their stops.") {
                     GlassRow("Traders") {
                         Picker("Traders", selection: $size) {
                             ForEach([3, 5, 10], id: \.self) { Text("Top \($0)").tag($0) }
@@ -388,9 +402,9 @@ struct CopyActivityScreen: View {
     @State private var showsBasket = false
     @State private var showsSettings = false
     @State private var showsShadow = true
+    @State private var pickedMode = false
+    @State private var goingLive: CopiedTrader?
 
-    /// Read several times each in one body pass, and each one walks the whole log — so they
-    /// are computed once per pass in `body` and handed down, not read as properties.
     private var figures: CopyTrader.Figures { copier.figures(shadow: showsShadow) }
     private var openCopies: [OpenCopy] { copier.open.filter { $0.shadowed == showsShadow } }
     private var entries: [CopyLogEntry] { copier.log.filter { $0.shadowed == showsShadow } }
@@ -424,7 +438,7 @@ struct CopyActivityScreen: View {
                         .buttonStyle(.plain)
                         .contextMenu {
                             if trader.rules.mode == .shadow {
-                                Button("Go Live", systemImage: "bolt.fill") { copier.setMode(.live, for: trader.address) }
+                                Button("Go Live", systemImage: "bolt.fill") { goingLive = trader }
                             } else {
                                 Button("Back to Shadow", systemImage: "eye") { copier.setMode(.shadow, for: trader.address) }
                             }
@@ -481,7 +495,7 @@ struct CopyActivityScreen: View {
                             HStack {
                                 Text("See All")
                                 Spacer()
-                                Text("\(entries.count)").foregroundStyle(.secondary).monospacedDigit()
+                                Text("\(min(entries.count, 200))").foregroundStyle(.secondary).monospacedDigit()
                                 chevron
                             }
                             .contentShape(Rectangle())
@@ -505,6 +519,23 @@ struct CopyActivityScreen: View {
         }
         .sheet(isPresented: $showsBasket) { CopyBasketSheet(copier: copier) }
         .sheet(isPresented: $showsSettings) { CopySettingsSheet(copier: copier) }
+        .confirmationDialog(
+            "Go live copying \(goingLive.map { directory.name(for: $0.address) } ?? "")?",
+            isPresented: Binding(get: { goingLive != nil }, set: { if !$0 { goingLive = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Go Live", role: .destructive) {
+                if let trader = goingLive { copier.setMode(.live, for: trader.address) }
+                goingLive = nil
+            }
+            Button("Keep Shadow", role: .cancel) { goingLive = nil }
+        } message: {
+            if let trader = goingLive {
+                Text("Real AUSD: \(trader.rules.marginPerTrade) margin per copy at up to \(trader.rules.maxLeverage)×, sent to your Perpl \(copier.network.shortName.lowercased()) account.")
+            }
+        }
+        // Opens on the mode with money in it; the person can still flip the switch.
+        .task { if !pickedMode { pickedMode = true; showsShadow = !copier.showsLiveFigures } }
         #if DEBUG
         .task { if ProcessInfo.processInfo.arguments.contains("-copy-settings") { showsSettings = true } }
         #endif
@@ -694,7 +725,7 @@ struct CopySettingsSheet: View {
                     }
                 }
 
-                GlassSection(footer: "Copying runs while Desk is open. With away copying on, Desk keeps the trading key ready after you leave and wakes when a trader you copy moves — until iOS closes the app, when the alert takes over.") {
+                GlassSection(footer: "Woken by a silent push when a trader you copy moves, until iOS closes Desk.") {
                     Toggle(isOn: $copiesWhileAway) {
                         GlassRow("Keep copying when I leave", subtitle: "Woken by a silent push") { EmptyView() }
                     }
@@ -784,7 +815,9 @@ private struct CopyLogRow: View {
         case .protected: ("shield.lefthalf.filled", .blue)
         case .skipped: ("forward.circle.fill", .secondary)
         case .failed: ("exclamationmark.circle.fill", DeskColor.fall.color)
-        case .paused: ("info.circle.fill", .orange)
+        case .paused: ("pause.circle.fill", .orange)
+        case .resumed: ("play.circle.fill", .green)
+        case .basket: ("arrow.triangle.2.circlepath", .secondary)
         }
     }
 
@@ -796,8 +829,9 @@ private struct CopyLogRow: View {
         case .protected: "\(side) closed by its trigger"
         case .skipped: "Skipped \(side)"
         case .failed: "Couldn't copy \(side)"
-        case .paused: entry.detail.hasPrefix("Basket") ? "Basket updated"
-            : (entry.detail.contains("resumed") ? "Auto-Copy resumed" : "Auto-Copy paused")
+        case .paused: "Auto-Copy paused"
+        case .resumed: "Auto-Copy resumed"
+        case .basket: "Basket updated"
         }
     }
 

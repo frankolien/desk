@@ -54,7 +54,7 @@ struct OpenCopy: Codable, Hashable, Identifiable {
 }
 
 struct CopyLogEntry: Codable, Hashable, Identifiable {
-    enum Kind: String, Codable { case opened, closed, protected, skipped, failed, paused }
+    enum Kind: String, Codable { case opened, closed, protected, skipped, failed, paused, resumed, basket }
 
     let id: UUID
     let date: Date
@@ -227,7 +227,15 @@ final class CopyTrader {
             averageSlippageBps: slips.isEmpty ? nil : Double(slips.reduce(0, +)) / Double(slips.count))
     }
 
-    var realisedToday: Double { figures(shadow: false).today + figures(shadow: true).today }
+    /// Whether the person has any money in this: a live trader or a live copy. Every
+    /// summary shows one mode; paper and money are never added into one figure.
+    var showsLiveFigures: Bool {
+        traders.contains { $0.rules.mode == .live } || open.contains { !$0.shadowed }
+    }
+
+    var realisedToday: Double { figures(shadow: !showsLiveFigures).today }
+
+    func isCopying(_ address: String) -> Bool { traders.contains { $0.id == address.lowercased() } }
 
     /// AUSD micros from a figure that came off the network, clamped rather than trapped.
     private static func microsClamping(_ value: Double) -> Int64 {
@@ -273,7 +281,7 @@ final class CopyTrader {
             if AutoCopySwitch.isPaused != isPaused {
                 isPaused = AutoCopySwitch.isPaused
                 record(CopyLogEntry(
-                    id: UUID(), date: .now, trader: "", symbol: "", isLong: true, kind: .paused,
+                    id: UUID(), date: .now, trader: "", symbol: "", isLong: true, kind: isPaused ? .paused : .resumed,
                     detail: isPaused ? "Auto-copy paused from outside Desk." : "Auto-copy resumed from outside Desk."))
             }
             let active = !traders.isEmpty || basket != nil || !open.isEmpty
@@ -460,7 +468,7 @@ final class CopyTrader {
         self.basket?.lastRotation = .now
         if leaving > 0 || !joining.isEmpty {
             record(CopyLogEntry(
-                id: UUID(), date: .now, trader: joining.first ?? "", symbol: "", isLong: true, kind: .paused,
+                id: UUID(), date: .now, trader: joining.first ?? "", symbol: "", isLong: true, kind: .basket,
                 detail: "Basket re-picked from the leaderboard: \(joining.count) in, \(leaving) out.",
                 isShadow: basket.rules.mode == .shadow))
         }
@@ -539,6 +547,11 @@ final class CopyTrader {
             ? Price(text: String(format: "%.8f", theirs.mark), decimals: target.config.priceDecimals, rounding: .towardZero)
             : market.price(for: target)
         guard let mark, mark.raw > 0 else { return note(.skipped, "No live \(symbol) price to size from.") }
+        // The venue holds one position per market, so a copy on the other side of something
+        // the person opened themselves would close their own trade, not open a copy.
+        if !shadow, model.openPositions.contains(where: { $0.marketID == target.id && ($0.side == .long) != (side == .long) }) {
+            return note(.skipped, "You hold the other side of \(symbol) yourself; the copy would have closed it.")
+        }
 
         let peers = open.filter { $0.shadowed == shadow }
         let exposure = peers.map { CopyExposure(symbol: $0.symbol, side: $0.isLong ? .long : .short, notional: $0.notional) }
@@ -552,10 +565,10 @@ final class CopyTrader {
             realisedToday: Money(raw: Self.microsClamping(today)) ?? .zero
         ) {
         case .failure(let skip):
-            if case .dailyLossLimit = skip {
-                // Through `setPaused`, so the App Group flag the run loop, the widget, Siri
-                // and Control Center all read is set too. Assigning the field alone was
-                // undone by the next tick, which then logged a resume nobody asked for.
+            // Only money pauses everything. A paper loss stops paper copies for the day and
+            // nothing else; through `setPaused`, so the App Group flag the run loop, the
+            // widget, Siri and Control Center all read is set too.
+            if case .dailyLossLimit = skip, !shadow {
                 setPaused(true)
                 return note(.paused, sentence(for: skip, rules: rules))
             }
@@ -691,7 +704,7 @@ final class CopyTrader {
             // same fallback the close path uses. Without it such a copy stayed open forever
             // and quietly consumed a slot against the open-copy and exposure limits.
             let positionID = copy.positionID ?? model.closedTrades
-                .filter { $0.marketID == copy.marketID && $0.isLong == copy.isLong }
+                .filter { $0.marketID == copy.marketID && $0.isLong == copy.isLong && $0.closedAt >= copy.openedAt }
                 .max { $0.positionID < $1.positionID }?.positionID
             guard let positionID,
                   !model.openPositions.contains(where: { $0.positionID == positionID }) else { continue }
@@ -777,7 +790,9 @@ final class CopyTrader {
         case .marketNotListed: "This market isn't listed on Perpl \(network.shortName.lowercased())."
         case .marketClosed: "The market is closed for trading."
         case .openCopiesLimit(let limit): "\(limit) copies are already open, your limit."
-        case .dailyLossLimit(let limit): "Today's copy losses reached your \(limit) AUSD limit, so auto-copy paused."
+        case .dailyLossLimit(let limit): rules.mode == .shadow
+            ? "Today's shadow losses reached your \(limit) AUSD limit; no more paper copies today."
+            : "Today's copy losses reached your \(limit) AUSD limit, so auto-copy paused."
         case .insufficientBalance: "Not enough free AUSD for a \(rules.marginPerTrade) AUSD copy."
         case .chased(let bps): String(format: "Price had already moved %.2f%% against the copy since their entry.", Double(bps) / 100)
         case .tooSmall: "\(rules.marginPerTrade) AUSD is too small to size on this market."

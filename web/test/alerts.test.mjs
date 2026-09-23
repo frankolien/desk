@@ -63,6 +63,8 @@ test("a book diff names opens, flips, meaningful adds and closes, and ignores tr
   assert.deepEqual(tradeEvents({ 20: long }, { 20: { ...long, size: "6" } }).map((e) => e.kind), ["added"]);
   assert.deepEqual(tradeEvents({ 20: long }, { 20: { ...long, size: "5.2" } }), []);
   assert.deepEqual(tradeEvents({ 20: long }, { 20: { ...long, size: "2" } }), []);
+  // A row of nothing that stays nothing is not an add, however 0 >= 0 reads.
+  assert.deepEqual(tradeEvents({ 20: { ...long, size: "0" } }, { 20: { ...long, size: "0" } }), []);
 });
 
 test("an alert reads like a sentence and carries what the app needs to copy", () => {
@@ -214,4 +216,10 @@ test("a subscription may name the traders it copies, and a move on one wakes the
   assert.equal(apns.sent[0].payload.aps.alert, undefined);
   assert.equal(apns.sent[0].payload.desk.type, "wake");
   assert.equal(apns.sent[0].options.background, true);
+  // An add is not a move the copy loop follows, so it wakes nobody.
+  apns.sent.length = 0;
+  state.row = row({ positionType: 1, lotLNS: BigInt(row().lotLNS) * 2n });
+  const third = await scan({ store, chain: fakeChain(state), apns, markets });
+  assert.equal(third.sent, 0);
+  assert.equal(apns.sent.length, 0);
 });
