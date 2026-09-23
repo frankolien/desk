@@ -346,8 +346,8 @@ struct HomeScreen: View {
                         subtitle: positionSubtitle(position.figures),
                         value: hidesBalance
                             ? "•••••"
-                            : (position.figures.unrealisedPnL.isNegative ? "" : "+")
-                                + position.figures.unrealisedPnL.display() + " AUSD",
+                            : (position.figures.unrealisedPnL.isNegative ? "" : "+") + position.figures.unrealisedPnL.display(),
+                        unit: hidesBalance ? nil : "AUSD",
                         change: Self.percent(position.figures.returnOnMarginMicros) + " on margin",
                         tint: position.figures.isProfit ? DeskColor.rise : DeskColor.fall,
                         action: {
@@ -398,11 +398,11 @@ struct HomeScreen: View {
     /// known: a distance computed from no mark would be a claim.
     private func positionSubtitle(_ position: PositionFigures) -> String {
         guard let distance = position.liquidationDistanceMicros else {
-            return "Liquidation \(Unavailable.text)"
+            return "Liq. \(Unavailable.text)"
         }
         return distance == 0
             ? "At liquidation"
-            : "Liquidation \(Self.percent(distance, signed: false)) away"
+            : "Liq. \(Self.percent(distance, signed: false)) away"
     }
 
     /// Micros to a percentage, truncated. A gain is never rounded up into one it is not.
@@ -498,6 +498,8 @@ private struct HomeAssetRow<Mark: View>: View {
     let title: String
     let subtitle: String
     let value: String
+    /// Drawn small after the number, so "AUSD" never pushes the figure onto two lines.
+    var unit: String? = nil
     let change: String?
     let tint: DeskRGB
     let action: () -> Void
@@ -510,21 +512,34 @@ private struct HomeAssetRow<Mark: View>: View {
                     Text(title)
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                     Text(subtitle)
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
+                        .lineLimit(1)
                 }
                 Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text(value)
-                        .font(.system(size: 16, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(DeskColor.nightText.color)
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        Text(value)
+                            .font(.system(size: 16, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(DeskColor.nightText.color)
+                        if let unit {
+                            Text(unit)
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundStyle(DeskColor.nightMuted.color)
+                        }
+                    }
+                    .lineLimit(1)
                     if let change {
                         Text(change)
                             .font(.system(size: 12, weight: .bold, design: .rounded).monospacedDigit())
                             .foregroundStyle(tint.color)
+                            .lineLimit(1)
                     }
                 }
+                .layoutPriority(1)
             }
             .padding(.horizontal, 16)
             .frame(height: 80)
