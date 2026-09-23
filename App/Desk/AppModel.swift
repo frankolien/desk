@@ -53,7 +53,13 @@ final class AppModel {
     private(set) var openPositions: [PerplPosition] = []
     /// Positions the venue has already closed, newest first. They arrive on the same
     /// `mt: 26`/`mt: 27` stream and carry the exit price and the realised PnL.
-    private(set) var closedPositions: [PerplPosition] = []
+    /// What this account has closed on this network, remembered on the phone.
+    var closedTrades: [ClosedTrade] {
+        if let stagedClosedTrades { return stagedClosedTrades }
+        guard let address else { return [] }
+        return ClosedPositionsStore.shared.trades(network: network.rawValue, address: address.checksummed)
+    }
+    private var stagedClosedTrades: [ClosedTrade]?
 
     /// Whether the trading key is in memory right now.
     ///
@@ -122,10 +128,9 @@ final class AppModel {
             let open = positions.filter(\.isOpen)
             self?.openPositions = open
             self?.openPosition = open.first
-            // By the venue's own monotonic position id, so the order never reshuffles.
-            self?.closedPositions = positions
-                .filter { !$0.isOpen }
-                .sorted { $0.positionID > $1.positionID }
+            if let self, let address {
+                ClosedPositionsStore.shared.record(positions, network: network.rawValue, address: address.checksummed)
+            }
         }
         // An order that finds Desk locked asks for Face ID once and carries on. Only a
         // locked key qualifies: a connection that failed for any other reason is reported
@@ -168,7 +173,7 @@ final class AppModel {
                 hasDesk.record(true)
                 openPosition = Self.reviewPosition
                 openPositions = Self.reviewPosition.map { [$0] } ?? []
-                closedPositions = Self.reviewClosedPositions
+                stagedClosedTrades = Self.reviewClosedPositions.map { ClosedTrade(position: $0) }
                 isKeyUnlocked = true
                 // `home-setup` is a signed-in person on a network with no account yet.
                 hasTradingAccount = name != "home-setup"
@@ -456,7 +461,6 @@ final class AppModel {
         hasDesk = LastGood()
         openPosition = nil
         openPositions = []
-        closedPositions = []
         fundingProblem = nil
         openingProblem = nil
         needsManualFaucet = false
@@ -830,7 +834,10 @@ final class AppModel {
 
     /// Signs out: the key, the connection and the account on screen all go.
     func endSession() async {
-        if let address { TradingKeyVault.forget(address: address, network: network.rawValue) }
+        if let address {
+            TradingKeyVault.forget(address: address, network: network.rawValue)
+            ClosedPositionsStore.shared.forget(address: address.checksummed)
+        }
         await trading.close()
         await session.end()
         isKeyUnlocked = false
@@ -849,7 +856,7 @@ final class AppModel {
         hasDesk = LastGood()
         openPosition = nil
         openPositions = []
-        closedPositions = []
+        stagedClosedTrades = nil
         hasTradingAccount = false
         sessionTradingIndex = nil
         fundingProblem = nil

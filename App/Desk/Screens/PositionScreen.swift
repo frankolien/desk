@@ -207,7 +207,7 @@ struct PositionScreen: View {
 
     private var history: some View {
         VStack(spacing: 0) {
-            if model.closedPositions.isEmpty {
+            if model.closedTrades.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.system(size: 28, weight: .semibold))
@@ -223,12 +223,12 @@ struct PositionScreen: View {
                 .padding(.vertical, 30)
                 .padding(.horizontal, 20)
             } else {
-                ForEach(Array(model.closedPositions.enumerated()), id: \.element.positionID) { index, closed in
+                ForEach(Array(model.closedTrades.enumerated()), id: \.element.positionID) { index, closed in
                     ClosedPositionRow(
                         position: closed,
                         symbol: market.market(id: closed.marketID)?.symbol ?? Unavailable.text,
                         priceDecimals: market.market(id: closed.marketID)?.config.priceDecimals)
-                    if index < model.closedPositions.count - 1 {
+                    if index < model.closedTrades.count - 1 {
                         Divider().overlay(Color.white.opacity(0.08)).padding(.horizontal, 16)
                     }
                 }
@@ -424,7 +424,7 @@ enum PositionTab: String, CaseIterable, Identifiable {
 /// One closed position. The realised figure is the venue's own `dpnl`, never recomputed:
 /// once closed there is no mark to derive it from.
 private struct ClosedPositionRow: View {
-    let position: PerplPosition
+    let position: ClosedTrade
     let symbol: String
     let priceDecimals: UInt8?
 
@@ -442,7 +442,7 @@ private struct ClosedPositionRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text("\(position.side == .long ? "Long" : "Short") \(symbol)")
+                    Text("\(position.isLong ? "Long" : "Short") \(symbol)")
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                     Text("\(position.leverageHundredths / 100)×")
                         .font(.system(size: 10, weight: .bold, design: .rounded))

@@ -690,13 +690,12 @@ final class CopyTrader {
             // A copy whose position id never arrived is matched on its market and side, the
             // same fallback the close path uses. Without it such a copy stayed open forever
             // and quietly consumed a slot against the open-copy and exposure limits.
-            let side: Side = copy.isLong ? .long : .short
-            let positionID = copy.positionID ?? model.closedPositions
-                .filter { $0.marketID == copy.marketID && $0.side == side }
+            let positionID = copy.positionID ?? model.closedTrades
+                .filter { $0.marketID == copy.marketID && $0.isLong == copy.isLong }
                 .max { $0.positionID < $1.positionID }?.positionID
             guard let positionID,
                   !model.openPositions.contains(where: { $0.positionID == positionID }) else { continue }
-            let closed = model.closedPositions.first { $0.positionID == positionID }
+            let closed = model.closedTrades.first { $0.positionID == positionID }
             open.removeAll { $0.id == copy.id }
             record(CopyLogEntry(
                 id: UUID(), date: .now, trader: copy.trader, symbol: copy.symbol, isLong: copy.isLong,
@@ -737,7 +736,7 @@ final class CopyTrader {
     private func backfillRealised(model: AppModel) {
         guard !pendingRealised.isEmpty, model.trading.positions.value != nil else { return }
         for (entryID, positionID) in pendingRealised {
-            guard let raw = model.closedPositions.first(where: { $0.positionID == positionID })?.realisedPnLRaw
+            guard let raw = model.closedTrades.first(where: { $0.positionID == positionID })?.realisedPnLRaw
             else { continue }
             pendingRealised[entryID] = nil
             guard let index = log.firstIndex(where: { $0.id == entryID }) else { continue }
@@ -748,7 +747,7 @@ final class CopyTrader {
 
     private func realised(positionID: Int64, model: AppModel) async -> Double? {
         for _ in 0..<20 {
-            if let raw = model.closedPositions.first(where: { $0.positionID == positionID })?.realisedPnLRaw {
+            if let raw = model.closedTrades.first(where: { $0.positionID == positionID })?.realisedPnLRaw {
                 return Double(raw) / 1_000_000
             }
             try? await Task.sleep(for: .milliseconds(250))
