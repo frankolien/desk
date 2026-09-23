@@ -5,7 +5,7 @@
 /// rather than "Sent to 0x1964…".
 import { redisStore } from "./_store.mjs";
 import { walletResource } from "./_wallet-resource.mjs";
-import { HEARTBEAT_KEY, ledgerKey, TRACKED_KEY, URGENT_KEY } from "./_ledger.mjs";
+import { HEARTBEAT_KEY, QUOTE_SYMBOLS, ledgerKey, TRACKED_KEY, URGENT_KEY } from "./_ledger.mjs";
 
 const ETHERSCAN = "https://api.etherscan.io/v2/api";
 
@@ -56,6 +56,8 @@ export async function followingFeed(store, addresses, now = Date.now()) {
     for (const trade of Array.isArray(ledger.trades) ? ledger.trades : []) {
       if (!Number.isFinite(trade.time) || trade.time > now + 60_000 || trade.time < now - 14 * 86_400_000) continue;
       if (!["buy", "sell"].includes(trade.side) || !Number.isFinite(trade.value) || trade.value <= 0) continue;
+      // Ledgers written before money stopped counting as a position still carry these.
+      if (QUOTE_SYMBOLS.has(String(trade.symbol ?? "").toUpperCase())) continue;
       events.push({ wallet: address, chainIndex, time: trade.time, hash: trade.hash,
         token: trade.token, symbol: trade.symbol, side: trade.side,
         amount: trade.amount, value: trade.value, gain: trade.gain ?? null });

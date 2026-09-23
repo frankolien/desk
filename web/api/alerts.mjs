@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 import { apnsClient, isDeadToken } from "./_apns.mjs";
 import { hypersyncClient, indexHistory } from "./_history.mjs";
-import { TRACKED_KEY, URGENT_KEY, ledgerKey } from "./_ledger.mjs";
+import { TRACKED_KEY, URGENT_KEY, WATCHED_KEY, ledgerKey } from "./_ledger.mjs";
 import { createMarkets } from "./_markets.mjs";
 import { priceDeliveries } from "./_prices.mjs";
 import { redisStore } from "./_store.mjs";
@@ -336,8 +336,8 @@ export async function scan({ store, chain, apns, markets, quotes = [], now = Dat
     }
   });
   await store.srem(SUBSCRIPTIONS, ...expired);
-  // A wallet someone wants pushes for goes to the front of the worker's queue every scan.
-  for (const address of watchers.keys()) await store.sadd(URGENT_KEY, address);
+  // The worker's fast lane reads this: wallets someone wants pushes for, kept at the tip.
+  await store.set(WATCHED_KEY, JSON.stringify([...watchers.keys()]), { ex: 900 }).catch(() => {});
 
   // Round-robin across subscriptions rather than a flat slice: a flat one let fifteen junk
   // subscriptions, twenty addresses each, fill the whole budget and silently stop every real

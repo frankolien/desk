@@ -66,29 +66,18 @@ struct SignalsScreen: View {
 
                         switch section {
                         case .traders:
+                            TradersFeed(content: .following, directory: directory, copier: copier, onOpenCopying: { showsCopying = true },
+                                        onSelect: { selectedTrader = $0 },
+                                        onOpenTracked: { selectedTrackedWallet = $0 },
+                                        onEditTracked: { trackedEditing = $0 }, onAdd: { showsTrackNew = true })
+                                .padding(.top, 20)
                             FollowingFeed(model: followingFeed,
                                           addresses: TrackedWallets.shared.list.map(\.address),
                                           name: { address in
                                               let tracked = TrackedWallets.shared.wallet(for: address)
                                               return tracked?.name.isEmpty == false ? tracked!.name
                                                   : (IdentityDirectory.shared.name(for: address) ?? tracked?.shortAddress ?? address)
-                                          }, onAdd: { showsTrackNew = true },
-                                          unalertedTraderCount: directory.followed.filter { !TradeAlerts.shared.isOn(for: $0) }.count,
-                                          onEnableTraderAlerts: {
-                                              Task {
-                                                  for address in directory.followed where !TradeAlerts.shared.isOn(for: address) {
-                                                      _ = await TradeAlerts.shared.turnOn(for: address)
-                                                  }
-                                              }
-                                          },
-                                          notificationsOff: TradeAlerts.shared.permission == .denied,
-                                          notificationProblem: TradeAlerts.shared.problem)
-                                .padding(.top, 20)
-                                .padding(.bottom, 28)
-                            TradersFeed(content: .following, directory: directory, copier: copier, onOpenCopying: { showsCopying = true },
-                                        onSelect: { selectedTrader = $0 },
-                                        onOpenTracked: { selectedTrackedWallet = $0 },
-                                        onEditTracked: { trackedEditing = $0 }, onAdd: { showsTrackNew = true })
+                                          }, onAdd: { showsTrackNew = true })
                                 .padding(.bottom, 130)
                         case .top:
                             Button { showsSmartMoney = true } label: {

@@ -85,73 +85,13 @@ struct FollowingFeed: View {
     let addresses: [String]
     let name: (String) -> String
     let onAdd: () -> Void
-    let unalertedTraderCount: Int
-    let onEnableTraderAlerts: () -> Void
-    let notificationsOff: Bool
-    let notificationProblem: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Recent activity")
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                    .foregroundStyle(DeskColor.nightText.color)
-                Spacer()
-                if !addresses.isEmpty {
-                    Text("\(addresses.count) following")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(DeskColor.nightMuted.color)
-                }
-            }
-
-            Text("Confirmed token trades from wallets you follow. The feed shows indexed trades; push alerts use each wallet's minimum trade size.")
-                .font(.system(size: 13, weight: .medium, design: .rounded))
-                .foregroundStyle(DeskColor.nightMuted.color)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 7)
-                .padding(.bottom, 14)
-
-            if notificationsOff {
-                Label("Push alerts are off for Desk in iPhone Settings. The feed still updates here.", systemImage: "bell.slash")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 12)
-            } else if let notificationProblem {
-                Label(notificationProblem, systemImage: "bell.badge")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 12)
-            }
-
-            if model.sync?.workerDelayed == true {
-                Label("Wallet indexing is delayed. This feed may miss recent trades until the service recovers.", systemImage: "clock.badge.exclamationmark")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 12)
-            }
-            if model.sync?.pushDelayed == true && !notificationsOff {
-                Label("Push delivery is delayed. Recent trades may still appear in this feed.", systemImage: "bell.slash")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 12)
-            }
-
-            if unalertedTraderCount > 0 && !notificationsOff {
-                Button(action: onEnableTraderAlerts) {
-                    Label("Enable position alerts for \(unalertedTraderCount) followed trader\(unalertedTraderCount == 1 ? "" : "s")", systemImage: "bell.badge")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(DeskColor.action.color)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(14)
-                        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
-                }
-                .buttonStyle(.plain)
-                .padding(.bottom, 12)
-            }
+            Text("Recent activity")
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundStyle(DeskColor.nightText.color)
+                .padding(.bottom, 6)
 
             if addresses.isEmpty {
                 Button(action: onAdd) {
@@ -163,46 +103,16 @@ struct FollowingFeed: View {
                         .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 18))
                 }
                 .buttonStyle(.plain)
+                .padding(.top, 8)
             } else if !model.loaded {
-                ProgressView("Reading followed wallets…")
-                    .tint(DeskColor.action.color)
-                    .padding(.vertical, 22)
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(0..<3, id: \.self) { SkeletonRow(widthFraction: 0.85 - Double($0) * 0.15) }
+                }
+                .padding(.top, 14)
             } else {
-                if let problem = model.problem {
-                    Label(problem, systemImage: "exclamationmark.circle")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(DeskColor.nightMuted.color)
-                        .padding(.bottom, 12)
-                }
-                if !model.pending.isEmpty {
-                    Label("\(model.pending.count) wallet\(model.pending.count == 1 ? " is" : "s are") indexing; new trades will appear here.", systemImage: "clock.arrow.circlepath")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(DeskColor.nightMuted.color)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.bottom, 12)
-                }
-                if !model.stale.isEmpty {
-                    Label("Activity for \(model.stale.count) wallet\(model.stale.count == 1 ? " is" : "s are") catching up with the chain.", systemImage: "clock.arrow.circlepath")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(DeskColor.nightMuted.color)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.bottom, 12)
-                }
-                if model.events.isEmpty && model.problem == nil && model.pending.count + model.stale.count == addresses.count {
-                    Text("Still checking followed wallets. Trades will appear after indexing catches up.")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundStyle(DeskColor.nightMuted.color)
-                        .padding(.vertical, 16)
-                } else if model.events.isEmpty && model.problem == nil {
-                    Text("No trades found in the indexed wallet activity yet.")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundStyle(DeskColor.nightMuted.color)
-                        .padding(.vertical, 16)
-                } else {
-                    LazyVStack(spacing: 0) {
-                        ForEach(model.events) { trade in
-                            FollowingTradeRow(trade: trade, walletName: name(trade.wallet))
-                        }
+                LazyVStack(spacing: 0) {
+                    ForEach(model.events) { trade in
+                        FollowingTradeRow(trade: trade, walletName: name(trade.wallet))
                     }
                 }
             }
@@ -213,6 +123,22 @@ struct FollowingFeed: View {
 private struct FollowingTradeRow: View {
     let trade: FollowingTrade
     let walletName: String
+
+    private static func compact(_ value: Double) -> String {
+        let magnitude = abs(value)
+        if magnitude >= 1e9 { return String(format: "%.1fB", magnitude / 1e9) }
+        if magnitude >= 1e6 { return String(format: "%.1fM", magnitude / 1e6) }
+        if magnitude >= 1e3 { return String(format: "%.1fK", magnitude / 1e3) }
+        if magnitude >= 100 { return String(format: "%.0f", magnitude) }
+        return String(format: magnitude >= 1 ? "%.2f" : "%.4f", magnitude)
+    }
+
+    private var detail: String {
+        var parts: [String] = []
+        if let amount = trade.amount, amount > 0 { parts.append("\(trade.isBuy ? "+" : "−")\(Self.compact(amount)) \(trade.symbol)") }
+        if let gain = trade.gain, abs(gain) >= 0.01 { parts.append("\(gain >= 0 ? "+" : "−")\(abs(gain).formatted(.currency(code: "USD")))") }
+        return parts.joined(separator: " · ")
+    }
 
     private var timeLabel: String {
         let formatter = RelativeDateTimeFormatter()
@@ -250,8 +176,7 @@ private struct FollowingTradeRow: View {
                         }
                         .font(.system(size: 15, weight: .bold, design: .rounded))
                         .lineLimit(1).minimumScaleFactor(0.8)
-                        Text(trade.gain.map { "Realized \($0.formatted(.currency(code: "USD")))" }
-                             ?? "On-chain trade · tap to view token")
+                        Text(detail)
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundStyle(DeskColor.nightMuted.color)
                             .lineLimit(1)

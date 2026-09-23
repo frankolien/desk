@@ -24,11 +24,13 @@ export const CUSTODY = new Set([
 export const NATIVE = "native";
 export const LEDGER_VERSION = 1;
 /// Money, not positions: paying with one of these is not selling it.
-const QUOTE_SYMBOLS = new Set(["MON", "WMON", "USDC", "USDT", "AUSD", "USDE", "SUSDE", "SOL", "WSOL"]);
+export const QUOTE_SYMBOLS = new Set(["MON", "WMON", "USDC", "USDT", "AUSD", "USDE", "SUSDE", "SOL", "WSOL"]);
 // EVM is case-insensitive; Solana base58 is not. Never merge distinct Solana wallets.
 export const ledgerKey = (address) => `wl:${address.startsWith("0x") ? address.toLowerCase() : address}`;
 export const TRACKED_KEY = "wl:tracked";
 export const URGENT_KEY = "wl:urgent";
+/// Wallets someone has pushes for, written by every alert scan; the worker keeps these at the tip first.
+export const WATCHED_KEY = "wl:watched";
 export const HEARTBEAT_KEY = "wl:heartbeat";
 const KEEP_TRADES = 300;
 
@@ -150,11 +152,11 @@ export async function applyMovement(ledger, movement, { price, meta }) {
         }
       }
       const payment = leg.payment || QUOTE_SYMBOLS.has(String(info.symbol).toUpperCase());
-      if (unit != null && movement.kind !== "sent" && (priced > 0 || !payment)) {
+      if (unit != null && movement.kind !== "sent" && !payment) {
         ledger.trades.push({ time: movement.time, hash: movement.hash, token: leg.token, symbol: info.symbol, side: "sell", amount, price: unit, value: amount * unit, gain });
       }
     }
-    if (leg.side === "in" && unit != null && movement.kind !== "received") {
+    if (leg.side === "in" && unit != null && movement.kind !== "received" && !QUOTE_SYMBOLS.has(String(info.symbol).toUpperCase())) {
       ledger.trades.push({ time: movement.time, hash: movement.hash, token: leg.token, symbol: info.symbol, side: "buy", amount, price: unit, value: amount * unit, gain: null });
     }
     ledger.positions[leg.token] = position;
