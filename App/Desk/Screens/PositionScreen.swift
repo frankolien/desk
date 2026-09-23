@@ -366,115 +366,30 @@ struct PositionScreen: View {
     }
 
     private func card(_ figures: PositionFigures) -> some View {
-        VStack(spacing: 0) {
-            cardHeader(figures)
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 14)
-
-            VStack(spacing: 16) {
-                HStack(alignment: .top, spacing: 12) {
-                    metric("Value", value(figures).map { DisplayCurrency.shared.format($0) } ?? Unavailable.text,
-                           isDimmed: stale)
-                    metric("PnL",
-                           (figures.unrealisedPnL.isNegative ? "" : "+")
-                               + figures.unrealisedPnL.display() + " AUSD",
-                           detail: HomeScreen.percent(figures.returnOnMarginMicros) + " on margin",
-                           tint: figures.isProfit ? DeskColor.rise : DeskColor.fall,
-                           alignment: .trailing, isDimmed: stale)
-                }
-                HStack(alignment: .top, spacing: 12) {
-                    metric("Entry / Mark",
-                           figures.entry.display(fractionDigits: figures.entry.decimals)
-                               + " / " + figures.mark.display(fractionDigits: figures.mark.decimals),
-                           isDimmed: stale)
-                    metric("Liq. Price",
-                           figures.liquidationPrice?.display(fractionDigits: figures.entry.decimals)
-                               ?? Unavailable.text,
-                           detail: figures.liquidationDistanceMicros.map {
-                               $0 == 0 ? "At liquidation" : HomeScreen.percent($0, signed: false) + " away"
-                           },
-                           tint: liquidationTint(figures),
-                           alignment: .trailing, isDimmed: stale)
-                }
-                HStack(alignment: .top, spacing: 12) {
-                    metric("Size",
-                           figures.size.display(fractionDigits: figures.size.decimals)
-                               + " " + market.symbol)
-                    metric("Collateral", figures.collateral.display() + " AUSD",
-                           alignment: .trailing)
-                }
-                HStack(alignment: .top, spacing: 12) {
-                    metric("Funding",
-                           figures.fundingSinceEntry.map { $0.display() + " AUSD" } ?? Unavailable.text,
-                           detail: "since you opened")
-                    metric("Fees",
-                           Money(raw: active.feeRaw).map { $0.display() + " AUSD" }
-                               ?? Unavailable.text,
-                           detail: "charged so far",
-                           alignment: .trailing)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 16)
+        PositionCard(
+            symbol: market.symbol,
+            sideText: "\(figures.leverageHundredths / 100)× \(figures.side == .long ? "Long" : "Short")",
+            isLong: figures.side == .long,
+            rows: [
+                (PositionCardMetric(label: "Value", value: value(figures).map { DisplayCurrency.shared.format($0) } ?? Unavailable.text, isDimmed: stale),
+                 PositionCardMetric(label: "PnL",
+                                    value: (figures.unrealisedPnL.isNegative ? "" : "+") + figures.unrealisedPnL.display() + " AUSD",
+                                    detail: HomeScreen.percent(figures.returnOnMarginMicros) + " on margin",
+                                    tint: figures.isProfit ? DeskColor.rise : DeskColor.fall, isDimmed: stale)),
+                (PositionCardMetric(label: "Entry / Mark",
+                                    value: figures.entry.display(fractionDigits: figures.entry.decimals) + " / " + figures.mark.display(fractionDigits: figures.mark.decimals),
+                                    isDimmed: stale),
+                 PositionCardMetric(label: "Liq. Price",
+                                    value: figures.liquidationPrice?.display(fractionDigits: figures.entry.decimals) ?? Unavailable.text,
+                                    detail: figures.liquidationDistanceMicros.map { $0 == 0 ? "At liquidation" : HomeScreen.percent($0, signed: false) + " away" },
+                                    tint: liquidationTint(figures), isDimmed: stale)),
+                (PositionCardMetric(label: "Size", value: figures.size.display(fractionDigits: figures.size.decimals) + " " + market.symbol),
+                 PositionCardMetric(label: "Collateral", value: figures.collateral.display() + " AUSD")),
+                (PositionCardMetric(label: "Funding", value: figures.fundingSinceEntry.map { $0.display() + " AUSD" } ?? Unavailable.text, detail: "since you opened"),
+                 PositionCardMetric(label: "Fees", value: Money(raw: active.feeRaw).map { $0.display() + " AUSD" } ?? Unavailable.text, detail: "charged so far")),
+            ]) {
+            PositionCardShareButton { showsShare = true }
         }
-        .deskGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-    }
-
-    /// The market, the side and the size of the bet, above the figures — so the card can
-    /// be read on its own once the History tab has scrolled the heading away.
-    private func cardHeader(_ figures: PositionFigures) -> some View {
-        HStack(spacing: 9) {
-            MarketTokenLogo(symbol: market.symbol, size: 30)
-            Text(market.symbol)
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-            Text("\(figures.leverageHundredths / 100)× \(figures.side == .long ? "Long" : "Short")")
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(sideTint(figures).color)
-                .padding(.horizontal, 9)
-                .frame(height: 24)
-                .background(sideTint(figures).color.opacity(0.14), in: Capsule())
-            Spacer(minLength: 8)
-            Button { showsShare = true } label: {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(DeskColor.nightText.color)
-                    .frame(width: 30, height: 30)
-                    .background(Color.white.opacity(0.08), in: Circle())
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Share position")
-        }
-    }
-
-    private func metric(
-        _ label: String,
-        _ value: String,
-        detail: String? = nil,
-        tint: DeskRGB = DeskColor.nightText,
-        alignment: HorizontalAlignment = .leading,
-        isDimmed: Bool = false
-    ) -> some View {
-        VStack(alignment: alignment, spacing: 3) {
-            Text(label)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(DeskColor.nightMuted.color)
-            Text(value)
-                .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
-                .foregroundStyle(tint.color)
-                .contentTransition(.numericText())
-            if let detail {
-                Text(detail)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(DeskColor.nightMuted.color)
-            }
-        }
-        .frame(maxWidth: .infinity,
-               alignment: alignment == .leading ? .leading : .trailing)
-        .multilineTextAlignment(alignment == .leading ? .leading : .trailing)
-        .opacity(isDimmed ? 0.55 : 1)
-        .accessibilityElement(children: .combine)
     }
 
     private func actionButton(

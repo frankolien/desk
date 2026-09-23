@@ -323,61 +323,44 @@ struct HolderPositionSheet: View {
         }
     }
 
+    private var liquidationDistance: String? {
+        guard let liquidation, let mark = Double(holder.mark), mark > 0 else { return nil }
+        return String(format: "%.2f%% away", abs(liquidation - mark) / mark * 100)
+    }
+
+    private var shareText: String {
+        "\(name) is \(holder.sideText) \(holder.market) from $\(TraderFormat.price(holder.entry)) · \(TraderFormat.dollars(holder.pnl)) on Desk"
+    }
+
     private var card: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(holder.sideText)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(sideTint)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(sideTint.opacity(0.16), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(TraderFormat.dollars(holder.collateral, signed: false))
-                        .font(.system(size: 26, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(DeskColor.nightText.color)
-                        .lineLimit(1).minimumScaleFactor(0.6)
-                    HStack(spacing: 4) {
-                        Text("Lev. size").foregroundStyle(DeskColor.nightMuted.color)
-                        Text(TraderFormat.compact(Double(holder.value))).foregroundStyle(DeskColor.nightText.color)
-                        Text("(\(TraderFormat.price(holder.size)) \(holder.market))").foregroundStyle(DeskColor.nightMuted.color)
-                    }
-                    .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                }
-                Spacer(minLength: 10)
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(TraderFormat.dollars(holder.pnl))
-                        .font(.system(size: 26, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(pnlTint)
-                        .lineLimit(1).minimumScaleFactor(0.6)
-                    if let percent = holder.pnlPercent {
-                        HStack(spacing: 3) {
-                            Image(systemName: percent >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill").font(.system(size: 9))
-                            Text(String(format: "%.2f%%", abs(percent)))
-                        }
-                        .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(pnlTint)
-                    }
-                }
+        PositionCard(
+            symbol: holder.market,
+            sideText: holder.sideText.replacingOccurrences(of: "x ", with: "× "),
+            isLong: holder.isLong,
+            rows: [
+                (PositionCardMetric(label: "Value", value: TraderFormat.dollars(holder.value, signed: false)),
+                 PositionCardMetric(label: "PnL",
+                                    value: (holder.isProfit ? "+" : "") + holder.pnl + " AUSD",
+                                    detail: holder.pnlPercent.map { String(format: "%@%.2f%% on margin", $0 >= 0 ? "+" : "−", abs($0)) },
+                                    tint: holder.isProfit ? DeskColor.rise : DeskColor.fall)),
+                (PositionCardMetric(label: "Entry / Mark", value: "\(TraderFormat.price(holder.entry)) / \(TraderFormat.price(holder.mark))"),
+                 PositionCardMetric(label: "Liq. Price",
+                                    value: liquidation.map { TraderFormat.price(String($0)) } ?? Unavailable.text,
+                                    detail: liquidationDistance,
+                                    tint: liquidation == nil ? DeskColor.nightText : DeskColor.action)),
+                (PositionCardMetric(label: "Size", value: "\(TraderFormat.price(holder.size)) \(holder.market)"),
+                 PositionCardMetric(label: "Collateral", value: TraderFormat.price(holder.collateral) + " AUSD")),
+            ]) {
+            ShareLink(item: shareText) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .frame(width: 30, height: 30)
+                    .background(Color.white.opacity(0.08), in: Circle())
+                    .contentShape(Circle())
             }
-            Rectangle().fill(Color.white.opacity(0.1)).frame(height: 0.5).padding(.vertical, 2)
-            HStack {
-                HStack(spacing: 8) {
-                    Text("Avg. entry").foregroundStyle(DeskColor.nightMuted.color)
-                    Text("$" + TraderFormat.price(holder.entry)).foregroundStyle(DeskColor.nightText.color)
-                }
-                Spacer()
-                HStack(spacing: 8) {
-                    Text("Liq. price").foregroundStyle(DeskColor.nightMuted.color)
-                    Text(liquidation.map { "$" + TraderFormat.price(String($0)) } ?? "—").foregroundStyle(DeskColor.nightText.color)
-                }
-            }
-            .font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit())
+            .buttonStyle(.plain)
         }
-        .padding(18)
-        .background(DeskColor.nightChip.color.opacity(0.6), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(DeskColor.nightLine.color, lineWidth: 0.5))
     }
 
     private var closed: some View {
