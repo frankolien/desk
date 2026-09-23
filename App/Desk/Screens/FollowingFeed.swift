@@ -85,6 +85,7 @@ struct FollowingFeed: View {
     let addresses: [String]
     let name: (String) -> String
     let onAdd: () -> Void
+    let onOpen: (FollowingTrade) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -112,7 +113,7 @@ struct FollowingFeed: View {
             } else {
                 LazyVStack(spacing: 0) {
                     ForEach(model.events) { trade in
-                        FollowingTradeRow(trade: trade, walletName: name(trade.wallet))
+                        FollowingTradeRow(trade: trade, walletName: name(trade.wallet)) { onOpen(trade) }
                     }
                 }
             }
@@ -123,6 +124,7 @@ struct FollowingFeed: View {
 private struct FollowingTradeRow: View {
     let trade: FollowingTrade
     let walletName: String
+    let onOpen: () -> Void
 
     private static func compact(_ value: Double) -> String {
         let magnitude = abs(value)
@@ -147,9 +149,7 @@ private struct FollowingTradeRow: View {
     }
 
     var body: some View {
-        Button {
-            TokenOpenRequest.shared.open(.init(chainIndex: trade.chainIndex, contract: trade.token, symbol: trade.symbol))
-        } label: {
+        Button(action: onOpen) {
             VStack(alignment: .leading, spacing: 13) {
                 HStack(spacing: 10) {
                     TraderAvatar(address: trade.wallet, size: 32)

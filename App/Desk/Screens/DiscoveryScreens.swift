@@ -51,6 +51,27 @@ struct WatchlistScreen: View {
         SpotWatchlistStorage.decode(savedSpotData)
     }
 
+    /// A saved token carries the figures it had when it was saved, and a search result
+    /// has none. The card wants today's, so the server is asked for the whole list at once
+    /// and the answer is written back where the list lives.
+    private func refreshSpotFigures() async {
+        let saved = spotRows
+        guard !saved.isEmpty else { return }
+        var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/token-details")!
+        components.queryItems = [
+            URLQueryItem(name: "view", value: "prices"),
+            URLQueryItem(name: "tokens", value: saved.prefix(20).map { "\($0.chainIndex):\($0.contract)" }.joined(separator: ",")),
+        ]
+        guard let url = components.url,
+              let (data, _) = try? await ResponseCache.shared.data(from: url, maxStale: 0),
+              let body = try? JSONDecoder().decode(SpotFigures.Response.self, from: data) else { return }
+        let refreshed = saved.map { token -> TrendingSpotToken in
+            guard let figures = body.prices.first(where: { $0.chainIndex == token.chainIndex && $0.contract.caseInsensitiveCompare(token.contract) == .orderedSame }) else { return token }
+            return token.with(figures)
+        }
+        if let encoded = try? JSONEncoder().encode(refreshed), let text = String(data: encoded, encoding: .utf8) { savedSpotData = text }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -121,7 +142,13 @@ struct WatchlistScreen: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 190)
             }
-            .refreshable { await market.refreshNow() }
+            .refreshable { await market.refreshNow(); await refreshSpotFigures() }
+            .task(id: spotRows.map(\.id).joined(separator: ",")) {
+                while !Task.isCancelled {
+                    await refreshSpotFigures()
+                    try? await Task.sleep(for: .seconds(30))
+                }
+            }
             .deskSoftBottomEdge()
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -498,21 +525,7 @@ struct MarketSearchScreen: View {
             }
             .task(id: TokenOpenRequest.shared.pending) {
                 guard let target = TokenOpenRequest.shared.take() else { return }
-                query = target.contract
-                for _ in 0..<12 {
-                    if let match = (discovery.searchResults + discovery.trending).first(where: {
-                        $0.chainIndex == target.chainIndex && $0.contract.caseInsensitiveCompare(target.contract) == .orderedSame
-                    }) { selectedSpot = match; return }
-                    try? await Task.sleep(for: .milliseconds(300))
-                }
-                // OKX's search skips most Monad tokens; the page still opens on what is known.
-                selectedSpot = TrendingSpotToken(
-                    id: "\(target.chainIndex):\(target.contract)", chainIndex: target.chainIndex,
-                    chainName: target.chainIndex == "143" ? "Monad" : "Chain \(target.chainIndex)",
-                    symbol: target.symbol ?? "TOKEN", name: target.symbol ?? "Token", logoURL: "", contract: target.contract,
-                    decimals: nil, quotable: nil, buyable: nil, nativeSymbol: nil, explorerURL: "",
-                    price: nil, change: nil, marketCap: nil, volume24H: nil, liquidity: nil, holders: nil,
-                    communityRecognized: nil, riskLevel: nil)
+                selectedSpot = await discovery.find(target)
             }
         }
     }
@@ -613,6 +626,24 @@ private final class TokenDiscoveryModel: ObservableObject {
         if !latestQuery.isEmpty { await load(query: latestQuery, intoSearch: true) }
     }
 
+    /// The listing for a token asked for by address, or a page built from what is known:
+    /// OKX's search skips most Monad tokens.
+    func find(_ target: TokenOpenRequest.Target) async -> TrendingSpotToken {
+        let match = { (list: [TrendingSpotToken]) in
+            list.first { $0.chainIndex == target.chainIndex && $0.contract.caseInsensitiveCompare(target.contract) == .orderedSame }
+        }
+        if let known = match(trending) { return known }
+        await load(query: target.contract, intoSearch: true)
+        if let found = match(searchResults) { return found }
+        return TrendingSpotToken(
+            id: "\(target.chainIndex):\(target.contract)", chainIndex: target.chainIndex,
+            chainName: target.chainIndex == "143" ? "Monad" : target.chainIndex == "501" ? "Solana" : "Chain \(target.chainIndex)",
+            symbol: target.symbol ?? "TOKEN", name: target.symbol ?? "Token", logoURL: "", contract: target.contract,
+            decimals: nil, quotable: nil, buyable: nil, nativeSymbol: nil, explorerURL: "",
+            price: nil, change: nil, marketCap: nil, volume24H: nil, liquidity: nil, holders: nil,
+            communityRecognized: nil, riskLevel: nil)
+    }
+
     func search(_ raw: String) async {
         let query = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         latestQuery = query
@@ -697,6 +728,29 @@ private struct TrendingSpotRow: View {
         .padding(.horizontal, 14)
         .frame(height: 76)
         .background { TokenAdaptiveCardBackground(symbol: token.symbol, cornerRadius: 18, artworkURL: token.artworkURL) }
+    }
+}
+
+struct SpotFigures: Decodable {
+    struct Response: Decodable { let prices: [SpotFigures] }
+    let chainIndex: String
+    let contract: String
+    let price: Double?
+    let change24h: Double?
+    let volume24H: Double?
+    let marketCap: Double?
+    let liquidity: Double?
+    let holders: Double?
+}
+
+extension TrendingSpotToken {
+    func with(_ figures: SpotFigures) -> TrendingSpotToken {
+        TrendingSpotToken(
+            id: id, chainIndex: chainIndex, chainName: chainName, symbol: symbol, name: name, logoURL: logoURL, contract: contract,
+            decimals: decimals, quotable: quotable, buyable: buyable, nativeSymbol: nativeSymbol, explorerURL: explorerURL,
+            price: figures.price ?? price, change: figures.change24h ?? change, marketCap: figures.marketCap ?? marketCap,
+            volume24H: figures.volume24H ?? volume24H, liquidity: figures.liquidity ?? liquidity, holders: figures.holders ?? holders,
+            communityRecognized: communityRecognized, riskLevel: riskLevel)
     }
 }
 
@@ -2260,6 +2314,23 @@ private struct WalletResource: Decodable {
     let logos: [String: String]?
     struct WalletChain: Decodable { let chainIndex: String; let chain: String?; let value: Double }
     struct WalletLabel: Decodable, Identifiable { let code: String; let text: String; var id: String { code } }
+}
+
+/// The token page, pushed from a tab that only knows the address.
+struct SpotTokenPage: View {
+    let target: TokenOpenRequest.Target
+    let model: AppModel
+    @StateObject private var lookup = TokenDiscoveryModel()
+    @State private var token: TrendingSpotToken?
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let token { SpotTokenDetailScreen(token: token, model: model) }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .task { token = await lookup.find(target) }
+    }
 }
 
 /// Reuses the discovery wallet profile for a wallet followed from Signals.

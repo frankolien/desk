@@ -86,7 +86,7 @@ final class TrackedWallets {
 @MainActor
 @Observable
 final class TokenOpenRequest {
-    struct Target: Equatable, Sendable {
+    struct Target: Hashable, Sendable {
         let chainIndex: String
         let contract: String
         var symbol: String? = nil

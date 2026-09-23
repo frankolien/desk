@@ -36,6 +36,7 @@ struct SignalsScreen: View {
     @State private var trackedEditing: TrackedWallet?
     @State private var showsTrackNew = false
     @State private var showsSmartMoney = false
+    @State private var openToken: TokenOpenRequest.Target?
     #if DEBUG
     @State private var debugPrimer: TraderSnapshot?
     @State private var debugAutoCopy: TraderSnapshot?
@@ -77,7 +78,8 @@ struct SignalsScreen: View {
                                               let tracked = TrackedWallets.shared.wallet(for: address)
                                               return tracked?.name.isEmpty == false ? tracked!.name
                                                   : (IdentityDirectory.shared.name(for: address) ?? tracked?.shortAddress ?? address)
-                                          }, onAdd: { showsTrackNew = true })
+                                          }, onAdd: { showsTrackNew = true },
+                                          onOpen: { openToken = .init(chainIndex: $0.chainIndex, contract: $0.token, symbol: $0.symbol) })
                                 .padding(.bottom, 130)
                         case .top:
                             Button { showsSmartMoney = true } label: {
@@ -140,6 +142,10 @@ struct SignalsScreen: View {
                 TraderProfileScreen(initial: trader, directory: directory, copier: copier) { copy($0) }
                     .toolbar(.hidden, for: .tabBar)
             }
+            .navigationDestination(item: $openToken) { target in
+                SpotTokenPage(target: target, model: model)
+                    .toolbar(.hidden, for: .tabBar)
+            }
             .navigationDestination(item: $selectedTrackedWallet) { wallet in
                 TrackedWalletProfile(address: wallet.address, model: model)
                     .toolbar(.hidden, for: .tabBar)
@@ -153,7 +159,7 @@ struct SignalsScreen: View {
                     DeskBackground()
                     ScrollView(showsIndicators: false) {
                         SmartMoneyFeed(model: smartMoney) { signal in
-                            TokenOpenRequest.shared.open(.init(chainIndex: signal.chainIndex, contract: signal.token, symbol: signal.symbol))
+                            openToken = .init(chainIndex: signal.chainIndex, contract: signal.token, symbol: signal.symbol)
                         }
                         .padding(.horizontal, 20)
                         .padding(.top, 20)
