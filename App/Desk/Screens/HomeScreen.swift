@@ -315,7 +315,7 @@ struct HomeScreen: View {
             HomeAssetRow(
                 mark: { TokenLogo(asset: .ausd, size: 44) },
                 title: "Trading account",
-                subtitle: "Available to trade",
+                subtitle: "AUSD available to trade",
                 value: hidesBalance ? "•••••" : collateralInCurrency,
                 change: nil,
                 tint: DeskColor.action,

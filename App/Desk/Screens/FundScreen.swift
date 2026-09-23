@@ -172,6 +172,14 @@ struct FundScreen: View {
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
             }
+            if needsFunds, !model.network.hasFaucet, let address = model.address {
+                HStack {
+                    Spacer()
+                    AddressQR(address: address.checksummed)
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+            }
             Button {
                 if needsFunds && !model.network.hasFaucet {
                     // No faucet on mainnet: the next step is someone sending funds here.
