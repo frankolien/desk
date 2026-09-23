@@ -16,6 +16,20 @@
     var p = video.play();
     if (p && p.catch) p.catch(function () {});
   }
+  /* Safari drops the poster the moment play is asked for; a video that has not arrived
+     yet shows black until it buffers. So the poster stays until the first frame can. */
+  function playFromStart(video) {
+    if (!video || reduced.matches) return;
+    var go = function () {
+      try { video.currentTime = 0; } catch (e) {}
+      play(video);
+    };
+    if (video.readyState >= 2) { go(); return; }
+    video.preload = "auto";
+    var once = function () { video.removeEventListener("canplay", once); go(); };
+    video.addEventListener("canplay", once);
+    if (video.readyState === 0) video.load();
+  }
 
   /* ── Reveal ── */
   var revealed = $$(".site-reveal");
@@ -69,7 +83,7 @@
         var on = i === hi;
         p.classList.toggle("is-active", on);
         var v = $("video", p);
-        if (on) { if (v) { v.currentTime = 0; play(v); } } else if (v) { v.pause(); }
+        if (on) { playFromStart(v); } else if (v) { v.pause(); }
       });
       nums.forEach(function (n, i) {
         var on = i === hi;
