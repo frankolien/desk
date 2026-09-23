@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { isDeadToken, providerToken, readPrivateKey } from "../api/_apns.mjs";
 import { memoryStore } from "../api/_store.mjs";
 import {
-  alertPayload, compactDollars, createHandler, parseSubscription, readBook, scan, shareBudget, subscriptionId, tradeEvents,
+  WAKE_CAP, alertPayload, compactDollars, createHandler, parseSubscription, readBook, scan, shareBudget, subscriptionId, tradeEvents, withinWakeBudget,
 } from "../api/alerts.mjs";
 
 const ALICE = "0x95d2602d30da1179fd13274839e60345857ca648";
@@ -222,4 +222,12 @@ test("a subscription may name the traders it copies, and a move on one wakes the
   const third = await scan({ store, chain: fakeChain(state), apns, markets });
   assert.equal(third.sent, 0);
   assert.equal(apns.sent.length, 0);
+});
+
+test("a phone is woken at most a dozen times an hour", async () => {
+  const store = memoryStore();
+  let allowed = 0;
+  for (let i = 0; i < 15; i += 1) if (await withinWakeBudget(store, "sub", 1_000)) allowed += 1;
+  assert.equal(allowed, WAKE_CAP);
+  assert.equal(await withinWakeBudget(store, "sub", 1_000 + 3_600_000), true);
 });

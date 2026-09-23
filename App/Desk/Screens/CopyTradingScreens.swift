@@ -696,6 +696,13 @@ private struct PauseButtonStyle: ViewModifier {
 /// Limits and the Live Activity, out of the way of the result.
 struct CopySettingsSheet: View {
     let copier: CopyTrader
+
+    private static func ago(_ date: Date?) -> String {
+        guard let date else { return "Not yet" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: .now)
+    }
     @AppStorage(AutoCopyAway.key) private var copiesWhileAway = false
 
     @Environment(\.dismiss) private var dismiss
@@ -728,6 +735,10 @@ struct CopySettingsSheet: View {
                 GlassSection(footer: "Woken by a silent push when a trader you copy moves, until iOS closes Desk.") {
                     Toggle(isOn: $copiesWhileAway) {
                         GlassRow("Keep copying when I leave", subtitle: "Woken by a silent push") { EmptyView() }
+                    }
+                    if copiesWhileAway {
+                        GlassRow("Last synced", value: Self.ago(TradeAlerts.shared.lastSyncedAt))
+                        GlassRow("Last woken", value: Self.ago(copier.lastWokenAt))
                     }
                     Toggle(isOn: $showsLiveActivity) {
                         GlassRow("Live Activity", subtitle: "Lock Screen and Dynamic Island") { EmptyView() }

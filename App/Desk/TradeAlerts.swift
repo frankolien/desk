@@ -230,6 +230,18 @@ final class TradeAlerts {
 
     func namesChanged() { if !alerted.isEmpty { scheduleSync() } }
 
+    /// The perp markets on the watchlist, by symbol, for price alerts beyond Bitcoin and Monad.
+    static var watchlistSymbols: [String] {
+        let ids = UserDefaults.standard.string(forKey: "desk.watchlist")?.split(separator: ",").map(String.init) ?? []
+        let symbols = UserDefaults.standard.dictionary(forKey: "desk.marketSymbols") as? [String: String] ?? [:]
+        return ids.compactMap { symbols[$0] }.sorted()
+    }
+
+    func watchlistChanged() { if priceAlerts { scheduleSync() } }
+
+    private static let lastSyncKey = "desk.alerts.lastSync"
+    private(set) var lastSyncedAt: Date? = UserDefaults.standard.object(forKey: "desk.alerts.lastSync") as? Date
+
     private static let copyingKey = "desk.alerts.copying"
     private(set) var copying: [String] = UserDefaults.standard.stringArray(forKey: "desk.alerts.copying") ?? []
 
@@ -299,6 +311,7 @@ final class TradeAlerts {
             "copying": copying,
             "wallets": TrackedWallets.shared.payload,
             "prices": priceAlerts,
+            "priceMarkets": Self.watchlistSymbols,
             "confirm": confirm,
         ]
         var request = URLRequest(url: Self.endpoint)
@@ -316,6 +329,8 @@ final class TradeAlerts {
         }
         if confirm { confirmOnSync = false }
         problem = nil
+        lastSyncedAt = .now
+        UserDefaults.standard.set(lastSyncedAt, forKey: Self.lastSyncKey)
     }
 
     private struct ServerError: Decodable { let error: String }

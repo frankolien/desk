@@ -151,6 +151,8 @@ public struct CopyPlan: Sendable, Hashable {
     /// Whole-cent AUSD margin after conviction scaling and the exposure guard.
     public let margin: Double
     public let draft: OrderDesk.Draft
+    /// Where the venue would take the copy, from the same quote the ticket shows.
+    public var liquidationPrice: Price? = nil
 
     public var notional: Double { margin * Double(leverage) }
 }
@@ -254,6 +256,17 @@ public enum CopyPlanner {
             return .failure(.tooSmall)
         }
 
+        // The same quote the ticket prices with, so a copy affords what the ticket would
+        // say it costs and knows where it would be liquidated.
+        guard let quote = try? OrderQuote.quote(
+            side: side, size: size, price: mark, leverageHundredths: lev * 100,
+            feeMicros: market.config.takerFeeMicros,
+            initialMarginFraction: market.config.initialMarginFraction,
+            maintenanceMarginFraction: market.config.maintenanceMarginFraction) else {
+            return .failure(.tooSmall)
+        }
+        guard free.raw >= quote.total.raw else { return .failure(.insufficientBalance) }
+
         // The venue bounds a market order's slippage against the mark. What is left of the
         // chase allowance becomes that bound, so no fill lands further from their entry.
         let slippage = max(5, min(rules.maxChaseBps - max(0, chase), 50, market.maxMarketSlippageBps))
@@ -266,7 +279,7 @@ public enum CopyPlanner {
             leverageHundredths: lev * 100,
             slippageBps: slippage,
             protection: protection.stopLoss == nil && protection.takeProfit == nil ? nil : protection)
-        return .success(CopyPlan(side: side, leverage: lev, margin: margin, draft: draft))
+        return .success(CopyPlan(side: side, leverage: lev, margin: margin, draft: draft, liquidationPrice: quote.liquidationPrice))
     }
 
     /// How far the market has moved against `side` since `entry`, in basis points.

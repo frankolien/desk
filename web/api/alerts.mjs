@@ -26,6 +26,10 @@ import { chainReader, describePosition, openMarkets, perpIdsFromBitmap } from ".
 export const MAX_TRADERS = 20;
 export const MAX_SUBSCRIPTIONS = 5_000;
 const MAX_SCANNED = 300;
+/// Background wakes a phone may get in an hour. iOS throttles silent pushes hard, so a
+/// flood of them costs the useful ones; the alert push, if any, still stands.
+export const WAKE_CAP = 12;
+export const wakeCountKey = (id, hour) => `alerts:wakes:${id}:${hour}`;
 const MAX_EVENTS_PER_TRADER = 4;
 const SUBSCRIPTION_TTL = 60 * 24 * 3600;
 const SNAPSHOT_TTL = 7 * 24 * 3600;
@@ -44,7 +48,7 @@ const validAddress = (value) => typeof value === "string" && /^0x[a-fA-F0-9]{40}
 /// The subscription as stored, or the sentence explaining why it was refused.
 export function parseSubscription(body) {
   if (!body || typeof body !== "object") return { error: "A JSON body is required." };
-  const { install, token, environment, traders, names, copying, wallets, prices } = body;
+  const { install, token, environment, traders, names, copying, wallets, prices, priceMarkets } = body;
   if (typeof install !== "string" || !/^[0-9a-f]{64}$/.test(install)) return { error: "A valid install secret is required." };
   if (typeof token !== "string" || !/^[0-9a-fA-F]{64,200}$/.test(token)) return { error: "A valid device token is required." };
   if (!Array.isArray(traders) || traders.length > MAX_TRADERS || !traders.every(validAddress)) {
@@ -53,6 +57,8 @@ export function parseSubscription(body) {
   if (copying != null && (!Array.isArray(copying) || copying.length > MAX_TRADERS || !copying.every(validAddress))) {
     return { error: `Up to ${MAX_TRADERS} copied addresses are allowed.` };
   }
+  const watched = priceMarkets == null ? [] : parseMarkets(priceMarkets);
+  if (!watched) return { error: "priceMarkets must be up to 20 market symbols." };
   const tracked = wallets == null ? [] : parseWallets(wallets);
   if (!tracked) return { error: `Up to ${MAX_WALLETS} tracked wallets are allowed, each with an address, an optional name and a minimum in dollars.` };
   const followed = [...new Set(traders.map((address) => address.toLowerCase()))];
@@ -74,9 +80,22 @@ export function parseSubscription(body) {
       names: labels,
       wallets: tracked,
       prices: prices !== false,
+      priceMarkets: watched,
     },
     wantsPrices: prices === true,
   };
+}
+
+/// The markets a phone has on its watchlist, or null when the list is malformed.
+function parseMarkets(markets) {
+  if (!Array.isArray(markets) || markets.length > 20) return null;
+  const out = [];
+  for (const entry of markets) {
+    if (typeof entry !== "string" || !/^[A-Za-z0-9]{1,12}$/.test(entry)) return null;
+    const symbol = entry.toUpperCase();
+    if (!out.includes(symbol)) out.push(symbol);
+  }
+  return out;
 }
 
 /// The tracked wallets as stored, or null when any entry is malformed.
@@ -268,6 +287,13 @@ async function inBatches(items, size, work) {
   return out;
 }
 
+export async function withinWakeBudget(store, id, now = Date.now()) {
+  const hour = Math.floor(now / 3_600_000);
+  const count = await store.incr(wakeCountKey(id, hour));
+  if (count === 1) await store.expire(wakeCountKey(id, hour), 3600);
+  return count <= WAKE_CAP;
+}
+
 /// Pushes for tracked wallets' new trades, and the seen markers to write before sending.
 async function walletDeliveries({ store, watchers, now }) {
   const addresses = [...watchers.keys()];
@@ -349,6 +375,7 @@ export async function scan({ store, chain, apns, markets, quotes = [], now = Dat
 
   const snapshots = [];
   const deliveries = [];
+  const wakes = [];
   addresses.forEach((address, index) => {
     const book = books[index];
     if (!book) return;
@@ -364,12 +391,15 @@ export async function scan({ store, chain, apns, markets, quotes = [], now = Dat
         }
         // The loop copies opens, flips and closes; an add would wake the phone for nothing.
         if (record.copying?.includes(address) && event.kind !== "added") {
-          deliveries.push({ id, record, payload: wakePayload(address, event),
+          wakes.push({ id, record, payload: wakePayload(address, event),
             collapseId: `wake-${address.slice(2, 14)}`, background: true });
         }
       }
     }
   });
+  for (const wake of wakes) {
+    if (await withinWakeBudget(store, wake.id, now)) deliveries.push(wake);
+  }
   // Saved before anything is sent, so a scan that dies mid-delivery cannot repeat itself.
   await store.setMany(snapshots, SNAPSHOT_TTL);
 
@@ -521,7 +551,7 @@ export function createHandler(resolve) {
           alert: {
             title: first ? "Trade alerts are on" : copied ? "Away copying is on" : tracked.length ? "Wallet alerts are on" : "Price alerts are on",
             body: !first && !copied && !tracked.length
-              ? "You'll hear when Bitcoin, Ether, Solana or any Perpl market breaks a level or moves 5% in a day."
+              ? "You'll hear when Bitcoin, Monad or a market on your watchlist breaks a level or moves 5% in a day."
               : !first && !copied
               ? (tracked.length === 1
                 ? `You'll hear when ${tracked[0].name || shortAddress(tracked[0].address)} trades on ${isSolanaAddress(tracked[0].address) ? "Solana" : "Monad"}.`

@@ -377,6 +377,7 @@ struct PerpDetailScreen: View {
         var ids = savedIDs.split(separator: ",").compactMap { UInt32($0) }
         if let index = ids.firstIndex(of: id) { ids.remove(at: index) } else { ids.append(id) }
         savedIDs = ids.map(String.init).joined(separator: ",")
+        TradeAlerts.shared.watchlistChanged()
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 

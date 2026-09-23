@@ -105,6 +105,8 @@ final class CopyTrader {
     private var portfolios: [String: Double] = [:]
     private var accounts: [UInt64: String] = [:]
     private var wokenAt: Date?
+    /// When a push last woke the loop, for the settings sheet to show the path works.
+    private(set) var lastWokenAt: Date? = UserDefaults.standard.object(forKey: "desk.copy.lastWake") as? Date
     private var cycles = 0
     private var syncedCopying: [String]?
     /// The loop that is running, for the background push handler to wake.
@@ -264,6 +266,8 @@ final class CopyTrader {
     func wake() async -> Bool {
         let before = cycles
         wokenAt = wokenAt ?? .now
+        lastWokenAt = .now
+        UserDefaults.standard.set(lastWokenAt, forKey: "desk.copy.lastWake")
         for _ in 0..<100 {
             if cycles > before { return true }
             try? await Task.sleep(for: .milliseconds(200))

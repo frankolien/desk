@@ -190,6 +190,7 @@ struct WatchlistScreen: View {
         // Sorted so the stored string is stable: an unordered set would rewrite the
         // defaults value on every toggle even when the membership had not changed.
         savedIDs = next.sorted().map(String.init).joined(separator: ",")
+        TradeAlerts.shared.watchlistChanged()
     }
 
     private func remove(_ token: TrendingSpotToken) {
@@ -561,6 +562,7 @@ struct MarketSearchScreen: View {
         // Sorted so the stored string is stable: an unordered set would rewrite the
         // defaults value on every toggle even when the membership had not changed.
         savedIDs = next.sorted().map(String.init).joined(separator: ",")
+        TradeAlerts.shared.watchlistChanged()
     }
 
     private func open(_ entry: Market) {

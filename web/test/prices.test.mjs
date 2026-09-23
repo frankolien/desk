@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { levelStep, levelText, priceDeliveries, priceEvents, pricePayload } from "../api/_prices.mjs";
+import { levelStep, levelText, priceDeliveries, priceEvents, pricePayload, wantsMarket } from "../api/_prices.mjs";
 import { memoryStore } from "../api/_store.mjs";
 import { parseSubscription } from "../api/alerts.mjs";
 
@@ -59,6 +59,17 @@ test("the first reading is the baseline, a level is told once in six hours, and 
   const again = await priceDeliveries({ store, quotes: [{ name: "BTC", mark: 85_050, prev: 84_000 }], subscribers, now: 4 });
   assert.equal(wobble.events, 1);
   assert.equal(again.events, 0);
+});
+
+test("Bitcoin and Monad reach everyone; another market only a phone that watches it", () => {
+  assert.equal(wantsMarket({}, "BTC"), true);
+  assert.equal(wantsMarket({}, "MON"), true);
+  assert.equal(wantsMarket({}, "SOL"), false);
+  assert.equal(wantsMarket({ priceMarkets: ["SOL"] }, "SOL"), true);
+  assert.equal(wantsMarket({ priceMarkets: ["SOL"], prices: false }, "BTC"), false);
+  const base = { install: "ab".repeat(32), token: "cd".repeat(32), traders: [] };
+  assert.deepEqual(parseSubscription({ ...base, priceMarkets: ["sol", "SOL", "hype"] }).record.priceMarkets, ["SOL", "HYPE"]);
+  assert.ok(parseSubscription({ ...base, priceMarkets: ["not a symbol!"] }).error);
 });
 
 test("a subscription carries whether it wants prices, on unless said otherwise", () => {

@@ -214,6 +214,8 @@ final class MarketModel {
             symbol = market.symbol
             if let head = context.chain.gas?.headBlock { headBlock = max(headBlock, head) }
             allMarkets = context.markets.filter(\.config.isOpen)
+            // Alerts need symbols for the watchlist's ids without a model of their own.
+            UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: allMarkets.map { (String($0.id), $0.symbol) }), forKey: "desk.marketSymbols")
             for item in allMarkets where quotes[item.id] == nil {
                 quotes[item.id] = Quote(markRaw: item.state.markRaw, previousRaw: item.state.previousRaw)
             }

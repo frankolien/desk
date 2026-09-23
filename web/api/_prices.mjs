@@ -66,6 +66,15 @@ export function pricePayload(name, event) {
   };
 }
 
+/// Bitcoin because it is the market everyone watches, Monad because Desk lives on it.
+/// Everything else only reaches a phone that put the market on its watchlist.
+export const ALWAYS_TOLD = new Set(["BTC", "MON"]);
+
+export function wantsMarket(record, name) {
+  if (record.prices === false) return false;
+  return ALWAYS_TOLD.has(name) || (record.priceMarkets ?? []).includes(name);
+}
+
 /// Reads the last marks, finds what crossed, and returns one delivery per subscriber
 /// per event. Levels stay quiet six hours once told; a day's move is told once per
 /// threshold and direction.
@@ -89,7 +98,7 @@ export async function priceDeliveries({ store, quotes, subscribers, now = Date.n
       events += 1;
       const payload = pricePayload(quote.name, event);
       for (const { id, record } of subscribers) {
-        if (record.prices === false) continue;
+        if (!wantsMarket(record, quote.name)) continue;
         deliveries.push({ id, record, payload, collapseId: `px-${quote.name}` });
       }
     }
