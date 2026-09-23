@@ -167,7 +167,13 @@ export async function indexSolanaWallet(address, { store, rpc, price, meta, now 
     if (now() >= deadline) { complete = false; break; }
     // Public endpoints count requests per second; a breath between them keeps the round alive.
     if (paceMs > 0 && done > 0) await new Promise((resolve) => setTimeout(resolve, paceMs));
-    const tx = await rpc("getTransaction", [entry.signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
+    let tx = null;
+    try {
+      tx = await rpc("getTransaction", [entry.signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 1, commitment: "confirmed" }]);
+    } catch (error) {
+      // A pruned or unsupported transaction is skipped, not a reason to stall the wallet.
+      if (!/-32020|-32015/.test(error.message)) throw error;
+    }
     const movement = tx ? solanaMovement(address, entry.signature, tx) : null;
     if (movement) {
       for (const leg of [...movement.in, ...movement.out]) meta.learn?.(leg.token, leg.decimals);

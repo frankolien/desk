@@ -336,6 +336,8 @@ export async function scan({ store, chain, apns, markets, quotes = [], now = Dat
     }
   });
   await store.srem(SUBSCRIPTIONS, ...expired);
+  // A wallet someone wants pushes for goes to the front of the worker's queue every scan.
+  for (const address of watchers.keys()) await store.sadd(URGENT_KEY, address);
 
   // Round-robin across subscriptions rather than a flat slice: a flat one let fifteen junk
   // subscriptions, twenty addresses each, fill the whole budget and silently stop every real

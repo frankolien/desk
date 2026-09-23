@@ -2638,7 +2638,11 @@ private struct WalletProfileScreen: View {
                 .frame(width: 38, height: 38).clipShape(Circle())
                 .accessibilityLabel(row.symbol)
         } else {
-            TokenSymbolBadge(symbol: row.symbol, seed: row.contract.isEmpty ? row.symbol : row.contract, size: 38)
+            RemoteImage(url: logo(row.chainIndex, row.contract)) {
+                TokenSymbolBadge(symbol: row.symbol, seed: row.contract.isEmpty ? row.symbol : row.contract, size: 38)
+            }
+            .frame(width: 38, height: 38).clipShape(Circle())
+            .accessibilityLabel(row.symbol)
         }
     }
 

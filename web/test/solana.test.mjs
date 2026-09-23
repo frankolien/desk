@@ -141,3 +141,18 @@ test("a Solana wallet can be tracked, keeps its case, and its push names its cha
   assert.equal(payload.desk.chainIndex, "501");
   assert.equal(payload.aps.alert.title, "sol whale");
 });
+
+test("a transaction the RPC no longer has is skipped and the cursor still moves on", async () => {
+  const store = memoryStore();
+  const buy = transaction({ lamports: [2_000_000_000n, 1_500_000_000n], pre: [], post: [[BONK, 100_000_000n, 5]] });
+  const rpc = async (method, params) => {
+    if (method === "getSignaturesForAddress") return [{ signature: "kept", err: null }, { signature: "pruned", err: null }];
+    if (params[0] === "pruned") throw new Error("solana -32020: Transaction not found");
+    return buy;
+  };
+  const meta = solanaMetaReader({ store, fetchImpl: async () => ({ ok: false }), api: "" });
+  const result = await indexSolanaWallet(WALLET, { store, rpc, price: async () => 0.0000032, meta, now: () => 10 });
+  assert.equal(result.complete, true);
+  assert.equal(result.ledger.cursor, "kept");
+  assert.equal(result.ledger.trades.length, 1);
+});
