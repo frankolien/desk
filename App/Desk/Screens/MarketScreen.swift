@@ -319,11 +319,6 @@ struct PerpDetailScreen: View {
             }
             .refreshable { await market.refreshNow(); await holders.load(symbol: market.symbol) }
 
-            LinearGradient(colors: [.black.opacity(0), .black.opacity(0.92), .black], startPoint: .top, endPoint: .bottom)
-                .frame(height: 150)
-                .ignoresSafeArea(edges: .bottom)
-                .allowsHitTesting(false)
-
             HStack(spacing: 10) {
                 tradeButton(.down, title: "Short")
                 tradeButton(.up, title: "Long")
@@ -405,10 +400,10 @@ struct PerpDetailScreen: View {
                     if let leverage = market.market?.config.maxLeverage, leverage > 0 {
                         Text("\(leverage)x")
                             .font(.system(size: 12, weight: .bold, design: .rounded))
-                            .foregroundStyle(DeskColor.action.color)
+                            .foregroundStyle(DeskColor.nightText.color)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 3)
-                            .background(DeskColor.action.color.opacity(0.16), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                 }
                 Text(TraderFormat.assetName(market.symbol))
@@ -521,7 +516,7 @@ struct PerpDetailScreen: View {
                         Text(item.rawValue)
                             .font(.system(size: 15, weight: tab == item ? .bold : .medium, design: .rounded))
                             .foregroundStyle(tab == item ? .white : Color.white.opacity(0.45))
-                        Rectangle().fill(tab == item ? DeskColor.action.color : .clear).frame(height: 2)
+                        Rectangle().fill(tab == item ? Color.white : .clear).frame(height: 2)
                     }
                     .frame(maxWidth: .infinity)
                     .contentShape(Rectangle())

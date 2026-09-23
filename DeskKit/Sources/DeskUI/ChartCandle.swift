@@ -8,13 +8,16 @@ public struct ChartCandle: Sendable, Equatable {
     public let close: Double
     /// Absent where the feed does not publish it, which is most spot tokens.
     public let volume: Double?
+    /// Seconds since 1970 at the candle's open, when the feed says.
+    public let time: Double?
 
-    public init(open: Double, high: Double, low: Double, close: Double, volume: Double? = nil) {
+    public init(open: Double, high: Double, low: Double, close: Double, volume: Double? = nil, time: Double? = nil) {
         self.open = open
         self.high = high
         self.low = low
         self.close = close
         self.volume = volume
+        self.time = time
     }
 
     public var isRising: Bool { close >= open }

@@ -89,7 +89,7 @@ struct MarketHoldersList: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Toggle("Friends", isOn: $friendsOnly).labelsHidden().tint(DeskColor.action.color)
+                Toggle("Friends", isOn: $friendsOnly).labelsHidden().tint(DeskColor.rise.color)
                 Text("Friends")
                     .font(.system(size: 15, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightText.color)
@@ -140,7 +140,7 @@ private struct HolderRow: View {
                         .font(.system(size: 17, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .minimumScaleFactor(0.7)
                     Text(holder.sideText)
                         .fixedSize()
                         .font(.system(size: 12, weight: .bold, design: .rounded))
@@ -153,18 +153,17 @@ private struct HolderRow: View {
                     .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
                     .foregroundStyle(DeskColor.nightMuted.color)
             }
-            .layoutPriority(1)
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 5) {
                 Text(TraderFormat.dollars(holder.value, signed: false))
                     .font(.system(size: 17, weight: .semibold, design: .rounded).monospacedDigit())
                     .foregroundStyle(DeskColor.nightText.color)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
                 Text(TraderFormat.dollars(holder.pnl))
                     .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
                     .foregroundStyle((holder.isProfit ? DeskColor.rise : DeskColor.fall).color)
             }
+            .lineLimit(1)
+            .fixedSize()
         }
         .padding(.vertical, 14)
         .overlay(alignment: .bottom) {
@@ -271,18 +270,18 @@ struct HolderPositionSheet: View {
             if let address = holder.address {
                 let following = directory.isFollowing(address)
                 Button {
-                    directory.toggle(address)
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(.snappy(duration: 0.2)) { directory.toggle(address) }
                 } label: {
                     Text(following ? "Following" : "Follow")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundStyle(following ? DeskColor.nightText.color : .white)
-                        .padding(.horizontal, 18)
-                        .frame(height: 40)
-                        .background(following ? Color.white.opacity(0.1) : DeskColor.action.color,
-                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 13)
+                        .frame(height: 30)
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .deskGlass(interactive: true, in: Capsule())
             }
         }
     }
@@ -295,14 +294,13 @@ struct HolderPositionSheet: View {
                     .font(.system(size: 21, weight: .bold, design: .rounded))
                     .foregroundStyle(DeskColor.nightText.color)
                 HStack(spacing: 5) {
-                    Text("Open")
-                    Circle().frame(width: 5, height: 5)
+                    Text("Open").foregroundStyle(DeskColor.nightText.color)
+                    Circle().fill(DeskColor.rise.color).frame(width: 5, height: 5)
                 }
                 .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(DeskColor.action.color)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(DeskColor.action.color.opacity(0.16), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {
@@ -336,21 +334,23 @@ struct HolderPositionSheet: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(TraderFormat.dollars(holder.collateral, signed: false))
-                        .font(.system(size: 30, weight: .bold, design: .rounded).monospacedDigit())
+                        .font(.system(size: 26, weight: .bold, design: .rounded).monospacedDigit())
                         .foregroundStyle(DeskColor.nightText.color)
+                        .lineLimit(1).minimumScaleFactor(0.6)
                     HStack(spacing: 4) {
                         Text("Lev. size").foregroundStyle(DeskColor.nightMuted.color)
                         Text(TraderFormat.compact(Double(holder.value))).foregroundStyle(DeskColor.nightText.color)
-                        Text("(\(holder.size) \(holder.market))").foregroundStyle(DeskColor.nightMuted.color)
+                        Text("(\(TraderFormat.price(holder.size)) \(holder.market))").foregroundStyle(DeskColor.nightMuted.color)
                     }
-                    .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
-                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                    .lineLimit(1).minimumScaleFactor(0.7)
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: 10)
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(TraderFormat.dollars(holder.pnl))
-                        .font(.system(size: 30, weight: .bold, design: .rounded).monospacedDigit())
+                        .font(.system(size: 26, weight: .bold, design: .rounded).monospacedDigit())
                         .foregroundStyle(pnlTint)
+                        .lineLimit(1).minimumScaleFactor(0.6)
                     if let percent = holder.pnlPercent {
                         HStack(spacing: 3) {
                             Image(systemName: percent >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill").font(.system(size: 9))

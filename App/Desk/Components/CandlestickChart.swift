@@ -22,8 +22,37 @@ struct PriceGuide: Identifiable, Hashable {
 struct CandlestickChart: View {
     let candles: [ChartCandle]
     var guides: [PriceGuide] = []
+    /// The candle under a held finger; nil until the chart is pressed.
+    @State private var scrubbed: Int?
+
+    private static let stamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "d MMM HH:mm"
+        return formatter
+    }()
 
     var body: some View {
+        GeometryReader { proxy in
+            canvas
+                .gesture(
+                    LongPressGesture(minimumDuration: 0.18)
+                        .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+                        .onChanged { value in
+                            guard case .second(true, let drag) = value, let drag else { return }
+                            let samples = Array(candles.suffix(25))
+                            let layout = CandleLayout(count: samples.count, width: proxy.size.width - 62)
+                            let index = min(max(Int(drag.location.x / layout.step) - layout.leading, 0), samples.count - 1)
+                            if index != scrubbed {
+                                scrubbed = index
+                                UISelectionFeedbackGenerator().selectionChanged()
+                            }
+                        }
+                        .onEnded { _ in scrubbed = nil }
+                )
+        }
+    }
+
+    private var canvas: some View {
         Canvas { context, size in
             let samples = Array(candles.suffix(25))
             guard samples.count > 1,
@@ -133,6 +162,46 @@ struct CandlestickChart: View {
                         .foregroundStyle(guide.tint),
                     at: CGPoint(x: plotWidth + 31, y: guideY), anchor: .center)
             }
+
+            if let scrubbed, samples.indices.contains(scrubbed) {
+                let candle = samples[scrubbed]
+                let x = layout.x(scrubbed)
+                let y = axis.y(candle.close)
+                var cross = Path()
+                cross.move(to: CGPoint(x: x, y: 0))
+                cross.addLine(to: CGPoint(x: x, y: size.height))
+                cross.move(to: CGPoint(x: 0, y: y))
+                cross.addLine(to: CGPoint(x: plotWidth, y: y))
+                context.stroke(cross, with: .color(.white.opacity(0.7)), style: StrokeStyle(lineWidth: 0.8, dash: [3, 3]))
+
+                let price = context.resolve(
+                    Text(PriceAxis.label(candle.close)).font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white))
+                let priceSize = price.measure(in: CGSize(width: 80, height: 20))
+                let priceTag = CGRect(x: plotWidth + 4, y: y - priceSize.height / 2 - 3,
+                                      width: min(size.width - plotWidth - 6, priceSize.width + 10), height: priceSize.height + 6)
+                context.fill(Path(roundedRect: priceTag, cornerRadius: 4), with: .color(.white.opacity(0.28)))
+                context.draw(price, at: CGPoint(x: priceTag.midX, y: priceTag.midY), anchor: .center)
+
+                let ohlc = context.resolve(
+                    Text("O \(PriceAxis.label(candle.open))  H \(PriceAxis.label(candle.high))  L \(PriceAxis.label(candle.low))  C \(PriceAxis.label(candle.close))")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.85)))
+                context.draw(ohlc, at: CGPoint(x: 2, y: 2), anchor: .topLeading)
+
+                if let time = candle.time {
+                    let when = context.resolve(
+                        Text(Self.stamp.string(from: Date(timeIntervalSince1970: time)))
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white))
+                    let whenSize = when.measure(in: CGSize(width: 140, height: 20))
+                    let width = whenSize.width + 12
+                    let tag = CGRect(x: min(max(x - width / 2, 0), plotWidth - width), y: priceHeight - whenSize.height - 8,
+                                     width: width, height: whenSize.height + 6)
+                    context.fill(Path(roundedRect: tag, cornerRadius: 4), with: .color(.white.opacity(0.28)))
+                    context.draw(when, at: CGPoint(x: tag.midX, y: tag.midY), anchor: .center)
+                }
+            }
         }
     }
 }
@@ -143,7 +212,7 @@ extension MarketModel.Candle {
         ChartCandle(
             open: Double(o) / scale, high: Double(h) / scale,
             low: Double(l) / scale, close: Double(c) / scale,
-            volume: Double(v))
+            volume: Double(v), time: t > 100_000_000_000 ? Double(t) / 1_000 : Double(t))
     }
 }
 
