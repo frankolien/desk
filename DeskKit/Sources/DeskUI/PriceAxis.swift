@@ -126,7 +126,7 @@ public struct PriceAxis: Sendable, Equatable {
     /// Derived per value, neighbouring ticks printed at different widths: a spot token's
     /// axis read "0.000100" above "0.0000500". One step, one precision.
     public static func label(_ value: Double, step: Double) -> String {
-        if abs(value) >= 1_000 { return String(format: "%.2fK", value / 1_000) }
+        if abs(value) >= 1_000 { return grouped(value) }
         guard step > 0, step.isFinite else { return label(value) }
         let places = min(max(Int(ceil(-log10(step))) + 1, 0), 12)
         return String(format: "%.\(places)f", value)
@@ -139,13 +139,22 @@ public struct PriceAxis: Sendable, Equatable {
     /// as "0.00", and eight renders Bitcoin as a wall of zeroes.
     public static func label(_ value: Double) -> String {
         let magnitude = abs(value)
-        if magnitude >= 1_000 { return String(format: "%.2fK", value / 1_000) }
+        if magnitude >= 1_000 { return grouped(value) }
         if magnitude >= 1 { return String(format: "%.2f", value) }
         if magnitude >= 0.01 { return String(format: "%.4f", value) }
         if magnitude == 0 { return "0" }
         // Two digits past the first significant one, so neighbouring ticks differ.
         let places = min(Int(ceil(-log10(magnitude))) + 2, 12)
         return String(format: "%.\(places)f", value)
+    }
+
+    /// Thousands print whole and grouped, the way a price is read aloud.
+    static func grouped(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        formatter.locale = Locale(identifier: "en_US")
+        return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.0f", value)
     }
 
     /// The 1, 2, 5, 10 ladder every axis uses.

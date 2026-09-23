@@ -197,3 +197,27 @@ test("a book that outran the page budget says so", async () => {
   assert.equal(result.body.markets[0].biggest.address, ALICE);
   assert.match(result.headers["Cache-Control"], /s-maxage=60/);
 });
+
+test("holders lists every open position on one market, biggest first, with its owner", async () => {
+  const chain = {
+    async allPositions(market) {
+      assert.equal(market.name, "BTC");
+      return { rows: [
+        { row: row({ accountId: 7n, lotLNS: 1_000n }), mark: 244_722n },
+        { row: row({ accountId: 9n, lotLNS: 5_000n, positionType: 1 }), mark: 244_722n },
+      ], complete: true };
+    },
+    async accountById(id) { return { accountId: id, accountAddr: id === 9n ? ALICE : "0x" + "b".repeat(40) }; },
+  };
+  const result = await createHandler({ chain, fetchImpl: context })({ method: "GET", query: { view: "holders", market: "btc" } }, recorder());
+  assert.equal(result.status, 200);
+  assert.equal(result.body.market, "BTC");
+  assert.equal(result.body.count, 2);
+  assert.equal(result.body.holders[0].address, ALICE);
+  assert.equal(result.body.holders[0].side, "short");
+  assert.equal(result.body.holders[0].accountId, "9");
+  assert.ok(Number(result.body.holders[0].value) > Number(result.body.holders[1].value));
+  assert.match(result.headers["Cache-Control"], /s-maxage=30/);
+  const missing = await createHandler({ chain, fetchImpl: context })({ method: "GET", query: { view: "holders", market: "DOGE" } }, recorder());
+  assert.equal(missing.status, 404);
+});

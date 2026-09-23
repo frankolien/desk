@@ -14,6 +14,7 @@ const COLLATERAL_DECIMALS = 6;
 const PAGE = 50n;
 const MAX_PAGES = 30;
 const TOP = 25;
+const HOLDERS = 60;
 const MAX_FOLLOWED = 20;
 
 export function formatFixed(raw, decimals, places = decimals) {
@@ -367,6 +368,25 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
     }
 
     try {
+      if (view === "holders") {
+        const symbol = String(req.query.market ?? "").trim().toUpperCase();
+        const market = [...book.values()].find((entry) => String(entry.name).toUpperCase() === symbol);
+        if (!market) return res.status(404).json({ error: "No open market by that name." });
+        const page = await chain.allPositions(market);
+        const described = page.rows
+          .map(({ row, mark }) => ({ accountId: row.accountId, ...describePosition(row, mark, market) }))
+          .sort((a, b) => Number(b.value) - Number(a.value));
+        const shown = described.slice(0, HOLDERS);
+        const accounts = await Promise.all(shown.map((holder) => chain.accountById(holder.accountId).catch(() => null)));
+        const total = (side) => described.filter((h) => h.side === side).reduce((sum, h) => sum + Number(h.value), 0);
+        res.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=120");
+        return res.status(200).json({
+          observedAt: Date.now(), market: market.name, marketId: market.id, complete: page.complete,
+          count: described.length, longValue: total("long").toFixed(2), shortValue: total("short").toFixed(2),
+          holders: shown.map((holder, index) => ({ ...holder, accountId: String(holder.accountId), address: accounts[index]?.accountAddr ?? null })),
+        });
+      }
+
       if (view === "crowd") {
         const markets = [...book.values()];
         const pages = await Promise.all(markets.map((market) => chain.allPositions(market)));

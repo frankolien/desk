@@ -283,10 +283,17 @@ struct PerpDetailScreen: View {
     let session: TradingSession
     let onOrderFilled: (Direction, String) -> Void
 
+    private enum Tab: String, CaseIterable { case holders = "Holders", about = "About" }
+
     @Environment(\.dismiss) private var dismiss
     @State private var ticket: Direction?
     @State private var showsSetup = false
     @State private var pendingSide: Direction?
+    @State private var tab: Tab = .holders
+    @State private var holders = MarketHoldersModel()
+    @State private var directory = TraderDirectory()
+    @State private var openHolder: MarketHolder?
+    @AppStorage("desk.watchlist") private var savedIDs = ""
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -295,25 +302,38 @@ struct PerpDetailScreen: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     detailHeader
-                    priceBlock.padding(.top, 42)
-                    chart.padding(.top, 28)
-                    ranges.padding(.top, 22)
-                    stats.padding(.top, 34)
+                    priceRow.padding(.top, 26)
+                    chart.padding(.top, 20)
+                    ranges.padding(.top, 16)
+                    tabs.padding(.top, 24)
+                    switch tab {
+                    case .holders:
+                        MarketHoldersList(model: holders, directory: directory) { openHolder = $0 }
+                    case .about:
+                        about.padding(.top, 16)
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
-                .padding(.bottom, 110)
+                .padding(.bottom, 120)
             }
-            .refreshable { await market.refreshNow() }
+            .refreshable { await market.refreshNow(); await holders.load(symbol: market.symbol) }
+
+            LinearGradient(colors: [.black.opacity(0), .black.opacity(0.92), .black], startPoint: .top, endPoint: .bottom)
+                .frame(height: 150)
+                .ignoresSafeArea(edges: .bottom)
+                .allowsHitTesting(false)
 
             HStack(spacing: 10) {
-                tradeButton(.up, title: "Long")
                 tradeButton(.down, title: "Short")
+                tradeButton(.up, title: "Long")
             }
-            .padding(.horizontal, 28)
+            .padding(.horizontal, 20)
             .padding(.bottom, 12)
         }
         .toolbar(.hidden, for: .navigationBar)
+        .task(id: market.symbol) { await holders.run(symbol: market.symbol) }
+        .task { await directory.refreshFollowing() }
         .task {
             #if DEBUG
             // The ticket sits behind a floating bar that UI automation cannot hit, so it
@@ -345,45 +365,132 @@ struct PerpDetailScreen: View {
                 },
                 onBack: { pendingSide = nil })
         }
+        .sheet(item: $openHolder) { holder in
+            HolderPositionSheet(holder: holder, market: market, directory: directory)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var isSaved: Bool {
+        guard let id = market.market?.id else { return false }
+        return savedIDs.split(separator: ",").compactMap { UInt32($0) }.contains(id)
+    }
+
+    private func toggleSaved() {
+        guard let id = market.market?.id else { return }
+        var ids = savedIDs.split(separator: ",").compactMap { UInt32($0) }
+        if let index = ids.firstIndex(of: id) { ids.remove(at: index) } else { ids.append(id) }
+        savedIDs = ids.map(String.init).joined(separator: ",")
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     private var detailHeader: some View {
-        HStack {
+        HStack(spacing: 12) {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .bold))
-                    .frame(width: 42, height: 42)
-                    .contentShape(Circle())
+                    .font(.system(size: 17, weight: .bold))
+                    .frame(width: 32, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .perpGlass(interactive: true, in: Circle())
+            .foregroundStyle(DeskColor.nightMuted.color)
 
+            MarketTokenLogo(symbol: market.symbol, size: 46)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(market.symbol)
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                    if let leverage = market.market?.config.maxLeverage, leverage > 0 {
+                        Text("\(leverage)x")
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundStyle(DeskColor.action.color)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(DeskColor.action.color.opacity(0.16), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                }
+                Text(TraderFormat.assetName(market.symbol))
+                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+            }
             Spacer()
-
-
+            Button(action: toggleSaved) {
+                Image(systemName: isSaved ? "star.fill" : "star")
+                    .font(.system(size: 19, weight: .semibold))
+                    .frame(width: 40, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(isSaved ? DeskColor.action.color : DeskColor.nightMuted.color)
+            ShareLink(item: URL(string: "https://trydesk.trade/app/trade/\(market.symbol)")!) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 36, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(DeskColor.nightMuted.color)
         }
-        .foregroundStyle(DeskColor.nightText.color)
     }
 
-    private var priceBlock: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            MarketTokenLogo(symbol: market.symbol, size: 42)
-            Text(market.symbol)
-                .font(.system(size: 19, weight: .bold, design: .rounded))
-                .foregroundStyle(DeskColor.nightMuted.color)
+    /// The day's move in money and in percent, against the venue's previous mark.
+    private var change: (text: String, up: Bool)? {
+        guard let listed = market.market, let mark = market.mark.value else { return nil }
+        let scale = pow(10.0, Double(listed.config.priceDecimals))
+        let previous = Double(listed.state.previousRaw) / scale
+        let now = Double(mark.raw) / scale
+        guard previous > 0 else { return nil }
+        let difference = now - previous
+        let percent = abs(difference / previous * 100)
+        return ("\(TraderFormat.dollars(String(abs(difference)), signed: false)) (\(String(format: "%.2f", percent))%)", difference >= 0)
+    }
+
+    private var openInterestText: String? {
+        guard let listed = market.market, listed.state.openInterestRaw > 0, let mark = market.mark.value else { return nil }
+        let size = Double(listed.state.openInterestRaw) / pow(10.0, Double(listed.config.sizeDecimals))
+        let price = Double(mark.raw) / pow(10.0, Double(listed.config.priceDecimals))
+        return TraderFormat.compact(size * price)
+    }
+
+    private var priceRow: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 6) {
+                AmountText(market.markText == "—" ? "—" : "$" + market.markText, size: 40)
+                    .contentTransition(.numericText())
+                HStack(spacing: 6) {
+                    if let change {
+                        Image(systemName: change.up ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                            .font(.system(size: 9, weight: .bold))
+                        Text(change.text)
+                            .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
+                    } else {
+                        Text(market.changePercentText ?? "—")
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                    }
+                    Text("24h")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+                .foregroundStyle(market.trend.color)
+            }
+            Spacer()
+            if let openInterestText {
+                VStack(alignment: .trailing, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                        Text(openInterestText)
+                            .font(.system(size: 20, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(DeskColor.nightText.color)
+                    }
+                    Text("Open interest")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
                 .padding(.top, 8)
-            AmountText(market.markText == "—" ? "—" : "$" + market.markText, size: 42)
-                .contentTransition(.numericText())
-            HStack(spacing: 8) {
-                Text(market.changePercentText ?? "—")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(market.trend.color)
-                Text("LIVE")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.16)))
             }
         }
     }
@@ -406,14 +513,52 @@ struct PerpDetailScreen: View {
 
     private var ranges: some View { CandleIntervalRail(market: market) }
 
-    private var stats: some View {
+    private var tabs: some View {
+        HStack(spacing: 0) {
+            ForEach(Tab.allCases, id: \.self) { item in
+                Button { withAnimation(.snappy(duration: 0.22)) { tab = item } } label: {
+                    VStack(spacing: 10) {
+                        Text(item.rawValue)
+                            .font(.system(size: 15, weight: tab == item ? .bold : .medium, design: .rounded))
+                            .foregroundStyle(tab == item ? .white : Color.white.opacity(0.45))
+                        Rectangle().fill(tab == item ? DeskColor.action.color : .clear).frame(height: 2)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5) }
+    }
+
+    private var about: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("MARKET STATS")
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .tracking(0.9)
-                .foregroundStyle(DeskColor.nightMuted.color)
             ValueRow(label: "Market", value: "\(market.symbol)-PERP")
             ValueRow(label: "Maximum leverage", value: "\(market.market?.config.maxLeverage ?? 0)×")
+            if let openInterestText { ValueRow(label: "Open interest", value: openInterestText) }
+            if holders.loaded { ValueRow(label: "Open positions", value: "\(holders.count)") }
+            if holders.longValue + holders.shortValue > 0 {
+                let share = holders.longValue / (holders.longValue + holders.shortValue)
+                VStack(alignment: .leading, spacing: 8) {
+                    GeometryReader { proxy in
+                        HStack(spacing: 3) {
+                            Capsule().fill(DeskColor.rise.color).frame(width: max(0, proxy.size.width - 3) * share)
+                            Capsule().fill(DeskColor.fall.color)
+                        }
+                    }
+                    .frame(height: 8)
+                    HStack {
+                        Text("\(Int((share * 100).rounded()))% long · \(TraderFormat.compact(holders.longValue))")
+                            .foregroundStyle(DeskColor.rise.color)
+                        Spacer()
+                        Text("\(Int(((1 - share) * 100).rounded()))% short · \(TraderFormat.compact(holders.shortValue))")
+                            .foregroundStyle(DeskColor.fall.color)
+                    }
+                    .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                }
+                .padding(.top, 4)
+            }
             ValueRow(label: "Data", value: market.freshness == .live ? "Live" : "Last known")
         }
         .padding(16)

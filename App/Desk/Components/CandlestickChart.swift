@@ -85,13 +85,19 @@ struct CandlestickChart: View {
 
             if let last = samples.last {
                 let currentY = axis.y(last.close)
+                let tint = (last.isRising ? DeskColor.rise : DeskColor.fall).color
                 var line = Path()
                 line.move(to: CGPoint(x: 0, y: currentY))
                 line.addLine(to: CGPoint(x: plotWidth, y: currentY))
-                context.stroke(
-                    line,
-                    with: .color((last.isRising ? DeskColor.rise : DeskColor.fall).color.opacity(0.55)),
-                    lineWidth: 0.8)
+                context.stroke(line, with: .color(tint.opacity(0.55)), style: StrokeStyle(lineWidth: 0.8, dash: [2, 3]))
+                let resolved = context.resolve(
+                    Text(PriceAxis.label(last.close)).font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(.black))
+                let textSize = resolved.measure(in: CGSize(width: 80, height: 20))
+                let tag = CGRect(x: plotWidth + 4, y: currentY - textSize.height / 2 - 3,
+                                 width: min(size.width - plotWidth - 6, textSize.width + 10), height: textSize.height + 6)
+                context.fill(Path(roundedRect: tag, cornerRadius: 4), with: .color(tint))
+                context.draw(resolved, at: CGPoint(x: tag.midX, y: tag.midY), anchor: .center)
             }
 
             for (guide, placement) in placements {
