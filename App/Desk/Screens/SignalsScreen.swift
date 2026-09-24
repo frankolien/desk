@@ -34,6 +34,7 @@ struct SignalsScreen: View {
     @State private var afterAlert: (() -> Void)?
     @State private var smartMoney = SignalsModel()
     @State private var followingFeed = FollowingFeedModel()
+    @Namespace private var pickerSpace
     @State private var trackedEditing: TrackedWallet?
     @State private var showsTrackNew = false
     @State private var showsSmartMoney = false
@@ -341,23 +342,65 @@ struct SignalsScreen: View {
         }
     }
 
-    private var sectionPicker: some View {
-        HStack(spacing: 0) {
-            ForEach(Section.allCases) { item in
-                Button { withAnimation(.easeOut(duration: 0.18)) { section = item } } label: {
-                    Text(item.rawValue)
-                        .font(.system(size: 13, weight: section == item ? .bold : .medium, design: .rounded))
-                        .foregroundStyle(DeskColor.nightText.color)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 36)
-                        .background(section == item ? Color.white.opacity(0.24) : .clear, in: Capsule())
-                        .contentShape(Capsule())
+    /// Liquid Glass where the system has it: the chosen segment is a glass pill that slides
+    /// between positions. A material with a hairline stands in below iOS 26.
+    @ViewBuilder private var sectionPicker: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 0) {
+                HStack(spacing: 0) {
+                    ForEach(Section.allCases) { item in
+                        Button { withAnimation(.snappy(duration: 0.3)) { section = item } } label: {
+                            sectionLabel(item)
+                        }
+                        .buttonStyle(.plain)
+                        // The glass carries the label: a container composites glass above
+                        // its other children, so glass behind the text would blur it.
+                        .modifier(SectionGlass(selected: section == item, space: pickerSpace))
+                    }
                 }
-                .buttonStyle(.plain)
+                .padding(3)
+                .background(Color.white.opacity(0.06), in: Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 0.6))
+            }
+        } else {
+            HStack(spacing: 0) {
+                ForEach(Section.allCases) { item in
+                    Button { withAnimation(.easeOut(duration: 0.18)) { section = item } } label: {
+                        sectionLabel(item)
+                            .background(section == item ? Color.white.opacity(0.24) : .clear, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(3)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.6))
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private struct SectionGlass: ViewModifier {
+        let selected: Bool
+        let space: Namespace.ID
+
+        func body(content: Content) -> some View {
+            if selected {
+                content
+                    .glassEffect(.regular.tint(Color.white.opacity(0.16)).interactive(), in: Capsule())
+                    .glassEffectID("section", in: space)
+            } else {
+                content
             }
         }
-        .padding(3)
-        .background(Color.white.opacity(0.11), in: Capsule())
+    }
+
+    private func sectionLabel(_ item: Section) -> some View {
+        Text(item.rawValue)
+            .font(.system(size: 13, weight: section == item ? .bold : .medium, design: .rounded))
+            .foregroundStyle(DeskColor.nightText.color)
+            .frame(maxWidth: .infinity)
+            .frame(height: 36)
+            .contentShape(Capsule())
     }
 
     @ViewBuilder

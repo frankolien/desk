@@ -126,10 +126,28 @@ struct NadNameSheet: View {
 }
 
 /// Type a label, see at once whether it is free and what it costs.
+/// The name flow as the first screen after a new sign-in: the same three steps, each
+/// with Skip in the corner, ending on Home either way.
+struct NadOnboardingScreen: View {
+    let model: AppModel
+    let onFinish: () -> Void
+    @State private var names = NadNamesModel()
+
+    var body: some View {
+        NavigationStack {
+            NadFindNameView(model: model, names: names, onSkip: onFinish)
+                .navigationBarTitleDisplayMode(.inline)
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
 struct NadFindNameView: View {
     let model: AppModel
     let names: NadNamesModel
     var initial = ""
+    /// Set when the flow is onboarding: Skip leaves for Home from any step.
+    var onSkip: (() -> Void)? = nil
 
     @State private var typed = ""
     @State private var checking: Task<Void, Never>?
@@ -204,7 +222,7 @@ struct NadFindNameView: View {
                     statusChip
                     Spacer()
                     NavigationLink {
-                        if let status { NadProfileStep(status: status, model: model, names: names) }
+                        if let status { NadProfileStep(status: status, model: model, names: names, onSkip: onSkip) }
                     } label: {
                         HStack(spacing: 6) {
                             Text("Continue")
@@ -224,6 +242,11 @@ struct NadFindNameView: View {
             }
         }
         .toolbar(.hidden, for: .tabBar)
+        .toolbar {
+            if let onSkip {
+                ToolbarItem(placement: .confirmationAction) { Button("Skip", action: onSkip).fontWeight(.semibold) }
+            }
+        }
         .onAppear {
             focused = true
             names.clearCheck()
@@ -269,6 +292,7 @@ struct NadProfileStep: View {
     let status: NadNameStatus
     let model: AppModel
     let names: NadNamesModel
+    var onSkip: (() -> Void)? = nil
 
     @State private var useDeskPicture = true
     @State private var bio = ""
@@ -410,12 +434,13 @@ struct NadProfileStep: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Skip") { goesToConfirm = true }.fontWeight(.semibold)
+                // Onboarding's Skip leaves the flow; the sheet's skips the optional profile.
+                Button("Skip") { if let onSkip { onSkip() } else { goesToConfirm = true } }.fontWeight(.semibold)
             }
         }
         .toolbar(.hidden, for: .tabBar)
         .navigationDestination(isPresented: $goesToConfirm) {
-            NadConfirmView(status: status, records: records, model: model, names: names)
+            NadConfirmView(status: status, records: records, model: model, names: names, onSkip: onSkip)
         }
     }
 
@@ -441,6 +466,7 @@ struct NadConfirmView: View {
     let records: [String: String]
     let model: AppModel
     let names: NadNamesModel
+    var onSkip: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var phase: Phase = .idle
@@ -458,6 +484,7 @@ struct NadConfirmView: View {
         return NativeAmount(raw: needed.raw - held.raw)
     }
     private var isBusy: Bool { phase == .requesting || phase == .signing || phase == .sending }
+    private var isDone: Bool { if case .done = phase { true } else { false } }
 
     var body: some View {
         ZStack {
@@ -474,6 +501,11 @@ struct NadConfirmView: View {
         .navigationTitle("Confirm registration")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
+        .toolbar {
+            if let onSkip, !isBusy, !isDone {
+                ToolbarItem(placement: .confirmationAction) { Button("Skip", action: onSkip).fontWeight(.semibold) }
+            }
+        }
         .interactiveDismissDisabled(isBusy)
         .task { await model.refreshMainnetMON() }
     }
@@ -558,7 +590,7 @@ struct NadConfirmView: View {
                     .foregroundStyle(DeskColor.action.color)
             }
             Spacer()
-            PrimaryButton(title: "Done") { dismiss() }.padding(.bottom, 12)
+            PrimaryButton(title: "Done") { if let onSkip { onSkip() } else { dismiss() } }.padding(.bottom, 12)
         }
     }
 

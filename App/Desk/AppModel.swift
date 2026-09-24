@@ -98,6 +98,22 @@ final class AppModel {
     private func hasOnboarded(_ address: EthereumAddress) -> Bool {
         DeskNetwork.allCases.contains { APIKeyStore.forNetwork($0).load(for: address) != nil }
     }
+
+    /// The .nad name flow shown once, straight after a sign-in that created or first
+    /// reached this account on the device. Funding is no longer a gate: Home shows the
+    /// setup card and Add funds opens it.
+    private(set) var showsNameOnboarding = false
+
+    private static func nameOnboardingKey(_ address: EthereumAddress) -> String { "desk.onboarding.name.\(address.checksummed)" }
+
+    private func considerNameOnboarding(_ address: EthereumAddress) {
+        showsNameOnboarding = !hasOnboarded(address) && !UserDefaults.standard.bool(forKey: Self.nameOnboardingKey(address))
+    }
+
+    func finishNameOnboarding() {
+        if let address { UserDefaults.standard.set(true, forKey: Self.nameOnboardingKey(address)) }
+        showsNameOnboarding = false
+    }
     /// Shown once, ever, the first time leverage is reached.
     var hasSeenLeverageExplainer = false
     private let session = SigningSession()
@@ -156,13 +172,14 @@ final class AppModel {
            index + 1 < ProcessInfo.processInfo.arguments.count {
             let name = ProcessInfo.processInfo.arguments[index + 1]
             stage = switch name {
-            case "market", "signals", "signal-detail", "empty", "watchlist", "search", "home", "home-setup": .trading
+            case "market", "signals", "signal-detail", "empty", "watchlist", "search", "home", "home-setup", "name": .trading
             case "fund", "fund-empty": .needsDesk
             default: .welcome
             }
             // `empty` is the state a real first run is actually in: signed in, funded by
             // nothing. It is the screen most likely to be wrong and the least likely to
             // be looked at, so it gets its own way in.
+            if name == "name" { showsNameOnboarding = true }
             if name == "empty" || name == "fund-empty" {
                 // Its own seed: the shared review wallet holds real testnet funds.
                 let seed: UInt8 = name == "fund-empty" ? 0x2B : 0x2A
@@ -340,7 +357,8 @@ final class AppModel {
             } catch {
                 // The venue did not answer. The account is still this person's; the
                 // trading screens report the connection themselves.
-                stage = hasOnboarded(last) ? .trading : .needsDesk
+                considerNameOnboarding(last)
+                stage = .trading
             }
             return .arrived
         case .cancelled:
@@ -364,7 +382,8 @@ final class AppModel {
             let context = try await PerplREST(configuration: network.perpl()).context()
             await enterTrading(stored, context: context)
         } else {
-            stage = hasOnboarded(address) ? .trading : .needsDesk
+            considerNameOnboarding(address)
+            stage = .trading
         }
     }
 

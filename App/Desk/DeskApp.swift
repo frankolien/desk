@@ -86,10 +86,15 @@ struct RootView: View {
                 case .needsDesk:
                     FundScreen(model: model)
                 case .trading:
-                    // Rebuilt on a network switch, so no market or socket from the other
-                    // network survives inside it.
-                    TradingShell(model: model)
-                        .id(model.network)
+                    if model.showsNameOnboarding {
+                        NadOnboardingScreen(model: model) { model.finishNameOnboarding() }
+                            .transition(.opacity)
+                    } else {
+                        // Rebuilt on a network switch, so no market or socket from the other
+                        // network survives inside it.
+                        TradingShell(model: model)
+                            .id(model.network)
+                    }
                 }
             }
 
@@ -115,6 +120,7 @@ struct RootView: View {
             }
         }
         .animation(.snappy, value: Connectivity.shared.isOnline)
+        .animation(.easeInOut(duration: 0.3), value: model.showsNameOnboarding)
         .task { await DisplayCurrency.shared.refresh() }
         .task {
             guard showsLaunchMoment else { return }
