@@ -47,6 +47,14 @@
     {
       "source": "/security",
       "destination": "/security/index.html"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/privacy/index.html"
+    },
+    {
+      "source": "/support",
+      "destination": "/support/index.html"
     }
   ],
   "headers": [

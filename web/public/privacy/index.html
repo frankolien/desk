@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Desk Privacy</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="What Desk keeps on your phone, what its server holds and for how long, and who else receives what.">
+<meta name="theme-color" content="#e8b339">
+<link rel="canonical" href="https://trydesk.trade/privacy">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://trydesk.trade/privacy">
+<meta property="og:title" content="Desk Privacy">
+<meta property="og:description" content="What Desk keeps on your phone, what its server holds and for how long, and who else receives what.">
+<meta property="og:image" content="https://trydesk.trade/brand/og.jpg">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+<link rel="icon" href="/brand/apple-touch-icon.png">
+<link rel="preload" href="/fonts/geist-variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/pages.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-apple" viewBox="0 0 22 26"><path fill="currentColor" d="M15.7 1.4c0 1.1-.45 2.16-1.19 2.94-.79.83-2.08 1.47-3.15 1.38-.12-1.05.4-2.17 1.15-2.92.8-.83 2.19-1.43 3.19-1.4zM20 16.3c-.57 1.31-.84 1.9-1.58 3.05-1.02 1.6-2.46 3.6-4.25 3.62-1.58.02-2-1.03-4.14-1.02-2.15.01-2.6 1.04-4.18 1.02-1.79-.02-3.15-1.82-4.17-3.43C-1.24 15.2-1.53 9.95.86 7.18a4.9 4.9 0 0 1 3.47-1.64c1.43 0 2.33.78 3.51.78 1.15 0 1.85-.78 3.5-.78 1.24 0 2.56.68 3.5 1.84-3.08 1.68-2.58 6.08.35 7.06z"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M13 6l6 6-6 6"/></symbol>
+</svg>
+<div class="site-root">
+
+<a href="#site-main" class="site-skip">Skip to content</a>
+
+<header class="site-nav">
+  <div class="site-wrap site-nav-inner">
+    <a href="/" class="site-logo" aria-label="Desk home">
+      <img src="/brand/mark.webp" alt="" width="34" height="34" class="site-logo-mark">
+      <span class="site-logo-word">Desk</span>
+    </a>
+    <nav class="site-nav-links" aria-label="Primary">
+      <a href="/#chain">Copy engine</a>
+      <a href="/#desk">Live desk</a>
+      <a href="/docs">API</a>
+      <a href="/status">Status</a>
+      <a href="/security">Security</a>
+      <a href="/app">Web app</a>
+      <a class="site-btn site-btn-ink site-btn-small" href="https://testflight.apple.com/join/zjQdZzMX" target="_blank" rel="noreferrer">
+        <svg class="site-apple" width="14" height="16" aria-hidden="true"><use href="#i-apple"/></svg>
+        Get the app
+      </a>
+    </nav>
+  </div>
+</header>
+
+<main id="site-main" class="site-main">
+
+  <section class="site-block page-hero" data-tone="amber" aria-labelledby="privacy-title">
+    <div class="site-wrap">
+      <p class="site-eyebrow">Privacy</p>
+      <h1 id="privacy-title" class="page-title">Your keys stay on your phone. So does almost everything else.</h1>
+      <p class="site-sub">Desk has no accounts and no analytics. This page says exactly what leaves your iPhone, where it goes, and how to make it go away.</p>
+    </div>
+  </section>
+
+  <section class="site-block page-body" aria-label="Privacy">
+    <div class="site-wrap page-columns">
+      <nav aria-label="On this page">
+        <ul class="page-toc">
+          <li><a href="#short">The short version</a></li>
+          <li><a href="#phone">On your iPhone</a></li>
+          <li><a href="#server">On our server</a></li>
+          <li><a href="#third">Who else receives something</a></li>
+          <li><a href="#not">What we do not do</a></li>
+          <li><a href="#rights">Your choices</a></li>
+          <li><a href="#changes">Changes</a></li>
+        </ul>
+      </nav>
+
+      <div class="page-prose">
+        <p><em>Effective 24 September 2026.</em></p>
+
+        <h2 id="short">The short version</h2>
+        <p>Desk has no accounts, no passwords and no analytics. Your keys are made and kept on your iPhone. The only things our server ever learns about you are what it needs to send you a push notification you asked for, and the public wallet address you are looking at. Signing out deletes what the server holds for your phone.</p>
+
+        <h2 id="phone">What stays on your iPhone</h2>
+        <ul>
+          <li><strong>Your passkey.</strong> Created by iOS and kept in your iCloud Keychain. Apple syncs it between your devices; we never see it.</li>
+          <li><strong>Your trading key.</strong> Derived from the passkey on the phone, sealed in the iOS keychain, unlocked with Face ID. It is never sent anywhere and never leaves the device.</li>
+          <li><strong>Your settings and history.</strong> Watchlist, tracked wallets and the names you give them, copy rules and the copy log, positions you have closed, your display currency, and the spot tokens you bought through Desk. Stored in the app's own storage on the phone.</li>
+        </ul>
+
+        <h2 id="server">What our server holds, and for how long</h2>
+        <p>The server at <code>trydesk.trade</code> holds nothing about you until you turn on alerts, follow a trader, track a wallet, or switch on away copying. When you do, the phone sends:</p>
+        <ul>
+          <li>A random install secret the app generated, which is how the phone proves a later request is its own. It is not derived from your wallet or your device.</li>
+          <li>The Apple push token for this install, so we can send the notification.</li>
+          <li>The trader addresses you follow and the names you gave them, the wallet addresses you track with their names and minimums, the market symbols on your watchlist, and whether price alerts are on.</li>
+        </ul>
+        <p>This is stored for sixty days from the last time the app refreshed it, in a Redis database hosted by Upstash through Vercel, and is deleted when you sign out or turn everything off. It is never sold, shared or used for anything but sending the pushes you asked for.</p>
+        <p>Every other request the app makes carries at most a public wallet address: yours, when it asks for your balances or history, or someone else's when you open their profile. Addresses on a public blockchain are public by design.</p>
+        <p>If you joined the waitlist on this site, we hold that email address until the invite has gone out, and delete it on request.</p>
+        <p>Our hosts, Vercel and Railway, keep ordinary request logs, including IP addresses, for a short time. We use the IP address only for hourly rate limits and never to identify anyone.</p>
+
+        <h2 id="third">Who else receives something</h2>
+        <p>Desk reads from and writes to services it does not run. Each receives only what the request needs:</p>
+        <ul>
+          <li><strong>Perpl</strong>, the exchange on Monad, receives the orders you sign and your wallet address. Trades settle on the Monad blockchain, where they are public and permanent.</li>
+          <li><strong>Monad RPC nodes</strong> receive your address to read balances and positions, and your signed transactions to send them.</li>
+          <li><strong>OKX, 0x and Relay</strong> receive token addresses, and your wallet address when quoting a swap or reading what you hold.</li>
+          <li><strong>Etherscan and Envio HyperSync</strong> receive a wallet address to read its history.</li>
+          <li><strong>Nad Name Service, nad.fun, ENS, Neynar (Farcaster) and Bonfida (Solana names)</strong> receive wallet addresses to look up public names and pictures.</li>
+          <li><strong>CoinGecko and OKX image servers</strong> serve token logos; like any image, they see your IP address.</li>
+          <li><strong>Apple</strong> receives push notifications addressed to your device token.</li>
+          <li><strong>Anthropic</strong> receives a public trader's aggregate figures to write a one-paragraph summary of their style. Never your data, and never an address.</li>
+        </ul>
+        <p>The full list, with what each service is used for, is kept in the <a href="https://github.com/frankolien/desk/blob/main/docs/third-parties.md" target="_blank" rel="noreferrer">open repository</a>.</p>
+
+        <h2 id="not">What we do not do</h2>
+        <ul>
+          <li>No analytics, advertising or crash-reporting SDKs. There is no tracking identifier in the app.</li>
+          <li>No account, email or phone number is needed to use Desk.</li>
+          <li>We do not sell data and we do not share it beyond the services above.</li>
+          <li>Desk is not for anyone under 18.</li>
+        </ul>
+
+        <h2 id="rights">Your choices</h2>
+        <ul>
+          <li><strong>Sign out</strong> in the app: the server forgets your push token, install secret, followed traders, tracked wallets and watchlist, and the app forgets everything it stored on the phone.</li>
+          <li><strong>Turn off alerts, tracking or away copying</strong> and the matching data is removed from the server on the next sync.</li>
+          <li><strong>Ask us</strong> to delete a waitlist email or anything else, through the contact on the <a href="/support">support page</a>.</li>
+        </ul>
+
+        <h2 id="changes">Changes</h2>
+        <p>If this policy changes, the new version appears here with a new effective date. The repository history shows exactly what changed.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="site-block page-foot" data-tone="night" aria-label="Footer">
+    <div class="site-wrap">
+      <footer class="site-cta-foot">
+        <p class="site-cta-copy">Copyright &copy; 2026 Desk.</p>
+        <p class="site-cta-fine">Perpetual futures are leveraged instruments. You can lose everything you put in.</p>
+        <nav class="site-footer-links" aria-label="Footer">
+          <a href="/docs">API</a>
+          <a href="/openapi.json">OpenAPI</a>
+          <a href="/status">Status</a>
+          <a href="/security">Security</a>
+          <a href="/privacy">Privacy</a>
+          <a href="/support">Support</a>
+          <a href="https://github.com/frankolien/desk" target="_blank" rel="noreferrer">GitHub</a>
+          <a href="https://perpl.trade" target="_blank" rel="noreferrer">Perpl</a>
+          <a href="https://monad.xyz" target="_blank" rel="noreferrer">Monad</a>
+        </nav>
+      </footer>
+    </div>
+  </section>
+
+</main>
+
+</div>
+</body>
+</html>
