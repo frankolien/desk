@@ -59,6 +59,8 @@ struct OpenPositionCard: View {
                          + figures.unrealisedPnL.display() + " AUSD")
                         .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
                         .foregroundStyle(tint.color)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Text(HomeScreen.percent(figures.returnOnMarginMicros) + " margin")
                         .font(.system(size: 11, weight: .bold, design: .rounded).monospacedDigit())
                         .foregroundStyle(tint.color)

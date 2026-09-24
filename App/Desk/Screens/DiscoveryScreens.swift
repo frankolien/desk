@@ -576,7 +576,7 @@ struct MarketSearchScreen: View {
 
 // MARK: - Spot discovery
 
-private struct TrendingSpotToken: Identifiable, Hashable, Codable, Sendable {
+struct TrendingSpotToken: Identifiable, Hashable, Codable, Sendable {
     let id: String
     let chainIndex: String
     let chainName: String
@@ -608,7 +608,7 @@ private struct TrendingSpotToken: Identifiable, Hashable, Codable, Sendable {
 }
 
 @MainActor
-private final class TokenDiscoveryModel: ObservableObject {
+final class TokenDiscoveryModel: ObservableObject {
     private struct Response: Decodable, Sendable { let tokens: [TrendingSpotToken] }
     @Published private(set) var trending: [TrendingSpotToken] = []
     @Published private(set) var searchResults: [TrendingSpotToken] = []
@@ -688,7 +688,7 @@ private final class TokenDiscoveryModel: ObservableObject {
     }
 }
 
-private struct TrendingSpotRow: View {
+struct TrendingSpotRow: View {
     let token: TrendingSpotToken
 
     var body: some View {
@@ -756,7 +756,7 @@ extension TrendingSpotToken {
     }
 }
 
-private enum SpotWatchlistStorage {
+enum SpotWatchlistStorage {
     static func decode(_ raw: String) -> [TrendingSpotToken] {
         guard let data = raw.data(using: .utf8),
               let tokens = try? JSONDecoder().decode([TrendingSpotToken].self, from: data)

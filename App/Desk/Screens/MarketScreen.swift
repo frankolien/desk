@@ -3,6 +3,12 @@ import DeskMoney
 import DeskUI
 import SwiftUI
 
+/// The Trade tab: what the room is doing, then every market, then who is doing it.
+///
+/// Ordered by what a person opening a trading tab wants first: their own positions if
+/// they have any, the markets traders are crowding into, the full list, and the traders
+/// worth following. All of it is read from Perpl through Desk's server; nothing here is
+/// a table of invented figures.
 struct MarketScreen: View {
     private struct PositionContext: Identifiable {
         let held: PerplPosition
@@ -11,16 +17,28 @@ struct MarketScreen: View {
         var id: String { "\(held.accountID):\(held.positionID)" }
     }
 
+    private enum Shelf: String, CaseIterable, Identifiable {
+        case perps = "Perps", trending = "Trending", watchlist = "Watchlist"
+        var id: String { rawValue }
+    }
+
     let model: AppModel
     let market: MarketModel
     let session: TradingSession
+    let copier: CopyTrader
     let onOrderFilled: (Direction, String) -> Void
+    var onOpenTraders: () -> Void = {}
+    var onFund: () -> Void = {}
 
-    @State private var query = ""
-    @State private var showsMarket = false
+    @State fileprivate var showsMarket = false
+    @State private var shelf: Shelf = .perps
     @State private var selectedPosition: PerplPosition?
-    @State private var showsWithdraw = false
-    @State private var showsFunding = false
+    @State private var selectedTrader: TraderSnapshot?
+    @State private var openToken: TokenOpenRequest.Target?
+    @State private var directory = TraderDirectory()
+    @StateObject private var discovery = TokenDiscoveryModel()
+    @AppStorage("desk.watchlist") private var savedIDs = ""
+    @AppStorage("desk.spotWatchlist") private var savedSpotData = ""
 
     var body: some View {
         NavigationStack {
@@ -30,18 +48,25 @@ struct MarketScreen: View {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
                         header
-                        searchField.padding(.top, 16)
-                        collateralCard.padding(.top, 24)
-                        Divider().overlay(Color.white.opacity(0.10)).padding(.top, 30)
-                        positions.padding(.top, 16)
-                        Divider().overlay(Color.white.opacity(0.10)).padding(.top, 26)
-                        markets.padding(.top, 18)
+                        if !Self.tradersOnly {
+                            if !positionContexts.isEmpty { positions.padding(.top, 18) }
+                            hotMarkets.padding(.top, 26)
+                            explore.padding(.top, 30)
+                        }
+                        liveTrades.padding(.top, 34)
+                        topTraders.padding(.top, 34)
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
                     .padding(.bottom, 116)
                 }
-                .refreshable { await market.refreshNow() }
+                .refreshable {
+                    async let markets: Void = market.refreshNow()
+                    async let top: Void = directory.refreshTop()
+                    async let crowd: Void = directory.refreshCrowd()
+                    async let spot: Void = discovery.refresh()
+                    _ = await (markets, top, crowd, spot)
+                }
             }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showsMarket) {
@@ -53,12 +78,24 @@ struct MarketScreen: View {
                     })
                     .toolbar(.hidden, for: .tabBar)
             }
+            .navigationDestination(item: $selectedTrader) { trader in
+                TraderProfileScreen(initial: trader, directory: directory, copier: copier) { position in
+                    selectedTrader = nil
+                    open(symbol: position.market)
+                }
+                .toolbar(.hidden, for: .tabBar)
+            }
+            .navigationDestination(item: $openToken) { target in
+                SpotTokenPage(target: target, model: model)
+                    .toolbar(.hidden, for: .tabBar)
+            }
+            .task { await directory.run() }
+            .task { await discovery.run() }
             .task { await openRequestedMarket() }
             .onChange(of: MarketOpenRequest.shared.pending) { _, symbol in if symbol != nil { Task { await openRequestedMarket() } } }
             #if DEBUG
             .task { if ProcessInfo.processInfo.arguments.contains("-price-demo") { MarketOpenRequest.shared.open("ETH") } }
-            .task { if ProcessInfo.processInfo.arguments.contains("-open-withdraw") { showsWithdraw = true } }
-            #if DEBUG
+            .task { if ProcessInfo.processInfo.arguments.contains("-crowd-demo") { directory.seedCrowdForReview() } }
             .task {
                 guard ProcessInfo.processInfo.arguments.contains("-open-ticket") else { return }
                 while market.allMarkets.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
@@ -68,11 +105,6 @@ struct MarketScreen: View {
                 showsMarket = true
             }
             #endif
-            #endif
-            .sheet(isPresented: $showsWithdraw) {
-                WithdrawSheet(model: model) { showsWithdraw = false }
-                    .presentationDetents([.large])
-            }
             // `item:` rather than `isPresented:`. With a boolean, SwiftUI can evaluate
             // this closure before the sibling `selectedPosition` write has landed, and the
             // sheet then presents with no content at all — a blank card, which is what
@@ -80,73 +112,52 @@ struct MarketScreen: View {
             .sheet(item: $selectedPosition) { held in
                 PositionScreen(position: held, market: market, session: session, model: model)
             }
-            .sheet(isPresented: $showsFunding) { AddFundsSheet(model: model) }
         }
     }
 
-    /// A title and nothing else.
-    ///
-    /// There was a search button here, directly above the search field. A second entry
-    /// point to a control already on screen is furniture — it costs a tap target, it
-    /// implies a second behaviour that does not exist, and its absence is not missed.
+    /// `-trade-traders` shows the lower sections first, so they can be captured without a scroll.
+    private static var tradersOnly: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-trade-traders")
+        #else
+        false
+        #endif
+    }
+
+    // MARK: Header
+
+    /// The title, and the one figure a trader checks before every order.
     private var header: some View {
-        Text("Perpetuals")
-            .font(.system(size: 17, weight: .bold, design: .rounded))
-            .foregroundStyle(DeskColor.nightText.color)
-            .frame(height: 42)
-    }
-
-    private var searchField: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(DeskColor.nightMuted.color)
-            TextField("Search", text: $query)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+        HStack {
+            Text("Trade")
+                .font(.system(size: 30, weight: .heavy, design: .rounded))
                 .foregroundStyle(DeskColor.nightText.color)
-        }
-        .font(.system(size: 15, weight: .medium, design: .rounded))
-        .padding(.horizontal, 15)
-        .frame(height: 44)
-        .perpGlass(interactive: true, in: Capsule())
-    }
-
-    private var collateralCard: some View {
-        HStack(spacing: 14) {
-            TokenLogo(asset: .ausd, size: 38)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Available")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-                Text("\(model.collateral.value?.display() ?? "—") AUSD")
-                    .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(DeskColor.nightText.color)
-            }
-
             Spacer()
-
-            Button { showsWithdraw = true } label: {
-                Image(systemName: "minus")
-                    .font(.system(size: 15, weight: .bold))
-                    .frame(width: 38, height: 38)
+            Button(action: onFund) {
+                HStack(spacing: 7) {
+                    TokenLogo(asset: .ausd, size: 20)
+                    Text(model.hasTradingAccount
+                         ? "\(model.collateral.value?.display(fractionDigits: 0) ?? Unavailable.text) AUSD"
+                         : "Open desk")
+                        .font(.system(size: 13, weight: .bold, design: .rounded).monospacedDigit())
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+                .foregroundStyle(DeskColor.nightText.color)
+                .padding(.leading, 8)
+                .padding(.trailing, 12)
+                .frame(height: 38)
+                .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-            .perpGlass(interactive: true, in: Circle())
-
-            Button { showsFunding = true } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 17, weight: .bold))
-                    .frame(width: 38, height: 38)
-            }
-            .buttonStyle(.plain)
-            .perpGlass(interactive: true, in: Circle())
+            .perpGlass(interactive: true, in: Capsule())
+            .accessibilityLabel("Available to trade")
         }
-        .foregroundStyle(DeskColor.nightText.color)
-        .padding(.horizontal, 16)
-        .frame(height: 70)
-        .perpGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .frame(height: 44)
     }
+
+    // MARK: Positions
 
     /// Derived at the point of display so that the header total, the PnL and the
     /// liquidation distance all descend from the one mark current when the screen drew.
@@ -161,117 +172,493 @@ struct MarketScreen: View {
         }
     }
 
-    private var totalPositionPnL: Money? {
-        let contexts = positionContexts
-        guard !contexts.isEmpty else { return nil }
-        return contexts.reduce(.zero) { $0 + $1.figures.unrealisedPnL }
+    private var totalPositionPnL: Money {
+        positionContexts.reduce(.zero) { $0 + $1.figures.unrealisedPnL }
     }
 
     private var positions: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Open Positions")
-                .font(.system(size: 17, weight: .bold, design: .rounded))
-                .foregroundStyle(DeskColor.nightMuted.color)
-
-            // The header total is unrealised PnL, not notional. Notional is the number
-            // that looks impressive and answers nothing; this is the one a person came
-            // to see.
-            Text(DisplayCurrency.shared.format(totalPositionPnL ?? .zero, signed: true))
-                .font(.system(size: 28, weight: .bold, design: .rounded).monospacedDigit())
-                .foregroundStyle((totalPositionPnL.map { !$0.isNegative && !$0.isZero ? DeskColor.rise : DeskColor.fall }
-                                  ?? DeskColor.nightText).color)
-                .contentTransition(.numericText())
-                .animation(.snappy(duration: 0.25), value: totalPositionPnL?.raw)
-                .padding(.top, 3)
-
-            if !positionContexts.isEmpty {
-                LazyVStack(spacing: 12) {
-                    ForEach(positionContexts) { position in
-                        OpenPositionCard(
-                            figures: position.figures,
-                            symbol: position.market.symbol,
-                            isStale: market.freshness.freezesDigits) {
-                                market.select(position.market)
-                                selectedPosition = position.held
-                                Task { await session.selectMarket(position.market) }
-                            }
-                    }
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                sectionTitle("Your positions")
+                Spacer()
+                Text(DisplayCurrency.shared.format(totalPositionPnL, signed: true))
+                    .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle((totalPositionPnL.isNegative ? DeskColor.fall : DeskColor.rise).color)
+                    .contentTransition(.numericText())
+            }
+            LazyVStack(spacing: 10) {
+                ForEach(positionContexts) { position in
+                    OpenPositionCard(
+                        figures: position.figures,
+                        symbol: position.market.symbol,
+                        isStale: market.freshness.freezesDigits) {
+                            market.select(position.market)
+                            selectedPosition = position.held
+                            Task { await session.selectMarket(position.market) }
+                        }
                 }
-                .padding(.top, 16)
-            } else {
-                VStack(spacing: 10) {
-                    Image(systemName: "infinity")
-                        .font(.system(size: 42, weight: .semibold))
-                        .foregroundStyle(DeskColor.nightMuted.color)
-                    Text("No Open Positions")
-                        .font(.system(size: 21, weight: .bold, design: .rounded))
-                        .foregroundStyle(DeskColor.nightText.color)
-                    Text("Choose a market below to open one")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundStyle(DeskColor.nightMuted.color)
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 190)
             }
         }
     }
 
-    private var markets: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("MARKETS")
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .tracking(0.9)
-                .foregroundStyle(DeskColor.nightMuted.color)
+    // MARK: Hot markets
 
-            let visible = market.allMarkets.filter { item in
-                query.isEmpty || item.symbol.localizedCaseInsensitiveContains(query)
-            }
-            if !visible.isEmpty {
-                ForEach(visible, id: \.id) { item in
-                Button {
-                    market.select(item)
-                    Task {
-                        await session.selectMarket(item)
-                        showsMarket = true
-                    }
-                } label: {
-                    HStack(spacing: 12) {
-                        MarketTokenLogo(symbol: item.symbol, size: 42)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.symbol)
-                                .font(.system(size: 18, weight: .bold, design: .rounded))
-                                .foregroundStyle(DeskColor.nightText.color)
-                            Text("MAX \(item.config.maxLeverage)×")
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
-                                .foregroundStyle(DeskColor.nightMuted.color)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .overlay(Capsule().stroke(Color.white.opacity(0.13), lineWidth: 0.7))
-                        }
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 4) {
-                            let price = market.markText(for: item)
-                            Text(price == "—" ? "—" : "$" + price)
-                                .font(.system(size: 18, weight: .bold, design: .rounded).monospacedDigit())
-                                .foregroundStyle(DeskColor.nightText.color)
-                            let change = market.changePercent(for: item)
-                            Text(change.map { String(format: "%+.2f%%", $0) } ?? "—")
-                                .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
-                                .foregroundStyle((change ?? 0) >= 0 ? DeskColor.rise.color : DeskColor.fall.color)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(.vertical, 4)
-                }
-            } else {
-                Text("No supported market found")
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
+    /// Markets ranked by the money traders have open in them, with the lean of the crowd.
+    private var hotCrowd: [MarketCrowd] {
+        directory.crowd
+            .filter { crowd in market.allMarkets.contains { $0.symbol == crowd.market } }
+            .sorted { $0.total > $1.total }
+            .prefix(6)
+            .map { $0 }
+    }
+
+    private var hotMarkets: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                sectionTitle("Hot Markets")
+                Text("Based on trader activity")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
-                    .frame(maxWidth: .infinity, minHeight: 80)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    if hotCrowd.isEmpty {
+                        ForEach(0..<2, id: \.self) { _ in hotPlaceholder }
+                    } else {
+                        ForEach(hotCrowd) { crowd in
+                            if let listed = market.allMarkets.first(where: { $0.symbol == crowd.market }) {
+                                Button { open(listed) } label: { HotMarketCard(crowd: crowd, market: listed, model: market) }
+                                    .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .padding(.horizontal, -16)
+        }
+    }
+
+    private var hotPlaceholder: some View {
+        RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .fill(Color.white.opacity(0.05))
+            .frame(width: 292, height: 126)
+    }
+
+    // MARK: Explore
+
+    private var savedMarketIDs: Set<UInt32> { Set(savedIDs.split(separator: ",").compactMap { UInt32($0) }) }
+
+    private var explore: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionTitle("Explore Markets")
+            HStack(spacing: 8) {
+                ForEach(Shelf.allCases) { item in
+                    Button {
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        withAnimation(.snappy(duration: 0.2)) { shelf = item }
+                    } label: {
+                        Text(item.rawValue)
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(shelf == item ? DeskColor.night.color : DeskColor.nightText.color)
+                            .padding(.horizontal, 16)
+                            .frame(height: 36)
+                            .background(shelf == item ? DeskColor.nightText.color : Color.white.opacity(0.08), in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            switch shelf {
+            case .perps: perpRows(market.allMarkets)
+            case .trending: trendingRows
+            case .watchlist: watchlistRows
             }
         }
+    }
+
+    @ViewBuilder
+    private func perpRows(_ markets: [Market]) -> some View {
+        if markets.isEmpty {
+            placeholderRows(3)
+        } else {
+            VStack(spacing: 0) {
+                ForEach(markets, id: \.id) { item in
+                    Button { open(item) } label: { PerpMarketRow(market: item, model: market) }
+                        .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var trendingRows: some View {
+        if discovery.trending.isEmpty {
+            placeholderRows(3)
+        } else {
+            VStack(spacing: 8) {
+                ForEach(discovery.trending.prefix(8)) { token in
+                    Button { openToken = .init(chainIndex: token.chainIndex, contract: token.contract, symbol: token.symbol) } label: {
+                        TrendingSpotRow(token: token)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var watchlistRows: some View {
+        let perps = market.allMarkets.filter { savedMarketIDs.contains($0.id) }
+        let spot = SpotWatchlistStorage.decode(savedSpotData)
+        if perps.isEmpty && spot.isEmpty {
+            Text("Star a market to keep it here.")
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundStyle(DeskColor.nightMuted.color)
+                .frame(maxWidth: .infinity, minHeight: 88)
+        } else {
+            VStack(spacing: 8) {
+                perpRows(perps)
+                ForEach(spot) { token in
+                    Button { openToken = .init(chainIndex: token.chainIndex, contract: token.contract, symbol: token.symbol) } label: {
+                        TrendingSpotRow(token: token)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func placeholderRows(_ count: Int) -> some View {
+        VStack(spacing: 8) {
+            ForEach(0..<count, id: \.self) { _ in
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+                    .frame(height: 64)
+            }
+        }
+    }
+
+    // MARK: Traders
+
+    /// Each top trader's largest open position, in leaderboard order.
+    private var liveRows: [(trader: TraderSnapshot, position: TraderPosition)] {
+        directory.top.compactMap { trader in
+            trader.positions.max { (Double($0.value) ?? 0) < (Double($1.value) ?? 0) }.map { (trader, $0) }
+        }
+        .prefix(5).map { $0 }
+    }
+
+    private var liveTrades: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            sectionLink("Live Trades", action: onOpenTraders)
+            Text("Top traders' open positions")
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(DeskColor.nightMuted.color)
+            if liveRows.isEmpty {
+                placeholderRows(3).padding(.top, 10)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(liveRows.enumerated()), id: \.element.trader.id) { index, row in
+                        Button { selectedTrader = row.trader } label: {
+                            LiveTradeRow(trader: row.trader, position: row.position,
+                                         name: directory.name(for: row.trader.address),
+                                         record: directory.records[row.trader.id],
+                                         isLast: index == liveRows.count - 1)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 6)
+            }
+        }
+    }
+
+    private var topTraders: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            sectionLink("Top Traders", action: onOpenTraders)
+            if directory.top.isEmpty {
+                placeholderRows(3).padding(.top, 10)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(directory.top.prefix(5).enumerated()), id: \.element.id) { index, trader in
+                        Button { selectedTrader = trader } label: {
+                            TopTraderRow(trader: trader, rank: index + 1,
+                                         name: directory.name(for: trader.address),
+                                         record: directory.records[trader.id],
+                                         isFollowed: directory.isFollowing(trader.address),
+                                         isLast: index == min(directory.top.count, 5) - 1)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 6)
+            }
+        }
+    }
+
+    // MARK: Pieces
+
+    private func sectionTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 22, weight: .bold, design: .rounded))
+            .foregroundStyle(DeskColor.nightText.color)
+    }
+
+    private func sectionLink(_ text: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                sectionTitle(text)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func open(_ item: Market) {
+        market.select(item)
+        Task {
+            await session.selectMarket(item)
+            showsMarket = true
+        }
+    }
+
+    private func open(symbol: String) {
+        guard let found = market.allMarkets.first(where: { $0.symbol.caseInsensitiveCompare(symbol) == .orderedSame }) else { return }
+        open(found)
+    }
+}
+
+/// One market the crowd is in: what it costs, how many are in, which way they lean.
+private struct HotMarketCard: View {
+    let crowd: MarketCrowd
+    let market: Market
+    let model: MarketModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                MarketTokenLogo(symbol: market.symbol, size: 40)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(market.symbol)
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                    Text("\(TraderFormat.compact(crowd.total)) open")
+                        .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+                Spacer(minLength: 8)
+                if let change = model.changePercent(for: market) {
+                    Text(String(format: "%+.2f%%", change))
+                        .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(change >= 0 ? DeskColor.rise.color : DeskColor.fall.color)
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                        .background((change >= 0 ? DeskColor.rise : DeskColor.fall).color.opacity(0.14), in: Capsule())
+                }
+            }
+            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5).padding(.vertical, 14)
+            HStack(spacing: 8) {
+                Circle().fill(DeskColor.rise.color).frame(width: 6, height: 6)
+                Text("**\(crowd.traders)** \(crowd.traders == 1 ? "trader" : "traders")")
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                if let share = crowd.longShare {
+                    let percent = Int((max(share, 1 - share) * 100).rounded())
+                    Text(percent == 50 ? "· split evenly" : "· \(percent)% \(share >= 0.5 ? "long" : "short")")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+                Spacer(minLength: 4)
+                if let biggest = crowd.biggest?.address {
+                    TraderAvatar(address: biggest, size: 26)
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 292)
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.white.opacity(0.07), lineWidth: 0.5))
+        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+
+/// A perp in the list: leverage and the day's volume on the left, price and change on the right.
+private struct PerpMarketRow: View {
+    let market: Market
+    let model: MarketModel
+
+    private var volume: String {
+        let value = Double(market.state.dailyVolumeRaw) / 1_000_000
+        return value > 0 ? "\(TraderFormat.compact(value)) Vol" : "—"
+    }
+
+    var body: some View {
+        HStack(spacing: 13) {
+            MarketTokenLogo(symbol: market.symbol, size: 42)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 7) {
+                    Text(market.symbol)
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                    Text("\(market.config.maxLeverage)x")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                Text(volume)
+                    .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
+                    .foregroundStyle(DeskColor.nightMuted.color)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 4) {
+                let price = model.markText(for: market)
+                Text(price == "—" ? "—" : "$" + price)
+                    .font(.system(size: 17, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .contentTransition(.numericText())
+                let change = model.changePercent(for: market)
+                Text(change.map { String(format: "%+.2f%%", $0) } ?? "—")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle((change ?? 0) >= 0 ? DeskColor.rise.color : DeskColor.fall.color)
+            }
+        }
+        .frame(height: 68)
+        .contentShape(Rectangle())
+    }
+}
+
+/// A top trader's largest position, with their record when history has one.
+private struct LiveTradeRow: View {
+    let trader: TraderSnapshot
+    let position: TraderPosition
+    let name: String
+    let record: TraderRecord?
+    let isLast: Bool
+
+    var body: some View {
+        HStack(spacing: 13) {
+            TraderAvatar(address: trader.address, size: 42)
+                .overlay(alignment: .bottomTrailing) {
+                    MarketTokenLogo(symbol: position.market, size: 18)
+                        .overlay(Circle().stroke(Color.black, lineWidth: 2))
+                        .offset(x: 3, y: 3)
+                }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(position.market)
+                        .foregroundStyle(DeskColor.nightText.color.opacity(0.85))
+                    Text("\(TraderFormat.leverage(position.leverage)) \(position.isLong ? "Long" : "Short") · \(TraderFormat.compact(Double(position.value)))")
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+                .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
+                .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 3) {
+                if let rate = record?.winRate {
+                    Text("\(Int((rate * 100).rounded()))%")
+                        .font(.system(size: 17, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(rate >= 0.6 ? DeskColor.rise.color : DeskColor.nightText.color)
+                    Text("Win rate")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                } else {
+                    Text(TraderFormat.compact(Double(position.pnl), signed: true))
+                        .font(.system(size: 17, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle((position.isProfit ? DeskColor.rise : DeskColor.fall).color)
+                    Text("Open PnL")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+            }
+        }
+        .padding(.vertical, 11)
+        .overlay(alignment: .bottom) {
+            if !isLast { Rectangle().fill(Color.white.opacity(0.07)).frame(height: 0.5).padding(.leading, 55) }
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+private struct TopTraderRow: View {
+    let trader: TraderSnapshot
+    let rank: Int
+    let name: String
+    let record: TraderRecord?
+    let isFollowed: Bool
+    let isLast: Bool
+
+    private var detail: String {
+        var parts: [String] = []
+        if let score = record?.score { parts.append("Score \(score)") }
+        let count = trader.positions.count
+        parts.append("\(count) \(count == 1 ? "position" : "positions")")
+        return parts.joined(separator: " · ")
+    }
+
+    /// Open PnL against what the trader has at stake.
+    private var returnText: String? {
+        guard let pnl = trader.pnl.flatMap(Double.init), let portfolio = trader.portfolio, portfolio - pnl > 0 else { return nil }
+        return String(format: "%+.0f%%", pnl / (portfolio - pnl) * 100)
+    }
+
+    var body: some View {
+        HStack(spacing: 13) {
+            TraderAvatar(address: trader.address, size: 42)
+                .overlay(alignment: .bottomTrailing) {
+                    if rank <= 3 {
+                        Text("\(rank)")
+                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                            .foregroundStyle(DeskColor.night.color)
+                            .frame(width: 17, height: 17)
+                            .background(DeskColor.action.color, in: Circle())
+                            .overlay(Circle().stroke(Color.black, lineWidth: 2))
+                            .offset(x: 3, y: 3)
+                    }
+                }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(name)
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .lineLimit(1)
+                    if isFollowed {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                    }
+                }
+                Text(detail)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(TraderFormat.compact(trader.pnl.flatMap(Double.init), signed: true))
+                    .font(.system(size: 17, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle((trader.isProfit ? DeskColor.rise : DeskColor.fall).color)
+                if let returnText {
+                    Text(returnText)
+                        .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+            }
+        }
+        .padding(.vertical, 11)
+        .overlay(alignment: .bottom) {
+            if !isLast { Rectangle().fill(Color.white.opacity(0.07)).frame(height: 0.5).padding(.leading, 55) }
+        }
+        .contentShape(Rectangle())
     }
 }
 

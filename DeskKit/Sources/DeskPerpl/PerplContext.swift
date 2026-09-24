@@ -219,6 +219,8 @@ public struct MarketState: Decodable, Sendable {
     public let askRaw: Int64
     public let previousRaw: Int64
     public let openInterestRaw: Int64
+    /// The day's traded notional in collateral units. Absent on older payloads, so zero.
+    public let dailyVolumeRaw: Int64
 
     enum CodingKeys: String, CodingKey {
         case observedAt = "at"
@@ -230,6 +232,7 @@ public struct MarketState: Decodable, Sendable {
         case askRaw = "ask"
         case previousRaw = "prv"
         case openInterestRaw = "oi"
+        case dailyVolumeRaw = "dva"
     }
 
     // Perpl sends a scaled integer as a number while it is small and as a string once it
@@ -246,6 +249,7 @@ public struct MarketState: Decodable, Sendable {
         askRaw = try box.decodeWireInt(.askRaw)
         previousRaw = try box.decodeWireInt(.previousRaw)
         openInterestRaw = try box.decodeWireInt(.openInterestRaw)
+        dailyVolumeRaw = (try? box.decodeWireInt(.dailyVolumeRaw)) ?? 0
     }
 }
 

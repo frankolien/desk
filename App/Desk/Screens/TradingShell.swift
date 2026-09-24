@@ -82,10 +82,12 @@ struct TradingShell: View {
                     onOrderFilled: orderFilled)
             }
 
-            Tab("Perps", systemImage: "infinity", value: .perps) {
+            Tab("Trade", systemImage: "arrow.left.arrow.right", value: .perps) {
                 MarketScreen(
-                    model: model, market: market, session: session,
-                    onOrderFilled: orderFilled)
+                    model: model, market: market, session: session, copier: copier,
+                    onOrderFilled: orderFilled,
+                    onOpenTraders: { tab = .signals },
+                    onFund: { if model.hasTradingAccount { showsFunding = true } else { showsSetup = true } })
             }
 
             Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
