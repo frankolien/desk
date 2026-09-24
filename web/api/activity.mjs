@@ -5,6 +5,7 @@
 /// rather than "Sent to 0x1964…".
 import { redisStore } from "./_store.mjs";
 import { walletResource } from "./_wallet-resource.mjs";
+import { postMessage, readRoom } from "./_chat.mjs";
 import { HEARTBEAT_KEY, QUOTE_SYMBOLS, ledgerKey, TRACKED_KEY, URGENT_KEY } from "./_ledger.mjs";
 
 const ETHERSCAN = "https://api.etherscan.io/v2/api";
@@ -131,6 +132,18 @@ async function list(fetchImpl, chainId, action, address, key) {
 export function createHandler(fetchImpl = fetch, key = () => process.env.ETHERSCAN_API_KEY, { store = redisStore(), wallet = walletResource } = {}) {
   return async function handler(req, res) {
     res.setHeader("Cache-Control", "private, no-store");
+    // The market rooms live here too: reading one is a GET, posting to one is the POST.
+    if (req.query.view === "chat") {
+      if (!store) return res.status(503).json({ error: "Live chat is not configured." });
+      try {
+        const outcome = req.method === "POST"
+          ? await postMessage(store, req.body ?? {})
+          : await readRoom(store, { market: req.query.market, install: req.query.install });
+        return res.status(outcome.status).json(outcome.body);
+      } catch {
+        return res.status(502).json({ error: "The room could not be reached right now." });
+      }
+    }
     if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
     const address = String(req.query.address || "");
 

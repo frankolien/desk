@@ -680,6 +680,8 @@ struct PerpDetailScreen: View {
     @State private var holders = MarketHoldersModel()
     @State private var directory = TraderDirectory()
     @State private var openHolder: MarketHolder?
+    @State private var chat = MarketChatModel()
+    @State private var showsChat = false
     @AppStorage("desk.watchlist") private var savedIDs = ""
 
     var body: some View {
@@ -692,7 +694,8 @@ struct PerpDetailScreen: View {
                     priceRow.padding(.top, 26)
                     chart.padding(.top, 20)
                     ranges.padding(.top, 16)
-                    tabs.padding(.top, 24)
+                    MarketChatPreview(chat: chat) { showsChat = true }.padding(.top, 26)
+                    tabs.padding(.top, 26)
                     switch tab {
                     case .holders:
                         MarketHoldersList(model: holders, directory: directory) { openHolder = $0 }
@@ -715,13 +718,20 @@ struct PerpDetailScreen: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task(id: market.symbol) { await holders.run(symbol: market.symbol) }
+        .task(id: market.symbol) { await chat.run(symbol: market.symbol) }
         .task { await directory.refreshFollowing() }
         .task {
             #if DEBUG
             // The ticket sits behind a floating bar that UI automation cannot hit, so it
             // gets the same way in that `-stage` gives every other screen.
             if ProcessInfo.processInfo.arguments.contains("-open-ticket") { ticket = .up }
+            if ProcessInfo.processInfo.arguments.contains("-open-chat") { showsChat = true }
             #endif
+        }
+        .sheet(isPresented: $showsChat) {
+            MarketChatSheet(chat: chat, market: market, holders: holders, model: model) { showsChat = false }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .fullScreenCover(isPresented: $showsSetup) {
             FundScreen(model: model) { showsSetup = false }
