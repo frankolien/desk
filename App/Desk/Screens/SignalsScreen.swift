@@ -11,7 +11,7 @@ struct SignalsScreen: View {
     let onOrderFilled: (Direction, String) -> Void
 
     private enum Section: String, CaseIterable, Identifiable {
-        case traders = "Following", top = "Top traders", market = "Market"
+        case traders = "Following", top = "Top traders", watchlist = "Watchlist", market = "Market"
         var id: String { rawValue }
     }
 
@@ -22,6 +22,7 @@ struct SignalsScreen: View {
     }
 
     @State private var section: Section = .traders
+    @State private var showsMarket = false
     @State private var directory = TraderDirectory()
     @State private var selectedTrader: TraderSnapshot?
     @State private var selectedTrackedWallet: TrackedWallet?
@@ -108,6 +109,21 @@ struct SignalsScreen: View {
                                         onEditTracked: { trackedEditing = $0 }, onAdd: { showsTrackNew = true })
                                 .padding(.top, 26)
                                 .padding(.bottom, 130)
+                        case .watchlist:
+                            WatchlistSection(
+                                market: market,
+                                onOpenMarket: { entry in
+                                    market.select(entry)
+                                    Task {
+                                        await session.selectMarket(entry)
+                                        showsMarket = true
+                                    }
+                                },
+                                onOpenSpot: { token in
+                                    openToken = .init(chainIndex: token.chainIndex, contract: token.contract, symbol: token.symbol)
+                                })
+                                .padding(.top, 20)
+                                .padding(.bottom, 130)
                         case .market:
                             marketReadings
                         }
@@ -130,6 +146,7 @@ struct SignalsScreen: View {
                     TrackedWallets.shared.track("0x52ac212e7187a799a7382c7a768cb35b72a3e20a", name: "moncat degen")
                 }
                 if arguments.contains("-smart-money") { section = .top; showsSmartMoney = true }
+                if arguments.contains("watchlist") { section = .watchlist }
             }
             #endif
             .sheet(item: $trackedEditing) { wallet in
@@ -140,6 +157,15 @@ struct SignalsScreen: View {
             }
             .navigationDestination(item: $selectedTrader) { trader in
                 TraderProfileScreen(initial: trader, directory: directory, copier: copier) { copy($0) }
+                    .toolbar(.hidden, for: .tabBar)
+            }
+            .navigationDestination(isPresented: $showsMarket) {
+                PerpDetailScreen(
+                    model: model, market: market, session: session,
+                    onOrderFilled: { side, symbol in
+                        showsMarket = false
+                        onOrderFilled(side, symbol)
+                    })
                     .toolbar(.hidden, for: .tabBar)
             }
             .navigationDestination(item: $openToken) { target in

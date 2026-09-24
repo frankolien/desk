@@ -23,7 +23,7 @@ struct TradingShell: View {
     @State private var fillConfirmation: String?
 
     enum Destination: Hashable {
-        case home, watchlist, signals, perps, search
+        case home, signals, perps, search
     }
 
     init(model: AppModel) {
@@ -44,17 +44,36 @@ struct TradingShell: View {
     private static func startingTab() -> Destination {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("signals") || arguments.contains("signal-detail") { return .signals }
-        if arguments.contains("watchlist") { return .watchlist }
+        if arguments.contains("signals") || arguments.contains("signal-detail") || arguments.contains("watchlist") { return .signals }
         if arguments.contains("search") { return .search }
-        if arguments.contains("market") || arguments.contains("empty") { return .perps }
+        if arguments.contains("home") || arguments.contains("home-setup") { return .home }
         #endif
-        return .home
+        return .perps
     }
 
     var body: some View {
         TabView(selection: $tab) {
-            Tab("Home", systemImage: "creditcard.fill", value: .home) {
+            Tab("Trade", systemImage: "arrow.left.arrow.right", value: .perps) {
+                MarketScreen(
+                    model: model, market: market, session: session, copier: copier,
+                    onOrderFilled: orderFilled,
+                    onOpenTraders: { tab = .signals },
+                    onFund: { if model.hasTradingAccount { showsFunding = true } else { showsSetup = true } })
+            }
+
+            Tab("Search", systemImage: "magnifyingglass", value: .search) {
+                MarketSearchScreen(
+                    model: model, market: market, session: session,
+                    onOrderFilled: orderFilled)
+            }
+
+            Tab("Signals", systemImage: "antenna.radiowaves.left.and.right", value: .signals) {
+                SignalsScreen(
+                    model: model, market: market, session: session, copier: copier,
+                    onOrderFilled: orderFilled)
+            }
+
+            Tab("Profile", systemImage: "person.crop.circle.fill", value: .home) {
                 HomeScreen(
                     model: model,
                     market: market,
@@ -68,32 +87,6 @@ struct TradingShell: View {
                     onSpot: { tab = .search },
                     onSwap: { showsSwap = true },
                     onAccount: { showsAccount = true })
-            }
-
-            Tab("Watchlist", systemImage: "bookmark.fill", value: .watchlist) {
-                WatchlistScreen(
-                    model: model, market: market, session: session,
-                    onOrderFilled: orderFilled)
-            }
-
-            Tab("Signals", systemImage: "antenna.radiowaves.left.and.right", value: .signals) {
-                SignalsScreen(
-                    model: model, market: market, session: session, copier: copier,
-                    onOrderFilled: orderFilled)
-            }
-
-            Tab("Trade", systemImage: "arrow.left.arrow.right", value: .perps) {
-                MarketScreen(
-                    model: model, market: market, session: session, copier: copier,
-                    onOrderFilled: orderFilled,
-                    onOpenTraders: { tab = .signals },
-                    onFund: { if model.hasTradingAccount { showsFunding = true } else { showsSetup = true } })
-            }
-
-            Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
-                MarketSearchScreen(
-                    model: model, market: market, session: session,
-                    onOrderFilled: orderFilled)
             }
         }
         .tint(.white)

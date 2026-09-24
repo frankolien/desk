@@ -26,16 +26,15 @@ import SwiftUI
 
 // MARK: - Watchlist
 
-struct WatchlistScreen: View {
-    let model: AppModel
+/// The saved markets, perps and spot together, for the Signals tab.
+///
+/// Saved locally. A watchlist is the user's own note about markets, it never needs to
+/// leave the phone, and the list is short enough that defaults are the right home.
+struct WatchlistSection: View {
     let market: MarketModel
-    let session: TradingSession
-    let onOrderFilled: (Direction, String) -> Void
-    @State private var showsMarket = false
-    @State private var selectedSpot: TrendingSpotToken?
+    let onOpenMarket: (Market) -> Void
+    let onOpenSpot: (TrendingSpotToken) -> Void
     @State private var isEditing = false
-    /// Saved locally. A watchlist is the user's own note about markets, it never needs to
-    /// leave the phone, and the list is short enough that defaults are the right home.
     @AppStorage("desk.watchlist") private var savedIDs = ""
     @AppStorage("desk.spotWatchlist") private var savedSpotData = ""
 
@@ -73,94 +72,66 @@ struct WatchlistScreen: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                DeskBackground()
-
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                            .font(.title2)
-                            .frame(width: 44, height: 44)
-                            .perpSearchGlass(in: Circle())
-                        Spacer()
-                        Text("Watchlist").font(.title2.bold())
-                        Spacer()
-                        Button(isEditing ? "Done" : "Edit") {
-                            withAnimation(.easeInOut(duration: 0.2)) { isEditing.toggle() }
-                        }
-                            .font(.body)
-                            .frame(width: 64, height: 44)
-                            .perpSearchGlass(in: Capsule())
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(rows.isEmpty && spotRows.isEmpty
+                     ? "Nothing saved yet"
+                     : "\(rows.count + spotRows.count) saved")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                Spacer()
+                if !(rows.isEmpty && spotRows.isEmpty) {
+                    Button(isEditing ? "Done" : "Edit") {
+                        withAnimation(.easeInOut(duration: 0.2)) { isEditing.toggle() }
                     }
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(DeskColor.nightText.color)
-                    .padding(.top, 10)
+                    .frame(height: 30)
+                    .padding(.horizontal, 12)
+                    .background(Color.white.opacity(0.1), in: Capsule())
+                    .buttonStyle(.plain)
+                }
+            }
 
-                    Text(rows.isEmpty && spotRows.isEmpty
-                         ? "Markets you save from Search appear here."
-                         : "\(rows.count + spotRows.count) market\(rows.count + spotRows.count == 1 ? "" : "s") saved.")
-                        .font(DeskType.caption)
-                        .foregroundStyle(DeskColor.nightMuted.color)
-                        .padding(.top, 6)
-
-                    if rows.isEmpty && spotRows.isEmpty {
-                        empty.padding(.top, 40)
-                    } else {
-                        VStack(spacing: 10) {
-                            ForEach(spotRows) { token in
-                                ZStack(alignment: .trailing) {
-                                    Button { selectedSpot = token } label: {
-                                        SpotWatchlistCard(token: token)
-                                    }
-                                    .buttonStyle(.plain)
-                                    if isEditing {
-                                        Button { remove(token) } label: {
-                                            Image(systemName: "minus")
-                                                .font(.headline)
-                                                .frame(width: 36, height: 36)
-                                                .background(.red, in: Circle())
-                                        }
-                                        .foregroundStyle(.white)
-                                        .padding(.trailing, 14)
-                                        .transition(.scale.combined(with: .opacity))
-                                    }
-                                }
+            if rows.isEmpty && spotRows.isEmpty {
+                empty.padding(.top, 30)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(spotRows) { token in
+                        ZStack(alignment: .trailing) {
+                            Button { onOpenSpot(token) } label: {
+                                SpotWatchlistCard(token: token)
                             }
-                            ForEach(rows, id: \.id) { entry in
-                                MarketRow(
-                                    model: market,
-                                    market: entry,
-                                    isSaved: true,
-                                    onOpen: { open(entry) },
-                                    onToggle: { toggle(entry.id) })
+                            .buttonStyle(.plain)
+                            if isEditing {
+                                Button { remove(token) } label: {
+                                    Image(systemName: "minus")
+                                        .font(.headline)
+                                        .frame(width: 36, height: 36)
+                                        .background(.red, in: Circle())
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.trailing, 14)
+                                .transition(.scale.combined(with: .opacity))
                             }
                         }
-                        .padding(.top, 20)
+                    }
+                    ForEach(rows, id: \.id) { entry in
+                        MarketRow(
+                            model: market,
+                            market: entry,
+                            isSaved: true,
+                            onOpen: { onOpenMarket(entry) },
+                            onToggle: { toggle(entry.id) })
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 190)
+                .padding(.top, 14)
             }
-            .refreshable { await market.refreshNow(); await refreshSpotFigures() }
-            .task(id: spotRows.map(\.id).joined(separator: ",")) {
-                while !Task.isCancelled {
-                    await refreshSpotFigures()
-                    try? await Task.sleep(for: .seconds(30))
-                }
-            }
-            .deskSoftBottomEdge()
-            }
-            .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(isPresented: $showsMarket) {
-                PerpDetailScreen(
-                    model: model, market: market, session: session,
-                    onOrderFilled: onOrderFilled)
-                    .toolbar(.hidden, for: .tabBar)
-            }
-            .navigationDestination(item: $selectedSpot) { token in
-                SpotTokenDetailScreen(token: token, model: model)
-                    .toolbar(.hidden, for: .tabBar)
+        }
+        .task(id: spotRows.map(\.id).joined(separator: ",")) {
+            while !Task.isCancelled {
+                await refreshSpotFigures()
+                try? await Task.sleep(for: .seconds(30))
             }
         }
     }
@@ -169,16 +140,12 @@ struct WatchlistScreen: View {
     /// one action that fills it.
     private var empty: some View {
         VStack(spacing: 12) {
-            Image(systemName: "bookmark")
+            Image(systemName: "star")
                 .font(.system(size: 34, weight: .medium))
                 .foregroundStyle(DeskColor.nightMuted.color)
-            Text("Nothing saved yet")
-                .font(.system(size: 18, weight: .bold, design: .rounded))
+            Text("Star a market to keep it here")
+                .font(.system(size: 16, weight: .bold, design: .rounded))
                 .foregroundStyle(DeskColor.nightText.color)
-            Text("Open Search and tap the bookmark on any market.")
-                .font(DeskType.caption)
-                .foregroundStyle(DeskColor.nightMuted.color)
-                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 30)
@@ -195,14 +162,6 @@ struct WatchlistScreen: View {
 
     private func remove(_ token: TrendingSpotToken) {
         savedSpotData = SpotWatchlistStorage.toggling(token, in: savedSpotData)
-    }
-
-    private func open(_ entry: Market) {
-        market.select(entry)
-        Task {
-            await session.selectMarket(entry)
-            showsMarket = true
-        }
     }
 }
 
