@@ -243,21 +243,12 @@ struct HomeScreen: View {
     /// is known on chain, the address otherwise, and the record so far.
     private var identity: some View {
         HStack(alignment: .top, spacing: 14) {
-            Menu {
-                Button { editsProfile = true } label: { Label("Edit Profile", systemImage: "person.crop.circle.badge.plus") }
-                Button {
-                    withAnimation(.snappy) { hidesBalance.toggle() }
-                } label: {
-                    Label(hidesBalance ? "Show Balance" : "Hide Balance", systemImage: hidesBalance ? "eye" : "eye.slash")
-                }
-                Button { Task { await model.lock() } } label: { Label("Lock Trading Key", systemImage: "lock.shield") }
-                Button { model.copyAddress() } label: { Label("Copy Address", systemImage: "doc.on.doc") }
-            } label: {
+            Button { editsProfile = true } label: {
                 // The trader avatar, not the generated one: a Farcaster, ENS, nad or SNS
                 // picture set elsewhere shows here the way it shows on every other trader.
                 TraderAvatar(address: model.address?.checksummed ?? "", size: 58)
                     .overlay(alignment: .bottomTrailing) {
-                        Image(systemName: "ellipsis")
+                        Image(systemName: "pencil")
                             .font(.system(size: 9, weight: .heavy))
                             .foregroundStyle(DeskColor.night.color)
                             .frame(width: 18, height: 18)
@@ -267,7 +258,7 @@ struct HomeScreen: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Account options")
+            .accessibilityLabel("Edit profile")
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(ownName ?? model.addressShort)
@@ -658,12 +649,11 @@ struct HomeScreen: View {
         Percent.micros(micros, signed: signed)
     }
 
-    /// The key's state rather than a countdown. Unlocked goes through to Account; locked
-    /// goes straight to Face ID, because that is the only thing a person tapping a locked
-    /// key wants.
+    /// The key's switch. Unlocked, a tap locks it; locked, a tap goes straight to Face ID,
+    /// because that is the only thing a person tapping a locked key wants.
     private var sessionRow: some View {
         Button {
-            if model.isKeyUnlocked { onAccount() } else { Task { await model.unlock() } }
+            Task { if model.isKeyUnlocked { await model.lock() } else { _ = await model.unlock() } }
         } label: {
             HStack(spacing: 12) {
                 MonochromeSymbolMark(symbol: model.isKeyUnlocked ? "faceid" : "lock.fill", size: 40)
@@ -676,9 +666,10 @@ struct HomeScreen: View {
                         .foregroundStyle(DeskColor.nightMuted.color)
                 }
                 Spacer()
-                Text(model.isKeyUnlocked ? "Unlocked" : "Unlock")
+                Text(model.isKeyUnlocked ? "Lock" : "Unlock")
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle((model.isKeyUnlocked ? DeskColor.nightText : DeskColor.identity).color)
+                    .contentTransition(.interpolate)
             }
             .frame(height: 52)
             .contentShape(Rectangle())

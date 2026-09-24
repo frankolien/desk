@@ -110,6 +110,11 @@ struct FollowingFeed: View {
                     ForEach(0..<3, id: \.self) { SkeletonRow(widthFraction: 0.85 - Double($0) * 0.15) }
                 }
                 .padding(.top, 14)
+            } else if model.events.isEmpty {
+                Text("No recent activity yet")
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .padding(.top, 14)
             } else {
                 LazyVStack(spacing: 0) {
                     ForEach(model.events) { trade in
