@@ -152,13 +152,16 @@ struct MarketScreen: View {
         VStack(alignment: .leading, spacing: 14) {
             DeskBrandMark(size: 28)
                 .frame(height: 36, alignment: .leading)
-            HStack(alignment: .center, spacing: 12) {
+            // Top-aligned with the button as tall as the figure's row, so the button sits
+            // level with the number rather than with the middle of the two lines.
+            HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     if model.hasTradingAccount {
                         HStack(alignment: .center, spacing: 9) {
                             TokenLogo(asset: .ausd, size: 30)
                             AmountText(model.collateral.value?.display() ?? Unavailable.text, size: 38)
                         }
+                        .frame(height: 44)
                         Text("Available to trade")
                             .font(.system(size: 13, weight: .medium, design: .rounded))
                             .foregroundStyle(DeskColor.nightMuted.color)
@@ -182,6 +185,7 @@ struct MarketScreen: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .frame(height: model.hasTradingAccount ? 44 : 30)
             }
         }
     }
