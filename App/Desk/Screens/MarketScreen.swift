@@ -133,14 +133,17 @@ struct MarketScreen: View {
 
     /// The mark, then the one figure a trader checks before every order.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 28) {
             DeskBrandMark(size: 28)
                 .frame(height: 36, alignment: .leading)
             HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     if model.hasTradingAccount {
-                        AmountText(model.collateral.value.map { DisplayCurrency.shared.format($0) } ?? Unavailable.text, size: 34)
-                        Text("AUSD available to trade")
+                        HStack(alignment: .center, spacing: 9) {
+                            TokenLogo(asset: .ausd, size: 30)
+                            AmountText(model.collateral.value?.display() ?? Unavailable.text, size: 34)
+                        }
+                        Text("Available to trade")
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundStyle(DeskColor.nightMuted.color)
                     } else {
