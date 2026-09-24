@@ -29,15 +29,15 @@ struct FundScreen: View {
                 VStack(alignment: .leading, spacing: 0) {
                     topBar
                     Text(onClose == nil ? "One last step." : "Trade on \(model.network.shortName.lowercased()).")
-                        .font(.system(size: 34, weight: .heavy, design: .rounded))
+                        .font(.system(size: 30, weight: .heavy, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
-                        .padding(.top, 32)
+                        .padding(.top, 18)
                     Text("Fund this wallet, then open your trading desk.")
-                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
-                        .padding(.top, 6)
-                    statusList.padding(.top, 25)
-                    actionPanel.padding(.top, 18)
+                        .padding(.top, 4)
+                    statusList.padding(.top, 16)
+                    actionPanel.padding(.top, 12)
 
                     if let problem = model.fundingProblem ?? model.openingProblem {
                         Label(problem, systemImage: "exclamationmark.circle.fill")
@@ -156,29 +156,28 @@ struct FundScreen: View {
     }
 
     private var actionPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
+        VStack(alignment: .leading, spacing: 12) {
+            // The code sits beside the balance rather than under it, so the whole screen
+            // fits without scrolling on the smallest phone Desk runs on.
+            HStack(alignment: .center, spacing: 14) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Available to deposit")
                         .font(.system(size: 13, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
-                    Text(ausdBalanceText)
-                        .font(.system(size: 25, weight: .bold, design: .rounded))
-                        .foregroundStyle(DeskColor.nightText.color)
-                        .monospacedDigit()
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text(ausdBalanceText)
+                            .font(.system(size: 25, weight: .bold, design: .rounded))
+                            .foregroundStyle(DeskColor.nightText.color)
+                            .monospacedDigit()
+                        Text("AUSD")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                    }
                 }
-                Spacer()
-                Text("AUSD")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-            }
-            if needsFunds, !model.network.hasFaucet, let address = model.address {
-                HStack {
-                    Spacer()
-                    AddressQR(address: address.checksummed)
-                    Spacer()
+                Spacer(minLength: 8)
+                if needsFunds, !model.network.hasFaucet, let address = model.address {
+                    AddressQR(address: address.checksummed, size: 96)
                 }
-                .padding(.vertical, 4)
             }
             Button {
                 if needsFunds && !model.network.hasFaucet {
@@ -211,7 +210,7 @@ struct FundScreen: View {
                     .foregroundStyle(DeskColor.nightMuted.color.opacity(0.78))
             }
         }
-        .padding(18)
+        .padding(16)
         .nativeGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
@@ -321,7 +320,7 @@ private struct SetupStatusRow: View {
                     .opacity(actionEnabled ? 1 : 0.45)
             }
         }
-        .frame(minHeight: 67)
+        .frame(minHeight: 58)
     }
 }
 

@@ -26,8 +26,8 @@ struct AddressQR: View {
                     .interpolation(.none)
                     .resizable()
                     .frame(width: size, height: size)
-                    .padding(10)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .padding(8)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
         .accessibilityLabel("Wallet address code")

@@ -7,7 +7,7 @@ struct WelcomeScreen: View {
     @State private var showsCreateWarning = false
 
     private let features: [(symbol: String, title: String)] = [
-        ("faceid", "Face ID Sign-In"),
+        ("person.badge.key.fill", "Passkey Sign-In"),
         ("key.slash", "No Seed Phrase"),
         ("bolt.fill", "Gasless Orders"),
         ("lock.open", "Key Never Stored"),
@@ -57,7 +57,7 @@ struct WelcomeScreen: View {
                     Button {
                         Task { await model.signIn() }
                     } label: {
-                        Text(model.isWorking ? "Deriving your keys…" : "Continue with Face ID")
+                        Text(model.isWorking ? "Deriving your keys…" : "Continue with passkey")
                             .font(.system(size: 17, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.night.color)
                         .frame(maxWidth: .infinity)
@@ -246,7 +246,7 @@ private struct CreateAccountSheet: View {
             Text("Create your Desk account")
                 .font(.title2.weight(.bold))
 
-            Text("Face ID creates a new passkey and wallet on this device.")
+            Text("A new passkey and wallet are created on this device.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
