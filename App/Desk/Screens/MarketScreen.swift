@@ -36,23 +36,26 @@ struct MarketScreen: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .top) {
                 Color.black.ignoresSafeArea()
+                DeskAurora().ignoresSafeArea()
 
+                // Each section pads itself so the hot-markets strip can run edge to edge
+                // without widening the page — a negative padding did, and the whole
+                // screen could then be dragged sideways.
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
-                        header
+                        header.padding(.horizontal, 16)
                         if !Self.tradersOnly {
-                            hotMarkets.padding(.top, 22)
-                            explore.padding(.top, 24)
+                            hotMarkets.padding(.top, 34)
+                            explore.padding(.top, 32).padding(.horizontal, 16)
                         }
                         if !Self.newsOnly {
-                            liveTrades.padding(.top, 26)
-                            topTraders.padding(.top, 26)
+                            liveTrades.padding(.top, 32).padding(.horizontal, 16)
+                            topTraders.padding(.top, 32).padding(.horizontal, 16)
                         }
-                        newsSection.padding(.top, 26)
+                        newsSection.padding(.top, 32).padding(.horizontal, 16)
                     }
-                    .padding(.horizontal, 16)
                     .padding(.top, 8)
                     .padding(.bottom, 116)
                 }
@@ -136,7 +139,7 @@ struct MarketScreen: View {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     if model.hasTradingAccount {
-                        AmountText(model.collateral.value?.display() ?? "0.00", size: 32)
+                        AmountText(model.collateral.value.map { DisplayCurrency.shared.format($0) } ?? Unavailable.text, size: 34)
                         Text("AUSD available to trade")
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundStyle(DeskColor.nightMuted.color)
@@ -183,6 +186,7 @@ struct MarketScreen: View {
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
             }
+            .padding(.horizontal, 16)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     if hotCrowd.isEmpty {
@@ -198,7 +202,6 @@ struct MarketScreen: View {
                 }
                 .padding(.horizontal, 16)
             }
-            .padding(.horizontal, -16)
         }
     }
 
