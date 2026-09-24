@@ -15,6 +15,7 @@ struct FundScreen: View {
     @State private var faucetPage: FaucetPage?
 
     @State private var showsNetwork = false
+    @State private var showsSwap = false
     @State private var didCopyForDeposit = false
 
     /// Perpl's `min_account_open_amount`: 100 AUSD on testnet, 10 on mainnet, read from
@@ -76,6 +77,11 @@ struct FundScreen: View {
         .sheet(isPresented: $showsNetwork) {
             NetworkSheet(model: model)
                 .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showsSwap) {
+            SwapSheet(model: model) { showsSwap = false }
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
         .sheet(item: $faucetPage, onDismiss: {
@@ -175,12 +181,14 @@ struct FundScreen: View {
                     }
                 }
                 Spacer(minLength: 8)
-                if needsFunds, !model.network.hasFaucet, let address = model.address {
+                if needsFunds, !model.network.hasFaucet, !canSwapForCollateral, let address = model.address {
                     AddressQR(address: address.checksummed, size: 96)
                 }
             }
             Button {
-                if needsFunds && !model.network.hasFaucet {
+                if canSwapForCollateral {
+                    showsSwap = true
+                } else if needsFunds && !model.network.hasFaucet {
                     // No faucet on mainnet: the next step is someone sending funds here.
                     model.copyAddress()
                     didCopyForDeposit = true
@@ -202,10 +210,27 @@ struct FundScreen: View {
             }
             .buttonStyle(.plain)
             .disabled(!canOpen)
+            if canSwapForCollateral {
+                Button {
+                    model.copyAddress()
+                    didCopyForDeposit = true
+                } label: {
+                    Text(didCopyForDeposit ? "Address copied" : "Or copy address to receive AUSD")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .nativeGlass(interactive: true, in: Capsule())
+            }
             if needsFunds {
                 Text(model.network.hasFaucet
                      ? "Free test MON for fees and test AUSD, sent straight to this wallet."
-                     : "Send MON for fees and at least \(minimum.display(fractionDigits: 0)) AUSD to this address on Monad mainnet. Balances update on their own.")
+                     : canSwapForCollateral
+                        ? "Your MON becomes AUSD here, then opens your desk. At least \(minimum.display(fractionDigits: 0)) AUSD to start."
+                        : "Send at least \(minimum.display(fractionDigits: 0)) AUSD, or MON to swap here, to this address on Monad mainnet. Balances update on their own.")
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color.opacity(0.78))
             }
@@ -217,13 +242,18 @@ struct FundScreen: View {
     private var hasMON: Bool { model.hasSetupGas }
     private var hasMinimumAUSD: Bool { (model.walletAUSD.value ?? .zero) >= minimum }
     private var needsFunds: Bool { !hasMON || !hasMinimumAUSD }
+    /// Mainnet, MON in hand, collateral short: the swap is the next step, not a transfer.
+    private var canSwapForCollateral: Bool { !hasMinimumAUSD && model.swappableMON != nil }
     private var isFunding: Bool { model.isWorking && needsFunds }
     private var balancesKnown: Bool { model.walletMON.value != nil && model.walletAUSD.value != nil }
     private var canOpen: Bool { balancesKnown && !model.isWorking }
     private var primaryTitle: String {
         switch (needsFunds, model.isWorking) {
         case (true, true): "Funding your wallet…"
-        case (true, false): model.network.hasFaucet ? "Fund my wallet" : (didCopyForDeposit ? "Address copied" : "Copy address to deposit")
+        case (true, false):
+            model.network.hasFaucet ? "Fund my wallet"
+                : canSwapForCollateral ? "Swap MON for AUSD"
+                : (didCopyForDeposit ? "Address copied" : "Copy address to deposit")
         case (false, true): "Checking…"
         case (false, false): "Open my desk"
         }

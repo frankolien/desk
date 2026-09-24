@@ -22,6 +22,7 @@ struct HomeScreen: View {
     var onFollowing: () -> Void = {}
     var onActivity: () -> Void = {}
     var onSpot: () -> Void = {}
+    var onSwap: () -> Void = {}
     let onAccount: () -> Void
 
     @AppStorage("desk.hidesBalance") private var hidesBalance = false
@@ -243,7 +244,7 @@ struct HomeScreen: View {
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
                     Text(mainnet
-                         ? "Deposit MON and AUSD, then open your Perpl account."
+                         ? "Send AUSD, or MON to swap, then open your Perpl account."
                          : "Get free test funds, then open your Perpl account.")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
@@ -252,7 +253,7 @@ struct HomeScreen: View {
             }
             Button(action: onSetup) {
                 HStack {
-                    Text(mainnet ? "Deposit and open account" : "Get test funds")
+                    Text(mainnet ? "Fund and open account" : "Get test funds")
                     Spacer()
                     Image(systemName: "arrow.right")
                 }
@@ -327,6 +328,19 @@ struct HomeScreen: View {
                 change: nil,
                 tint: DeskColor.nightMuted,
                 action: onWithdraw)
+
+            // MON that arrived from an exchange, waiting to become collateral.
+            if let spare = model.swappableMON {
+                HomeAssetRow(
+                    mark: { MonochromeSymbolMark(symbol: "arrow.triangle.2.circlepath") },
+                    title: "MON",
+                    subtitle: "Swap for AUSD",
+                    value: hidesBalance ? "•••••" : spare.display(fractionDigits: 2),
+                    unit: "MON",
+                    change: nil,
+                    tint: DeskColor.nightMuted,
+                    action: onSwap)
+            }
 
             // Profit first. A position row that leads with size answers a question
             // nobody opens the app to ask.

@@ -21,7 +21,7 @@ struct NetworkSheet: View {
                     option(.testnet, symbol: "testtube.2", tint: .teal,
                            detail: "Free test MON and AUSD from Desk's faucet. Nothing you win or lose is real.")
                     option(.mainnet, symbol: "bolt.fill", tint: .orange,
-                           detail: "Real MON and AUSD you deposit yourself. Profits and losses are real.")
+                           detail: "Real MON and AUSD. Send MON from an exchange and swap it for AUSD here. Profits and losses are real.")
                 }
             }
             .navigationTitle("Network")

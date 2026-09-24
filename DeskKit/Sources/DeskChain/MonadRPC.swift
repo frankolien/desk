@@ -20,7 +20,7 @@ public actor MonadRPC {
             try Configuration(url: URL(string: "https://testnet-rpc.monad.xyz")!, chainID: 10143)
         }
 
-        /// Real funds. Only spot purchases use it; the exchange and faucet stay on testnet.
+        /// Real funds.
         public static func mainnet() throws -> Configuration {
             try Configuration(url: URL(string: "https://rpc.monad.xyz")!, chainID: 143)
         }
@@ -131,6 +131,41 @@ public actor MonadRPC {
         }
     }
 
+    /// One block of calls run against the latest state, none of them signed or sent.
+    ///
+    /// This is how a transaction someone else composed is checked before the wallet key
+    /// touches it: the call runs, and a balance read in the same block says what it would
+    /// have left behind. `eth_simulateV1` is served by Monad's public node.
+    public func simulate(_ calls: [SimulatedCall]) async throws -> [SimulatedResult] {
+        let encoded: [JSONValue] = calls.map { call in
+            var fields: [String: JSONValue] = [
+                "to": .string(call.to.checksummed),
+                "data": .string("0x" + call.data.map { String(format: "%02x", $0) }.joined()),
+            ]
+            if let from = call.from { fields["from"] = .string(from.checksummed) }
+            if call.value.contains(where: { $0 != 0 }) { fields["value"] = .string(Quantity.encode(call.value)) }
+            return .object(fields)
+        }
+        let request: JSONValue = .object([
+            "blockStateCalls": .array([.object(["calls": .array(encoded)])]),
+            "validation": .bool(false),
+            "traceTransfers": .bool(false),
+        ])
+        return try await call("eth_simulateV1", [request, .string("latest")]) { value in
+            guard case .array(let blocks) = value, case .object(let block)? = blocks.first,
+                  case .array(let results)? = block["calls"], results.count == calls.count
+            else { throw Failure.malformedResponse("eth_simulateV1") }
+            return try results.map { result in
+                guard case .object(let fields) = result, let status = fields["status"]?.stringValue
+                else { throw Failure.malformedResponse("eth_simulateV1.status") }
+                let returned = fields["returnData"]?.stringValue ?? "0x"
+                return SimulatedResult(
+                    succeeded: (try? Quantity.uint64(status)) == 1,
+                    returnData: returned == "0x" ? Data() : (try? ABIWord.hexBytes(returned)) ?? Data())
+            }
+        }
+    }
+
     // MARK: - Machinery
 
     private func quantity(_ method: String, _ parameters: [JSONValue]) async throws -> UInt64 {
@@ -217,4 +252,23 @@ public struct TransactionReceipt: Sendable, Hashable {
     public let succeeded: Bool
     public let gasUsed: UInt64?
     public let blockNumber: UInt64?
+}
+
+public struct SimulatedCall: Sendable, Hashable {
+    public let from: EthereumAddress?
+    public let to: EthereumAddress
+    public let data: Data
+    public let value: Data
+
+    public init(from: EthereumAddress? = nil, to: EthereumAddress, data: Data, value: Data = Data()) {
+        self.from = from
+        self.to = to
+        self.data = data
+        self.value = value
+    }
+}
+
+public struct SimulatedResult: Sendable, Hashable {
+    public let succeeded: Bool
+    public let returnData: Data
 }

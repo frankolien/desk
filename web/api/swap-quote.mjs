@@ -141,8 +141,93 @@ async function zeroXQuote({ chainIndex, amount, fromTokenAddress, toTokenAddress
   };
 }
 
+
+/// MON → AUSD on Monad mainnet, as a transaction the wallet can sign.
+///
+/// The only swap Desk signs on its own chain. It funds a mainnet desk from an exchange
+/// withdrawal of MON without leaving the app, and it is bounded by construction: the
+/// wallet sells its native token, so nothing is approved and the most a bad route can
+/// take is the MON sent with the call.
+export const MONAD = "143";
+export const AUSD = "0x00000000efe302beaa2b3e6e1b18d08d69a9012a";
+export const NATIVE_MON = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+/// 0x's AllowanceHolder, one address on every chain 0x deploys to.
+export const ALLOWANCE_HOLDER = "0x0000000000001ff3684f28c67538d4d072c22734";
+const SWAP_SLIPPAGE_BPS = "100";
+
+/// The rule the app applies before signing, applied here too so a changed 0x answer is
+/// refused at the edge instead of reaching a phone.
+export function swapTransaction(quote, wei) {
+  const tx = quote?.transaction;
+  if (!tx || quote.liquidityAvailable === false) return null;
+  const to = String(tx.to ?? "").toLowerCase();
+  const data = String(tx.data ?? "").toLowerCase();
+  const ok = to === ALLOWANCE_HOLDER
+    && /^0x[0-9a-f]{8,}$/.test(data)
+    && String(tx.value) === wei
+    && String(quote.sellAmount) === wei
+    && /^\d+$/.test(String(quote.buyAmount ?? "")) && quote.buyAmount !== "0"
+    && /^\d+$/.test(String(quote.minBuyAmount ?? ""))
+    && String(quote.buyToken ?? AUSD).toLowerCase() === AUSD
+    && String(quote.sellToken ?? NATIVE_MON).toLowerCase() === NATIVE_MON;
+  return ok ? { chainId: Number(MONAD), to: tx.to, data: tx.data, value: String(tx.value) } : null;
+}
+
+export function summarizeSwap(quote, transaction, wei) {
+  return {
+    observedAt: Date.now(),
+    pay: { amount: readableUnits(wei, 18), wei, symbol: "MON" },
+    receive: {
+      amount: readableUnits(quote.buyAmount, 6),
+      minimum: readableUnits(quote.minBuyAmount, 6),
+      symbol: "AUSD",
+    },
+    feeMON: readableUnits(String(quote.totalNetworkFee ?? "0"), 18),
+    sources: Array.isArray(quote.route?.fills)
+      ? [...new Set(quote.route.fills.map((fill) => fill.source).filter(Boolean))] : [],
+    transaction,
+  };
+}
+
+async function swap(req, res) {
+  const user = String(req.query.user || "");
+  const wei = baseUnits(String(req.query.amount || ""), 18);
+  if (!/^0x[a-fA-F0-9]{40}$/.test(user)) {
+    return res.status(400).json({ error: "Valid quote parameters required", reason: "invalid" });
+  }
+  if (!wei || wei === "0") return res.status(400).json({ error: "Enter a valid amount", reason: "invalid" });
+  if (!zeroXConfigured()) return res.status(503).json({ error: "No quote provider is configured for this chain.", reason: "unavailable" });
+
+  const params = new URLSearchParams({
+    chainId: MONAD, sellToken: NATIVE_MON, buyToken: AUSD, sellAmount: wei,
+    taker: user, slippageBps: SWAP_SLIPPAGE_BPS,
+  });
+  let quote;
+  try {
+    const response = await fetch(`https://api.0x.org/swap/allowance-holder/quote?${params}`, {
+      headers: { "0x-api-key": process.env.ZEROX_API_KEY, "0x-version": "v2" },
+    });
+    quote = await response.json();
+    if (!response.ok) {
+      return res.status(422).json({ error: "A live quote is unavailable right now.", reason: "unavailable" });
+    }
+  } catch {
+    return res.status(502).json({ error: "The quote service could not be reached.", reason: "unreachable" });
+  }
+  if (quote.liquidityAvailable === false) {
+    return res.status(422).json({ error: "There is not enough AUSD liquidity for this amount.", reason: "no-liquidity" });
+  }
+  const transaction = swapTransaction(quote, wei);
+  if (!transaction) {
+    return res.status(422).json({ error: "This route needs a transaction Desk does not sign.", reason: "unsupported-route" });
+  }
+  return res.status(200).json(summarizeSwap(quote, transaction, wei));
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
+  res.setHeader("Cache-Control", "private, no-store");
+  if (req.query.view === "swap") return swap(req, res);
   const chainIndex = String(req.query.chainIndex || "");
   const tokenAddress = String(req.query.tokenAddress || "");
   const side = String(req.query.side || "buy").toLowerCase();

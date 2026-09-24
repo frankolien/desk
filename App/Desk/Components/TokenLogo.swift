@@ -218,6 +218,7 @@ struct AddFundsSheet: View {
     let model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var copied = false
+    @State private var showsSwap = false
 
     private var walletAmount: Money { model.walletAUSD.value ?? .zero }
 
@@ -278,6 +279,18 @@ struct AddFundsSheet: View {
                     .disabled(model.isWorking)
                 }
 
+                if let spare = model.swappableMON {
+                    Button { showsSwap = true } label: {
+                        Label("Swap \(spare.display(fractionDigits: 0)) MON for AUSD", systemImage: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .deskGlass(interactive: true, in: Capsule())
+                }
+
                 Button {
                     model.copyAddress()
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -318,6 +331,11 @@ struct AddFundsSheet: View {
         .presentationDragIndicator(.visible)
         .task { await model.refreshBalances() }
         .onDisappear { model.clearDeposit() }
+        .sheet(isPresented: $showsSwap) {
+            SwapSheet(model: model) { showsSwap = false }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
     }
 
     private func row(_ label: String, value: String) -> some View {

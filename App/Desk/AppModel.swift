@@ -119,6 +119,15 @@ final class AppModel {
 
     init(passkey: any PasskeyService) {
         self.passkey = passkey
+        #if DEBUG
+        // `-network mainnet` puts a staged launch on the other network without touching
+        // what the phone remembers.
+        if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-network"),
+           index + 1 < ProcessInfo.processInfo.arguments.count,
+           let chosen = DeskNetwork(rawValue: ProcessInfo.processInfo.arguments[index + 1]) {
+            network = chosen
+        }
+        #endif
         trading.network = network
         trading.onAccount = { [weak self] account in
             guard let free = account.free else { return }
@@ -177,6 +186,17 @@ final class AppModel {
                 isKeyUnlocked = true
                 // `home-setup` is a signed-in person on a network with no account yet.
                 hasTradingAccount = name != "home-setup"
+                // On mainnet the staged person has just received MON from an exchange and
+                // nothing else, which is the state the swap exists for.
+                if network.holdsRealFunds, name == "home-setup" || name == "fund" {
+                    walletMON.record(NativeAmount(decimalText: "812.4") ?? .zero)
+                    walletAUSD.record(.zero)
+                    collateral.record(.zero)
+                    hasDesk.record(false)
+                    openPosition = nil
+                    openPositions = []
+                    stagedClosedTrades = []
+                }
             }
         }
         #endif
@@ -546,6 +566,75 @@ final class AppModel {
         }
         _ = try await sender.wait(for: signed)
         await refreshMainnetMON()
+    }
+
+    /// MON kept back from a swap so the setup and trading that follow can pay their gas.
+    static let gasReserve = NativeAmount(decimalText: "0.5") ?? .zero
+
+    /// MON this wallet could swap for AUSD right now, or nil when there is none to spare.
+    var swappableMON: NativeAmount? {
+        guard network.holdsRealFunds, let held = walletMON.value, held.raw > Self.gasReserve.raw,
+              let spare = NativeAmount(raw: held.raw - Self.gasReserve.raw), spare.raw >= 1_000_000_000_000_000_000
+        else { return nil }
+        return spare
+    }
+
+    enum SwapStep: Equatable, Sendable { case checking, signing, sending }
+
+    struct SwapReceipt: Equatable, Sendable {
+        let hash: String
+        /// AUSD the wallet actually gained, read from the chain after the swap mined.
+        let received: Money
+    }
+
+    enum SwapFailure: Error, Equatable, Sendable {
+        case wrongNetwork
+        /// The route, run against the latest state, would leave less AUSD than promised.
+        case underdelivers(Money)
+        case routeReverts
+    }
+
+    /// Swaps MON in the wallet for AUSD on Monad mainnet, with one Face ID prompt.
+    ///
+    /// The transaction is run first, unsigned, in a simulated block with an AUSD balance
+    /// read either side of it. Only a route that leaves at least the quoted minimum is
+    /// then signed, so what the screen promised is what the chain was seen to do.
+    func swapMON(_ swap: AUSDSwap, progress: @MainActor @escaping (SwapStep) -> Void) async throws -> SwapReceipt {
+        guard network.holdsRealFunds, let address else { throw SwapFailure.wrongNetwork }
+        progress(.checking)
+        let rpc = MonadRPC(configuration: try network.rpc())
+        let ausd = try Self.ethereumAddress(network.pinnedCollateralToken)
+        let balanceOf = try Calldata.balanceOf(address)
+        let simulated = try await rpc.simulate([
+            SimulatedCall(to: ausd, data: balanceOf),
+            SimulatedCall(from: address, to: swap.to, data: swap.data, value: swap.value.bigEndianBytes),
+            SimulatedCall(to: ausd, data: balanceOf),
+        ])
+        guard simulated[1].succeeded else { throw SwapFailure.routeReverts }
+        let before = ABIMoney.decode(simulated[0].returnData)
+        let after = ABIMoney.decode(simulated[2].returnData)
+        guard after.raw - before.raw >= swap.minimumOut.raw,
+              let gain = Money(raw: after.raw - before.raw) else {
+            throw SwapFailure.underdelivers(Money(raw: max(0, after.raw - before.raw)) ?? .zero)
+        }
+
+        let sender: TransactionSender
+        if let mainnetSender {
+            sender = mainnetSender
+        } else {
+            sender = TransactionSender(rpc: rpc)
+            mainnetSender = sender
+        }
+        progress(.signing)
+        let signed = try await passkey.withKeys { wallet, _ in
+            try await sender.send(to: swap.to, data: swap.data, value: swap.value.bigEndianBytes, from: wallet)
+        }
+        progress(.sending)
+        _ = try await sender.wait(for: signed)
+        let held = walletAUSD.value ?? before
+        await refreshUntilChanged()
+        let received = walletAUSD.value.flatMap { Money(raw: max(0, $0.raw - held.raw)) } ?? gain
+        return SwapReceipt(hash: signed.hashHex, received: received.raw > 0 ? received : gain)
     }
 
     /// A mined receipt can reach the faucet before the balance view does.
@@ -996,6 +1085,11 @@ final class AppModel {
 
     func refreshBalances() async {
         guard let address else { return }
+        #if DEBUG
+        // A staged mainnet launch keeps its seeded balances: the review wallet holds nothing real.
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-stage"), arguments.contains("-network") { return }
+        #endif
         do {
             let reader = try await balanceReader()
             let snapshot = await reader.read(for: address)

@@ -18,6 +18,7 @@ struct TradingShell: View {
     @State private var showsSetup = false
     @State private var showsWithdraw = false
     @State private var showsNetwork = false
+    @State private var showsSwap = false
     @State private var showsActivity = false
     @State private var fillConfirmation: String?
 
@@ -65,6 +66,7 @@ struct TradingShell: View {
                     onFollowing: { tab = .signals },
                     onActivity: { showsActivity = true },
                     onSpot: { tab = .search },
+                    onSwap: { showsSwap = true },
                     onAccount: { showsAccount = true })
             }
 
@@ -114,8 +116,14 @@ struct TradingShell: View {
             if arguments.contains("-open-withdraw") { showsWithdraw = true }
             if arguments.contains("-open-funds") { showsFunding = true }
             if arguments.contains("-open-network") { showsNetwork = true }
+            if arguments.contains("-open-swap") { showsSwap = true }
         }
         #endif
+        .sheet(isPresented: $showsSwap) {
+            SwapSheet(model: model) { showsSwap = false }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
         .sheet(isPresented: $showsActivity) {
             ActivityScreen(model: model)
                 .presentationDetents([.large])
