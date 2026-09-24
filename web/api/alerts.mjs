@@ -4,7 +4,7 @@ import { apnsClient, isDeadToken } from "./_apns.mjs";
 import { hypersyncClient, indexHistory } from "./_history.mjs";
 import { TRACKED_KEY, URGENT_KEY, WATCHED_KEY, ledgerKey } from "./_ledger.mjs";
 import { createMarkets } from "./_markets.mjs";
-import { priceDeliveries } from "./_prices.mjs";
+import { MAX_TARGETS, parseTargets, priceDeliveries } from "./_prices.mjs";
 import { clientIp } from "./_ratelimit.mjs";
 import { redisStore } from "./_store.mjs";
 import {
@@ -51,7 +51,7 @@ const validAddress = (value) => typeof value === "string" && /^0x[a-fA-F0-9]{40}
 /// The subscription as stored, or the sentence explaining why it was refused.
 export function parseSubscription(body) {
   if (!body || typeof body !== "object") return { error: "A JSON body is required." };
-  const { install, token, environment, traders, names, copying, wallets, prices, priceMarkets } = body;
+  const { install, token, environment, traders, names, copying, wallets, prices, priceMarkets, targets } = body;
   if (typeof install !== "string" || !/^[0-9a-f]{64}$/.test(install)) return { error: "A valid install secret is required." };
   if (typeof token !== "string" || !/^[0-9a-fA-F]{64,200}$/.test(token)) return { error: "A valid device token is required." };
   if (!Array.isArray(traders) || traders.length > MAX_TRADERS || !traders.every(validAddress)) {
@@ -64,6 +64,8 @@ export function parseSubscription(body) {
   if (!watched) return { error: "priceMarkets must be up to 20 market symbols." };
   const tracked = wallets == null ? [] : parseWallets(wallets);
   if (!tracked) return { error: `Up to ${MAX_WALLETS} tracked wallets are allowed, each with an address, an optional name and a minimum in dollars.` };
+  const wanted = parseTargets(targets);
+  if (!wanted) return { error: `Up to ${MAX_TARGETS} price targets are allowed, each with a market, a price and a direction.` };
   const followed = [...new Set(traders.map((address) => address.toLowerCase()))];
   const copied = [...new Set((copying ?? []).map((address) => address.toLowerCase()))];
   const labels = {};
@@ -84,8 +86,9 @@ export function parseSubscription(body) {
       wallets: tracked,
       prices: prices !== false,
       priceMarkets: watched,
+      targets: wanted,
     },
-    wantsPrices: prices === true,
+    wantsPrices: prices === true || wanted.length > 0,
   };
 }
 
@@ -427,6 +430,10 @@ export async function scan({ store, chain, apns, markets, quotes = [], now = Dat
     await store.del(subscriptionKey(id));
     await store.srem(SUBSCRIPTIONS, id);
   }
+  // A fired target is forgotten first, so the environment write below keeps the shorter list.
+  for (const [id, record] of priced.changed) {
+    if (!dead.has(id) && !moved.has(id)) await store.set(subscriptionKey(id), JSON.stringify(record), { ex: SUBSCRIPTION_TTL });
+  }
   for (const [id, record] of moved) {
     if (!dead.has(id)) await store.set(subscriptionKey(id), JSON.stringify(record), { ex: SUBSCRIPTION_TTL });
   }
@@ -548,7 +555,7 @@ export function createHandler(resolve) {
     const { id, record, wantsPrices } = parsed;
 
     // Nothing to follow, copy, track or watch for is a request to be forgotten.
-    if (record.traders.length === 0 && record.copying.length === 0 && record.wallets.length === 0 && !wantsPrices) {
+    if (record.traders.length === 0 && record.copying.length === 0 && record.wallets.length === 0 && record.targets.length === 0 && !wantsPrices) {
       await store.del(subscriptionKey(id));
       await store.srem(SUBSCRIPTIONS, id);
       return res.status(200).json({ traders: 0 });
@@ -608,7 +615,10 @@ export function createHandler(resolve) {
       await store.sadd(TRACKED_KEY, wallet.address);
       await store.sadd(URGENT_KEY, wallet.address);
     }
-    return res.status(200).json({ traders: record.traders.length, ...(record.wallets.length ? { wallets: record.wallets.length } : {}), confirmed });
+    return res.status(200).json({
+      traders: record.traders.length, ...(record.wallets.length ? { wallets: record.wallets.length } : {}),
+      ...(record.targets.length ? { targets: record.targets } : {}), confirmed,
+    });
   };
 }
 

@@ -73,6 +73,12 @@ final class TradeAlerts {
 
     private static let storageKey = "desk.alertedTraders"
     private static let pricesKey = "desk.alerts.prices"
+    private static let targetsKey = "desk.alerts.targets"
+    /// Prices this phone asked to hear about once, set from the chart.
+    private(set) var targets: [PriceTarget] = {
+        guard let data = UserDefaults.standard.data(forKey: "desk.alerts.targets") else { return [] }
+        return (try? JSONDecoder().decode([PriceTarget].self, from: data)) ?? []
+    }()
     /// Levels broken and big days on every Perpl market. On unless switched off.
     private(set) var priceAlerts = UserDefaults.standard.object(forKey: "desk.alerts.prices") == nil
         || UserDefaults.standard.bool(forKey: "desk.alerts.prices")
@@ -132,7 +138,7 @@ final class TradeAlerts {
     func resume() async {
         await refreshPermission()
         // A silent wake needs a token but no permission, so copying registers regardless.
-        let wantsAlerts = !alerted.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty
+        let wantsAlerts = !alerted.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty || !targets.isEmpty
         guard (permission == .allowed && wantsAlerts) || !copying.isEmpty else { return }
         UIApplication.shared.registerForRemoteNotifications()
         if needsSync, deviceToken != nil { scheduleSync() }
@@ -154,6 +160,47 @@ final class TradeAlerts {
         if on { UIApplication.shared.registerForRemoteNotifications() }
         scheduleSync()
         return true
+    }
+
+    func targets(for market: String) -> [PriceTarget] {
+        targets.filter { $0.market == market.uppercased() }
+    }
+
+    /// One push when the mark crosses `price`, then forgotten. The side is read from where
+    /// the price sits against the mark now. False when notifications are off for Desk.
+    @discardableResult
+    func addTarget(market: String, price: Double, mark: Double) async -> Bool {
+        guard price > 0, price != mark else { return false }
+        let center = UNUserNotificationCenter.current()
+        if await center.notificationSettings().authorizationStatus == .notDetermined {
+            _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+        }
+        await refreshPermission()
+        guard permission == .allowed else { return false }
+        let target = PriceTarget(market: market.uppercased(), price: price, direction: price > mark ? .above : .below)
+        guard !targets.contains(target) else { return true }
+        targets.append(target)
+        if targets.count > 20 { targets.removeFirst(targets.count - 20) }
+        persistTargets()
+        UIApplication.shared.registerForRemoteNotifications()
+        scheduleSync()
+        return true
+    }
+
+    func removeTarget(_ target: PriceTarget) {
+        targets.removeAll { $0 == target }
+        persistTargets()
+        scheduleSync()
+    }
+
+    /// The server told this price; the line comes off the chart.
+    func targetFired(market: String, level: Double) {
+        targets.removeAll { $0.market == market.uppercased() && $0.price == level }
+        persistTargets()
+    }
+
+    private func persistTargets() {
+        UserDefaults.standard.set(try? JSONEncoder().encode(targets), forKey: Self.targetsKey)
     }
 
     /// Asks iOS if it has not been asked, then watches the trader. False when notifications
@@ -198,9 +245,11 @@ final class TradeAlerts {
     /// them for sixty days, refreshed on every launch. Nothing called this, so signing out
     /// left all of it in place and being renewed.
     func signOut() async {
-        let hadSubscription = !alerted.isEmpty || !copying.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty
+        let hadSubscription = !alerted.isEmpty || !copying.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty || !targets.isEmpty
         alerted = []
         copying = []
+        targets = []
+        persistTargets()
         AutoCopyAway.isOn = false
         persist()
         syncTask?.cancel()
@@ -313,6 +362,7 @@ final class TradeAlerts {
         let nicknames = UserDefaults.standard.dictionary(forKey: Self.nicknameKey) as? [String: String] ?? [:]
         let traders = alerted.map { $0.lowercased() }
         let confirm = confirmOnSync
+        let sentTargets = targets
         #if DEBUG
         let environment = "sandbox"
         #else
@@ -328,6 +378,7 @@ final class TradeAlerts {
             "wallets": TrackedWallets.shared.payload,
             "prices": priceAlerts,
             "priceMarkets": Self.watchlistSymbols,
+            "targets": sentTargets.map { ["market": $0.market, "price": $0.price, "direction": $0.direction.rawValue] as [String: Any] },
             "confirm": confirm,
         ]
         var request = URLRequest(url: Self.endpoint)
@@ -349,6 +400,10 @@ final class TradeAlerts {
             return
         }
         if confirm { confirmOnSync = false }
+        // A target the server no longer holds has fired while this phone was not told.
+        let kept = (try? JSONDecoder().decode(SyncAnswer.self, from: data))?.targets ?? []
+        let fired = sentTargets.filter { !kept.contains($0) }
+        if !fired.isEmpty { targets.removeAll { fired.contains($0) }; persistTargets() }
         needsSync = false
         problem = nil
         lastSyncedAt = .now
@@ -356,6 +411,15 @@ final class TradeAlerts {
     }
 
     private struct ServerError: Decodable { let error: String }
+    private struct SyncAnswer: Decodable { let targets: [PriceTarget]? }
+}
+
+struct PriceTarget: Codable, Hashable, Identifiable {
+    enum Side: String, Codable { case above, below }
+    var market: String
+    var price: Double
+    var direction: Side
+    var id: String { "\(market)-\(price)-\(direction.rawValue)" }
 }
 
 /// Proves to Desk's server that a subscription belongs to this install. Random, kept in the
@@ -428,13 +492,22 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.banner, .list, .sound]
+        await Self.noteFiredTarget(notification.request.content.userInfo)
+        return [.banner, .list, .sound]
+    }
+
+    nonisolated private static func noteFiredTarget(_ userInfo: [AnyHashable: Any]) async {
+        guard let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "price",
+              desk["kind"] as? String == "target", let market = desk["market"] as? String,
+              let level = (desk["level"] as? NSNumber)?.doubleValue else { return }
+        await MainActor.run { TradeAlerts.shared.targetFired(market: market, level: level) }
     }
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
         let userInfo = response.notification.request.content.userInfo
+        await Self.noteFiredTarget(userInfo)
         if let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "price",
            let market = desk["market"] as? String {
             await MainActor.run { MarketOpenRequest.shared.open(market) }

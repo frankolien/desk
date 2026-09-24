@@ -13,6 +13,7 @@ struct PositionScreen: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showsClose = false
     @State private var showsProtection = false
+    @State private var protectionPreset = ("", "")
     @State private var showsShare = false
     @State private var showsStudio = false
     @State private var tab: PositionTab = .positions
@@ -55,7 +56,8 @@ struct PositionScreen: View {
                 if let figures, let selected = market.market {
                     PositionProtectionSheet(
                         position: active, figures: figures, market: selected,
-                        session: session) { showsProtection = false }
+                        session: session, presetTakeProfit: protectionPreset.0,
+                        presetStopLoss: protectionPreset.1) { showsProtection = false }
                 }
             }
             #if DEBUG
@@ -75,6 +77,15 @@ struct PositionScreen: View {
                 let scale = pow(10.0, Double(market.market?.config.priceDecimals ?? 0))
                 ChartStudio(market: market, network: model.network.name,
                             guides: figures.map { guides($0, scale: scale) } ?? [],
+                            heldSide: figures.map { $0.side == .long ? .up : .down },
+                            onProtect: { takeProfit, stopLoss in
+                                showsStudio = false
+                                Task {
+                                    try? await Task.sleep(for: .milliseconds(550))
+                                    protectionPreset = (takeProfit ?? "", stopLoss ?? "")
+                                    showsProtection = true
+                                }
+                            },
                             onClose: { showsStudio = false })
             }
         }
@@ -246,7 +257,7 @@ struct PositionScreen: View {
 
     private var actionBar: some View {
         HStack(spacing: 10) {
-            actionButton("Add TP/SL", tint: DeskColor.nightText) { showsProtection = true }
+            actionButton("Add TP/SL", tint: DeskColor.nightText) { protectionPreset = ("", ""); showsProtection = true }
             actionButton(session.isBusy ? "Closing…" : "Close", tint: DeskColor.fall) {
                 showsClose = true
             }
@@ -562,6 +573,8 @@ private struct PositionProtectionSheet: View {
     let figures: PositionFigures
     let market: Market
     let session: TradingSession
+    var presetTakeProfit = ""
+    var presetStopLoss = ""
     let onDone: () -> Void
     @State private var takeProfit = ""
     @State private var stopLoss = ""
@@ -616,6 +629,14 @@ private struct PositionProtectionSheet: View {
         }
         .padding(20).foregroundStyle(DeskColor.nightText.color).background(DeskColor.night.color)
         .presentationDetents([.large]).presentationDragIndicator(.hidden)
+        .onAppear {
+            if takeProfit.isEmpty { takeProfit = presetTakeProfit }
+            if stopLoss.isEmpty { stopLoss = presetStopLoss }
+        }
+        .onAppear {
+            if takeProfit.isEmpty { takeProfit = presetTakeProfit }
+            if stopLoss.isEmpty { stopLoss = presetStopLoss }
+        }
     }
 
     private func triggerField(_ label: String, text: Binding<String>, tint: DeskRGB) -> some View {

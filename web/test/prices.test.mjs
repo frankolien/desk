@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { levelStep, levelText, priceDeliveries, priceEvents, pricePayload, wantsMarket } from "../api/_prices.mjs";
+import { crossed, levelStep, levelText, parseTargets, priceDeliveries, priceEvents, pricePayload, targetPayload, wantsMarket } from "../api/_prices.mjs";
 import { memoryStore } from "../api/_store.mjs";
 import { parseSubscription } from "../api/alerts.mjs";
 
@@ -78,4 +78,38 @@ test("a subscription carries whether it wants prices, on unless said otherwise",
   assert.equal(parseSubscription(base).wantsPrices, false);
   assert.equal(parseSubscription({ ...base, prices: true }).wantsPrices, true);
   assert.equal(parseSubscription({ ...base, prices: false }).record.prices, false);
+});
+
+test("a price target is told once when the mark crosses it, then dropped from the record", async () => {
+  const store = memoryStore();
+  const target = { market: "BTC", price: 85_000, direction: "above" };
+  const subscribers = [
+    { id: "a", record: { token: "t", prices: false, targets: [target, { market: "BTC", price: 80_000, direction: "below" }] } },
+    { id: "b", record: { token: "u", prices: false } },
+  ];
+  await priceDeliveries({ store, quotes: [{ name: "BTC", mark: 84_900, prev: 84_000 }], subscribers, now: 1 });
+  const hit = await priceDeliveries({ store, quotes: [{ name: "BTC", mark: 85_020, prev: 84_000 }], subscribers, now: 2 });
+  const targeted = hit.deliveries.filter((d) => d.payload.desk.kind === "target");
+  assert.equal(targeted.length, 1);
+  assert.equal(targeted[0].id, "a");
+  assert.equal(targeted[0].payload.aps.alert.body, "Bitcoin crossed $85,000 🟢 · now $85,020");
+  assert.equal(targeted[0].collapseId, "tgt-BTC-85000");
+  assert.deepEqual(hit.changed.map(([id, record]) => [id, record.targets]), [["a", [{ market: "BTC", price: 80_000, direction: "below" }]]]);
+  // The subscriber list handed in is not mutated; the caller saves `changed`.
+  assert.equal(subscribers[0].record.targets.length, 2);
+});
+
+test("targets are parsed strictly and crossing is one-directional", () => {
+  assert.deepEqual(parseTargets(undefined), []);
+  assert.deepEqual(parseTargets([{ market: "btc", price: 85000, direction: "above" }, { market: "BTC", price: 85000, direction: "above" }]),
+    [{ market: "BTC", price: 85000, direction: "above" }]);
+  assert.equal(parseTargets([{ market: "BTC", price: -1, direction: "above" }]), null);
+  assert.equal(parseTargets([{ market: "BTC", price: 1, direction: "sideways" }]), null);
+  assert.equal(parseTargets(new Array(21).fill({ market: "BTC", price: 1, direction: "above" })), null);
+  const above = { market: "BTC", price: 100, direction: "above" };
+  assert.equal(crossed(above, 99, 100), true);
+  assert.equal(crossed(above, 101, 99), false);
+  assert.equal(crossed({ ...above, direction: "below" }, 101, 99), true);
+  assert.equal(crossed(above, 0, 100), false);
+  assert.equal(targetPayload({ market: "MON", price: 0.0231, direction: "below" }, 0.0229).desk.direction, "down");
 });

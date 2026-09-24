@@ -688,6 +688,7 @@ struct PerpDetailScreen: View {
     @State private var chat = MarketChatModel()
     @State private var showsChat = false
     @State private var showsStudio = false
+    @State private var ticketPreset: TicketPreset?
     @AppStorage("desk.watchlist") private var savedIDs = ""
 
     var body: some View {
@@ -736,10 +737,10 @@ struct PerpDetailScreen: View {
             #endif
         }
         .fullScreenCover(isPresented: $showsStudio) {
-            ChartStudio(market: market, network: model.network.name, onTrade: { side in
+            ChartStudio(market: market, network: model.network.name, onTrade: { side, preset in
                 showsStudio = false
-                // The cover has to be gone, and the phone upright, before a sheet can come up.
-                Task { try? await Task.sleep(for: .milliseconds(550)); open(side) }
+                // The cover has to be gone before a sheet can come up.
+                Task { try? await Task.sleep(for: .milliseconds(550)); open(side, preset: preset) }
             }, onClose: { showsStudio = false })
         }
         .sheet(isPresented: $showsChat) {
@@ -752,10 +753,12 @@ struct PerpDetailScreen: View {
         }
         .sheet(item: $ticket) { side in
             TicketSheet(
-                side: side, market: market.market, mark: market.mark.value, session: session
+                side: side, market: market.market, mark: market.mark.value, session: session,
+                preset: ticketPreset
             ) {
                 session.clear()
                 ticket = nil
+                ticketPreset = nil
                 dismiss()
                 onOrderFilled(side, market.symbol)
             }
@@ -973,7 +976,8 @@ struct PerpDetailScreen: View {
         .perpGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    private func open(_ side: Direction) {
+    private func open(_ side: Direction, preset: TicketPreset? = nil) {
+        ticketPreset = preset
         if !model.hasTradingAccount {
             showsSetup = true
         } else if model.hasSeenLeverageExplainer {

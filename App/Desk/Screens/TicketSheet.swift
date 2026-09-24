@@ -5,6 +5,11 @@ import DeskUI
 import SwiftUI
 
 
+struct TicketPreset: Hashable {
+    var takeProfit: String?
+    var stopLoss: String?
+}
+
 struct TicketSheet: View {
     let side: Direction
     let market: Market?
@@ -14,6 +19,8 @@ struct TicketSheet: View {
     let session: TradingSession
     /// Where the leverage rail starts, for a ticket opened from someone else's position.
     var initialLeverage = 1
+    /// Protection handed in from the chart, where a level or a ruler chose the price.
+    var preset: TicketPreset?
     let onDismiss: () -> Void
 
     @State private var amount = ""
@@ -204,6 +211,11 @@ struct TicketSheet: View {
                     )
                     .onAppear {
                         leverage = min(max(1, initialLeverage), max(1, market?.config.maxLeverage ?? 1))
+                        if let preset {
+                            takeProfit = preset.takeProfit ?? ""
+                            stopLoss = preset.stopLoss ?? ""
+                            showsProtection = true
+                        }
                         #if DEBUG
                         // `-ticket-demo` fills a leveraged order so the preview can be captured.
                         if ProcessInfo.processInfo.arguments.contains("-ticket-demo") {

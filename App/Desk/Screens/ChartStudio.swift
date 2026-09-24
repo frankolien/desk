@@ -165,6 +165,8 @@ struct StudioFrame {
     var crosshair: CGPoint?
     var magnet: Bool
     var studies: StudySet
+    var alerts: [Double] = []
+    var leverage: Int = 1
 }
 
 /// Study series over the full history, computed when the candles change rather than on
@@ -424,39 +426,53 @@ struct StudioPainter {
             context.stroke(path, with: .color(tint), style: StrokeStyle(lineWidth: 1.6, lineJoin: .round))
 
         case .candles, .hollow, .heikinAshi, .bars:
+            // Edges on device pixels, or a body's two sides blur into different widths
+            // as the chart pans. A fixed gap keeps neighbours apart at every zoom.
+            let pixel = 1 / max(UITraitCollection.current.displayScale, 1)
+            let snap: (CGFloat) -> CGFloat = { ($0 / pixel).rounded() * pixel }
+            let slot = geometry.slotWidth
+            let gap = max(pixel, snap(slot * 0.22))
+            let bodyWidth = max(pixel, snap(slot) - gap)
+            let wickWidth = max(pixel, snap(min(slot * 0.12, 2)))
+            _ = bodyHalf
+
             for index in range where series.indices.contains(index) {
                 let candle = series[index]
                 let color = candle.isRising ? DeskColor.rise.color : DeskColor.fall.color
                 let x = geometry.x(index: index)
+                let centre = snap(x - wickWidth / 2) + wickWidth / 2
                 let openY = scale.y(candle.open)
                 let closeY = scale.y(candle.close)
-                let top = min(openY, closeY)
-                let bottom = max(openY, closeY)
+                let top = snap(min(openY, closeY))
+                let bottom = max(top + pixel, snap(max(openY, closeY)))
+                let high = snap(scale.y(candle.high))
+                let low = snap(scale.y(candle.low))
 
                 if frame.style == .bars {
                     var bar = Path()
-                    bar.move(to: CGPoint(x: x, y: scale.y(candle.high)))
-                    bar.addLine(to: CGPoint(x: x, y: scale.y(candle.low)))
-                    bar.move(to: CGPoint(x: x - bodyHalf, y: openY))
-                    bar.addLine(to: CGPoint(x: x, y: openY))
-                    bar.move(to: CGPoint(x: x, y: closeY))
-                    bar.addLine(to: CGPoint(x: x + bodyHalf, y: closeY))
-                    context.stroke(bar, with: .color(color), lineWidth: max(1, geometry.slotWidth * 0.16))
+                    bar.move(to: CGPoint(x: centre, y: high))
+                    bar.addLine(to: CGPoint(x: centre, y: low))
+                    let tick = snap(openY) + wickWidth / 2
+                    bar.move(to: CGPoint(x: centre - bodyWidth / 2, y: tick))
+                    bar.addLine(to: CGPoint(x: centre, y: tick))
+                    let closeTick = snap(closeY) + wickWidth / 2
+                    bar.move(to: CGPoint(x: centre, y: closeTick))
+                    bar.addLine(to: CGPoint(x: centre + bodyWidth / 2, y: closeTick))
+                    context.stroke(bar, with: .color(color), lineWidth: wickWidth)
                     continue
                 }
 
                 var wick = Path()
-                wick.move(to: CGPoint(x: x, y: scale.y(candle.high)))
-                wick.addLine(to: CGPoint(x: x, y: min(top, scale.y(candle.high))))
-                wick.move(to: CGPoint(x: x, y: max(bottom, scale.y(candle.low))))
-                wick.addLine(to: CGPoint(x: x, y: scale.y(candle.low)))
-                context.stroke(wick, with: .color(color), lineWidth: max(1, geometry.slotWidth * 0.14))
-                let body = CGRect(x: x - bodyHalf, y: top, width: bodyHalf * 2, height: max(1, bottom - top))
-                let shape = Path(roundedRect: body, cornerRadius: min(1.5, bodyHalf * 0.3))
-                if frame.style == .hollow, candle.isRising {
-                    context.stroke(shape, with: .color(color), lineWidth: 1)
+                wick.move(to: CGPoint(x: centre, y: high))
+                wick.addLine(to: CGPoint(x: centre, y: low))
+                context.stroke(wick, with: .color(color), lineWidth: wickWidth)
+
+                let body = CGRect(x: snap(x - bodyWidth / 2), y: top, width: bodyWidth, height: bottom - top)
+                if frame.style == .hollow, candle.isRising, bodyWidth > 3 * pixel {
+                    context.fill(Path(body), with: .color(.black))
+                    context.stroke(Path(body.insetBy(dx: pixel / 2, dy: pixel / 2)), with: .color(color), lineWidth: pixel)
                 } else {
-                    context.fill(shape, with: .color(color))
+                    context.fill(Path(body), with: .color(color))
                 }
             }
         }
@@ -616,6 +632,16 @@ struct StudioPainter {
             pill(Text(caption), at: CGPoint(x: 6, y: y), tint: guide.tint, in: &context)
             axisTag(guide.text, y: y, fill: .black.opacity(0.78), text: guide.tint, in: &context)
         }
+        for price in frame.alerts {
+            let y = geometry.scale.y(price)
+            guard y > plot.minY, y < plot.maxY else { continue }
+            var line = Path()
+            line.move(to: CGPoint(x: 0, y: y))
+            line.addLine(to: CGPoint(x: plot.maxX, y: y))
+            context.stroke(line, with: .color(DeskColor.identity.color.opacity(0.8)), style: StrokeStyle(lineWidth: 1, dash: [2, 4]))
+            pill(Text("Alert"), at: CGPoint(x: 6, y: y), tint: DeskColor.identity.color, in: &context)
+            axisTag(PriceAxis.label(price), y: y, fill: DeskColor.identity.color, text: .white, in: &context)
+        }
     }
 
     private func drawLastPrice(in context: inout GraphicsContext) {
@@ -674,10 +700,14 @@ struct StudioPainter {
         var caption = String(format: "%@ (%@%.2f%%), %d bars", PriceAxis.label(abs(measure.change)),
                              rising ? "+" : Direction.minus, abs(measure.percent), abs(measure.bars))
         if let duration = measure.durationText { caption += ", \(duration)" }
+        if frame.leverage > 1 {
+            caption += String(format: "\nat %d× ≈ %@%.1f%% on margin", frame.leverage,
+                              rising ? "+" : Direction.minus, abs(measure.percent) * Double(frame.leverage))
+        }
         let resolved = context.resolve(
             Text(caption).font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
                 .foregroundStyle(.white))
-        let textSize = resolved.measure(in: CGSize(width: 300, height: 40))
+        let textSize = resolved.measure(in: CGSize(width: 300, height: 60))
         let above = end.y <= start.y
         var origin = CGPoint(x: box.midX - textSize.width / 2 - 10, y: above ? box.minY - textSize.height - 22 : box.maxY + 8)
         origin.x = min(max(origin.x, 2), geometry.plot.maxX - textSize.width - 22)
@@ -794,7 +824,11 @@ struct ChartStudio: View {
     let market: MarketModel
     let network: String
     var guides: [PriceGuide] = []
-    var onTrade: ((Direction) -> Void)?
+    /// The side of the position this chart was opened from, so a level knows whether it
+    /// would be a take profit or a stop.
+    var heldSide: Direction?
+    var onTrade: ((Direction, TicketPreset?) -> Void)?
+    var onProtect: ((_ takeProfit: String?, _ stopLoss: String?) -> Void)?
     let onClose: () -> Void
 
     /// What one finger is doing. Decided on the first movement, not the first touch, so
@@ -824,6 +858,9 @@ struct ChartStudio: View {
     @State private var zoomStart: ChartWindow?
     @State private var shareImage: ShareImage?
     @State private var canvasSize: CGSize = .zero
+    @State private var levelMenu: ChartDrawing?
+    @State private var alertMenu: Double?
+    @State private var alerts: [Double] = []
 
     private static let defaultVisible = 70
 
@@ -850,8 +887,13 @@ struct ChartStudio: View {
         StudioFrame(
             candles: candles, interval: Double(market.candleIntervalSeconds), window: window, style: style,
             overlays: overlays, panes: panes, logScale: logScale, guides: guides, drawings: drawings,
-            pendingTrend: pendingTrend, ruler: ruler, crosshair: crosshair, magnet: magnet, studies: studies)
+            pendingTrend: pendingTrend, ruler: ruler, crosshair: crosshair, magnet: magnet, studies: studies,
+            alerts: alerts, leverage: Int(market.market?.config.maxLeverage ?? 1))
     }
+
+    private var priceDecimals: Int { Int(market.market?.config.priceDecimals ?? 2) }
+    private func priceText(_ price: Double) -> String { String(format: "%.\(priceDecimals)f", price) }
+    private func refreshAlerts() { alerts = TradeAlerts.shared.targets(for: market.symbol).map(\.price) }
 
     var body: some View {
         GeometryReader { proxy in
@@ -886,6 +928,7 @@ struct ChartStudio: View {
         .onAppear {
             market.setCandleDepth(400)
             drawings = ChartDrawingStore.load(drawingKey)
+            refreshAlerts()
             syncSeries()
         }
         .onDisappear {
@@ -901,8 +944,14 @@ struct ChartStudio: View {
         .onChange(of: drawings) { ChartDrawingStore.save(drawings, key: drawingKey) }
         #if DEBUG
         .task {
-            // `-studio-demo` puts the crosshair and a ruler on screen for a screenshot.
-            guard ProcessInfo.processInfo.arguments.contains("-studio-demo") else { return }
+            // `-chart-style <name>` picks a style; `-studio-demo` puts the crosshair, a ruler,
+            // a level and an alert on screen for a screenshot.
+            let arguments = ProcessInfo.processInfo.arguments
+            if let index = arguments.firstIndex(of: "-chart-style"), index + 1 < arguments.count,
+               ChartStyle(rawValue: arguments[index + 1]) != nil {
+                styleName = arguments[index + 1]
+            }
+            guard arguments.contains("-studio-demo") else { return }
             while candles.count < 60 || canvasSize == .zero { try? await Task.sleep(for: .milliseconds(200)) }
             let geometry = StudioGeometry(size: canvasSize, frame: frame)
             let painter = StudioPainter(frame: frame, geometry: geometry)
@@ -913,12 +962,88 @@ struct ChartStudio: View {
             if let a = anchor(at: from, geometry: geometry, painter: painter), let b = anchor(at: to, geometry: geometry, painter: painter) {
                 ruler = (a, b)
             }
+            if let level = anchor(at: CGPoint(x: 10, y: geometry.plot.height * 0.78), geometry: geometry, painter: painter) {
+                drawings = [ChartDrawing(id: UUID(), kind: .level, a: level, b: nil)]
+                alerts = [geometry.scale.value(atY: geometry.plot.height * 0.2)]
+            }
         }
         #endif
         .sheet(item: $shareImage) { shared in
             StudioActivitySheet(items: [shared.image])
                 .presentationDetents([.medium, .large])
         }
+        .confirmationDialog(
+            levelMenu.map { "Level \(PriceAxis.label($0.a.price))" } ?? "",
+            isPresented: Binding(get: { levelMenu != nil }, set: { if !$0 { levelMenu = nil } }),
+            titleVisibility: .visible, presenting: levelMenu
+        ) { drawing in levelActions(drawing) }
+        .confirmationDialog(
+            alertMenu.map { "Alert at \(PriceAxis.label($0))" } ?? "",
+            isPresented: Binding(get: { alertMenu != nil }, set: { if !$0 { alertMenu = nil } }),
+            titleVisibility: .visible, presenting: alertMenu
+        ) { price in
+            Button("Remove alert", role: .destructive) {
+                for target in TradeAlerts.shared.targets(for: market.symbol) where target.price == price {
+                    TradeAlerts.shared.removeTarget(target)
+                }
+                refreshAlerts()
+            }
+        }
+    }
+
+    /// What a horizontal level can become: protection on a held position, protection on a
+    /// new order, or a one-time alert. Which side it protects follows from where it sits.
+    @ViewBuilder private func levelActions(_ drawing: ChartDrawing) -> some View {
+        let price = drawing.a.price
+        let text = priceText(price)
+        if let mark = candles.last?.close, price != mark {
+            let above = price > mark
+            if let onProtect, let heldSide {
+                if (heldSide == .up) == above {
+                    Button("Set take profit here") { onProtect(text, nil) }
+                } else {
+                    Button("Set stop loss here") { onProtect(nil, text) }
+                }
+            }
+            if let onTrade {
+                if above {
+                    Button("Long, take profit here") { onTrade(.up, TicketPreset(takeProfit: text, stopLoss: nil)) }
+                    Button("Short, stop loss here") { onTrade(.down, TicketPreset(takeProfit: nil, stopLoss: text)) }
+                } else {
+                    Button("Long, stop loss here") { onTrade(.up, TicketPreset(takeProfit: nil, stopLoss: text)) }
+                    Button("Short, take profit here") { onTrade(.down, TicketPreset(takeProfit: text, stopLoss: nil)) }
+                }
+            }
+            if !alerts.contains(price) {
+                Button("Alert when price crosses \(PriceAxis.label(price))") {
+                    Task {
+                        if await TradeAlerts.shared.addTarget(market: market.symbol, price: price, mark: mark) { refreshAlerts() }
+                    }
+                }
+            }
+        }
+        Button("Remove level", role: .destructive) { drawings.removeAll { $0.id == drawing.id } }
+    }
+
+    /// The ruler read as an order: enter now, take profit where the ruler ends.
+    private struct Plan { let title: String; let symbol: String; let act: () -> Void }
+
+    private func plan(for ruler: (from: ChartAnchor, to: ChartAnchor)) -> Plan? {
+        guard ruler.to.price != ruler.from.price else { return nil }
+        let side: Direction = ruler.to.price > ruler.from.price ? .up : .down
+        let text = priceText(ruler.to.price)
+        let shown = PriceAxis.label(ruler.to.price)
+        let symbol = side == .up ? "arrow.up.right" : "arrow.down.right"
+        if let onProtect, let heldSide {
+            guard heldSide == side else { return nil }
+            return Plan(title: "Set TP \(shown)", symbol: symbol) { onProtect(text, nil) }
+        }
+        if let onTrade {
+            return Plan(title: "\(side == .up ? "Long" : "Short") · TP \(shown)", symbol: symbol) {
+                onTrade(side, TicketPreset(takeProfit: text, stopLoss: nil))
+            }
+        }
+        return nil
     }
 
     private func syncSeries() {
@@ -1133,7 +1258,26 @@ struct ChartStudio: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                         .padding(.leading, 8)
                 }
+                if let ruler, let plan = plan(for: ruler) {
+                    Button(action: plan.act) {
+                        HStack(spacing: 6) {
+                            Image(systemName: plan.symbol).font(.system(size: 11, weight: .bold))
+                            Text(plan.title).font(.system(size: 12, weight: .bold, design: .rounded).monospacedDigit())
+                        }
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .padding(.horizontal, 12)
+                        .frame(height: 32)
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .deskGlass(interactive: true, in: Capsule())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .padding(.leading, 8)
+                    .padding(.bottom, StudioGeometry.timeAxisHeight + 8)
+                    .transition(.opacity)
+                }
             }
+            .animation(.easeOut(duration: 0.15), value: ruler != nil)
             .onAppear { canvasSize = proxy.size }
             .onChange(of: proxy.size) { canvasSize = proxy.size }
         }
@@ -1245,7 +1389,13 @@ struct ChartStudio: View {
         SpatialTapGesture().onEnded { value in
             switch tool {
             case .none:
-                if crosshairMode {
+                if let hit = nearestDrawing(to: value.location, painter: painter),
+                   let drawing = drawings.first(where: { $0.id == hit }), drawing.kind == .level {
+                    levelMenu = drawing
+                } else if let price = alerts.min(by: { abs(painter.geometry.scale.y($0) - value.location.y) < abs(painter.geometry.scale.y($1) - value.location.y) }),
+                          abs(painter.geometry.scale.y(price) - value.location.y) < 14 {
+                    alertMenu = price
+                } else if crosshairMode {
                     ruler = nil
                     place(crosshairAt: value.location, geometry: painter.geometry, painter: painter)
                 } else {
@@ -1355,8 +1505,8 @@ struct ChartStudio: View {
     @ViewBuilder private var tradeButtons: some View {
         if let onTrade {
             HStack(spacing: 6) {
-                tradeButton(.down, title: "Short", action: onTrade)
-                tradeButton(.up, title: "Long", action: onTrade)
+                tradeButton(.down, title: "Short") { onTrade($0, nil) }
+                tradeButton(.up, title: "Long") { onTrade($0, nil) }
             }
         }
     }
