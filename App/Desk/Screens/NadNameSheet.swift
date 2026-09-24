@@ -2,6 +2,7 @@ import DeskAuth
 import DeskChain
 import DeskFlow
 import DeskUI
+import PhotosUI
 import SwiftUI
 
 /// A wallet's .nad identity: the names it holds, one to find, and the records on each.
@@ -11,6 +12,7 @@ struct NadNameSheet: View {
 
     @State private var names = NadNamesModel()
     @State private var findsName: String?
+    @State private var profileFor: NadNameStatus?
 
     private var address: String { model.address?.checksummed ?? "" }
 
@@ -61,6 +63,9 @@ struct NadNameSheet: View {
             .navigationDestination(item: $findsName) { typed in
                 NadFindNameView(model: model, names: names, initial: typed)
             }
+            .navigationDestination(item: $profileFor) { status in
+                NadProfileStep(status: status, model: model, names: names)
+            }
         }
         .preferredColorScheme(.dark)
         .task(id: address) { if !address.isEmpty { await names.load(address: address) } }
@@ -68,6 +73,10 @@ struct NadNameSheet: View {
         .task {
             let arguments = ProcessInfo.processInfo.arguments
             if let index = arguments.firstIndex(of: "-nad-find"), arguments.indices.contains(index + 1) { findsName = arguments[index + 1] }
+            if let index = arguments.firstIndex(of: "-nad-profile"), arguments.indices.contains(index + 1) {
+                await names.check(arguments[index + 1])
+                profileFor = names.status
+            }
         }
         #endif
     }
@@ -265,6 +274,11 @@ struct NadProfileStep: View {
     @State private var bio = ""
     @State private var x = ""
     @State private var website = ""
+    @State private var picked: PhotosPickerItem?
+    @State private var image: UIImage?
+    @State private var hostedAvatar: String?
+    @State private var isUploading = false
+    @State private var problem: String?
     @State private var goesToConfirm = false
 
     private var deskAvatar: String? {
@@ -275,11 +289,34 @@ struct NadProfileStep: View {
 
     private var records: [String: String] {
         var out: [String: String] = [:]
-        if useDeskPicture, let deskAvatar { out["avatar"] = deskAvatar }
+        if let hostedAvatar { out["avatar"] = hostedAvatar }
+        else if useDeskPicture, let deskAvatar { out["avatar"] = deskAvatar }
         if !bio.isEmpty { out["description"] = bio }
         if !x.isEmpty { out["com.twitter"] = x.replacingOccurrences(of: "@", with: "") }
         if !website.isEmpty { out["url"] = website }
         return out
+    }
+
+    /// A chosen photo is hosted through the Desk profile first, so the record can point
+    /// at a URL. One Face ID; the same picture then shows on Desk too.
+    private func continueToConfirm() async {
+        if let image, hostedAvatar == nil {
+            isUploading = true
+            problem = nil
+            defer { isUploading = false }
+            do {
+                let currentName = IdentityDirectory.shared.identity(for: model.address?.checksummed ?? "")
+                hostedAvatar = try await model.saveProfile(
+                    name: currentName?.source == "desk" ? (currentName?.name ?? "") : "",
+                    image: ProfileEditorSheet.jpeg(image))
+            } catch PasskeyFailure.cancelledByUser {
+                return
+            } catch {
+                problem = "The picture could not be uploaded. Continue without it or try again."
+                return
+            }
+        }
+        goesToConfirm = true
     }
 
     var body: some View {
@@ -288,19 +325,47 @@ struct NadProfileStep: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 22) {
                     HStack(spacing: 16) {
-                        if useDeskPicture, deskAvatar != nil {
-                            TraderAvatar(address: model.address?.checksummed ?? "", size: 72)
-                        } else {
-                            AddressAvatar(address: model.address?.checksummed ?? "", size: 72)
+                        PhotosPicker(selection: $picked, matching: .images, photoLibrary: .shared()) {
+                            ZStack(alignment: .bottomTrailing) {
+                                if let image {
+                                    Image(uiImage: image).resizable().scaledToFill().frame(width: 72, height: 72).clipShape(Circle())
+                                } else if useDeskPicture, deskAvatar != nil {
+                                    TraderAvatar(address: model.address?.checksummed ?? "", size: 72)
+                                } else {
+                                    AddressAvatar(address: model.address?.checksummed ?? "", size: 72)
+                                }
+                                Image(systemName: "camera.fill")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(DeskColor.night.color)
+                                    .frame(width: 24, height: 24)
+                                    .background(DeskColor.nightText.color, in: Circle())
+                                    .overlay(Circle().stroke(Color.black, lineWidth: 2))
+                            }
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Add a photo")
                         VStack(alignment: .leading, spacing: 4) {
                             Text(status.name).font(.system(size: 20, weight: .bold, design: .rounded)).foregroundStyle(DeskColor.nightText.color)
-                            Text("Public profile · optional").font(.system(size: 13, weight: .medium, design: .rounded)).foregroundStyle(DeskColor.nightMuted.color)
+                            Text(image != nil ? "New photo · hosted by Desk" : "Public profile · optional")
+                                .font(.system(size: 13, weight: .medium, design: .rounded)).foregroundStyle(DeskColor.nightMuted.color)
+                            if image != nil {
+                                Button("Remove photo") { withAnimation(.snappy(duration: 0.2)) { image = nil; picked = nil; hostedAvatar = nil } }
+                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(DeskColor.nightMuted.color)
+                                    .buttonStyle(.plain)
+                            }
                         }
                     }
                     .padding(.top, 10)
 
-                    if deskAvatar != nil {
+                    if let problem {
+                        Label(problem, systemImage: "exclamationmark.circle.fill")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DeskColor.fall.color)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if deskAvatar != nil, image == nil {
                         Toggle(isOn: $useDeskPicture) {
                             Text("Use my Desk picture as the avatar")
                                 .font(.system(size: 14, weight: .semibold, design: .rounded))
@@ -331,8 +396,15 @@ struct NadProfileStep: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            PrimaryButton(title: "Continue") { goesToConfirm = true }
+            PrimaryButton(title: isUploading ? "Uploading photo…" : "Continue", isEnabled: !isUploading) { Task { await continueToConfirm() } }
                 .padding(.horizontal, 16).padding(.bottom, 8)
+        }
+        .onChange(of: picked) { _, item in
+            guard let item else { return }
+            Task {
+                guard let data = try? await item.loadTransferable(type: Data.self), let loaded = UIImage(data: data) else { return }
+                withAnimation(.snappy(duration: 0.2)) { image = ProfileEditorSheet.squared(loaded); hostedAvatar = nil }
+            }
         }
         .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.inline)
@@ -526,6 +598,8 @@ struct NadNameDetail: View {
     @State private var bio = ""
     @State private var x = ""
     @State private var website = ""
+    @State private var picked: PhotosPickerItem?
+    @State private var image: UIImage?
     @State private var working: String?
     @State private var problem: String?
     @State private var savedAt: Date?
@@ -537,7 +611,8 @@ struct NadNameDetail: View {
     }
     private var changed: [String: String] {
         var out: [String: String] = [:]
-        if avatar != (name.records["avatar"] ?? "") { out["avatar"] = avatar }
+        if image != nil { out["avatar"] = "pending" }
+        else if avatar != (name.records["avatar"] ?? "") { out["avatar"] = avatar }
         if bio != (name.records["description"] ?? "") { out["description"] = bio }
         if x != (name.records["com.twitter"] ?? "") { out["com.twitter"] = x.replacingOccurrences(of: "@", with: "") }
         if website != (name.records["url"] ?? "") { out["url"] = website }
@@ -550,12 +625,26 @@ struct NadNameDetail: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 20) {
                     HStack(spacing: 14) {
-                        if let url = URL(string: avatar), !avatar.isEmpty {
-                            RemoteImage(url: url, fill: true) { AddressAvatar(address: owner, size: 64) }
-                                .frame(width: 64, height: 64).clipShape(Circle())
-                        } else {
-                            AddressAvatar(address: owner, size: 64)
+                        PhotosPicker(selection: $picked, matching: .images, photoLibrary: .shared()) {
+                            ZStack(alignment: .bottomTrailing) {
+                                if let image {
+                                    Image(uiImage: image).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(Circle())
+                                } else if let url = URL(string: avatar), !avatar.isEmpty {
+                                    RemoteImage(url: url, fill: true) { AddressAvatar(address: owner, size: 64) }
+                                        .frame(width: 64, height: 64).clipShape(Circle())
+                                } else {
+                                    AddressAvatar(address: owner, size: 64)
+                                }
+                                Image(systemName: "camera.fill")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(DeskColor.night.color)
+                                    .frame(width: 22, height: 22)
+                                    .background(DeskColor.nightText.color, in: Circle())
+                                    .overlay(Circle().stroke(Color.black, lineWidth: 2))
+                            }
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Choose a photo")
                         VStack(alignment: .leading, spacing: 3) {
                             Text(name.name).font(.system(size: 20, weight: .bold, design: .rounded)).foregroundStyle(DeskColor.nightText.color)
                             Text(name.isPrimary ? "Primary name" : "Not primary").font(.system(size: 13, weight: .medium, design: .rounded)).foregroundStyle(DeskColor.nightMuted.color)
@@ -582,7 +671,12 @@ struct NadNameDetail: View {
                             HStack {
                                 Text("Avatar").font(.system(size: 15, weight: .medium, design: .rounded)).foregroundStyle(DeskColor.nightText.color)
                                 Spacer()
-                                if let deskAvatar, avatar != deskAvatar {
+                                if image != nil {
+                                    Button("Remove new photo") { image = nil; picked = nil }
+                                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                                        .foregroundStyle(DeskColor.nightMuted.color)
+                                        .buttonStyle(.plain)
+                                } else if let deskAvatar, avatar != deskAvatar {
                                     Button("Use my Desk picture") { avatar = deskAvatar }
                                         .font(.system(size: 13, weight: .bold, design: .rounded))
                                         .foregroundStyle(DeskColor.action.color)
@@ -625,6 +719,13 @@ struct NadNameDetail: View {
         .navigationTitle(name.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
+        .onChange(of: picked) { _, item in
+            guard let item else { return }
+            Task {
+                guard let data = try? await item.loadTransferable(type: Data.self), let loaded = UIImage(data: data) else { return }
+                withAnimation(.snappy(duration: 0.2)) { image = ProfileEditorSheet.squared(loaded) }
+            }
+        }
         .onAppear {
             avatar = name.records["avatar"] ?? ""
             bio = name.records["description"] ?? ""
@@ -652,7 +753,19 @@ struct NadNameDetail: View {
         working = "records"; problem = nil
         defer { working = nil }
         do {
-            let call = try await names.calldata(["kind": "records", "name": name.label, "records": changed])
+            var records = changed
+            // A new photo is hosted through the Desk profile first, then the record points at it.
+            if let image {
+                let identity = IdentityDirectory.shared.identity(for: owner)
+                guard let hosted = try await model.saveProfile(
+                    name: identity?.source == "desk" ? (identity?.name ?? "") : "", image: ProfileEditorSheet.jpeg(image)) else {
+                    problem = "The picture could not be uploaded."; return
+                }
+                records["avatar"] = hosted
+                avatar = hosted
+                self.image = nil
+            }
+            let call = try await names.calldata(["kind": "records", "name": name.label, "records": records])
             _ = try await model.sendNadCall(call, value: .zero)
             savedAt = .now
             await names.load(address: owner)

@@ -280,13 +280,16 @@ final class AppModel {
     }
 
     /// The wallet's own name and picture, signed once with Face ID and shown to everyone.
-    func saveProfile(name: String, image: Data?) async throws {
-        guard let address else { return }
+    /// Returns the hosted picture's URL, which a name record can point at.
+    @discardableResult
+    func saveProfile(name: String, image: Data?) async throws -> String? {
+        guard let address else { return nil }
         let passkey = passkey
-        _ = try await DeskProfile.save(address: address, name: name, image: image) { digest in
+        let saved = try await DeskProfile.save(address: address, name: name, image: image) { digest in
             try await passkey.withKeys { wallet, _ in try WalletSigner.sign(digest: digest, with: wallet) }
         }
         await IdentityDirectory.shared.refresh(address.checksummed)
+        return saved.avatar
     }
 
     /// Whether the welcome screen should offer to create a passkey.

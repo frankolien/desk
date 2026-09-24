@@ -13,7 +13,7 @@ struct NadName: Decodable, Identifiable, Hashable, Sendable {
 }
 
 /// Whether a label can be had, and what it costs. Prices are one-time.
-struct NadNameStatus: Decodable, Sendable {
+struct NadNameStatus: Decodable, Hashable, Sendable {
     let name: String
     let label: String
     let available: Bool
