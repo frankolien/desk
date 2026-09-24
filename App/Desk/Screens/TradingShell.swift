@@ -53,7 +53,7 @@ struct TradingShell: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            Tab("Trade", systemImage: "arrow.left.arrow.right", value: .perps) {
+            Tab("Home", systemImage: "house.fill", value: .perps) {
                 MarketScreen(
                     model: model, market: market, session: session, copier: copier,
                     onOrderFilled: orderFilled,

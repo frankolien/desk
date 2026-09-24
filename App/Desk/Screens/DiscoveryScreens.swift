@@ -404,13 +404,18 @@ struct MarketSearchScreen: View {
                     }
                 }
                 .padding(.horizontal, 20)
-                // Clears the floating search field as well as the tab bar.
-                .padding(.bottom, 184)
+                .padding(.bottom, 24)
             }
             .refreshable { await discovery.refresh() }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .searchable(text: $query, prompt: "Search anything")
+            // The field floats above the tab bar, where a thumb already is, rather than
+            // in a navigation bar this screen does not show.
+            .safeAreaInset(edge: .bottom) {
+                field
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+            }
             .navigationDestination(isPresented: $showsMarket) {
                 PerpDetailScreen(
                     model: model, market: market, session: session,
@@ -495,24 +500,36 @@ struct MarketSearchScreen: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(DeskColor.nightMuted.color)
-            TextField("", text: $query, prompt: Text("Search markets")
+            TextField("", text: $query, prompt: Text("Search anything")
                 .foregroundStyle(DeskColor.nightMuted.color))
                 .font(.system(size: 16, weight: .medium, design: .rounded))
                 .foregroundStyle(DeskColor.nightText.color)
                 .autocorrectionDisabled()
-                .textInputAutocapitalization(.characters)
+                .textInputAutocapitalization(.never)
+                .submitLabel(.search)
             if !query.isEmpty {
                 Button { query = "" } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(DeskColor.nightMuted.color)
                 }
+                .buttonStyle(.plain)
                 .accessibilityLabel("Clear search")
+            } else {
+                Button("Paste") {
+                    query = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                }
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(DeskColor.nightText.color)
+                .buttonStyle(.plain)
+                .padding(.horizontal, 12)
+                .frame(height: 30)
+                .background(Color.white.opacity(0.12), in: Capsule())
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 13)
-        .background(DeskColor.nightChip.color.opacity(0.6), in: Capsule())
-        .overlay(Capsule().stroke(DeskColor.nightLine.color, lineWidth: 0.5))
+        .padding(.leading, 16)
+        .padding(.trailing, 8)
+        .frame(height: 52)
+        .perpSearchGlass(in: Capsule())
     }
 
     private func toggle(_ id: UInt32) {

@@ -3,20 +3,13 @@ import DeskMoney
 import DeskUI
 import SwiftUI
 
-/// The Trade tab: what the room is doing, then every market, then who is doing it.
+/// The Home tab: what the room is doing, then every market, then who is doing it.
 ///
-/// Ordered by what a person opening a trading tab wants first: their own positions if
-/// they have any, the markets traders are crowding into, the full list, and the traders
-/// worth following. All of it is read from Perpl through Desk's server; nothing here is
+/// Ordered by what a person opening the app wants first: the markets traders are
+/// crowding into, the full list, and the traders worth following. Their own positions
+/// live on Profile. All of it is read from Perpl through Desk's server; nothing here is
 /// a table of invented figures.
 struct MarketScreen: View {
-    private struct PositionContext: Identifiable {
-        let held: PerplPosition
-        let market: Market
-        let figures: PositionFigures
-        var id: String { "\(held.accountID):\(held.positionID)" }
-    }
-
     private enum Shelf: String, CaseIterable, Identifiable {
         case perps = "Perps", trending = "Trending", watchlist = "Watchlist"
         var id: String { rawValue }
@@ -32,7 +25,6 @@ struct MarketScreen: View {
 
     @State fileprivate var showsMarket = false
     @State private var shelf: Shelf = .perps
-    @State private var selectedPosition: PerplPosition?
     @State private var selectedTrader: TraderSnapshot?
     @State private var openToken: TokenOpenRequest.Target?
     @State private var directory = TraderDirectory()
@@ -51,8 +43,7 @@ struct MarketScreen: View {
                     VStack(alignment: .leading, spacing: 0) {
                         header
                         if !Self.tradersOnly {
-                            if !positionContexts.isEmpty { positions.padding(.top, 18) }
-                            hotMarkets.padding(.top, 26)
+                            hotMarkets.padding(.top, 30)
                             explore.padding(.top, 30)
                         }
                         if !Self.newsOnly {
@@ -115,13 +106,6 @@ struct MarketScreen: View {
                 showsMarket = true
             }
             #endif
-            // `item:` rather than `isPresented:`. With a boolean, SwiftUI can evaluate
-            // this closure before the sibling `selectedPosition` write has landed, and the
-            // sheet then presents with no content at all — a blank card, which is what
-            // tapping a position actually did.
-            .sheet(item: $selectedPosition) { held in
-                PositionScreen(position: held, market: market, session: session, model: model)
-            }
         }
     }
 
@@ -144,77 +128,38 @@ struct MarketScreen: View {
 
     // MARK: Header
 
-    /// The title, and the one figure a trader checks before every order.
+    /// The mark, then the one figure a trader checks before every order.
     private var header: some View {
-        HStack {
-            Text("Trade")
-                .font(.system(size: 30, weight: .heavy, design: .rounded))
-                .foregroundStyle(DeskColor.nightText.color)
-            Spacer()
-            Button(action: onFund) {
-                HStack(spacing: 7) {
-                    TokenLogo(asset: .ausd, size: 20)
-                    Text(model.hasTradingAccount
-                         ? "\(model.collateral.value?.display(fractionDigits: 0) ?? Unavailable.text) AUSD"
-                         : "Open desk")
-                        .font(.system(size: 13, weight: .bold, design: .rounded).monospacedDigit())
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(DeskColor.nightMuted.color)
+        VStack(alignment: .leading, spacing: 18) {
+            DeskBrandMark(size: 36)
+                .frame(height: 44, alignment: .leading)
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    if model.hasTradingAccount {
+                        AmountText(model.collateral.value?.display() ?? "0.00", size: 40)
+                        Text("AUSD available to trade")
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                    } else {
+                        Text("No desk yet")
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .foregroundStyle(DeskColor.nightText.color)
+                        Text("Fund it to trade on Perpl")
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                    }
                 }
-                .foregroundStyle(DeskColor.nightText.color)
-                .padding(.leading, 8)
-                .padding(.trailing, 12)
-                .frame(height: 38)
-                .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .perpGlass(interactive: true, in: Capsule())
-            .accessibilityLabel("Available to trade")
-        }
-        .frame(height: 44)
-    }
-
-    // MARK: Positions
-
-    /// Derived at the point of display so that the header total, the PnL and the
-    /// liquidation distance all descend from the one mark current when the screen drew.
-    private var positionContexts: [PositionContext] {
-        model.openPositions.compactMap { held in
-            guard let positionMarket = market.market(id: held.marketID),
-                  let mark = market.price(for: positionMarket),
-                  let figures = PositionFigures(
-                    position: held, market: positionMarket.config, mark: mark)
-            else { return nil }
-            return PositionContext(held: held, market: positionMarket, figures: figures)
-        }
-    }
-
-    private var totalPositionPnL: Money {
-        positionContexts.reduce(.zero) { $0 + $1.figures.unrealisedPnL }
-    }
-
-    private var positions: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                sectionTitle("Your positions")
-                Spacer()
-                Text(DisplayCurrency.shared.format(totalPositionPnL, signed: true))
-                    .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
-                    .foregroundStyle((totalPositionPnL.isNegative ? DeskColor.fall : DeskColor.rise).color)
-                    .contentTransition(.numericText())
-            }
-            LazyVStack(spacing: 10) {
-                ForEach(positionContexts) { position in
-                    OpenPositionCard(
-                        figures: position.figures,
-                        symbol: position.market.symbol,
-                        isStale: market.freshness.freezesDigits) {
-                            market.select(position.market)
-                            selectedPosition = position.held
-                            Task { await session.selectMarket(position.market) }
-                        }
+                Spacer(minLength: 8)
+                Button(action: onFund) {
+                    Text(model.hasTradingAccount ? "Add funds" : "Open desk")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.night.color)
+                        .padding(.horizontal, 20)
+                        .frame(height: 46)
+                        .background(DeskColor.nightText.color, in: Capsule())
+                        .contentShape(Capsule())
                 }
+                .buttonStyle(.plain)
             }
         }
     }
