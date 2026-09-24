@@ -311,10 +311,10 @@ export function toast({ logoHTML = "", title, sub = "", amount = "", ttl = 6000 
   setTimeout(() => { el.style.opacity = "0"; el.style.transition = "opacity .3s"; setTimeout(() => el.remove(), 320); }, ttl);
 }
 
-export const APP_URL = "https://trydesk.trade/#get";
+export const APP_URL = "https://testflight.apple.com/join/zjQdZzMX";
 
 /// The web cannot sign. Anything that would be an order opens this instead.
-export function handoff({ title = "Trade this in Desk", sub = "Every order signs with Face ID in the app. Desk is on TestFlight by invite; join the waitlist and it comes by email." } = {}) {
+export function handoff({ title = "Trade this in Desk", sub = "Every order signs with Face ID in the app. Scan to get Desk on your iPhone." } = {}) {
   $("#handoff-title").textContent = title;
   $("#handoff-sub").textContent = sub;
   const box = $("#handoff-qr");
@@ -386,7 +386,7 @@ function startWallet() {
     if (!row) return;
     if (row.dataset.connect === "desk" || row.dataset.connect === "create") {
       close();
-      handoff({ title: row.dataset.connect === "create" ? "Create your account in Desk" : "Desk on iPhone", sub: "Your account lives in the app and signs with Face ID. Join the waitlist for the TestFlight invite." });
+      handoff({ title: row.dataset.connect === "create" ? "Create your account in Desk" : "Desk on iPhone", sub: "Your account lives in the app and signs with Face ID. Scan to get Desk." });
       return;
     }
     if (row.dataset.connect === "watch") {

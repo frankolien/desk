@@ -535,22 +535,3 @@ button { font: inherit; color: inherit; }
   .js .site-reveal { opacity: 1; transform: none; transition: none; }
   .site-btn, .site-round { transition: none; }
 }
-
-/* ── Waitlist ── */
-.site-waitlist { display: flex; gap: 10px; width: min(480px, 100%); margin: 30px auto 0; }
-.site-waitlist-input {
-  flex: 1; min-width: 0; height: 52px; padding: 0 22px; border-radius: 999px;
-  border: 1.5px solid rgba(255, 255, 255, 0.16); background: rgba(255, 255, 255, 0.06);
-  color: var(--fg); font: inherit; font-size: 16px; font-weight: 500; outline: none;
-}
-.site-waitlist-input::placeholder { color: var(--fg-muted); }
-.site-waitlist-input:focus { border-color: var(--amber); }
-.site-waitlist .site-btn-ink { background: var(--amber); color: var(--ink); }
-.site-waitlist .site-btn-ink:hover { background: var(--amber-deep); }
-.site-waitlist-note { margin: 14px 0 0; font-size: 13px; color: var(--fg-muted); min-height: 1.4em; }
-.site-waitlist-note.is-done { color: var(--amber); }
-@media (max-width: 520px) {
-  .site-waitlist { flex-direction: column; gap: 12px; }
-  .site-waitlist-input { height: 62px; padding: 0 24px; font-size: 18px; text-align: center; }
-  .site-waitlist .site-btn { justify-content: center; height: 62px; font-size: 17px; }
-}

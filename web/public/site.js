@@ -328,31 +328,4 @@
   }).catch(function () {
     renderTraders([]);
   });
-
-  /* ── Waitlist ── */
-  var waitlist = $("#waitlist");
-  if (waitlist) {
-    var note = $("[data-waitlist-note]");
-    var input = $("input", waitlist);
-    var submit = $("button", waitlist);
-    waitlist.addEventListener("submit", function (e) {
-      e.preventDefault();
-      var email = (input.value || "").trim();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { note.textContent = "That doesn\u2019t look like an email address."; input.focus(); return; }
-      submit.disabled = true;
-      note.textContent = "";
-      fetch("/api/alerts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "waitlist", email: email }) })
-        .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
-        .then(function (r) {
-          if (!r.ok) throw new Error(r.body && r.body.error);
-          waitlist.hidden = true;
-          note.classList.add("is-done");
-          note.textContent = r.body.already ? "You\u2019re already on the list." : "You\u2019re on the list. The invite comes to " + email + ".";
-        })
-        .catch(function (err) {
-          submit.disabled = false;
-          note.textContent = (err && err.message) || "That didn\u2019t go through. Try again.";
-        });
-    });
-  }
 })();
