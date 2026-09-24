@@ -154,8 +154,8 @@ struct SwapSheet: View {
     private var holdTitle: String {
         guard let typed else { return "Enter an amount" }
         if tooMuch { return "Not enough MON" }
-        guard let quoted = flow.quoted else { return flow.isQuoting ? "Quoting…" : "No quote yet" }
-        return "Hold to swap \(typed.display(fractionDigits: 2)) MON for ≈ \(Self.ausd(quoted.receive.amount)) AUSD"
+        guard flow.quoted != nil else { return flow.isQuoting ? "Quoting…" : "No quote yet" }
+        return "Hold to swap \(Self.mon(typed)) MON"
     }
 
     private func row(_ title: String, _ value: String) -> some View {
@@ -180,7 +180,7 @@ struct SwapSheet: View {
     private var progress: some View {
         VStack(alignment: .leading, spacing: 16) {
             Spacer()
-            Text("Swapping \(typed?.display(fractionDigits: 2) ?? amount) MON")
+            Text("Swapping \(typed.map(Self.mon) ?? amount) MON")
                 .font(.system(size: 26, weight: .bold, design: .rounded))
                 .foregroundStyle(DeskColor.nightText.color)
             VStack(alignment: .leading, spacing: 14) {
@@ -261,7 +261,7 @@ struct SwapSheet: View {
                 .padding(.top, 10)
 
             VStack(spacing: 0) {
-                receiptRow("Paid", "\(typed?.display(fractionDigits: 2) ?? amount) MON")
+                receiptRow("Paid", "\(typed.map(Self.mon) ?? amount) MON")
                 Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
                 receiptRow("Network", model.network.name)
                 Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
@@ -314,6 +314,11 @@ struct SwapSheet: View {
 
     private static func ausd(_ text: String) -> String { Money(text: text).map { $0.display() } ?? text }
     private static func mon(_ text: String) -> String { NativeAmount(decimalText: text).map { $0.display(fractionDigits: 3) } ?? text }
+    /// Whole MON when it is whole, two places otherwise: "500", not "500.00".
+    private static func mon(_ amount: NativeAmount) -> String {
+        let text = amount.display(fractionDigits: 2)
+        return text.hasSuffix(".00") ? String(text.dropLast(3)) : text
+    }
 }
 
 struct SwapQuote: Decodable, Sendable {

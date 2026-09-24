@@ -66,6 +66,10 @@ final class TradeAlerts {
     private var deviceToken: String?
     private var confirmOnSync = false
     private var syncTask: Task<Void, Never>?
+    /// Something changed on this phone that the server has not heard yet. Cleared by a
+    /// successful sync, retried on the next foreground; never a dialog by itself.
+    private var needsSync = false
+    private var registrationRetry: Task<Void, Never>?
 
     private static let storageKey = "desk.alertedTraders"
     private static let pricesKey = "desk.alerts.prices"
@@ -123,13 +127,15 @@ final class TradeAlerts {
         }
     }
 
-    /// Re-registers on launch, which also refreshes the server's copy before it expires.
+    /// Re-registers on launch and on every return to the foreground, which also refreshes
+    /// the server's copy before it expires and catches up on anything unsynced.
     func resume() async {
         await refreshPermission()
         // A silent wake needs a token but no permission, so copying registers regardless.
         let wantsAlerts = !alerted.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty
         guard (permission == .allowed && wantsAlerts) || !copying.isEmpty else { return }
         UIApplication.shared.registerForRemoteNotifications()
+        if needsSync, deviceToken != nil { scheduleSync() }
     }
 
     /// Asks iOS if it has not been asked; false when notifications are off for Desk.
@@ -217,15 +223,23 @@ final class TradeAlerts {
     }
 
     func didRegister(deviceToken data: Data) {
+        registrationRetry?.cancel()
         let token = data.map { String(format: "%02x", $0) }.joined()
         deviceToken = token
         UserDefaults.standard.set(token, forKey: Self.tokenKey)
         scheduleSync()
     }
 
+    /// Apple could not be reached for a token. The follow is already saved on this phone,
+    /// so nothing is lost; iOS is asked again shortly, and again on the next foreground.
     func didFailToRegister() {
-        guard !alerted.isEmpty else { return }
-        problem = "This iPhone couldn't register for notifications. Check your connection and try again."
+        needsSync = true
+        registrationRetry?.cancel()
+        registrationRetry = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            guard !Task.isCancelled, self != nil else { return }
+            UIApplication.shared.registerForRemoteNotifications()
+        }
     }
 
     func namesChanged() { if !alerted.isEmpty { scheduleSync() } }
@@ -284,6 +298,7 @@ final class TradeAlerts {
 
     /// Changes made in quick succession go up as one request, in the order they were made.
     private func scheduleSync() {
+        needsSync = true
         syncTask?.cancel()
         syncTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
@@ -294,6 +309,7 @@ final class TradeAlerts {
 
     private func sync() async {
         guard let deviceToken, let install = InstallSecret.value() else { return }
+        needsSync = true
         let nicknames = UserDefaults.standard.dictionary(forKey: Self.nicknameKey) as? [String: String] ?? [:]
         let traders = alerted.map { $0.lowercased() }
         let confirm = confirmOnSync
@@ -318,16 +334,22 @@ final class TradeAlerts {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        guard let (data, response) = try? await URLSession.shared.data(for: request) else {
-            problem = "Alerts couldn't be saved. Check your connection and try again."
-            return
+        // A dropped connection is retried here, then left for the next foreground. Only
+        // the server saying no is worth a dialog.
+        var answer: (Data, URLResponse)?
+        for attempt in 0..<3 {
+            if attempt > 0 { try? await Task.sleep(for: .seconds(attempt * 3)) }
+            guard !Task.isCancelled else { return }
+            answer = try? await URLSession.shared.data(for: request)
+            if answer != nil { break }
         }
+        guard let (data, response) = answer else { return }
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            let reason = (try? JSONDecoder().decode(ServerError.self, from: data))?.error
-            problem = reason ?? "Alerts couldn't be saved right now."
+            if let reason = (try? JSONDecoder().decode(ServerError.self, from: data))?.error { problem = reason }
             return
         }
         if confirm { confirmOnSync = false }
+        needsSync = false
         problem = nil
         lastSyncedAt = .now
         UserDefaults.standard.set(lastSyncedAt, forKey: Self.lastSyncKey)

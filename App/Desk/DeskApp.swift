@@ -52,7 +52,9 @@ struct DeskApp: App {
         .onChange(of: phase) { _, new in
             switch new {
             case .background: grace.leave(model)
-            case .active: grace.return(model)
+            case .active:
+                grace.return(model)
+                Task { await TradeAlerts.shared.resume() }
             default: break
             }
         }

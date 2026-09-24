@@ -276,8 +276,8 @@ struct WithdrawSheet: View {
 
     private var holdTitle: String {
         guard let requested else { return destination == .address && recipient == nil ? "Add an address" : "Enter an amount" }
-        let target = destination == .address ? recipient.map { TraderSnapshot.short($0.checksummed) } ?? "address" : "wallet"
-        return "Hold to send \(requested.display()) AUSD to \(target)"
+        // The destination is already drawn in the route above; the button names only the amount.
+        return "Hold to send \(requested.display()) AUSD"
     }
 
     private func label(_ text: String) -> some View {

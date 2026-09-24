@@ -55,6 +55,7 @@ struct HoldToConfirm: View {
             // white and disappearing into it.
             .foregroundStyle(progress > 0.55 ? label.color : DeskColor.nightText.color)
             .animation(.easeInOut(duration: 0.15), value: progress > 0.55)
+            .padding(.horizontal, 22)
         }
         .frame(height: 62)
         .opacity(isEnabled ? 1 : 0.45)
