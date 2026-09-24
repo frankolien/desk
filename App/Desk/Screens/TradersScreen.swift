@@ -527,9 +527,8 @@ struct TradersFeed: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 20)
             }
-            .padding(.horizontal, -20)
+            .scrollClipDisabled()
             .padding(.top, 12)
             .padding(.bottom, 28)
             }

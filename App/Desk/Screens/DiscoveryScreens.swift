@@ -317,8 +317,9 @@ struct MarketSearchScreen: View {
                             }
                         }
                     }
-                    .contentMargins(.horizontal, 20)
-                    .padding(.horizontal, -20)
+                    // Cards may draw past the page margin, but the strip itself stays the page's
+                    // width: a negative padding widened the page and let it be dragged sideways.
+                    .scrollClipDisabled()
                     .padding(.top, 12)
 
                     if !spotResults.isEmpty {
@@ -2631,8 +2632,7 @@ private struct WalletProfileScreen: View {
                 .buttonStyle(.plain)
             }
         }
-        .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.1)).frame(height: 0.5) }
-        .padding(.horizontal, -20)
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.1)).frame(height: 0.5).padding(.horizontal, -20) }
     }
 
     // MARK: Content

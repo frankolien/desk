@@ -79,12 +79,12 @@ struct NewsRow: View {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(item.title)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                     Text("\(item.source) · \(Self.age(of: item.date))")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
                     .lineLimit(1)
                     if !chips.isEmpty {
@@ -112,7 +112,7 @@ struct NewsRow: View {
                     RemoteImage(url: image, fill: true) {
                         RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.06))
                     }
-                    .frame(width: 66, height: 66)
+                    .frame(width: 72, height: 72)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
             }

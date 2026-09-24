@@ -58,6 +58,11 @@ struct MarketScreen: View {
                     }
                     .padding(.top, 8)
                     .padding(.bottom, 116)
+                    #if DEBUG
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width in
+                        if ProcessInfo.processInfo.arguments.contains("-width-probe") { print("home-content-width \(width) screen \(UIScreen.main.bounds.width)") }
+                    }
+                    #endif
                 }
                 .refreshable {
                     async let markets: Void = market.refreshNow()
@@ -141,10 +146,10 @@ struct MarketScreen: View {
                     if model.hasTradingAccount {
                         HStack(alignment: .center, spacing: 9) {
                             TokenLogo(asset: .ausd, size: 30)
-                            AmountText(model.collateral.value?.display() ?? Unavailable.text, size: 34)
+                            AmountText(model.collateral.value?.display() ?? Unavailable.text, size: 38)
                         }
                         Text("Available to trade")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
                             .foregroundStyle(DeskColor.nightMuted.color)
                     } else {
                         Text("No desk yet")
@@ -186,7 +191,7 @@ struct MarketScreen: View {
             VStack(alignment: .leading, spacing: 1) {
                 sectionTitle("Hot Markets")
                 Text("Based on trader activity")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
             }
             .padding(.horizontal, 16)
@@ -211,7 +216,7 @@ struct MarketScreen: View {
     private var hotPlaceholder: some View {
         RoundedRectangle(cornerRadius: 22, style: .continuous)
             .fill(Color.white.opacity(0.05))
-            .frame(width: 250, height: 104)
+            .frame(width: 262, height: 108)
     }
 
     // MARK: Explore
@@ -322,7 +327,7 @@ struct MarketScreen: View {
         VStack(alignment: .leading, spacing: 4) {
             sectionLink("Live Trades", action: onOpenTraders)
             Text("Top traders' open positions")
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundStyle(DeskColor.nightMuted.color)
             if liveRows.isEmpty {
                 placeholderRows(3).padding(.top, 10)
@@ -390,7 +395,7 @@ struct MarketScreen: View {
 
     private func sectionTitle(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 18, weight: .bold, design: .rounded))
+            .font(.system(size: 20, weight: .bold, design: .rounded))
             .foregroundStyle(DeskColor.nightText.color)
     }
 
@@ -433,10 +438,10 @@ private struct HotMarketCard: View {
                 MarketTokenLogo(symbol: market.symbol, size: 34)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(market.symbol)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
                     Text("\(TraderFormat.compact(crowd.total)) open")
-                        .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
+                        .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
                         .foregroundStyle(DeskColor.nightMuted.color)
                 }
                 Spacer(minLength: 8)
@@ -453,12 +458,12 @@ private struct HotMarketCard: View {
             HStack(spacing: 6) {
                 Circle().fill(DeskColor.rise.color).frame(width: 5, height: 5)
                 Text("**\(crowd.traders)** \(crowd.traders == 1 ? "trader" : "traders")")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
                 if let share = crowd.longShare {
                     let percent = Int((max(share, 1 - share) * 100).rounded())
                     Text(percent == 50 ? "· split evenly" : "· \(percent)% \(share >= 0.5 ? "long" : "short")")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
                 }
                 Spacer(minLength: 4)
@@ -468,7 +473,7 @@ private struct HotMarketCard: View {
             }
         }
         .padding(14)
-        .frame(width: 250)
+        .frame(width: 262)
         .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.white.opacity(0.07), lineWidth: 0.5))
         .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -487,11 +492,11 @@ private struct PerpMarketRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            MarketTokenLogo(symbol: market.symbol, size: 36)
+            MarketTokenLogo(symbol: market.symbol, size: 38)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(market.symbol)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
                     Text("\(market.config.maxLeverage)x")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
@@ -501,23 +506,23 @@ private struct PerpMarketRow: View {
                         .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 Text(volume)
-                    .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
+                    .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
                     .foregroundStyle(DeskColor.nightMuted.color)
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 3) {
                 let price = model.markText(for: market)
                 Text(price == "—" ? "—" : "$" + price)
-                    .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 16, weight: .bold, design: .rounded).monospacedDigit())
                     .foregroundStyle(DeskColor.nightText.color)
                     .contentTransition(.numericText())
                 let change = model.changePercent(for: market)
                 Text(change.map { String(format: "%+.2f%%", $0) } ?? "—")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
                     .foregroundStyle((change ?? 0) >= 0 ? DeskColor.rise.color : DeskColor.fall.color)
             }
         }
-        .frame(height: 56)
+        .frame(height: 60)
         .contentShape(Rectangle())
     }
 }
@@ -540,7 +545,7 @@ private struct LiveTradeRow: View {
                 }
             VStack(alignment: .leading, spacing: 3) {
                 Text(name)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
                     .foregroundStyle(DeskColor.nightText.color)
                     .lineLimit(1)
                 HStack(spacing: 5) {
@@ -549,21 +554,21 @@ private struct LiveTradeRow: View {
                     Text("\(TraderFormat.leverage(position.leverage)) \(position.isLong ? "Long" : "Short") · \(TraderFormat.compact(Double(position.value)))")
                         .foregroundStyle(DeskColor.nightMuted.color)
                 }
-                .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
+                .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
                 .lineLimit(1)
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 2) {
                 if let rate = record?.winRate {
                     Text("\(Int((rate * 100).rounded()))%")
-                        .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
+                        .font(.system(size: 16, weight: .bold, design: .rounded).monospacedDigit())
                         .foregroundStyle(rate >= 0.6 ? DeskColor.rise.color : DeskColor.nightText.color)
                     Text("Win rate")
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
                 } else {
                     Text(TraderFormat.compact(Double(position.pnl), signed: true))
-                        .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
+                        .font(.system(size: 16, weight: .bold, design: .rounded).monospacedDigit())
                         .foregroundStyle((position.isProfit ? DeskColor.rise : DeskColor.fall).color)
                     Text("Open PnL")
                         .font(.system(size: 11, weight: .medium, design: .rounded))
@@ -618,7 +623,7 @@ private struct TopTraderRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(name)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
                         .lineLimit(1)
                     if isFollowed {
@@ -628,13 +633,13 @@ private struct TopTraderRow: View {
                     }
                 }
                 Text(detail)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 2) {
                 Text(TraderFormat.compact(trader.pnl.flatMap(Double.init), signed: true))
-                    .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 16, weight: .bold, design: .rounded).monospacedDigit())
                     .foregroundStyle((trader.isProfit ? DeskColor.rise : DeskColor.fall).color)
                 if let returnText {
                     Text(returnText)
@@ -846,7 +851,7 @@ struct PerpDetailScreen: View {
                         Image(systemName: change.up ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
                             .font(.system(size: 9, weight: .bold))
                         Text(change.text)
-                            .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
+                            .font(.system(size: 16, weight: .bold, design: .rounded).monospacedDigit())
                     } else {
                         Text(market.changePercentText ?? "—")
                             .font(.system(size: 15, weight: .bold, design: .rounded))
