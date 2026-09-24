@@ -279,10 +279,9 @@ struct HomeScreen: View {
             HomeActionTile(symbol: "arrow.up.right", title: "Withdraw", isEnabled: canWithdraw, action: onWithdraw)
             HomeActionTile(symbol: "arrow.left.arrow.right", title: "Trade",
                            isEnabled: !isEmpty, action: onTrade)
+            // Only what has no tile or chip of its own: funding, withdrawing, the network
+            // and Following each already live one tap away on this screen or a tab.
             Menu {
-                Button { onNetwork() } label: { Label("Network", systemImage: "globe") }
-                Button { onFund() } label: { Label("Add funds", systemImage: "creditcard.fill") }
-                Button { onWithdraw() } label: { Label("Withdraw", systemImage: "building.columns") }
                 Button {
                     withAnimation(.snappy) { hidesBalance.toggle() }
                 } label: {
@@ -292,7 +291,6 @@ struct HomeScreen: View {
                 Button { Task { await model.lock() } } label: {
                     Label("Lock Trading Key", systemImage: "lock.shield")
                 }
-                Button { onFollowing() } label: { Label("Following", systemImage: "person.fill") }
                 Button { model.copyAddress() } label: { Label("Copy Address", systemImage: "doc.on.doc") }
             } label: {
                 HomeActionTileLabel(symbol: "ellipsis", title: "More")
