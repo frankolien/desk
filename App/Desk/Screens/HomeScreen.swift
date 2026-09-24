@@ -118,6 +118,7 @@ struct HomeScreen: View {
     private var chartChange: (money: Money, percent: Double)? {
         let shown = shownEquity
         guard let first = shown.first, let last = shown.last, first.raw > 0, shown.count >= 2,
+              shown.contains(where: { $0.raw != first.raw }),
               let delta = Money(raw: last.raw - first.raw) else { return nil }
         return (delta, Double(last.raw - first.raw) / Double(first.raw) * 100)
     }
@@ -282,7 +283,7 @@ struct HomeScreen: View {
                     Task { try? await Task.sleep(for: .seconds(1.4)); withAnimation { copiedAddress = false } }
                 } label: {
                     HStack(spacing: 5) {
-                        Text(copiedAddress ? "Address copied" : (ownName != nil ? model.addressShort : "\(model.addressShort) · \(model.network.shortName)"))
+                        Text(copiedAddress ? "Address copied" : (ownName != nil ? model.addressShort : model.network.name))
                         Image(systemName: copiedAddress ? "checkmark" : "doc.on.doc")
                             .font(.system(size: 10, weight: .bold))
                     }
