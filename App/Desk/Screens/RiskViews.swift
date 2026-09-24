@@ -101,6 +101,8 @@ struct RiskChip: View {
             Text(level.title)
                 .font(.system(size: compact ? 10 : 11, weight: .bold, design: .rounded))
                 .foregroundStyle(level == .unchecked ? DeskColor.nightMuted.color : level.color)
+                .lineLimit(1)
+                .fixedSize()
         }
         .padding(.horizontal, compact ? 7 : 10)
         .padding(.vertical, compact ? 3 : 6)

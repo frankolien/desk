@@ -36,6 +36,8 @@ struct MarketScreen: View {
     @State private var selectedTrader: TraderSnapshot?
     @State private var openToken: TokenOpenRequest.Target?
     @State private var directory = TraderDirectory()
+    @State private var news = NewsModel()
+    @State private var article: NewsItem?
     @StateObject private var discovery = TokenDiscoveryModel()
     @AppStorage("desk.watchlist") private var savedIDs = ""
     @AppStorage("desk.spotWatchlist") private var savedSpotData = ""
@@ -53,8 +55,11 @@ struct MarketScreen: View {
                             hotMarkets.padding(.top, 26)
                             explore.padding(.top, 30)
                         }
-                        liveTrades.padding(.top, 34)
-                        topTraders.padding(.top, 34)
+                        if !Self.newsOnly {
+                            liveTrades.padding(.top, 34)
+                            topTraders.padding(.top, 34)
+                        }
+                        newsSection.padding(.top, 34)
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
@@ -65,7 +70,8 @@ struct MarketScreen: View {
                     async let top: Void = directory.refreshTop()
                     async let crowd: Void = directory.refreshCrowd()
                     async let spot: Void = discovery.refresh()
-                    _ = await (markets, top, crowd, spot)
+                    async let headlines: Void = news.load()
+                    _ = await (markets, top, crowd, spot, headlines)
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -91,6 +97,10 @@ struct MarketScreen: View {
             }
             .task { await directory.run() }
             .task { await discovery.run() }
+            .task { await news.run() }
+            .sheet(item: $article) { item in
+                if let link = item.link { InAppSafari(url: link).ignoresSafeArea() }
+            }
             .task { await openRequestedMarket() }
             .onChange(of: MarketOpenRequest.shared.pending) { _, symbol in if symbol != nil { Task { await openRequestedMarket() } } }
             #if DEBUG
@@ -115,10 +125,18 @@ struct MarketScreen: View {
         }
     }
 
-    /// `-trade-traders` shows the lower sections first, so they can be captured without a scroll.
+    /// `-trade-traders` and `-trade-news` show a lower section first, so it can be captured without a scroll.
     private static var tradersOnly: Bool {
         #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-trade-traders")
+        ProcessInfo.processInfo.arguments.contains("-trade-traders") || newsOnly
+        #else
+        false
+        #endif
+    }
+
+    private static var newsOnly: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-trade-news")
         #else
         false
         #endif
@@ -318,7 +336,7 @@ struct MarketScreen: View {
                 .frame(maxWidth: .infinity, minHeight: 88)
         } else {
             VStack(spacing: 8) {
-                perpRows(perps)
+                if !perps.isEmpty { perpRows(perps) }
                 ForEach(spot) { token in
                     Button { openToken = .init(chainIndex: token.chainIndex, contract: token.contract, symbol: token.symbol) } label: {
                         TrendingSpotRow(token: token)
@@ -393,6 +411,26 @@ struct MarketScreen: View {
                     }
                 }
                 .padding(.top, 6)
+            }
+        }
+    }
+
+    // MARK: News
+
+    private var newsSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            sectionTitle("News")
+            if news.items.isEmpty {
+                placeholderRows(news.loaded ? 0 : 3).padding(.top, 10)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(news.items.prefix(8).enumerated()), id: \.element.id) { index, item in
+                        Button { article = item } label: {
+                            NewsRow(item: item, market: market, isLast: index == min(news.items.count, 8) - 1)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
         }
     }

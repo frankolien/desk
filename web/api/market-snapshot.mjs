@@ -1,5 +1,8 @@
 import crypto from "node:crypto";
 
+import { filter, headlines } from "./_news.mjs";
+import { redisStore } from "./_store.mjs";
+
 const TOKENS = {
   BTC: { chainIndex: "1", address: "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599", instrument: "BTC-USDT" },
   ETH: { chainIndex: "1", address: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", instrument: "ETH-USDT" },
@@ -45,6 +48,16 @@ async function dexCandles(identity, bar) {
 
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
+  // Headlines share this function: same market vocabulary, and the function ceiling holds.
+  if (req.query.view === "news") {
+    try {
+      const items = filter(await headlines({ store: redisStore() }), req.query.symbols);
+      res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=900");
+      return res.status(200).json({ observedAt: Date.now(), items });
+    } catch {
+      return res.status(502).json({ error: "News could not be read right now." });
+    }
+  }
   const symbol = String(req.query.symbol || "").toUpperCase();
   const bar = String(req.query.period || "1m");
   const known = TOKENS[symbol];
