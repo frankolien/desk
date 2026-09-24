@@ -87,6 +87,10 @@ targets:
         # Dark only. A trading app on a near-black ground has no light mode to test, and
         # in thirty-one days an untested one is a liability rather than a feature.
         INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        # Desk uses exempt cryptography for passkeys, HTTPS and transaction signatures;
+        # it does not ship non-exempt encryption. This suppresses the export-compliance
+        # questionnaire for each uploaded build.
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: Desk saves the trade cards you choose to keep.
         INFOPLIST_KEY_NSFaceIDUsageDescription: Desk derives your trading key from your face. Nothing is stored.
 

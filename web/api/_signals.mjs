@@ -126,6 +126,8 @@ export function aggregateTokens(ledgers, { now, windowMs }) {
   });
 }
 
+
+
 export async function computeSignals({ store, now = Date.now(), window = DEFAULT_WINDOW, prices = currentPrices }) {
   const windowMs = WINDOWS[window] ?? WINDOWS[DEFAULT_WINDOW];
   const ledgers = await qualifiedLedgers({ store, now });
@@ -156,7 +158,9 @@ export async function computeSignals({ store, now = Date.now(), window = DEFAULT
       price: priced.get(row.token) ?? null,
     })),
   };
+
 }
+
 
 export async function cachedSignals({ store, window = DEFAULT_WINDOW, now = Date.now(), prices }) {
   const key = signalsKey(window);
@@ -166,3 +170,4 @@ export async function cachedSignals({ store, window = DEFAULT_WINDOW, now = Date
   await store.set(key, JSON.stringify(result), { ex: CACHE_S }).catch(() => {});
   return result;
 }
+
