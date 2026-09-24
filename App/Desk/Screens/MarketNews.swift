@@ -76,15 +76,15 @@ struct NewsRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 14) {
-                VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(item.title)
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                     Text("\(item.source) · \(Self.age(of: item.date))")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
                     .lineLimit(1)
                     if !chips.isEmpty {
@@ -98,9 +98,9 @@ struct NewsRow: View {
                                             .foregroundStyle(change >= 0 ? DeskColor.rise.color : DeskColor.fall.color)
                                     }
                                 }
-                                .font(.system(size: 12, weight: .bold, design: .rounded).monospacedDigit())
-                                .padding(.horizontal, 10)
-                                .frame(height: 26)
+                                .font(.system(size: 11, weight: .bold, design: .rounded).monospacedDigit())
+                                .padding(.horizontal, 8)
+                                .frame(height: 22)
                                 .background(Color.white.opacity(0.08), in: Capsule())
                             }
                         }
@@ -110,13 +110,13 @@ struct NewsRow: View {
                 Spacer(minLength: 0)
                 if let image = item.imageURL {
                     RemoteImage(url: image, fill: true) {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white.opacity(0.06))
+                        RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.06))
                     }
-                    .frame(width: 84, height: 84)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .frame(width: 66, height: 66)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
             }
-            .padding(.vertical, 16)
+            .padding(.vertical, 12)
             if !isLast { Rectangle().fill(Color.white.opacity(0.07)).frame(height: 0.5) }
         }
         .contentShape(Rectangle())
