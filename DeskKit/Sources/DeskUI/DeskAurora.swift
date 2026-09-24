@@ -4,12 +4,15 @@ import SwiftUI
 /// a field with an amber half and a violet half is two tints, not one light.
 public struct DeskAurora: View {
     private let height: CGFloat
+    /// Which edge the light sits on. It fades towards the middle from either.
+    private let edge: VerticalEdge
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var phase: CGFloat = 0
 
-    public init(height: CGFloat = 430) {
+    public init(height: CGFloat = 430, edge: VerticalEdge = .top) {
         self.height = height
+        self.edge = edge
     }
 
     public var body: some View {
@@ -32,10 +35,10 @@ public struct DeskAurora: View {
                         .init(color: .white.opacity(0.88), location: 0.45),
                         .init(color: .clear, location: 1),
                     ],
-                    startPoint: .top,
-                    endPoint: .bottom)
+                    startPoint: edge == .top ? .top : .bottom,
+                    endPoint: edge == .top ? .bottom : .top)
             }
-            .frame(maxHeight: .infinity, alignment: .top)
+            .frame(maxHeight: .infinity, alignment: edge == .top ? .top : .bottom)
             .ignoresSafeArea()
             .allowsHitTesting(false)
             .accessibilityHidden(true)
