@@ -149,7 +149,7 @@ struct MarketScreen: View {
 
     /// The mark, then the one figure a trader checks before every order.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: 14) {
             DeskBrandMark(size: 28)
                 .frame(height: 36, alignment: .leading)
             HStack(alignment: .center, spacing: 12) {
