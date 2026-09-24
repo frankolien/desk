@@ -5,6 +5,7 @@ import { MAX_ADDRESSES, NameLookupUnavailable, ensAddressReader, ensReader, look
 import { EXCHANGE_VIEWS } from "./_perpl-abi.mjs";
 import { DEFAULT_WINDOW, WINDOWS, cachedSignals } from "./_signals.mjs";
 import { redisStore } from "./_store.mjs";
+import { publicProfile, readProfile, saveProfile } from "./_profile.mjs";
 
 /// Perpl mainnet, read-only. Following is about real traders, so it reads the live venue
 /// even though Desk trades on testnet; nothing here signs or moves funds.
@@ -270,8 +271,30 @@ async function styleSummary({ store, fetchImpl, account, stats, apiKey = process
 
 export function createHandler({ chain = chainReader(), fetchImpl = fetch, store = redisStore(), ens = ensReader(), ensAddress = ensAddressReader() } = {}) {
   return async function handler(req, res) {
-    if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
     const view = String(req.query.view || "top");
+
+    // A wallet's own name and picture: set with a signature, read by anyone.
+    if (view === "profile") {
+      res.setHeader("Cache-Control", "private, no-store");
+      if (req.method === "POST") {
+        const outcome = await saveProfile(store, req.body ?? {});
+        return res.status(outcome.status).json(outcome.body);
+      }
+      const address = String(req.query.address ?? "");
+      if (!validAddress(address)) return res.status(400).json({ error: "A wallet address is required." });
+      return res.status(200).json({ profile: publicProfile(address, await readProfile(store, address)) });
+    }
+    if (view === "avatar") {
+      const address = String(req.query.address ?? "");
+      if (!validAddress(address)) return res.status(400).json({ error: "A wallet address is required." });
+      const stored = await readProfile(store, address);
+      if (!stored?.image) return res.status(404).json({ error: "No picture." });
+      // The URL carries the version, so a picture can be cached hard and replaced by a new URL.
+      res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+      res.setHeader("Content-Type", stored.type || "image/jpeg");
+      return res.status(200).send(Buffer.from(stored.image, "base64"));
+    }
+    if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
 
     if (view === "lookup") {
       const query = String(req.query.q ?? "").trim().slice(0, 80);

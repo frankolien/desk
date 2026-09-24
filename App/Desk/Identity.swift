@@ -16,6 +16,7 @@ struct Identity: Codable, Hashable, Sendable {
 
     var sourceLabel: String? {
         switch source {
+        case "desk": "Desk"
         case "nad": "Nad Name Service"
         case "nadfun": "nad.fun"
         case "ens": "ENS"
@@ -93,7 +94,16 @@ final class IdentityDirectory {
         return identity
     }
 
-    func resolve(_ addresses: [String]) async {
+    /// Forgets what is held for one address and asks the server for a fresh answer,
+    /// past its own cache: what a person just changed about themselves should show now.
+    func refresh(_ address: String) async {
+        let key = key(for: address)
+        fetchedAt[key] = nil
+        pinned.remove(key)
+        await resolve([key], fresh: true)
+    }
+
+    func resolve(_ addresses: [String], fresh: Bool = false) async {
         let now = Date.now
         var wanted: [String] = []
         var seen: Set<String> = []
@@ -102,7 +112,7 @@ final class IdentityDirectory {
             let evm = address.count == 42 && address.hasPrefix("0x")
             guard (evm || TrackedWallets.isSolana(address)), seen.insert(address).inserted,
                   !inFlight.contains(address) else { continue }
-            if let at = fetchedAt[address], now.timeIntervalSince(at) < Self.maxAge { continue }
+            if !fresh, let at = fetchedAt[address], now.timeIntervalSince(at) < Self.maxAge { continue }
             wanted.append(address)
         }
         guard !wanted.isEmpty else { return }
@@ -116,8 +126,9 @@ final class IdentityDirectory {
                 URLQueryItem(name: "view", value: "identity"),
                 URLQueryItem(name: "addresses", value: chunk.joined(separator: ",")),
             ]
+            if fresh { components.queryItems?.append(URLQueryItem(name: "fresh", value: "1")) }
             guard let url = components.url,
-                  let (data, _) = try? await ResponseCache.shared.data(from: url, maxStale: 3_600),
+                  let (data, _) = try? await ResponseCache.shared.data(from: url, maxStale: fresh ? 0 : 3_600),
                   let body = try? JSONDecoder().decode(Response.self, from: data) else { continue }
             for (address, identity) in body.identities where !pinned.contains(key(for: address)) {
                 let key = key(for: address)

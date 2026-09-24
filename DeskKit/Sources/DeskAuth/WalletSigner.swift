@@ -83,3 +83,17 @@ struct Keccak256Digest: Digest {
         try bytes.withUnsafeBytes(body)
     }
 }
+
+/// EIP-191 personal messages: what `personal_sign` signs, and what every verifier of
+/// a wallet's word about itself checks.
+///
+/// The prefix and the byte length make the digest impossible to confuse with a
+/// transaction or a typed-data hash, so a signature over one of these can never be
+/// replayed as anything that moves money.
+public enum PersonalMessage {
+    public static func digest(_ message: String) -> Data {
+        let body = Data(message.utf8)
+        let prefix = Data("\u{19}Ethereum Signed Message:\n\(body.count)".utf8)
+        return Keccak.hash(prefix + body)
+    }
+}

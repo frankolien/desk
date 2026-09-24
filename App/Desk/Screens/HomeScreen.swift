@@ -49,6 +49,7 @@ struct HomeScreen: View {
     @State private var range: Range = .day
     @State private var equity: [EquityLog.Point] = []
     @State private var copiedAddress = false
+    @State private var editsProfile = false
 
     // MARK: Figures
 
@@ -155,6 +156,12 @@ struct HomeScreen: View {
             PositionScreen(position: held, market: market, session: model.trading, model: model)
                 .presentationDetents([.large])
         }
+        .sheet(isPresented: $editsProfile) {
+            ProfileEditorSheet(model: model) { editsProfile = false }
+        }
+        #if DEBUG
+        .task { if ProcessInfo.processInfo.arguments.contains("-open-profile-editor") { editsProfile = true } }
+        #endif
         .task(id: model.address) { await spot.run(for: model.address) }
         .task(id: model.address) {
             if let address = model.address { await IdentityDirectory.shared.resolve([address.checksummed]) }
@@ -236,6 +243,7 @@ struct HomeScreen: View {
     private var identity: some View {
         HStack(alignment: .top, spacing: 14) {
             Menu {
+                Button { editsProfile = true } label: { Label("Edit Profile", systemImage: "person.crop.circle.badge.plus") }
                 Button {
                     withAnimation(.snappy) { hidesBalance.toggle() }
                 } label: {

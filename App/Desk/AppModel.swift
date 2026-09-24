@@ -258,6 +258,16 @@ final class AppModel {
         UIPasteboard.general.string = address.checksummed
     }
 
+    /// The wallet's own name and picture, signed once with Face ID and shown to everyone.
+    func saveProfile(name: String, image: Data?) async throws {
+        guard let address else { return }
+        let passkey = passkey
+        _ = try await DeskProfile.save(address: address, name: name, image: image) { digest in
+            try await passkey.withKeys { wallet, _ in try WalletSigner.sign(digest: digest, with: wallet) }
+        }
+        await IdentityDirectory.shared.refresh(address.checksummed)
+    }
+
     /// Whether the welcome screen should offer to create a passkey.
     ///
     /// True exactly when this device has never derived an address. It cannot be inferred

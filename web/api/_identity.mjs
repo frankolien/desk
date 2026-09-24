@@ -1,4 +1,5 @@
 import { createPublicClient, http } from "viem";
+import { deskProfiles } from "./_profile.mjs";
 import { mainnet } from "viem/chains";
 
 /// Who a wallet is, from every place a Monad wallet can carry a public name: a .nad
@@ -126,8 +127,10 @@ async function farcaster(addresses, fetchImpl, key) {
   return found;
 }
 
-export function describeIdentity(address, { nad = null, fun = null, ens = null, sns = null, cast = null, perpl = null } = {}) {
+export function describeIdentity(address, { desk = null, nad = null, fun = null, ens = null, sns = null, cast = null, perpl = null } = {}) {
   const sources = [
+    // What the wallet said about itself comes first; the chains' records fill the gaps.
+    desk && { source: "desk", name: desk.name ?? null, avatar: desk.avatar ?? null },
     nad && { source: "nad", name: nad.name, avatar: nad.avatar ?? null },
     fun && { source: "nadfun", name: fun.name, avatar: fun.avatar ?? null, bio: fun.bio ?? null },
     ens && { source: "ens", name: ens.name, avatar: ens.avatar ?? null, x: ens.x ?? null },
@@ -171,7 +174,8 @@ export async function resolveIdentities(addresses, { fetchImpl = fetch, chain = 
 
   const evm = missing.filter(evmAddress);
   const solana = missing.filter(solanaAddress);
-  const [nad, sns, casts, funs, enses, perpls] = await Promise.all([
+  const [desks, nad, sns, casts, funs, enses, perpls] = await Promise.all([
+    deskProfiles(store, missing),
     nadNames(evm, fetchImpl),
     snsPrimary(solana, fetchImpl),
     farcaster(missing, fetchImpl, neynarKey),
@@ -185,7 +189,7 @@ export async function resolveIdentities(addresses, { fetchImpl = fetch, chain = 
 
   missing.forEach((address, index) => {
     const identity = describeIdentity(address, {
-      nad: nad.get(address), fun: funs[index], ens: enses[index], sns: sns.get(address), cast: casts.get(address), perpl: perpls[index],
+      desk: desks.get(address), nad: nad.get(address), fun: funs[index], ens: enses[index], sns: sns.get(address), cast: casts.get(address), perpl: perpls[index],
     });
     identities[address] = identity;
     if (store) store.set(cacheKey(address), JSON.stringify(identity), { ex: TTL_SECONDS }).catch(() => {});
