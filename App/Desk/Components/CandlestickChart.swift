@@ -216,13 +216,32 @@ extension MarketModel.Candle {
     }
 }
 
+/// The corner control that opens the full-screen chart.
+struct ChartExpandButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(DeskColor.nightMuted.color)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .deskGlass(interactive: true, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .padding(.trailing, 66)
+        .accessibilityLabel("Expand chart")
+    }
+}
+
 /// The interval rail under a chart. One control, so the market screen and the position
 /// screen cannot drift into offering different ranges of the same series.
 struct CandleIntervalRail: View {
     let market: MarketModel
 
-    private static let intervals = [(60, "1m"), (180, "3m"), (300, "5m"),
-                                    (900, "15m"), (1_800, "30m"), (3_600, "1H")]
+    static let intervals = [(60, "1m"), (180, "3m"), (300, "5m"), (900, "15m"),
+                            (1_800, "30m"), (3_600, "1H"), (14_400, "4H"), (86_400, "1D")]
 
     var body: some View {
         HStack {

@@ -32,6 +32,13 @@ final class MarketModel {
     private(set) var history: [Double] = []
     private(set) var candles: [Candle] = []
     private(set) var candleIntervalSeconds = 3_600
+    /// How many candles a refresh asks for. The detail screens draw a couple of dozen;
+    /// the full-screen chart raises this so there is history to pan through.
+    private(set) var candleDepth = MarketModel.defaultCandleDepth
+    private(set) var isLoadingOlderCandles = false
+    private(set) var reachedOldestCandle = false
+    static let defaultCandleDepth = 80
+    private static let candleCap = 3_000
     /// The block the venue last reported, carried on the same context call the price
     /// comes from. Every order's deadline is computed against it, so a stale one produces
     /// an order that expires on arrival.
@@ -150,6 +157,7 @@ final class MarketModel {
         market = selected
         symbol = selected.symbol
         candles = []
+        reachedOldestCandle = false
         // The series belongs to the market that produced it. `record` reseeds it from
         // the new market's own previous mark.
         history = []
@@ -162,8 +170,46 @@ final class MarketModel {
         guard seconds != candleIntervalSeconds else { return }
         candleIntervalSeconds = seconds
         candles = []
+        reachedOldestCandle = false
         lastCandleFetch = nil
         Task { await refreshCandles() }
+    }
+
+    /// Raising the depth refetches at once; lowering it takes effect on the next refresh.
+    func setCandleDepth(_ depth: Int) {
+        let clamped = min(max(depth, Self.defaultCandleDepth), Self.candleCap)
+        guard clamped != candleDepth else { return }
+        let grew = clamped > candleDepth
+        candleDepth = clamped
+        if grew { lastCandleFetch = nil; Task { await refreshCandles() } }
+    }
+
+    /// The window before the oldest candle held, prepended. Called when a pan reaches
+    /// the left edge; a venue answer with nothing older marks the series complete.
+    func loadOlderCandles() async {
+        guard !isLoadingOlderCandles, !reachedOldestCandle, let first = candles.first,
+              candles.count < Self.candleCap else { return }
+        isLoadingOlderCandles = true
+        defer { isLoadingOlderCandles = false }
+        let requestedMarket = marketID
+        let requestedInterval = candleIntervalSeconds
+        let to = first.t - 1
+        let from = to - Int64(requestedInterval * candleDepth * 1_000)
+        do {
+            let endpoint = try PerplEndpoint(
+                method: .get,
+                path: "/v1/market-data/\(requestedMarket)/candles/\(requestedInterval)/\(from)-\(to)")
+            let data = try await rest.publicData(endpoint)
+            let result = try await Task.detached(priority: .utility) {
+                try JSONDecoder().decode(CandleSeries.self, from: data).d
+            }.value
+            guard requestedMarket == marketID, requestedInterval == candleIntervalSeconds,
+                  candles.first?.t == first.t else { return }
+            let older = result.filter { $0.t < first.t }
+            if older.isEmpty { reachedOldestCandle = true } else { candles = older + candles }
+        } catch {
+            // Left as it was; the next pan to the edge asks again.
+        }
     }
 
     func markText(for item: Market) -> String {
@@ -330,7 +376,7 @@ final class MarketModel {
         // Keep roughly the same visual density at every range. Fetching a whole day of
         // one-minute candles and then dropping almost all of them produces misleading
         // shapes and unnecessary traffic.
-        let from = to - Int64(requestedInterval * 80 * 1_000)
+        let from = to - Int64(requestedInterval * candleDepth * 1_000)
         do {
             let endpoint = try PerplEndpoint(
                 method: .get,
@@ -340,7 +386,12 @@ final class MarketModel {
                 try JSONDecoder().decode(CandleSeries.self, from: data).d
             }.value
             guard requestedMarket == marketID, requestedInterval == candleIntervalSeconds else { return }
-            candles = result
+            // History a pan already pulled in stays; only the recent window is replaced.
+            if let newest = result.first?.t {
+                candles = candles.filter { $0.t < newest } + result
+            } else {
+                candles = result
+            }
             lastCandleFetch = Date()
         } catch {
             // Keep the last complete series. The live mark continues independently.

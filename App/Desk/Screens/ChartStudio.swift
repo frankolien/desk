@@ -1,0 +1,1339 @@
+import DeskUI
+import SwiftUI
+import UIKit
+
+/// Holds every screen but one to portrait. The full-screen chart asks for landscape on
+/// the way in and gives it back on the way out; the app delegate reads `mask`.
+@MainActor
+enum OrientationLock {
+    private(set) static var mask: UIInterfaceOrientationMask = .portrait
+
+    static func request(_ orientation: UIInterfaceOrientationMask) {
+        mask = orientation
+        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
+        var controller = scene.keyWindow?.rootViewController
+        while let presented = controller?.presentedViewController { controller = presented }
+        controller?.setNeedsUpdateOfSupportedInterfaceOrientations()
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: orientation))
+    }
+}
+
+// MARK: - Model
+
+enum ChartStyle: String, CaseIterable, Identifiable {
+    case candles, hollow, bars, line, area, heikinAshi
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .candles: "Candles"
+        case .hollow: "Hollow candles"
+        case .bars: "Bars"
+        case .line: "Line"
+        case .area: "Area"
+        case .heikinAshi: "Heikin Ashi"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .candles: "chart.bar.fill"
+        case .hollow: "chart.bar"
+        case .bars: "chart.bar.xaxis"
+        case .line: "chart.xyaxis.line"
+        case .area: "chart.line.uptrend.xyaxis"
+        case .heikinAshi: "waveform.path"
+        }
+    }
+}
+
+enum ChartOverlay: String, CaseIterable, Identifiable {
+    case ma7, ma25, ma99, ema12, ema26, bollinger, vwap
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .ma7: "MA 7"
+        case .ma25: "MA 25"
+        case .ma99: "MA 99"
+        case .ema12: "EMA 12"
+        case .ema26: "EMA 26"
+        case .bollinger: "Bollinger 20 · 2"
+        case .vwap: "VWAP"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .ma7: DeskColor.action.color
+        case .ma25: Color(red: 0.91, green: 0.36, blue: 0.66)
+        case .ma99: Color(red: 0.55, green: 0.47, blue: 0.98)
+        case .ema12: Color(red: 0.30, green: 0.83, blue: 0.94)
+        case .ema26: Color(red: 0.98, green: 0.58, blue: 0.24)
+        case .bollinger: DeskColor.identity.color
+        case .vwap: Color.white.opacity(0.8)
+        }
+    }
+}
+
+enum ChartPane: String, CaseIterable, Identifiable {
+    case volume, rsi, macd
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .volume: "Volume"
+        case .rsi: "RSI 14"
+        case .macd: "MACD 12 · 26 · 9"
+        }
+    }
+
+    var caption: String {
+        switch self {
+        case .volume: "Vol"
+        case .rsi: "RSI 14"
+        case .macd: "MACD 12 26 9"
+        }
+    }
+}
+
+enum ChartTool: String, CaseIterable, Identifiable {
+    case none, level, trend, ruler, erase
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .none: "Pan"
+        case .level: "Price level"
+        case .trend: "Trend line"
+        case .ruler: "Ruler"
+        case .erase: "Erase"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .none: "hand.draw"
+        case .level: "minus"
+        case .trend: "line.diagonal"
+        case .ruler: "ruler"
+        case .erase: "eraser"
+        }
+    }
+}
+
+/// A point on the chart in the chart's own units, so it survives new candles, a zoom,
+/// and a relaunch.
+struct ChartAnchor: Codable, Hashable {
+    var time: Double
+    var price: Double
+}
+
+struct ChartDrawing: Codable, Hashable, Identifiable {
+    enum Kind: String, Codable { case level, trend }
+    var id: UUID
+    var kind: Kind
+    var a: ChartAnchor
+    var b: ChartAnchor?
+}
+
+enum ChartDrawingStore {
+    static func key(_ symbol: String, network: String) -> String { "desk.chart.drawings.\(network).\(symbol)" }
+
+    static func load(_ key: String) -> [ChartDrawing] {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
+        return (try? JSONDecoder().decode([ChartDrawing].self, from: data)) ?? []
+    }
+
+    static func save(_ drawings: [ChartDrawing], key: String) {
+        if drawings.isEmpty { UserDefaults.standard.removeObject(forKey: key); return }
+        UserDefaults.standard.set(try? JSONEncoder().encode(drawings), forKey: key)
+    }
+}
+
+/// Everything the painter needs, gathered once per frame.
+struct StudioFrame {
+    var candles: [ChartCandle]
+    var interval: Double
+    var window: ChartWindow
+    var style: ChartStyle
+    var overlays: Set<ChartOverlay>
+    var panes: [ChartPane]
+    var logScale: Bool
+    var guides: [PriceGuide]
+    var drawings: [ChartDrawing]
+    var pendingTrend: ChartAnchor?
+    var ruler: (from: ChartAnchor, to: ChartAnchor)?
+    var crosshair: CGPoint?
+    var magnet: Bool
+    var studies: StudySet
+}
+
+/// Study series over the full history, computed when the candles change rather than on
+/// every finger move.
+struct StudySet {
+    var ma7: [Double?] = []
+    var ma25: [Double?] = []
+    var ma99: [Double?] = []
+    var ema12: [Double?] = []
+    var ema26: [Double?] = []
+    var bands = ChartStudies.Bands(upper: [], middle: [], lower: [])
+    var vwap: [Double?] = []
+    var rsi: [Double?] = []
+    var macd = ChartStudies.MACD(line: [], signal: [], histogram: [])
+    var heikin: [ChartCandle] = []
+
+    init() {}
+
+    init(candles: [ChartCandle]) {
+        let closes = candles.map(\.close)
+        ma7 = ChartStudies.sma(closes, period: 7)
+        ma25 = ChartStudies.sma(closes, period: 25)
+        ma99 = ChartStudies.sma(closes, period: 99)
+        ema12 = ChartStudies.ema(closes, period: 12)
+        ema26 = ChartStudies.ema(closes, period: 26)
+        bands = ChartStudies.bollinger(closes)
+        vwap = ChartStudies.vwap(candles)
+        rsi = ChartStudies.rsi(closes)
+        macd = ChartStudies.macd(closes)
+        heikin = ChartStudies.heikinAshi(candles)
+    }
+
+    func series(_ overlay: ChartOverlay) -> [[Double?]] {
+        switch overlay {
+        case .ma7: [ma7]
+        case .ma25: [ma25]
+        case .ma99: [ma99]
+        case .ema12: [ema12]
+        case .ema26: [ema26]
+        case .bollinger: [bands.upper, bands.middle, bands.lower]
+        case .vwap: [vwap]
+        }
+    }
+}
+
+// MARK: - Geometry
+
+/// Where everything sits for one frame size. Shared by the painter and the gestures, so
+/// a finger and a pixel agree about which candle they mean.
+struct StudioGeometry {
+    static let axisWidth: CGFloat = 60
+    static let timeAxisHeight: CGFloat = 20
+
+    let size: CGSize
+    let plot: CGRect
+    let panes: [(pane: ChartPane, rect: CGRect)]
+    let slotWidth: CGFloat
+    let window: ChartWindow
+    let scale: ChartScale
+
+    init(size: CGSize, frame: StudioFrame) {
+        self.size = size
+        window = frame.window
+        let plotWidth = max(size.width - Self.axisWidth, 1)
+        let chartHeight = max(size.height - Self.timeAxisHeight, 1)
+        let paneShare = frame.panes.isEmpty ? 0 : min(0.22, 0.58 / Double(frame.panes.count))
+        let paneHeight = max(chartHeight * CGFloat(paneShare), frame.panes.isEmpty ? 0 : 40)
+        let priceHeight = chartHeight - paneHeight * CGFloat(frame.panes.count)
+        plot = CGRect(x: 0, y: 0, width: plotWidth, height: priceHeight)
+        var y = priceHeight
+        var rects: [(ChartPane, CGRect)] = []
+        for pane in frame.panes {
+            rects.append((pane, CGRect(x: 0, y: y, width: plotWidth, height: paneHeight)))
+            y += paneHeight
+        }
+        panes = rects
+        slotWidth = plotWidth / CGFloat(max(frame.window.visible, 1))
+
+        let visible = frame.window.range
+        let drawn = frame.style == .heikinAshi ? frame.studies.heikin : frame.candles
+        var low = Double.greatestFiniteMagnitude
+        var high = -Double.greatestFiniteMagnitude
+        for index in visible where drawn.indices.contains(index) {
+            low = min(low, drawn[index].low)
+            high = max(high, drawn[index].high)
+        }
+        for overlay in frame.overlays {
+            for series in frame.studies.series(overlay) {
+                for index in visible where series.indices.contains(index) {
+                    if let value = series[index] { low = min(low, value); high = max(high, value) }
+                }
+            }
+        }
+        if low > high { low = 0; high = 1 }
+        scale = ChartScale(low: low, high: high, logarithmic: frame.logScale, top: plot.minY + 10, height: max(plot.height - 20, 1))
+    }
+
+    func x(slot: Int) -> CGFloat { (CGFloat(slot) + 0.5) * slotWidth }
+    func x(index: Int) -> CGFloat { x(slot: window.slot(of: index)) }
+    func x(fractionalIndex: Double) -> CGFloat { (CGFloat(fractionalIndex - Double(window.end - window.visible)) + 0.5) * slotWidth }
+    func slot(atX x: CGFloat) -> Int { Int((x / slotWidth).rounded(.down)) }
+    func fractionalIndex(atX x: CGFloat) -> Double { Double(x / slotWidth) - 0.5 + Double(window.end - window.visible) }
+}
+
+// MARK: - Painter
+
+struct StudioPainter {
+    let frame: StudioFrame
+    let geometry: StudioGeometry
+
+    private static let clock: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+    private static let day: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "d MMM"
+        return formatter
+    }()
+    private static let full: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "d MMM HH:mm"
+        return formatter
+    }()
+
+    private var candles: [ChartCandle] { frame.style == .heikinAshi ? frame.studies.heikin : frame.candles }
+    private var firstTime: Double? { frame.candles.first?.time }
+
+    func fractionalIndex(of time: Double) -> Double? {
+        guard let firstTime, frame.interval > 0 else { return nil }
+        return (time - firstTime) / frame.interval
+    }
+
+    func time(atFractionalIndex index: Double) -> Double? {
+        guard let firstTime else { return nil }
+        return firstTime + index * frame.interval
+    }
+
+    func point(_ anchor: ChartAnchor) -> CGPoint? {
+        guard let index = fractionalIndex(of: anchor.time) else { return nil }
+        return CGPoint(x: geometry.x(fractionalIndex: index), y: geometry.scale.y(anchor.price))
+    }
+
+    func draw(in context: inout GraphicsContext) {
+        let plot = geometry.plot
+        let scale = geometry.scale
+        let range = frame.window.range
+
+        drawGrid(in: &context)
+        drawTimeAxis(in: &context)
+
+        // A clip on a graphics context cannot be lifted, so the plot draws into a copy.
+        var clipped = context
+        clipped.clip(to: Path(plot))
+        drawOverlayFills(in: &clipped, range: range)
+        drawPrice(in: &clipped, range: range)
+        drawOverlayLines(in: &clipped, range: range)
+        drawDrawings(in: &clipped)
+        drawRuler(in: &clipped)
+
+        for (pane, rect) in geometry.panes {
+            var paneContext = context
+            paneContext.clip(to: Path(CGRect(x: 0, y: rect.minY, width: geometry.size.width, height: rect.height)))
+            drawPane(pane, in: rect, context: &paneContext, range: range)
+        }
+
+        drawGuides(in: &context)
+        for drawing in frame.drawings where drawing.kind == .level {
+            let y = scale.y(drawing.a.price)
+            guard y > plot.minY, y < plot.maxY else { continue }
+            axisTag(PriceAxis.label(drawing.a.price), y: y, fill: DeskColor.action.color, text: .black, in: &context)
+        }
+        drawLastPrice(in: &context)
+        drawCrosshair(in: &context)
+    }
+
+    private func drawGrid(in context: inout GraphicsContext) {
+        let plot = geometry.plot
+        for tick in geometry.scale.ticks(count: 6) where tick.y > plot.minY + 6 && tick.y < plot.maxY - 6 {
+            var line = Path()
+            line.move(to: CGPoint(x: 0, y: tick.y))
+            line.addLine(to: CGPoint(x: plot.maxX, y: tick.y))
+            context.stroke(line, with: .color(.white.opacity(0.06)), lineWidth: 0.6)
+            context.draw(
+                Text(tick.label).font(.system(size: 10, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(DeskColor.nightMuted.color),
+                at: CGPoint(x: plot.maxX + 6, y: tick.y), anchor: .leading)
+        }
+        var axis = Path()
+        axis.move(to: CGPoint(x: plot.maxX, y: 0))
+        axis.addLine(to: CGPoint(x: plot.maxX, y: geometry.size.height - StudioGeometry.timeAxisHeight))
+        context.stroke(axis, with: .color(.white.opacity(0.08)), lineWidth: 0.6)
+    }
+
+    private func drawTimeAxis(in context: inout GraphicsContext) {
+        let top = geometry.size.height - StudioGeometry.timeAxisHeight
+        var line = Path()
+        line.move(to: CGPoint(x: 0, y: top))
+        line.addLine(to: CGPoint(x: geometry.plot.maxX, y: top))
+        context.stroke(line, with: .color(.white.opacity(0.08)), lineWidth: 0.6)
+
+        let every = max(1, Int((72 / geometry.slotWidth).rounded(.up)))
+        var previousDay: Int?
+        for index in frame.window.range where frame.candles.indices.contains(index) {
+            guard let time = frame.candles[index].time else { continue }
+            let date = Date(timeIntervalSince1970: time)
+            let day = Int((time / 86_400).rounded(.down))
+            let dayChanged = previousDay != nil && previousDay != day
+            previousDay = day
+            guard index % every == 0 || dayChanged else { continue }
+            let x = geometry.x(index: index)
+            var tick = Path()
+            tick.move(to: CGPoint(x: x, y: top))
+            tick.addLine(to: CGPoint(x: x, y: top + 3))
+            context.stroke(tick, with: .color(.white.opacity(0.25)), lineWidth: 0.6)
+            let label = frame.interval >= 86_400 || dayChanged ? Self.day.string(from: date) : Self.clock.string(from: date)
+            context.draw(
+                Text(label).font(.system(size: 10, weight: dayChanged ? .bold : .medium, design: .rounded).monospacedDigit())
+                    .foregroundStyle(dayChanged ? DeskColor.nightText.color : DeskColor.nightMuted.color),
+                at: CGPoint(x: x, y: top + 11), anchor: .center)
+        }
+    }
+
+    private func drawPrice(in context: inout GraphicsContext, range: Range<Int>) {
+        let scale = geometry.scale
+        let series = candles
+        let bodyHalf = max(0.8, geometry.slotWidth * 0.36)
+
+        switch frame.style {
+        case .line, .area:
+            var path = Path()
+            var started = false
+            for index in range where series.indices.contains(index) {
+                let point = CGPoint(x: geometry.x(index: index), y: scale.y(series[index].close))
+                if started { path.addLine(to: point) } else { path.move(to: point); started = true }
+            }
+            let tint = (series.last?.isRising ?? true) ? DeskColor.rise.color : DeskColor.fall.color
+            if frame.style == .area, let first = range.first, let last = range.last, series.indices.contains(first), series.indices.contains(last) {
+                var fill = path
+                fill.addLine(to: CGPoint(x: geometry.x(index: min(last, series.count - 1)), y: geometry.plot.maxY))
+                fill.addLine(to: CGPoint(x: geometry.x(index: first), y: geometry.plot.maxY))
+                fill.closeSubpath()
+                context.fill(fill, with: .linearGradient(
+                    Gradient(colors: [tint.opacity(0.32), tint.opacity(0.0)]),
+                    startPoint: CGPoint(x: 0, y: geometry.plot.minY), endPoint: CGPoint(x: 0, y: geometry.plot.maxY)))
+            }
+            context.stroke(path, with: .color(tint), style: StrokeStyle(lineWidth: 1.6, lineJoin: .round))
+
+        case .candles, .hollow, .heikinAshi, .bars:
+            for index in range where series.indices.contains(index) {
+                let candle = series[index]
+                let color = candle.isRising ? DeskColor.rise.color : DeskColor.fall.color
+                let x = geometry.x(index: index)
+                let openY = scale.y(candle.open)
+                let closeY = scale.y(candle.close)
+                let top = min(openY, closeY)
+                let bottom = max(openY, closeY)
+
+                if frame.style == .bars {
+                    var bar = Path()
+                    bar.move(to: CGPoint(x: x, y: scale.y(candle.high)))
+                    bar.addLine(to: CGPoint(x: x, y: scale.y(candle.low)))
+                    bar.move(to: CGPoint(x: x - bodyHalf, y: openY))
+                    bar.addLine(to: CGPoint(x: x, y: openY))
+                    bar.move(to: CGPoint(x: x, y: closeY))
+                    bar.addLine(to: CGPoint(x: x + bodyHalf, y: closeY))
+                    context.stroke(bar, with: .color(color), lineWidth: max(1, geometry.slotWidth * 0.12))
+                    continue
+                }
+
+                var wick = Path()
+                wick.move(to: CGPoint(x: x, y: scale.y(candle.high)))
+                wick.addLine(to: CGPoint(x: x, y: min(top, scale.y(candle.high))))
+                wick.move(to: CGPoint(x: x, y: max(bottom, scale.y(candle.low))))
+                wick.addLine(to: CGPoint(x: x, y: scale.y(candle.low)))
+                context.stroke(wick, with: .color(color), lineWidth: max(0.7, geometry.slotWidth * 0.08))
+                let body = CGRect(x: x - bodyHalf, y: top, width: bodyHalf * 2, height: max(1, bottom - top))
+                let shape = Path(roundedRect: body, cornerRadius: min(1.5, bodyHalf * 0.3))
+                if frame.style == .hollow, candle.isRising {
+                    context.stroke(shape, with: .color(color), lineWidth: 1)
+                } else {
+                    context.fill(shape, with: .color(color))
+                }
+            }
+        }
+    }
+
+    private func drawOverlayFills(in context: inout GraphicsContext, range: Range<Int>) {
+        guard frame.overlays.contains(.bollinger) else { return }
+        let bands = frame.studies.bands
+        var upper = Path()
+        var lowerPoints: [CGPoint] = []
+        var started = false
+        for index in range where bands.upper.indices.contains(index) {
+            guard let high = bands.upper[index], let low = bands.lower[index] else { continue }
+            let x = geometry.x(index: index)
+            let point = CGPoint(x: x, y: geometry.scale.y(high))
+            if started { upper.addLine(to: point) } else { upper.move(to: point); started = true }
+            lowerPoints.append(CGPoint(x: x, y: geometry.scale.y(low)))
+        }
+        guard started else { return }
+        for point in lowerPoints.reversed() { upper.addLine(to: point) }
+        upper.closeSubpath()
+        context.fill(upper, with: .color(ChartOverlay.bollinger.tint.opacity(0.07)))
+    }
+
+    private func drawOverlayLines(in context: inout GraphicsContext, range: Range<Int>) {
+        for overlay in ChartOverlay.allCases where frame.overlays.contains(overlay) {
+            for (position, series) in frame.studies.series(overlay).enumerated() {
+                var path = Path()
+                var started = false
+                for index in range where series.indices.contains(index) {
+                    guard let value = series[index] else { started = false; continue }
+                    let point = CGPoint(x: geometry.x(index: index), y: geometry.scale.y(value))
+                    if started { path.addLine(to: point) } else { path.move(to: point); started = true }
+                }
+                let middleBand = overlay == .bollinger && position == 1
+                let style = overlay == .vwap
+                    ? StrokeStyle(lineWidth: 1.1, dash: [4, 3])
+                    : StrokeStyle(lineWidth: middleBand ? 0.8 : 1.2, lineJoin: .round)
+                context.stroke(path, with: .color(overlay.tint.opacity(middleBand ? 0.6 : 0.95)), style: style)
+            }
+        }
+    }
+
+    private func drawPane(_ pane: ChartPane, in rect: CGRect, context: inout GraphicsContext, range: Range<Int>) {
+        var top = Path()
+        top.move(to: CGPoint(x: 0, y: rect.minY))
+        top.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        context.stroke(top, with: .color(.white.opacity(0.08)), lineWidth: 0.6)
+        context.draw(
+            Text(pane.caption).font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundStyle(DeskColor.nightMuted.color),
+            at: CGPoint(x: 6, y: rect.minY + 5), anchor: .topLeading)
+
+        let inner = rect.insetBy(dx: 0, dy: 6)
+        switch pane {
+        case .volume:
+            let volumes = range.compactMap { frame.candles.indices.contains($0) ? frame.candles[$0].volume : nil }
+            guard let peak = volumes.max(), peak > 0 else { return }
+            for index in range where frame.candles.indices.contains(index) {
+                guard let volume = frame.candles[index].volume else { continue }
+                let height = CGFloat(volume / peak) * inner.height
+                let x = geometry.x(index: index)
+                let half = max(0.8, geometry.slotWidth * 0.36)
+                let color = frame.candles[index].isRising ? DeskColor.rise.color : DeskColor.fall.color
+                context.fill(Path(roundedRect: CGRect(x: x - half, y: inner.maxY - height, width: half * 2, height: height), cornerRadius: 1),
+                             with: .color(color.opacity(0.55)))
+            }
+            let hovered = hoveredIndex.flatMap { frame.candles.indices.contains($0) ? frame.candles[$0].volume : nil } ?? volumes.last
+            if let hovered {
+                context.draw(
+                    Text(compact(hovered)).font(.system(size: 9, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(DeskColor.nightMuted.color),
+                    at: CGPoint(x: rect.maxX + 6, y: rect.minY + 5), anchor: .topLeading)
+            }
+
+        case .rsi:
+            let scale = ChartScale(low: 0, high: 100, logarithmic: false, top: inner.minY, height: inner.height, paddingFraction: 0)
+            for level in [30.0, 70.0] {
+                var line = Path()
+                line.move(to: CGPoint(x: 0, y: scale.y(level)))
+                line.addLine(to: CGPoint(x: rect.maxX, y: scale.y(level)))
+                context.stroke(line, with: .color(.white.opacity(0.14)), style: StrokeStyle(lineWidth: 0.6, dash: [3, 4]))
+                context.draw(
+                    Text(String(Int(level))).font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color),
+                    at: CGPoint(x: rect.maxX + 6, y: scale.y(level)), anchor: .leading)
+            }
+            var path = Path()
+            var started = false
+            for index in range where frame.studies.rsi.indices.contains(index) {
+                guard let value = frame.studies.rsi[index] else { continue }
+                let point = CGPoint(x: geometry.x(index: index), y: scale.y(value))
+                if started { path.addLine(to: point) } else { path.move(to: point); started = true }
+            }
+            context.stroke(path, with: .color(ChartOverlay.ma25.tint), style: StrokeStyle(lineWidth: 1.2, lineJoin: .round))
+            let shown = hoveredIndex.flatMap { frame.studies.rsi.indices.contains($0) ? frame.studies.rsi[$0] : nil } ?? frame.studies.rsi.last ?? nil
+            if let shown {
+                context.draw(
+                    Text(String(format: "%.1f", shown)).font(.system(size: 9, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(ChartOverlay.ma25.tint),
+                    at: CGPoint(x: 46, y: rect.minY + 5), anchor: .topLeading)
+            }
+
+        case .macd:
+            let macd = frame.studies.macd
+            var extreme = 0.0
+            for index in range {
+                if macd.line.indices.contains(index), let value = macd.line[index] { extreme = max(extreme, abs(value)) }
+                if macd.signal.indices.contains(index), let value = macd.signal[index] { extreme = max(extreme, abs(value)) }
+                if macd.histogram.indices.contains(index), let value = macd.histogram[index] { extreme = max(extreme, abs(value)) }
+            }
+            guard extreme > 0 else { return }
+            let scale = ChartScale(low: -extreme, high: extreme, logarithmic: false, top: inner.minY, height: inner.height, paddingFraction: 0)
+            let zero = scale.y(0)
+            var axis = Path()
+            axis.move(to: CGPoint(x: 0, y: zero))
+            axis.addLine(to: CGPoint(x: rect.maxX, y: zero))
+            context.stroke(axis, with: .color(.white.opacity(0.14)), lineWidth: 0.6)
+            let half = max(0.8, geometry.slotWidth * 0.3)
+            for index in range where macd.histogram.indices.contains(index) {
+                guard let value = macd.histogram[index] else { continue }
+                let y = scale.y(value)
+                let previous = index > 0 ? (macd.histogram[index - 1] ?? value) : value
+                let strengthening = abs(value) >= abs(previous)
+                let color = value >= 0
+                    ? DeskColor.rise.color.opacity(strengthening ? 0.9 : 0.45)
+                    : DeskColor.fall.color.opacity(strengthening ? 0.9 : 0.45)
+                let bar = CGRect(x: geometry.x(index: index) - half, y: min(y, zero), width: half * 2, height: max(1, abs(zero - y)))
+                context.fill(Path(bar), with: .color(color))
+            }
+            for (series, tint) in [(macd.line, ChartOverlay.ema12.tint), (macd.signal, ChartOverlay.ema26.tint)] {
+                var path = Path()
+                var started = false
+                for index in range where series.indices.contains(index) {
+                    guard let value = series[index] else { continue }
+                    let point = CGPoint(x: geometry.x(index: index), y: scale.y(value))
+                    if started { path.addLine(to: point) } else { path.move(to: point); started = true }
+                }
+                context.stroke(path, with: .color(tint), style: StrokeStyle(lineWidth: 1.1, lineJoin: .round))
+            }
+        }
+    }
+
+    private func drawGuides(in context: inout GraphicsContext) {
+        let plot = geometry.plot
+        for guide in frame.guides {
+            let raw = geometry.scale.y(guide.value)
+            let pinnedTop = raw < plot.minY + 4
+            let pinnedBottom = raw > plot.maxY - 4
+            let y = min(max(raw, plot.minY + 4), plot.maxY - 4)
+            var line = Path()
+            line.move(to: CGPoint(x: 0, y: y))
+            line.addLine(to: CGPoint(x: plot.maxX, y: y))
+            context.stroke(line, with: .color(guide.tint.opacity(pinnedTop || pinnedBottom ? 0.4 : 0.85)),
+                           style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+            let caption = guide.label + (pinnedTop ? " ↑" : pinnedBottom ? " ↓" : "")
+            pill(Text(caption), at: CGPoint(x: 6, y: y), tint: guide.tint, in: &context)
+            axisTag(guide.text, y: y, fill: .black.opacity(0.78), text: guide.tint, in: &context)
+        }
+    }
+
+    private func drawLastPrice(in context: inout GraphicsContext) {
+        guard let last = frame.candles.last else { return }
+        let plot = geometry.plot
+        let y = min(max(geometry.scale.y(last.close), plot.minY), plot.maxY)
+        let tint = last.isRising ? DeskColor.rise.color : DeskColor.fall.color
+        var line = Path()
+        line.move(to: CGPoint(x: 0, y: y))
+        line.addLine(to: CGPoint(x: plot.maxX, y: y))
+        context.stroke(line, with: .color(tint.opacity(0.6)), style: StrokeStyle(lineWidth: 0.8, dash: [2, 3]))
+        axisTag(PriceAxis.label(last.close), y: y, fill: tint, text: .black, in: &context)
+    }
+
+    private func drawDrawings(in context: inout GraphicsContext) {
+        let plot = geometry.plot
+        for drawing in frame.drawings {
+            switch drawing.kind {
+            case .level:
+                let y = geometry.scale.y(drawing.a.price)
+                guard y > plot.minY - 20, y < plot.maxY + 20 else { continue }
+                var line = Path()
+                line.move(to: CGPoint(x: 0, y: y))
+                line.addLine(to: CGPoint(x: plot.maxX, y: y))
+                context.stroke(line, with: .color(DeskColor.action.color.opacity(0.9)), style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
+            case .trend:
+                guard let b = drawing.b, let start = point(drawing.a), let end = point(b) else { continue }
+                var line = Path()
+                line.move(to: start)
+                line.addLine(to: end)
+                context.stroke(line, with: .color(DeskColor.identity.color), style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
+                for end in [start, end] {
+                    context.fill(Path(ellipseIn: CGRect(x: end.x - 3, y: end.y - 3, width: 6, height: 6)), with: .color(DeskColor.identity.color))
+                }
+            }
+        }
+        if let pending = frame.pendingTrend, let start = point(pending) {
+            context.fill(Path(ellipseIn: CGRect(x: start.x - 4, y: start.y - 4, width: 8, height: 8)), with: .color(DeskColor.identity.color))
+            context.stroke(Path(ellipseIn: CGRect(x: start.x - 8, y: start.y - 8, width: 16, height: 16)), with: .color(DeskColor.identity.color.opacity(0.5)), lineWidth: 1)
+        }
+    }
+
+    private func drawRuler(in context: inout GraphicsContext) {
+        guard let ruler = frame.ruler, let start = point(ruler.from), let end = point(ruler.to) else { return }
+        let measure = measurement(ruler)
+        let rising = measure.change >= 0
+        let tint = rising ? DeskColor.rise.color : DeskColor.fall.color
+        let box = CGRect(x: min(start.x, end.x), y: min(start.y, end.y), width: abs(end.x - start.x), height: abs(end.y - start.y))
+        context.fill(Path(box), with: .color(tint.opacity(0.14)))
+        context.stroke(Path(box), with: .color(tint.opacity(0.7)), style: StrokeStyle(lineWidth: 0.8, dash: [3, 3]))
+        var arrow = Path()
+        arrow.move(to: CGPoint(x: box.midX, y: start.y))
+        arrow.addLine(to: CGPoint(x: box.midX, y: end.y))
+        context.stroke(arrow, with: .color(tint), lineWidth: 1.2)
+
+        var lines = [String(format: "%@%.2f%%  %@", rising ? "+" : Direction.minus, abs(measure.percent), PriceAxis.label(abs(measure.change)))]
+        var second = "\(abs(measure.bars)) bars"
+        if let duration = measure.durationText { second += " · \(duration)" }
+        lines.append(second)
+        let resolved = context.resolve(
+            Text(lines.joined(separator: "\n")).font(.system(size: 10, weight: .bold, design: .rounded).monospacedDigit())
+                .foregroundStyle(.white))
+        let textSize = resolved.measure(in: CGSize(width: 220, height: 60))
+        let above = end.y <= start.y
+        var origin = CGPoint(x: box.midX - textSize.width / 2 - 8, y: above ? box.minY - textSize.height - 18 : box.maxY + 6)
+        origin.x = min(max(origin.x, 2), geometry.plot.maxX - textSize.width - 18)
+        origin.y = min(max(origin.y, 2), geometry.plot.maxY - textSize.height - 12)
+        let tag = CGRect(origin: origin, size: CGSize(width: textSize.width + 16, height: textSize.height + 10))
+        context.fill(Path(roundedRect: tag, cornerRadius: 6), with: .color(tint.opacity(0.92)))
+        context.draw(resolved, at: CGPoint(x: tag.midX, y: tag.midY), anchor: .center)
+    }
+
+    func measurement(_ ruler: (from: ChartAnchor, to: ChartAnchor)) -> ChartMeasure {
+        let bars = frame.interval > 0 ? Int(((ruler.to.time - ruler.from.time) / frame.interval).rounded()) : 0
+        return ChartMeasure(fromPrice: ruler.from.price, toPrice: ruler.to.price, bars: bars,
+                            seconds: abs(ruler.to.time - ruler.from.time))
+    }
+
+    /// The candle under the crosshair, if any.
+    var hoveredIndex: Int? {
+        guard let crosshair = frame.crosshair else { return nil }
+        let index = frame.window.index(atSlot: geometry.slot(atX: crosshair.x))
+        return frame.candles.indices.contains(index) ? index : nil
+    }
+
+    /// Where the horizontal line sits: the finger, or the nearest of the candle's four
+    /// prices when the magnet is on.
+    func crosshairPrice(at point: CGPoint) -> Double {
+        let free = geometry.scale.value(atY: point.y)
+        guard frame.magnet, let index = hoveredIndex else { return free }
+        let candle = candles[index]
+        return [candle.open, candle.high, candle.low, candle.close].min { abs($0 - free) < abs($1 - free) } ?? free
+    }
+
+    private func drawCrosshair(in context: inout GraphicsContext) {
+        guard let crosshair = frame.crosshair, let index = hoveredIndex else { return }
+        let plot = geometry.plot
+        let x = geometry.x(index: index)
+        let price = crosshairPrice(at: crosshair)
+        let y = min(max(geometry.scale.y(price), plot.minY), plot.maxY)
+        var cross = Path()
+        cross.move(to: CGPoint(x: x, y: 0))
+        cross.addLine(to: CGPoint(x: x, y: geometry.size.height - StudioGeometry.timeAxisHeight))
+        cross.move(to: CGPoint(x: 0, y: y))
+        cross.addLine(to: CGPoint(x: plot.maxX, y: y))
+        context.stroke(cross, with: .color(.white.opacity(0.65)), style: StrokeStyle(lineWidth: 0.8, dash: [3, 3]))
+        axisTag(PriceAxis.label(price), y: y, fill: .white.opacity(0.92), text: .black, in: &context)
+
+        if let time = frame.candles[index].time {
+            let when = context.resolve(
+                Text(Self.full.string(from: Date(timeIntervalSince1970: time)))
+                    .font(.system(size: 10, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(.black))
+            let size = when.measure(in: CGSize(width: 160, height: 20))
+            let width = size.width + 12
+            let top = geometry.size.height - StudioGeometry.timeAxisHeight
+            let tag = CGRect(x: min(max(x - width / 2, 0), plot.maxX - width), y: top + 1, width: width, height: StudioGeometry.timeAxisHeight - 3)
+            context.fill(Path(roundedRect: tag, cornerRadius: 4), with: .color(.white.opacity(0.92)))
+            context.draw(when, at: CGPoint(x: tag.midX, y: tag.midY), anchor: .center)
+        }
+    }
+
+    private func pill(_ text: Text, at point: CGPoint, tint: Color, in context: inout GraphicsContext) {
+        let resolved = context.resolve(text.font(.system(size: 10, weight: .bold, design: .rounded)).foregroundStyle(tint))
+        let size = resolved.measure(in: CGSize(width: 200, height: 40))
+        let rect = CGRect(x: point.x, y: point.y - size.height / 2 - 3, width: size.width + 12, height: size.height + 6)
+        context.fill(Path(roundedRect: rect, cornerRadius: rect.height / 2), with: .color(.black.opacity(0.78)))
+        context.stroke(Path(roundedRect: rect, cornerRadius: rect.height / 2), with: .color(tint.opacity(0.5)), lineWidth: 0.8)
+        context.draw(resolved, at: CGPoint(x: rect.midX, y: rect.midY), anchor: .center)
+    }
+
+    private func axisTag(_ label: String, y: CGFloat, fill: Color, text: Color, in context: inout GraphicsContext) {
+        let resolved = context.resolve(
+            Text(label).font(.system(size: 10, weight: .bold, design: .rounded).monospacedDigit()).foregroundStyle(text))
+        let size = resolved.measure(in: CGSize(width: 90, height: 20))
+        let rect = CGRect(x: geometry.plot.maxX + 2, y: y - size.height / 2 - 3,
+                          width: min(StudioGeometry.axisWidth - 4, size.width + 10), height: size.height + 6)
+        context.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(fill))
+        context.draw(resolved, at: CGPoint(x: rect.midX, y: rect.midY), anchor: .center)
+    }
+
+    private func compact(_ value: Double) -> String {
+        let magnitude = abs(value)
+        if magnitude >= 1e9 { return String(format: "%.2fB", magnitude / 1e9) }
+        if magnitude >= 1e6 { return String(format: "%.2fM", magnitude / 1e6) }
+        if magnitude >= 1e3 { return String(format: "%.1fK", magnitude / 1e3) }
+        return String(format: "%.0f", magnitude)
+    }
+}
+
+/// The drawing alone, so a share image and the live screen render the same pixels.
+struct StudioCanvas: View {
+    let frame: StudioFrame
+
+    var body: some View {
+        Canvas(rendersAsynchronously: false) { context, size in
+            let geometry = StudioGeometry(size: size, frame: frame)
+            StudioPainter(frame: frame, geometry: geometry).draw(in: &context)
+        }
+    }
+}
+
+// MARK: - Screen
+
+/// The chart at full size, turned to landscape: history to pan and pinch through, studies,
+/// drawings that persist per market, a ruler, and the order buttons so nobody has to leave
+/// to act on what they saw.
+struct ChartStudio: View {
+    let market: MarketModel
+    let network: String
+    var guides: [PriceGuide] = []
+    var onTrade: ((Direction) -> Void)?
+    let onClose: () -> Void
+
+    @AppStorage("desk.chart.style") private var styleName = ChartStyle.candles.rawValue
+    @AppStorage("desk.chart.overlays") private var overlayNames = "ma7,ma25,ma99"
+    @AppStorage("desk.chart.panes") private var paneNames = "volume"
+    @AppStorage("desk.chart.log") private var logScale = false
+    @AppStorage("desk.chart.magnet") private var magnet = true
+
+    @State private var window = ChartWindow(total: 0)
+    @State private var studies = StudySet()
+    @State private var seriesFirstTime: Double?
+    @State private var tool: ChartTool = .none
+    @State private var drawings: [ChartDrawing] = []
+    @State private var pendingTrend: ChartAnchor?
+    @State private var ruler: (from: ChartAnchor, to: ChartAnchor)?
+    @State private var crosshair: CGPoint?
+    @State private var scrubbing = false
+    @State private var dragStart: ChartWindow?
+    @State private var zoomStart: ChartWindow?
+    @State private var shareImage: ShareImage?
+    @State private var canvasSize: CGSize = .zero
+
+    private var style: ChartStyle { ChartStyle(rawValue: styleName) ?? .candles }
+    private var overlays: Set<ChartOverlay> { Set(overlayNames.split(separator: ",").compactMap { ChartOverlay(rawValue: String($0)) }) }
+    private var panes: [ChartPane] { ChartPane.allCases.filter { paneNames.split(separator: ",").map(String.init).contains($0.rawValue) } }
+    private var drawingKey: String { ChartDrawingStore.key(market.symbol, network: network) }
+    private var priceScale: Double { pow(10.0, Double(market.market?.config.priceDecimals ?? 0)) }
+
+    /// The venue's candles with the live mark folded into the newest one, so the last
+    /// bar moves with the price between candle refreshes.
+    private var candles: [ChartCandle] {
+        var series = market.candles.map { $0.chartCandle(scale: priceScale) }
+        if let mark = market.mark.value, let last = series.last {
+            let live = Double(mark.raw) / priceScale
+            series[series.count - 1] = ChartCandle(
+                open: last.open, high: max(last.high, live), low: min(last.low, live),
+                close: live, volume: last.volume, time: last.time)
+        }
+        return series
+    }
+
+    private var frame: StudioFrame {
+        StudioFrame(
+            candles: candles, interval: Double(market.candleIntervalSeconds), window: window, style: style,
+            overlays: overlays, panes: panes, logScale: logScale, guides: guides, drawings: drawings,
+            pendingTrend: pendingTrend, ruler: ruler, crosshair: crosshair, magnet: magnet, studies: studies)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            chart
+            toolbar
+        }
+        .background(Color.black.ignoresSafeArea())
+        .foregroundStyle(DeskColor.nightText.color)
+        .onAppear {
+            OrientationLock.request(.landscape)
+            market.setCandleDepth(400)
+            drawings = ChartDrawingStore.load(drawingKey)
+            syncSeries()
+        }
+        .onDisappear {
+            OrientationLock.request(.portrait)
+            market.setCandleDepth(MarketModel.defaultCandleDepth)
+        }
+        .onChange(of: market.candles) { syncSeries() }
+        .onChange(of: market.candleIntervalSeconds) {
+            pendingTrend = nil
+            ruler = nil
+            window = ChartWindow(total: 0, visible: window.visible)
+        }
+        .onChange(of: drawings) { ChartDrawingStore.save(drawings, key: drawingKey) }
+        .sheet(item: $shareImage) { shared in
+            StudioActivitySheet(items: [shared.image])
+                .presentationDetents([.medium, .large])
+        }
+        .statusBarHidden()
+    }
+
+    private func syncSeries() {
+        let series = market.candles
+        let first = series.first.map { Double($0.t) / 1_000 }
+        var prepended = 0
+        if let first, let previous = seriesFirstTime, first < previous {
+            prepended = series.prefix { Double($0.t) / 1_000 < previous }.count
+        }
+        seriesFirstTime = first
+        window.update(total: series.count, prepended: prepended)
+        studies = StudySet(candles: series.map { $0.chartCandle(scale: priceScale) })
+    }
+
+    // MARK: Header
+
+    private var hovered: ChartCandle? {
+        guard let crosshair, canvasSize != .zero else { return nil }
+        let painter = StudioPainter(frame: frame, geometry: StudioGeometry(size: canvasSize, frame: frame))
+        guard let index = painter.hoveredIndex else { return nil }
+        return (style == .heikinAshi ? studies.heikin : candles)[index]
+    }
+
+    private var change: (text: String, up: Bool)? {
+        guard let listed = market.market, let mark = market.mark.value else { return nil }
+        let previous = Double(listed.state.previousRaw) / priceScale
+        let now = Double(mark.raw) / priceScale
+        guard previous > 0 else { return nil }
+        let percent = (now - previous) / previous * 100
+        return (String(format: "%@%.2f%%", percent >= 0 ? "+" : Direction.minus, abs(percent)), percent >= 0)
+    }
+
+    private var header: some View {
+        HStack(spacing: 14) {
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .bold))
+                    .frame(width: 34, height: 34)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(DeskColor.nightMuted.color)
+            .accessibilityLabel("Close chart")
+
+            HStack(spacing: 8) {
+                MarketTokenLogo(symbol: market.symbol, size: 22)
+                Text(market.symbol)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                Text(intervalLabel)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            }
+
+            if let last = candles.last {
+                let shown = hovered ?? last
+                let tint = shown.isRising ? DeskColor.rise.color : DeskColor.fall.color
+                HStack(spacing: 10) {
+                    Text(hovered == nil ? (market.mark.value?.display(fractionDigits: market.market?.config.priceDecimals ?? 2) ?? PriceAxis.label(last.close)) : PriceAxis.label(shown.close))
+                        .font(.system(size: 16, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(tint)
+                        .contentTransition(.numericText())
+                    if hovered == nil, let change {
+                        Text(change.text)
+                            .font(.system(size: 12, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(change.up ? DeskColor.rise.color : DeskColor.fall.color)
+                    }
+                    ohlc(shown, tint: tint)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            countdown
+
+            Button { share() } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 34, height: 34)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(DeskColor.nightMuted.color)
+            .accessibilityLabel("Share chart")
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 40)
+    }
+
+    private func ohlc(_ candle: ChartCandle, tint: Color) -> some View {
+        HStack(spacing: 8) {
+            ForEach([("O", candle.open), ("H", candle.high), ("L", candle.low), ("C", candle.close)], id: \.0) { label, value in
+                HStack(spacing: 3) {
+                    Text(label).foregroundStyle(DeskColor.nightMuted.color)
+                    Text(PriceAxis.label(value)).foregroundStyle(tint)
+                }
+            }
+        }
+        .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
+        .lineLimit(1)
+    }
+
+    private var intervalLabel: String {
+        CandleIntervalRail.intervals.first { $0.0 == market.candleIntervalSeconds }?.1 ?? "\(market.candleIntervalSeconds)s"
+    }
+
+    /// Time left in the current candle, ticking once a second on its own.
+    private var countdown: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let interval = Double(market.candleIntervalSeconds)
+            let elapsed = context.date.timeIntervalSince1970.truncatingRemainder(dividingBy: interval)
+            let remaining = Int(interval - elapsed)
+            HStack(spacing: 4) {
+                Image(systemName: "timer").font(.system(size: 10, weight: .bold))
+                Text(remaining >= 3_600 ? String(format: "%d:%02d:%02d", remaining / 3_600, remaining % 3_600 / 60, remaining % 60)
+                                        : String(format: "%02d:%02d", remaining / 60, remaining % 60))
+                    .monospacedDigit()
+            }
+            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .foregroundStyle(DeskColor.nightMuted.color)
+        }
+        .accessibilityLabel("Time until the candle closes")
+    }
+
+    // MARK: Chart
+
+    private var chart: some View {
+        GeometryReader { proxy in
+            let frame = frame
+            let geometry = StudioGeometry(size: proxy.size, frame: frame)
+            let painter = StudioPainter(frame: frame, geometry: geometry)
+            ZStack(alignment: .topTrailing) {
+                if candles.isEmpty {
+                    ProgressView().tint(DeskColor.nightMuted.color)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    StudioCanvas(frame: frame)
+                        .contentShape(Rectangle())
+                        .gesture(panGesture(geometry: geometry).simultaneously(with: zoomGesture(geometry: geometry)))
+                        .simultaneousGesture(scrubGesture(painter: painter))
+                        .gesture(ExclusiveGesture(doubleTap, tapGesture(painter: painter)))
+                }
+                if !window.isAtLatest {
+                    Button {
+                        withAnimation(.snappy(duration: 0.25)) { window.jumpToLatest() }
+                    } label: {
+                        Image(systemName: "chevron.right.2")
+                            .font(.system(size: 12, weight: .bold))
+                            .frame(width: 30, height: 30)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .deskGlass(interactive: true, in: Circle())
+                    .padding(.trailing, StudioGeometry.axisWidth + 8)
+                    .padding(.top, 8)
+                    .accessibilityLabel("Back to the latest candle")
+                }
+                if market.isLoadingOlderCandles {
+                    ProgressView().tint(DeskColor.nightMuted.color).scaleEffect(0.7)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .padding(.leading, 8)
+                }
+            }
+            .onAppear { canvasSize = proxy.size }
+            .onChange(of: proxy.size) { canvasSize = proxy.size }
+        }
+        .padding(.leading, 2)
+        .animation(.easeOut(duration: 0.15), value: window.isAtLatest)
+    }
+
+    private func panGesture(geometry: StudioGeometry) -> some Gesture {
+        DragGesture(minimumDistance: 6, coordinateSpace: .local)
+            .onChanged { value in
+                guard !scrubbing else { return }
+                if tool == .ruler {
+                    guard let start = anchor(at: value.startLocation, geometry: geometry),
+                          let end = anchor(at: value.location, geometry: geometry) else { return }
+                    ruler = (start, end)
+                    return
+                }
+                if dragStart == nil { dragStart = window; crosshair = nil }
+                guard let dragStart else { return }
+                var moved = dragStart
+                moved.pan(bySlots: Int((value.translation.width / geometry.slotWidth).rounded()))
+                window = moved
+                if window.range.lowerBound < 30 { Task { await market.loadOlderCandles() } }
+            }
+            .onEnded { _ in dragStart = nil }
+    }
+
+    private func zoomGesture(geometry: StudioGeometry) -> some Gesture {
+        MagnifyGesture(minimumScaleDelta: 0.02)
+            .onChanged { value in
+                if zoomStart == nil { zoomStart = window; crosshair = nil }
+                guard let zoomStart else { return }
+                var zoomed = zoomStart
+                zoomed.zoom(by: Double(value.magnification), anchorFraction: min(max(Double(value.startLocation.x / geometry.plot.width), 0), 1))
+                window = zoomed
+            }
+            .onEnded { _ in zoomStart = nil }
+    }
+
+    private func scrubGesture(painter: StudioPainter) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.22, maximumDistance: 12)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+            .onChanged { value in
+                guard tool != .ruler else { return }
+                switch value {
+                case .first(true):
+                    scrubbing = true
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                case .second(true, let drag):
+                    scrubbing = true
+                    guard let drag else { return }
+                    let previous = painter.hoveredIndex
+                    crosshair = drag.location
+                    let updated = StudioPainter(frame: frame, geometry: painter.geometry).hoveredIndex
+                    if previous != updated { UISelectionFeedbackGenerator().selectionChanged() }
+                default: break
+                }
+            }
+            .onEnded { _ in scrubbing = false }
+    }
+
+    private var doubleTap: some Gesture {
+        SpatialTapGesture(count: 2).onEnded { _ in
+            withAnimation(.snappy(duration: 0.25)) {
+                window = ChartWindow(total: window.total, visible: 90)
+            }
+            crosshair = nil
+        }
+    }
+
+    private func tapGesture(painter: StudioPainter) -> some Gesture {
+        SpatialTapGesture().onEnded { value in
+            switch tool {
+            case .none:
+                if crosshair != nil { crosshair = nil } else { ruler = nil }
+            case .level:
+                guard let anchor = anchor(at: value.location, geometry: painter.geometry, painter: painter) else { return }
+                drawings.append(ChartDrawing(id: UUID(), kind: .level, a: anchor, b: nil))
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            case .trend:
+                guard let anchor = anchor(at: value.location, geometry: painter.geometry, painter: painter) else { return }
+                if let start = pendingTrend {
+                    drawings.append(ChartDrawing(id: UUID(), kind: .trend, a: start, b: anchor))
+                    pendingTrend = nil
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                } else {
+                    pendingTrend = anchor
+                }
+            case .ruler:
+                ruler = nil
+            case .erase:
+                if let hit = nearestDrawing(to: value.location, painter: painter) {
+                    drawings.removeAll { $0.id == hit }
+                    UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+                }
+            }
+        }
+    }
+
+    private func anchor(at point: CGPoint, geometry: StudioGeometry, painter: StudioPainter? = nil) -> ChartAnchor? {
+        let painter = painter ?? StudioPainter(frame: frame, geometry: geometry)
+        guard let time = painter.time(atFractionalIndex: geometry.fractionalIndex(atX: point.x)) else { return nil }
+        let price = magnet ? StudioPainter(frame: withCrosshair(point), geometry: geometry).crosshairPrice(at: point) : geometry.scale.value(atY: point.y)
+        return ChartAnchor(time: time, price: price)
+    }
+
+    private func withCrosshair(_ point: CGPoint) -> StudioFrame {
+        var copy = frame
+        copy.crosshair = point
+        return copy
+    }
+
+    private func nearestDrawing(to point: CGPoint, painter: StudioPainter) -> UUID? {
+        var best: (UUID, CGFloat)?
+        for drawing in drawings {
+            let distance: CGFloat
+            switch drawing.kind {
+            case .level:
+                distance = abs(painter.geometry.scale.y(drawing.a.price) - point.y)
+            case .trend:
+                guard let b = drawing.b, let start = painter.point(drawing.a), let end = painter.point(b) else { continue }
+                distance = Self.distance(from: point, toSegment: start, end)
+            }
+            if distance < 14, best.map({ distance < $0.1 }) ?? true { best = (drawing.id, distance) }
+        }
+        return best?.0
+    }
+
+    private static func distance(from point: CGPoint, toSegment a: CGPoint, _ b: CGPoint) -> CGFloat {
+        let dx = b.x - a.x
+        let dy = b.y - a.y
+        let lengthSquared = dx * dx + dy * dy
+        guard lengthSquared > 0 else { return hypot(point.x - a.x, point.y - a.y) }
+        let t = min(max(((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared, 0), 1)
+        return hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy))
+    }
+
+    // MARK: Toolbar
+
+    private var toolbar: some View {
+        HStack(spacing: 10) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(CandleIntervalRail.intervals, id: \.0) { seconds, label in
+                        let selected = market.candleIntervalSeconds == seconds
+                        Button { market.selectCandleInterval(seconds) } label: {
+                            Text(label)
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                                .foregroundStyle(selected ? DeskColor.nightText.color : DeskColor.nightMuted.color)
+                                .padding(.horizontal, 9)
+                                .frame(height: 28)
+                                .background(selected ? Color.white.opacity(0.14) : .clear, in: Capsule())
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .frame(maxWidth: 330)
+
+            Spacer(minLength: 0)
+
+            styleMenu
+            indicatorMenu
+            toolMenu
+            settingsMenu
+
+            if let onTrade {
+                HStack(spacing: 6) {
+                    tradeButton(.down, title: "Short", action: onTrade)
+                    tradeButton(.up, title: "Long", action: onTrade)
+                }
+                .padding(.leading, 4)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 46)
+    }
+
+    private func toolbarIcon(_ symbol: String, active: Bool = false) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(active ? DeskColor.action.color : DeskColor.nightText.color)
+            .frame(width: 34, height: 30)
+            .background(active ? DeskColor.action.color.opacity(0.14) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+    }
+
+    private var styleMenu: some View {
+        Menu {
+            ForEach(ChartStyle.allCases) { item in
+                Button {
+                    styleName = item.rawValue
+                } label: {
+                    if style == item { Label(item.title, systemImage: "checkmark") } else { Text(item.title) }
+                }
+            }
+        } label: { toolbarIcon(style.symbol) }
+        .accessibilityLabel("Chart style")
+    }
+
+    private var indicatorMenu: some View {
+        Menu {
+            Section("On the chart") {
+                ForEach(ChartOverlay.allCases) { item in
+                    Button { toggle(item) } label: {
+                        if overlays.contains(item) { Label(item.title, systemImage: "checkmark") } else { Text(item.title) }
+                    }
+                }
+            }
+            Section("Below the chart") {
+                ForEach(ChartPane.allCases) { item in
+                    Button { toggle(item) } label: {
+                        if panes.contains(item) { Label(item.title, systemImage: "checkmark") } else { Text(item.title) }
+                    }
+                }
+            }
+        } label: { toolbarIcon("function", active: !overlays.isEmpty || !panes.isEmpty) }
+        .accessibilityLabel("Indicators")
+    }
+
+    private var toolMenu: some View {
+        Menu {
+            ForEach(ChartTool.allCases) { item in
+                Button {
+                    tool = item
+                    pendingTrend = nil
+                    if item != .ruler { ruler = nil }
+                } label: {
+                    if tool == item { Label(item.title, systemImage: "checkmark") } else { Label(item.title, systemImage: item.symbol) }
+                }
+            }
+            if !drawings.isEmpty {
+                Divider()
+                Button(role: .destructive) { drawings.removeAll() } label: { Label("Clear drawings", systemImage: "trash") }
+            }
+        } label: { toolbarIcon(tool == .none ? "pencil.and.outline" : tool.symbol, active: tool != .none) }
+        .accessibilityLabel("Drawing tools")
+    }
+
+    private var settingsMenu: some View {
+        Menu {
+            Toggle("Log scale", isOn: $logScale)
+            Toggle("Magnet crosshair", isOn: $magnet)
+        } label: { toolbarIcon("slider.horizontal.3", active: logScale) }
+        .accessibilityLabel("Chart settings")
+    }
+
+    private func toggle(_ overlay: ChartOverlay) {
+        var set = overlays
+        if set.contains(overlay) { set.remove(overlay) } else { set.insert(overlay) }
+        overlayNames = ChartOverlay.allCases.filter { set.contains($0) }.map(\.rawValue).joined(separator: ",")
+    }
+
+    private func toggle(_ pane: ChartPane) {
+        var list = panes
+        if let index = list.firstIndex(of: pane) { list.remove(at: index) } else { list.append(pane) }
+        paneNames = ChartPane.allCases.filter { list.contains($0) }.map(\.rawValue).joined(separator: ",")
+    }
+
+    private func tradeButton(_ side: Direction, title: String, action: @escaping (Direction) -> Void) -> some View {
+        Button { action(side) } label: {
+            Text(title)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(.black)
+                .padding(.horizontal, 16)
+                .frame(height: 32)
+                .background(side.color.color, in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Share
+
+    private func share() {
+        var still = frame
+        still.crosshair = nil
+        let content = VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                DeskBrandMark(size: 22)
+                Text("\(market.symbol) · \(intervalLabel)")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightText.color)
+                Spacer()
+                if let last = candles.last {
+                    Text(PriceAxis.label(last.close))
+                        .font(.system(size: 18, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(last.isRising ? DeskColor.rise.color : DeskColor.fall.color)
+                }
+            }
+            .padding(.horizontal, 18)
+            .frame(height: 52)
+            StudioCanvas(frame: still)
+        }
+        .frame(width: 1_200, height: 700)
+        .background(Color.black)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 2
+        if let image = renderer.uiImage { shareImage = ShareImage(image: image) }
+    }
+}
+
+private struct ShareImage: Identifiable {
+    let id = UUID()
+    let image: UIImage
+}
+
+private struct StudioActivitySheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}

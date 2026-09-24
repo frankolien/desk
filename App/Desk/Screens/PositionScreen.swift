@@ -14,6 +14,7 @@ struct PositionScreen: View {
     @State private var showsClose = false
     @State private var showsProtection = false
     @State private var showsShare = false
+    @State private var showsStudio = false
     @State private var tab: PositionTab = .positions
     /// Which position the screen is showing. Starts at the one that was tapped.
     @State private var focusedID: Int64?
@@ -69,6 +70,12 @@ struct PositionScreen: View {
                 if let figures {
                     TradeShareSheet(symbol: market.symbol, figures: figures)
                 }
+            }
+            .fullScreenCover(isPresented: $showsStudio) {
+                let scale = pow(10.0, Double(market.market?.config.priceDecimals ?? 0))
+                ChartStudio(market: market, network: model.network.name,
+                            guides: figures.map { guides($0, scale: scale) } ?? [],
+                            onClose: { showsStudio = false })
             }
         }
     }
@@ -347,6 +354,7 @@ struct PositionScreen: View {
                 guides: guides(figures, scale: scale))
                 .frame(height: 250)
                 .overlay(alignment: .bottom) { Divider().overlay(Color.white.opacity(0.12)) }
+                .overlay(alignment: .topTrailing) { ChartExpandButton { showsStudio = true } }
         } else {
             VStack(spacing: 18) {
                 SkeletonRow(widthFraction: 0.88)

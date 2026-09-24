@@ -45,10 +45,10 @@ struct MarketScreen: View {
                 // without widening the page — a negative padding did, and the whole
                 // screen could then be dragged sideways.
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 10) {
                         header.padding(.horizontal, 16)
                         if !Self.tradersOnly {
-                            hotMarkets.padding(.top, 34)
+                            hotMarkets.padding(.top, 10)
                             if !discovery.trending.isEmpty {
                                 TrendingTicker(tokens: Array(discovery.trending.prefix(10)), sparklines: sparklines) { token in
                                     openToken = .init(chainIndex: token.chainIndex, contract: token.contract, symbol: token.symbol)
@@ -116,7 +116,8 @@ struct MarketScreen: View {
             .task { if ProcessInfo.processInfo.arguments.contains("-price-demo") { MarketOpenRequest.shared.open("ETH") } }
             .task { if ProcessInfo.processInfo.arguments.contains("-crowd-demo") { directory.seedCrowdForReview() } }
             .task {
-                guard ProcessInfo.processInfo.arguments.contains("-open-ticket") else { return }
+                let arguments = ProcessInfo.processInfo.arguments
+                guard arguments.contains("-open-ticket") || arguments.contains("-open-studio") || arguments.contains("-open-detail") else { return }
                 while market.allMarkets.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
                 guard let first = market.allMarkets.first else { return }
                 market.select(first)
@@ -686,6 +687,7 @@ struct PerpDetailScreen: View {
     @State private var openHolder: MarketHolder?
     @State private var chat = MarketChatModel()
     @State private var showsChat = false
+    @State private var showsStudio = false
     @AppStorage("desk.watchlist") private var savedIDs = ""
 
     var body: some View {
@@ -730,7 +732,15 @@ struct PerpDetailScreen: View {
             // gets the same way in that `-stage` gives every other screen.
             if ProcessInfo.processInfo.arguments.contains("-open-ticket") { ticket = .up }
             if ProcessInfo.processInfo.arguments.contains("-open-chat") { showsChat = true }
+            if ProcessInfo.processInfo.arguments.contains("-open-studio") { showsStudio = true }
             #endif
+        }
+        .fullScreenCover(isPresented: $showsStudio) {
+            ChartStudio(market: market, network: model.network.name, onTrade: { side in
+                showsStudio = false
+                // The cover has to be gone, and the phone upright, before a sheet can come up.
+                Task { try? await Task.sleep(for: .milliseconds(550)); open(side) }
+            }, onClose: { showsStudio = false })
         }
         .sheet(isPresented: $showsChat) {
             MarketChatSheet(chat: chat, market: market, holders: holders, model: model) { showsChat = false }
@@ -898,6 +908,7 @@ struct PerpDetailScreen: View {
             CandlestickChart(candles: market.candles.map { $0.chartCandle(scale: scale) })
                 .frame(height: 250)
                 .overlay(alignment: .bottom) { Divider().overlay(Color.white.opacity(0.12)) }
+                .overlay(alignment: .topTrailing) { ChartExpandButton { showsStudio = true } }
         } else {
             VStack(spacing: 18) {
                 SkeletonRow(widthFraction: 0.88)
@@ -962,16 +973,18 @@ struct PerpDetailScreen: View {
         .perpGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
+    private func open(_ side: Direction) {
+        if !model.hasTradingAccount {
+            showsSetup = true
+        } else if model.hasSeenLeverageExplainer {
+            ticket = side
+        } else {
+            pendingSide = side
+        }
+    }
+
     private func tradeButton(_ side: Direction, title: String) -> some View {
-        Button {
-            if !model.hasTradingAccount {
-                showsSetup = true
-            } else if model.hasSeenLeverageExplainer {
-                ticket = side
-            } else {
-                pendingSide = side
-            }
-        } label: {
+        Button { open(side) } label: {
             Text(title)
                 .font(.system(size: 17, weight: .bold, design: .rounded))
                 .foregroundStyle(side.color.color)

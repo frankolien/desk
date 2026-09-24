@@ -403,6 +403,10 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         TradeAlerts.shared.didRegister(deviceToken: deviceToken)
     }
 
+    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        OrientationLock.mask
+    }
+
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: any Error) {
         TradeAlerts.shared.didFailToRegister()
     }
