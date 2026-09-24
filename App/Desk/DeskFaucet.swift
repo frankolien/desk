@@ -53,7 +53,7 @@ struct DeskFaucet: Sendable {
         guard outcome.ausd.status == "unavailable" else { return nil }
         return switch outcome.ausd.reason {
         case "cooldown": "Agora's AUSD faucet is cooling down. Try again in a minute."
-        case "faucet-empty": "Agora's AUSD faucet could not send right now."
+        case "faucet-empty": "Test AUSD is out right now. Try again later."
         default: "Test AUSD could not be claimed. Try again in a minute."
         }
     }

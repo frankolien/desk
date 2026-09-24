@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  AUSD_MINIMUM, MON_DRIP, MON_RESERVE, MON_THRESHOLD,
-  createHandler, limited, plan, revertReason, throttled, validRecipient,
+  AUSD_FALLBACK, AUSD_MINIMUM, MON_DRIP, MON_RESERVE, MON_THRESHOLD, createHandler, limited, plan, revertReason, throttled, validRecipient,
 } from "../api/faucet.mjs";
 import { memoryStore } from "../api/_store.mjs";
 
@@ -106,8 +105,8 @@ test("requests are refused before touching the chain", async () => {
   const unconfigured = await createHandler(() => null, new Map())({ method: "POST", body: { address: WALLET } }, recorder());
   assert.equal(unconfigured.status, 503);
   assert.equal(unconfigured.body.reason, "not-configured");
-  const get = await createHandler(() => fakeChain({}), new Map())({ method: "GET" }, recorder());
-  assert.equal(get.status, 405);
+  const put = await createHandler(() => fakeChain({}), new Map())({ method: "PUT" }, recorder());
+  assert.equal(put.status, 405);
 });
 
 test("a wallet that hit Agora's cooldown may ask again at once", async () => {
@@ -152,7 +151,36 @@ test("Agora's revert selectors map to reasons", () => {
   assert.equal(revertReason("0x20e5bc67"), "cooldown");
   assert.equal(revertReason("0x0949DAB9"), "already-funded");
   assert.equal(revertReason("0x5274afe7000000000000000000000000a9012a055bd4e0edff8ce09f960291c09d5322dc"), "faucet-empty");
+  assert.equal(revertReason("0x356680b7"), "faucet-empty");
   assert.equal(revertReason("0xdeadbeef"), null);
   assert.equal(validRecipient(WALLET), true);
   assert.equal(validRecipient("0x123"), false);
+});
+
+test("when Agora's faucet is empty, Desk's own wallet sends the AUSD and frees the day's limit", async () => {
+  const store = memoryStore();
+  const chain = fakeChain(
+    { recipientMON: 0n, recipientAUSD: 0n, faucetMON: FULL_FAUCET, faucetAUSD: 5_000_000_000n },
+    { simulateClaim: async () => ({ ok: false, reason: "faucet-empty" }),
+      sendAUSD: async (to, amount, n) => { chain.calls.push(["desk-ausd", to, amount, n]); return "0xdesk"; } });
+  const result = await createHandler(() => chain, new Map(), () => store)({ method: "POST", body: { address: WALLET } }, recorder());
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.ausd, { status: "sent", hash: "0xdesk", source: "desk" });
+  assert.deepEqual(chain.calls.map((c) => c[0]), ["mon", "desk-ausd"]);
+  assert.equal(chain.calls[1][2], AUSD_FALLBACK);
+
+  // With nothing in Desk's wallet either, the refusal frees the wallet to try again later.
+  const dry = fakeChain(
+    { recipientMON: MON_THRESHOLD, recipientAUSD: 0n, faucetMON: FULL_FAUCET, faucetAUSD: 0n },
+    { simulateClaim: async () => ({ ok: false, reason: "faucet-empty" }) });
+  const second = memoryStore();
+  await createHandler(() => dry, new Map(), () => second)({ method: "POST", body: { address: WALLET } }, recorder());
+  assert.equal(await second.get(`faucet:addr2:${WALLET.toLowerCase()}`), null);
+});
+
+test("the faucet says what it holds", async () => {
+  const chain = { reserves: async () => ({ faucet: WALLET, mon: "1", ausd: "2", agoraAUSD: "3" }) };
+  const result = await createHandler(() => chain, new Map())({ method: "GET", query: {} }, recorder());
+  assert.equal(result.status, 200);
+  assert.equal(result.body.agoraAUSD, "3");
 });

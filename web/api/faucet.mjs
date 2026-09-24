@@ -17,12 +17,18 @@ export const MON_DRIP = 100_000_000_000_000_000n;
 /// Left in the faucet wallet so it can still pay for the AUSD claim it makes.
 export const MON_RESERVE = 50_000_000_000_000_000n;
 export const AUSD_MINIMUM = 100_000_000n;
+/// What Desk's own wallet hands out when Agora's faucet cannot: enough to open a desk
+/// and trade, not the ten thousand Agora gives, because Desk's stash is finite.
+export const AUSD_FALLBACK = 1_000_000_000n;
 
 const MIN_FEE_WEI = 100_000_000_000n;
 const PRIORITY_FEE_WEI = 2_000_000_000n;
 const RECENT_WINDOW_MS = 60_000;
 
 const ERC20_ABI = [{
+  type: "function", name: "transfer", stateMutability: "nonpayable",
+  inputs: [{ name: "to", type: "address" }, { name: "amount", type: "uint256" }], outputs: [{ type: "bool" }],
+}, {
   type: "function", name: "balanceOf", stateMutability: "view",
   inputs: [{ name: "owner", type: "address" }], outputs: [{ type: "uint256" }],
 }];
@@ -35,6 +41,8 @@ const REVERTS = {
   "0x20e5bc67": "cooldown",
   "0x0949dab9": "already-funded",
   "0x5274afe7": "faucet-empty",
+  // InsufficientFunds(): the faucet holds less than it hands out.
+  "0x356680b7": "faucet-empty",
 };
 
 export function validRecipient(value) {
@@ -86,13 +94,26 @@ export function chainDependencies(privateKey, rpcURL = monadTestnet.rpcUrls.defa
   }
 
   return {
+    faucetAddress: account.address,
+
     async balances(recipient) {
-      const [recipientMON, recipientAUSD, faucetMON] = await Promise.all([
+      const [recipientMON, recipientAUSD, faucetMON, faucetAUSD] = await Promise.all([
         reader.getBalance({ address: recipient }),
         reader.readContract({ address: AUSD, abi: ERC20_ABI, functionName: "balanceOf", args: [recipient] }),
         reader.getBalance({ address: account.address }),
+        reader.readContract({ address: AUSD, abi: ERC20_ABI, functionName: "balanceOf", args: [account.address] }),
       ]);
-      return { recipientMON, recipientAUSD, faucetMON };
+      return { recipientMON, recipientAUSD, faucetMON, faucetAUSD };
+    },
+
+    /// What the faucet itself holds, and what Agora's holds, for the health view.
+    async reserves() {
+      const [mon, ausd, agoraAUSD] = await Promise.all([
+        reader.getBalance({ address: account.address }),
+        reader.readContract({ address: AUSD, abi: ERC20_ABI, functionName: "balanceOf", args: [account.address] }),
+        reader.readContract({ address: AUSD, abi: ERC20_ABI, functionName: "balanceOf", args: [AGORA_FAUCET] }),
+      ]);
+      return { faucet: account.address, mon: mon.toString(), ausd: ausd.toString(), agoraAUSD: agoraAUSD.toString() };
     },
 
     async simulateClaim(recipient) {
@@ -118,6 +139,11 @@ export function chainDependencies(privateKey, rpcURL = monadTestnet.rpcUrls.defa
     async claimAUSD(recipient, gas, nonce) {
       const data = encodeFunctionData({ abi: FAUCET_ABI, functionName: "requestFunds", args: [recipient] });
       return writer.sendTransaction({ to: AGORA_FAUCET, data, gas, nonce, ...(await fees()) });
+    },
+
+    async sendAUSD(recipient, amount, nonce) {
+      const data = encodeFunctionData({ abi: ERC20_ABI, functionName: "transfer", args: [recipient, amount] });
+      return writer.sendTransaction({ to: AUSD, data, gas: 90_000n, nonce, ...(await fees()) });
     },
 
     async confirmed(hash) {
@@ -149,7 +175,7 @@ export function callerKey(headers = {}) {
 export async function limited(store, recipient, headers) {
   if (!store) return null;
   try {
-    if (!await store.set(`faucet:addr:${recipient}`, "1", { ex: ADDRESS_WINDOW_SECONDS, nx: true })) {
+    if (!await store.set(`faucet:addr2:${recipient}`, "1", { ex: ADDRESS_WINDOW_SECONDS, nx: true })) {
       return { error: "This wallet was funded today.", reason: "too-soon" };
     }
     const caller = callerKey(headers);
@@ -183,6 +209,15 @@ function serially(work) {
 export function createHandler(resolveDependencies, memory = recent, resolveStore = () => redisStore()) {
   return async function handler(req, res) {
     res.setHeader("Cache-Control", "private, no-store");
+    if (req.method === "GET") {
+      const chain = resolveDependencies();
+      if (!chain?.reserves) return res.status(503).json({ error: "The Desk faucet is not configured.", reason: "not-configured" });
+      try {
+        return res.status(200).json(await chain.reserves());
+      } catch {
+        return res.status(502).json({ error: "The faucet could not reach Monad testnet.", reason: "chain-unavailable" });
+      }
+    }
     if (req.method !== "POST") return res.status(405).json({ error: "POST required" });
     const body = typeof req.body === "string" ? safeJSON(req.body) : req.body;
     const recipient = body?.address;
@@ -204,18 +239,26 @@ export function createHandler(resolveDependencies, memory = recent, resolveStore
     }
 
     try {
-      const decision = plan(await chain.balances(recipient));
+      const balances = await chain.balances(recipient);
+      const decision = plan(balances);
       const result = { mon: { status: decision.mon }, ausd: { status: decision.ausd } };
 
       let claimGas = null;
+      let fromDesk = false;
       if (decision.ausd === "claim") {
         const simulation = await chain.simulateClaim(recipient);
         if (simulation.ok) claimGas = simulation.gas;
         else result.ausd = { status: simulation.reason === "already-funded" ? "enough" : "unavailable", reason: simulation.reason };
+        // Agora's faucet runs dry. Desk's own wallet covers the gap while it has a stash,
+        // so a first run never ends on an empty desk because a third party is empty.
+        if (!simulation.ok && simulation.reason !== "already-funded" && simulation.reason !== "cooldown"
+            && typeof chain.sendAUSD === "function" && (balances.faucetAUSD ?? 0n) >= AUSD_FALLBACK) {
+          fromDesk = true;
+        }
       }
 
       const pending = [];
-      if (decision.mon === "send" || claimGas) await serially(async () => {
+      if (decision.mon === "send" || claimGas || fromDesk) await serially(async () => {
         let nonce = await chain.nonce();
         if (decision.mon === "send") {
           const hash = await chain.sendMON(recipient, nonce++);
@@ -225,6 +268,10 @@ export function createHandler(resolveDependencies, memory = recent, resolveStore
         if (claimGas) {
           const hash = await chain.claimAUSD(recipient, claimGas, nonce);
           result.ausd = { status: "sent", hash };
+          pending.push(["ausd", hash]);
+        } else if (fromDesk) {
+          const hash = await chain.sendAUSD(recipient, AUSD_FALLBACK, nonce);
+          result.ausd = { status: "sent", hash, source: "desk" };
           pending.push(["ausd", hash]);
         }
       });
@@ -242,9 +289,11 @@ export function createHandler(resolveDependencies, memory = recent, resolveStore
         }
       }
       // Anything undelivered may be asked for again straight away: Agora's cooldown is
-      // shared by every caller, so the wallet should not also wait out Desk's.
+      // shared by every caller, so the wallet should not also wait out Desk's, and the
+      // day's limit is for wallets that were funded, not wallets that were refused.
       if (result.mon.status === "unavailable" || result.ausd.status === "unavailable") {
         memory.delete(recipient.toLowerCase());
+        await resolveStore()?.del(`faucet:addr2:${recipient.toLowerCase()}`).catch(() => {});
       }
       return res.status(200).json(result);
     } catch {
