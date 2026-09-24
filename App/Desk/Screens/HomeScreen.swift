@@ -81,13 +81,14 @@ struct HomeScreen: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     topBar
-                    balance.padding(.top, 54)
-                    actions.padding(.top, 42)
+                    balance.padding(.top, 40)
+                    balanceCaption.padding(.top, 6)
+                    actions.padding(.top, 28)
+                    summaryCards.padding(.top, 20)
                     if !model.hasTradingAccount {
-                        setupCard.padding(.top, 24)
+                        setupCard.padding(.top, 16)
                     }
-                    networkChip.padding(.top, 26)
-                    accountRows.padding(.top, 12)
+                    accountRows.padding(.top, 16)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
@@ -115,45 +116,64 @@ struct HomeScreen: View {
     private var homeBackground: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            DeskAurora()
+            DeskAurora(height: 560)
         }
     }
 
     // MARK: Chrome
 
     private var topBar: some View {
-        ZStack {
-            HStack {
-                glassCircle(symbol: "gearshape.fill", label: "Account", action: onAccount)
-                Spacer()
-                glassCircle(symbol: "clock.fill", label: "Activity", action: onActivity)
+        HStack(spacing: 10) {
+            Menu {
+                Button {
+                    withAnimation(.snappy) { hidesBalance.toggle() }
+                } label: {
+                    Label(hidesBalance ? "Show Balance" : "Hide Balance",
+                          systemImage: hidesBalance ? "eye" : "eye.slash")
+                }
+                Button { Task { await model.lock() } } label: {
+                    Label("Lock Trading Key", systemImage: "lock.shield")
+                }
+                Button { model.copyAddress() } label: { Label("Copy Address", systemImage: "doc.on.doc") }
+            } label: {
+                AddressAvatar(address: model.address?.checksummed ?? "", size: 42)
+                    .contentShape(Circle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Account options")
 
             Button(action: onAccount) {
-                HStack(spacing: 8) {
-                    AddressAvatar(address: model.address?.checksummed ?? "", size: 21)
-                        .grayscale(1)
+                HStack(spacing: 6) {
                     Text(model.addressShort)
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
                         .monospacedDigit()
-                    // Mainnet is the normal state and carries no label; only testnet is marked.
+                        .lineLimit(1)
+                        .fixedSize()
                     if !model.network.holdsRealFunds {
                         Text("Testnet")
                             .font(.system(size: 10, weight: .heavy, design: .rounded))
-                            .foregroundStyle(DeskColor.nightText.color)
-                            .padding(.horizontal, 7)
-                            .frame(height: 18)
+                            .fixedSize()
+                            .padding(.horizontal, 6)
+                            .frame(height: 17)
                             .background(Color.white.opacity(0.14), in: Capsule())
                     }
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(DeskColor.nightMuted.color)
                 }
                 .foregroundStyle(DeskColor.nightText.color)
                 .padding(.horizontal, 14)
-                .frame(height: 42)
+                .frame(height: 40)
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
             .homeGlass(interactive: true, in: Capsule())
             .accessibilityLabel("Your account, \(model.addressShort)")
+
+            Spacer()
+
+            glassCircle(symbol: "clock.arrow.circlepath", label: "Activity", action: onActivity)
+            glassCircle(symbol: "globe", label: "Network, \(model.network.name)", action: onNetwork)
         }
     }
 
@@ -172,33 +192,6 @@ struct HomeScreen: View {
         .buttonStyle(.plain)
         .homeGlass(interactive: true, in: Circle())
         .accessibilityLabel(label)
-    }
-
-    /// What the rows below are. Desk trades one network at a time, so this names the one
-    /// in force rather than claiming an "all networks" view the app does not have — the
-    /// figures underneath come from a single chain and saying otherwise would be a lie
-    /// told by a filter. It doubles as the way into the switcher, which was previously
-    /// reachable only from inside the More menu.
-    private var networkChip: some View {
-        Button(action: onNetwork) {
-            HStack(spacing: 6) {
-                Image(systemName: "globe")
-                    .font(.system(size: 12, weight: .semibold))
-                Text(model.network.name)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-            }
-            .foregroundStyle(DeskColor.nightText.color)
-            .padding(.horizontal, 12)
-            .frame(height: 34)
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .homeGlass(interactive: true, in: Capsule())
-        .accessibilityLabel("Network, \(model.network.name)")
-        .accessibilityHint("Double tap to switch network")
     }
 
     // MARK: Balance
@@ -228,6 +221,38 @@ struct HomeScreen: View {
         .accessibilityValue(hidesBalance ? "Hidden" : totalInCurrency)
         .accessibilityHint("Double tap to \(hidesBalance ? "show" : "hide") your balance")
         .animation(.snappy, value: hidesBalance)
+    }
+
+    /// Under the total: what the open positions are doing, in money and against the
+    /// total. Without positions, where the money is.
+    private var balanceCaption: some View {
+        Button(action: onTrade) {
+            HStack(spacing: 6) {
+                if let pnl = totalPositionPnL, let total = model.collateral.value {
+                    let base = Double((total + (model.walletAUSD.value ?? .zero)).raw - pnl.raw)
+                    let percent = base > 0 ? Double(pnl.raw) / base * 100 : 0
+                    Text(hidesBalance ? "•••••" : DisplayCurrency.shared.format(pnl, signed: true) + String(format: " (%+.2f%%)", percent))
+                        .foregroundStyle((pnl.isNegative ? DeskColor.fall : DeskColor.rise).color)
+                    Text("Open PnL")
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                } else {
+                    Text("AUSD on \(model.network.name)")
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+            }
+            .font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit())
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var totalPositionPnL: Money? {
+        let contexts = positionContexts
+        guard !contexts.isEmpty else { return nil }
+        return contexts.reduce(.zero) { $0 + $1.figures.unrealisedPnL }
     }
 
     // MARK: Setup
@@ -275,31 +300,71 @@ struct HomeScreen: View {
     // MARK: Actions
 
     private var actions: some View {
-        HStack(spacing: 8) {
-            HomeActionTile(symbol: "tray.and.arrow.down", title: "Add funds", action: onFund)
-            HomeActionTile(symbol: "arrow.up.right", title: "Withdraw", isEnabled: canWithdraw, action: onWithdraw)
-            HomeActionTile(symbol: "arrow.left.arrow.right", title: "Trade",
-                           isEnabled: !isEmpty, action: onTrade)
-            // Only what has no tile or chip of its own: funding, withdrawing, the network
-            // and Following each already live one tap away on this screen or a tab.
-            Menu {
-                Button {
-                    withAnimation(.snappy) { hidesBalance.toggle() }
-                } label: {
-                    Label(hidesBalance ? "Show Balance" : "Hide Balance",
-                          systemImage: hidesBalance ? "eye" : "eye.slash")
-                }
-                Button { Task { await model.lock() } } label: {
-                    Label("Lock Trading Key", systemImage: "lock.shield")
-                }
-                Button { model.copyAddress() } label: { Label("Copy Address", systemImage: "doc.on.doc") }
-            } label: {
-                HomeActionTileLabel(symbol: "ellipsis", title: "More")
-            }
-            .buttonStyle(.plain)
-            .homeGlass(interactive: true, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
-            .accessibilityLabel("More")
+        HStack(spacing: 10) {
+            actionPill(symbol: "arrow.up", title: "Withdraw", isEnabled: canWithdraw, action: onWithdraw)
+            actionPill(symbol: "arrow.down", title: "Add funds", action: onFund)
+            actionPill(symbol: "clock.arrow.circlepath", title: "History", action: onActivity)
         }
+    }
+
+    private func actionPill(symbol: String, title: String, isEnabled: Bool = true, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Image(systemName: symbol).font(.system(size: 14, weight: .bold))
+                Text(title).font(.system(size: 15, weight: .bold, design: .rounded))
+            }
+            .foregroundStyle(DeskColor.nightText.color)
+            .frame(maxWidth: .infinity)
+            .frame(height: 50)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .homeGlass(interactive: true, in: Capsule())
+        .opacity(isEnabled ? 1 : 0.42)
+        .disabled(!isEnabled)
+    }
+
+    /// The three places money is: on the desk, in the wallet, and at risk in positions.
+    private var summaryCards: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                summaryCard(title: "Trading", detail: "AUSD on the desk",
+                            value: hidesBalance ? "•••••" : collateralInCurrency, highlighted: true, action: onFund)
+                summaryCard(title: "Wallet", detail: "AUSD, not on the desk",
+                            value: hidesBalance ? "•••••" : walletInCurrency, action: onWithdraw)
+                summaryCard(title: "Positions (\(positionContexts.count))", detail: positionContexts.isEmpty ? "None open" : "Open PnL",
+                            value: hidesBalance ? "•••••" : totalPositionPnL.map { DisplayCurrency.shared.format($0, signed: true) } ?? "—",
+                            tint: totalPositionPnL.map { $0.isNegative ? DeskColor.fall : DeskColor.rise }, action: onTrade)
+            }
+        }
+        .scrollClipDisabled()
+    }
+
+    private func summaryCard(title: String, detail: String, value: String, highlighted: Bool = false,
+                             tint: DeskRGB? = nil, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                Text(value)
+                    .font(.system(size: 20, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle((tint ?? DeskColor.nightText).color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(detail)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color.opacity(0.8))
+                    .lineLimit(1)
+            }
+            .padding(14)
+            .frame(width: 168, alignment: .leading)
+            .background(Color.white.opacity(highlighted ? 0.09 : 0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(highlighted ? Color.white.opacity(0.35) : Color.white.opacity(0.08), lineWidth: highlighted ? 1 : 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Rows
@@ -309,26 +374,6 @@ struct HomeScreen: View {
         // apart into four unrelated cards. Ten is the gap that groups them without
         // welding them together.
         VStack(spacing: 10) {
-            // Two accounts, named as two. The desk is where trades come from; the
-            // wallet is where a withdrawal lands and where a deposit is taken from.
-            HomeAssetRow(
-                mark: { TokenLogo(asset: .ausd, size: 44) },
-                title: "Trading account",
-                subtitle: "AUSD available to trade",
-                value: hidesBalance ? "•••••" : collateralInCurrency,
-                change: nil,
-                tint: DeskColor.action,
-                action: onFund)
-
-            HomeAssetRow(
-                mark: { MonochromeSymbolMark(symbol: "wallet.bifold") },
-                title: "Wallet",
-                subtitle: "AUSD, not on the desk",
-                value: hidesBalance ? "•••••" : walletInCurrency,
-                change: nil,
-                tint: DeskColor.nightMuted,
-                action: onWithdraw)
-
             // MON that arrived from an exchange, waiting to become collateral.
             if let spare = model.swappableMON {
                 HomeAssetRow(
@@ -458,50 +503,6 @@ struct HomeScreen: View {
         }
         .buttonStyle(.plain)
         .homeGlass(interactive: true, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-    }
-}
-
-/// The drawn tile, shared by the plain actions and the More menu.
-private struct HomeActionTileLabel: View {
-    let symbol: String
-    let title: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Image(systemName: symbol)
-                .font(.system(size: 20, weight: .semibold))
-            Spacer(minLength: 0)
-            Text(title)
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-        }
-        .foregroundStyle(DeskColor.nightText.color)
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: 76)
-        // Without this the tile is tappable only where its glyph and label are
-        // drawn: the padding and the glass behind it are not part of the button.
-        .contentShape(Rectangle())
-    }
-}
-
-private struct HomeActionTile: View {
-    let symbol: String
-    let title: String
-    var isEnabled = true
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HomeActionTileLabel(symbol: symbol, title: title)
-        }
-        .buttonStyle(.plain)
-        .homeGlass(interactive: true,
-                   in: RoundedRectangle(cornerRadius: 19, style: .continuous))
-        .opacity(isEnabled ? 1 : 0.42)
-        .disabled(!isEnabled)
-        .accessibilityLabel(title)
     }
 }
 

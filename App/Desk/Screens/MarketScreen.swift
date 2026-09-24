@@ -30,6 +30,7 @@ struct MarketScreen: View {
     @State private var directory = TraderDirectory()
     @State private var news = NewsModel()
     @State private var article: NewsItem?
+    @State private var sparklines = TickerSparklines()
     @StateObject private var discovery = TokenDiscoveryModel()
     @AppStorage("desk.watchlist") private var savedIDs = ""
     @AppStorage("desk.spotWatchlist") private var savedSpotData = ""
@@ -48,7 +49,13 @@ struct MarketScreen: View {
                         header.padding(.horizontal, 16)
                         if !Self.tradersOnly {
                             hotMarkets.padding(.top, 34)
-                            explore.padding(.top, 32).padding(.horizontal, 16)
+                            if !discovery.trending.isEmpty {
+                                TrendingTicker(tokens: Array(discovery.trending.prefix(10)), sparklines: sparklines) { token in
+                                    openToken = .init(chainIndex: token.chainIndex, contract: token.contract, symbol: token.symbol)
+                                }
+                                .padding(.top, 18)
+                            }
+                            explore.padding(.top, 26).padding(.horizontal, 16)
                         }
                         if !Self.newsOnly {
                             liveTrades.padding(.top, 32).padding(.horizontal, 16)
@@ -97,6 +104,9 @@ struct MarketScreen: View {
             .task { await directory.run() }
             .task { await discovery.run() }
             .task { await news.run() }
+            .task(id: discovery.trending.prefix(10).map(\.id).joined(separator: ",")) {
+                await sparklines.load(discovery.trending)
+            }
             .sheet(item: $article) { item in
                 if let link = item.link { InAppSafari(url: link).ignoresSafeArea() }
             }

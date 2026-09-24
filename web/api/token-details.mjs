@@ -34,9 +34,32 @@ async function handlePrices(req, res) {
   }
 }
 
+const SPARKLINE_BATCH = 10;
+
+/// A day of hourly closes per token, oldest first, for the small charts on Home:
+/// `?view=sparklines&tokens=chain:addr,…` (up to 10). A token OKX cannot chart comes
+/// back with no points rather than failing the batch.
+async function handleSparklines(req, res) {
+  const ids = [...new Set(String(req.query.tokens ?? "").split(",").map((v) => v.trim()).filter(Boolean))].slice(0, SPARKLINE_BATCH);
+  const parsed = ids.map((id) => TOKEN_ID.exec(id)).filter(Boolean).map((m) => ({ chainIndex: m[1], contract: m[2] }));
+  if (!parsed.length) return res.status(400).json({ error: "tokens must be chain:address pairs." });
+  const series = await Promise.all(parsed.map(async ({ chainIndex, contract }) => {
+    try {
+      const rows = await okxGet("/api/v6/dex/market/candles", { chainIndex, tokenContractAddress: contract, bar: "1H", limit: "24" });
+      const closes = (Array.isArray(rows) ? rows : []).map((row) => number(row[4])).filter((v) => v !== null).reverse();
+      return { chainIndex, contract, closes };
+    } catch {
+      return { chainIndex, contract, closes: [] };
+    }
+  }));
+  res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=900");
+  return res.status(200).json({ observedAt: Date.now(), series });
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
   if (req.query.view === "holdings") return handleHoldings(req, res);
+  if (req.query.view === "sparklines") return handleSparklines(req, res);
   if (req.query.view === "risk") return handleRisk(req, res);
   if (req.query.view === "early") return handleEarly(req, res);
   if (req.query.view === "prices") return handlePrices(req, res);

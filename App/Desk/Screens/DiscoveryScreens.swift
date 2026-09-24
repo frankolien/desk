@@ -831,7 +831,7 @@ private let spotFormatters: [SpotPriceShape: NumberFormatter] = {
 
 private enum SpotPriceShape: CaseIterable { case large, medium, small }
 
-private func spotPrice(_ value: Double) -> String {
+func spotPrice(_ value: Double) -> String {
     let shape: SpotPriceShape = value >= 100 ? .large : (value >= 1 ? .medium : .small)
     return spotFormatters[shape]?.string(from: NSNumber(value: value)) ?? "$—"
 }
