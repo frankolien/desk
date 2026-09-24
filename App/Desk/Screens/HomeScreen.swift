@@ -48,6 +48,7 @@ struct HomeScreen: View {
     @State private var filter: Filter = .all
     @State private var range: Range = .day
     @State private var equity: [EquityLog.Point] = []
+    @State private var copiedAddress = false
 
     // MARK: Figures
 
@@ -155,6 +156,9 @@ struct HomeScreen: View {
                 .presentationDetents([.large])
         }
         .task(id: model.address) { await spot.run(for: model.address) }
+        .task(id: model.address) {
+            if let address = model.address { await IdentityDirectory.shared.resolve([address.checksummed]) }
+        }
         .onAppear { if firstOpened == 0 { firstOpened = Date.now.timeIntervalSince1970 } }
         .task(id: "\(model.address?.checksummed ?? "")|\(total?.raw ?? -1)") {
             guard let address = model.address, let total else { return }
@@ -240,7 +244,9 @@ struct HomeScreen: View {
                 Button { Task { await model.lock() } } label: { Label("Lock Trading Key", systemImage: "lock.shield") }
                 Button { model.copyAddress() } label: { Label("Copy Address", systemImage: "doc.on.doc") }
             } label: {
-                AddressAvatar(address: model.address?.checksummed ?? "", size: 58)
+                // The trader avatar, not the generated one: a Farcaster, ENS, nad or SNS
+                // picture set elsewhere shows here the way it shows on every other trader.
+                TraderAvatar(address: model.address?.checksummed ?? "", size: 58)
                     .overlay(alignment: .bottomTrailing) {
                         Image(systemName: "ellipsis")
                             .font(.system(size: 9, weight: .heavy))
@@ -259,9 +265,25 @@ struct HomeScreen: View {
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .foregroundStyle(DeskColor.nightText.color)
                     .lineLimit(1)
-                Text(ownName != nil ? model.addressShort : model.network.name)
+                // The address line is the copy button. Tapping an address and having it
+                // copied is what every wallet has taught people to expect.
+                Button {
+                    model.copyAddress()
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(.snappy(duration: 0.2)) { copiedAddress = true }
+                    Task { try? await Task.sleep(for: .seconds(1.4)); withAnimation { copiedAddress = false } }
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(copiedAddress ? "Address copied" : (ownName != nil ? model.addressShort : "\(model.addressShort) · \(model.network.shortName)"))
+                        Image(systemName: copiedAddress ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 10, weight: .bold))
+                    }
                     .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
-                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .foregroundStyle(copiedAddress ? DeskColor.rise.color : DeskColor.nightMuted.color)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Copy address")
                 HStack(spacing: 12) {
                     Button(action: onFollowing) {
                         (Text("\(followingCount) ").bold() + Text("Following"))
