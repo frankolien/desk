@@ -258,6 +258,27 @@ final class AppModel {
         UIPasteboard.general.string = address.checksummed
     }
 
+    /// Signs and sends a checked call to one of nad's two pinned contracts on Monad
+    /// mainnet, with one Face ID prompt, and returns the hash once it is mined. Nad
+    /// lives on mainnet only, so this uses the mainnet sender whatever Desk trades on.
+    func sendNadCall(_ call: NadCall, value: NativeAmount) async throws -> String {
+        let checked = try call.checked(expectingValue: value)
+        let sender: TransactionSender
+        if let mainnetSender {
+            sender = mainnetSender
+        } else {
+            sender = TransactionSender(rpc: MonadRPC(configuration: try .mainnet()))
+            mainnetSender = sender
+        }
+        let signed = try await passkey.withKeys { wallet, _ in
+            try await sender.send(to: checked.to, data: checked.data, value: checked.value.bigEndianBytes, from: wallet)
+        }
+        _ = try await sender.wait(for: signed)
+        await refreshMainnetMON()
+        if let address { await IdentityDirectory.shared.refresh(address.checksummed) }
+        return signed.hashHex
+    }
+
     /// The wallet's own name and picture, signed once with Face ID and shown to everyone.
     func saveProfile(name: String, image: Data?) async throws {
         guard let address else { return }

@@ -12,7 +12,9 @@ struct AccountScreen: View {
     @State private var showsFunding = false
     @State private var showsNetwork = false
     @State private var showsCurrency = false
+    @State private var showsNad = false
     @State private var didCopyAddress = false
+    @State private var nad = NadNamesModel()
 
     private var versionDescription: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
@@ -47,6 +49,17 @@ struct AccountScreen: View {
                                 title: "Withdraw",
                                 subtitle: "Face ID confirmation required",
                                 action: { showsWithdraw = true }
+                            )
+                        }
+
+                        settingsSection("IDENTITY") {
+                            SettingsRow(
+                                icon: "at",
+                                tint: .purple,
+                                title: "Nad name",
+                                subtitle: nad.primary == nil ? "Show, set and manage your .nad identity" : "Primary name on Monad",
+                                value: nad.primary,
+                                action: { showsNad = true }
                             )
                         }
 
@@ -141,6 +154,13 @@ struct AccountScreen: View {
             }
         }
         .preferredColorScheme(.dark)
+        .sheet(isPresented: $showsNad, onDismiss: { Task { if let address = model.address { await nad.load(address: address.checksummed) } } }) {
+            NadNameSheet(model: model) { showsNad = false }
+        }
+        .task(id: model.address) { if let address = model.address { await nad.load(address: address.checksummed) } }
+        #if DEBUG
+        .task { if ProcessInfo.processInfo.arguments.contains("-open-nad") { showsNad = true } }
+        #endif
         .sheet(isPresented: $showsFunding) {
             AddFundsSheet(model: model)
                 .presentationDetents([.large])

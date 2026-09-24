@@ -6,6 +6,7 @@ import { EXCHANGE_VIEWS } from "./_perpl-abi.mjs";
 import { DEFAULT_WINDOW, WINDOWS, cachedSignals } from "./_signals.mjs";
 import { redisStore } from "./_store.mjs";
 import { publicProfile, readProfile, saveProfile } from "./_profile.mjs";
+import { cleanLabel, nameStatus, namesOf, registerRequest, setPrimaryCalldata, setRecordsCalldata } from "./_nad.mjs";
 
 /// Perpl mainnet, read-only. Following is about real traders, so it reads the live venue
 /// even though Desk trades on testnet; nothing here signs or moves funds.
@@ -293,6 +294,52 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
       res.setHeader("Cache-Control", "public, max-age=86400, immutable");
       res.setHeader("Content-Type", stored.type || "image/jpeg");
       return res.status(200).send(Buffer.from(stored.image, "base64"));
+    }
+    // .nad names: what a wallet holds, whether a label is free and its price, and the
+    // calldata for the writes the wallet signs itself.
+    if (view === "nad") {
+      const address = String(req.query.address ?? "");
+      if (!validAddress(address)) return res.status(400).json({ error: "A wallet address is required." });
+      try {
+        res.setHeader("Cache-Control", "private, max-age=15");
+        return res.status(200).json(await namesOf(address));
+      } catch {
+        return res.status(502).json({ error: "Nad Name Service could not be read right now." });
+      }
+    }
+    if (view === "nad-name") {
+      const label = cleanLabel(req.query.name);
+      if (!label) return res.status(400).json({ error: "Names are 1–32 lower-case letters, digits and hyphens.", reason: "invalid" });
+      try {
+        res.setHeader("Cache-Control", "public, s-maxage=10, stale-while-revalidate=30");
+        return res.status(200).json(await nameStatus(label, { fetchImpl }));
+      } catch {
+        return res.status(502).json({ error: "Nad Name Service could not be read right now." });
+      }
+    }
+    if (view === "nad-calldata") {
+      if (req.method !== "POST") return res.status(405).json({ error: "POST required" });
+      const body = req.body ?? {};
+      const label = cleanLabel(body.name);
+      if (!label) return res.status(400).json({ error: "A valid name is required." });
+      res.setHeader("Cache-Control", "private, no-store");
+      if (body.kind === "records") {
+        const built = setRecordsCalldata(label, body.records ?? {});
+        return built ? res.status(200).json(built) : res.status(400).json({ error: "Nothing to write." });
+      }
+      if (body.kind === "primary") {
+        if (!validAddress(String(body.address ?? ""))) return res.status(400).json({ error: "A wallet address is required." });
+        return res.status(200).json(setPrimaryCalldata(label, body.address));
+      }
+      return res.status(400).json({ error: "Unknown write." });
+    }
+    if (view === "nad-register") {
+      if (req.method !== "POST") return res.status(405).json({ error: "POST required" });
+      const body = req.body ?? {};
+      if (!validAddress(String(body.owner ?? ""))) return res.status(400).json({ error: "A wallet address is required." });
+      res.setHeader("Cache-Control", "private, no-store");
+      const outcome = await registerRequest(body, { fetchImpl });
+      return res.status(outcome.status).json(outcome.body);
     }
     if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
 
