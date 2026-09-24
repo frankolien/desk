@@ -136,8 +136,9 @@ struct NadFindNameView: View {
     }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             DeskBackground()
+            DeskAurora(height: 420).ignoresSafeArea()
             VStack(spacing: 0) {
                 Spacer(minLength: 40)
                 Text("Find your name")
@@ -165,10 +166,13 @@ struct NadFindNameView: View {
                 .padding(.horizontal, 24)
                 .frame(height: 64)
                 .background(Color.white.opacity(0.06), in: Capsule())
-                .overlay(Capsule().stroke(tint, lineWidth: 1.5))
-                .shadow(color: tint.opacity(0.35), radius: 18)
+                .overlay(TravellingBorder(tint: tint))
+                .background {
+                    // A soft pool of the same light behind the field, so the page is not flat black.
+                    Capsule().fill(tint.opacity(0.22)).blur(radius: 46).padding(-14)
+                }
                 .padding(.top, 34)
-                .animation(.snappy(duration: 0.2), value: tint)
+                .animation(.snappy(duration: 0.25), value: tint)
 
                 Group {
                     if let status, status.available {
@@ -673,5 +677,39 @@ struct NadNameDetail: View {
         case TransactionSender.Failure.reverted: return "Monad rejected the change. Only gas was spent."
         default: return "The change could not be sent. Check your connection and MON for gas."
         }
+    }
+}
+
+
+/// A point of light circling the capsule's edge over a faint rim, the way a search field
+/// says it is alive. Still with Reduce Motion: the rim alone, in the same tint.
+private struct TravellingBorder: View {
+    let tint: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            Capsule().stroke(tint.opacity(0.35), lineWidth: 1.2)
+            if !reduceMotion {
+                TimelineView(.animation) { context in
+                    let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.6) / 2.6
+                    Capsule()
+                        .stroke(
+                            AngularGradient(
+                                stops: [
+                                    .init(color: .clear, location: 0),
+                                    .init(color: .clear, location: 0.62),
+                                    .init(color: tint.opacity(0.9), location: 0.86),
+                                    .init(color: .white, location: 0.97),
+                                    .init(color: .clear, location: 1),
+                                ],
+                                center: .center,
+                                angle: .degrees(turn * 360)),
+                            lineWidth: 1.8)
+                        .blur(radius: 0.3)
+                }
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
