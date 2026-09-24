@@ -204,7 +204,7 @@ struct FundScreen: View {
             .disabled(!canOpen)
             if needsFunds {
                 Text(model.network.hasFaucet
-                     ? "Free test MON for fees and 10,000 test AUSD, sent straight to this wallet."
+                     ? "Free test MON for fees and test AUSD, sent straight to this wallet."
                      : "Send MON for fees and at least \(minimum.display(fractionDigits: 0)) AUSD to this address on Monad mainnet. Balances update on their own.")
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color.opacity(0.78))

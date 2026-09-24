@@ -266,7 +266,7 @@ struct AddFundsSheet: View {
                     Button { Task { await model.fundWallet() } } label: {
                         HStack(spacing: 8) {
                             if model.isWorking { ProgressView().controlSize(.small) } else { Image(systemName: "sparkles") }
-                            Text(model.isWorking ? "Sending test funds…" : "Get 10,000 test AUSD")
+                            Text(model.isWorking ? "Sending test funds…" : "Get test AUSD")
                         }
                         .font(.system(size: 15, weight: .semibold, design: .rounded))
                         .frame(maxWidth: .infinity)
