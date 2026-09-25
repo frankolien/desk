@@ -625,6 +625,17 @@ final class AppModel {
     static let gasReserve = NativeAmount(decimalText: "0.5") ?? .zero
 
     /// MON this wallet could swap for AUSD right now, or nil when there is none to spare.
+    /// Perpl's `min_account_open_amount`: 100 AUSD on testnet, 10 on mainnet, read from
+    /// each context on 17 September.
+    var minimumToOpenDesk: Money { Money(text: network.hasFaucet ? "100" : "10") ?? .zero }
+
+    /// How much more AUSD the wallet needs before a desk can open; nil once it has enough.
+    var ausdShortfall: Money? {
+        let held = walletAUSD.value ?? .zero
+        guard held < minimumToOpenDesk, let short = Money(raw: minimumToOpenDesk.raw - held.raw) else { return nil }
+        return short
+    }
+
     var swappableMON: NativeAmount? {
         guard network.holdsRealFunds, let held = walletMON.value, held.raw > Self.gasReserve.raw,
               let spare = NativeAmount(raw: held.raw - Self.gasReserve.raw), spare.raw >= 1_000_000_000_000_000_000

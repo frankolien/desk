@@ -166,11 +166,13 @@ struct MarketScreen: View {
                             .font(.system(size: 13, weight: .medium, design: .rounded))
                             .foregroundStyle(DeskColor.nightMuted.color)
                     } else {
-                        Text("No desk yet")
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .foregroundStyle(DeskColor.nightText.color)
-                        Text("Fund it to trade on Perpl")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                        HStack(alignment: .center, spacing: 9) {
+                            TokenLogo(asset: .ausd, size: 30)
+                            AmountText(model.walletAUSD.value?.display() ?? "0.00", size: 38)
+                        }
+                        .frame(height: 44)
+                        Text(walletCaption)
+                            .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
                             .foregroundStyle(DeskColor.nightMuted.color)
                     }
                 }
@@ -185,9 +187,19 @@ struct MarketScreen: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .frame(height: model.hasTradingAccount ? 44 : 30)
+                .frame(height: 44)
             }
         }
+    }
+
+    /// Wallet AUSD is not tradable until a desk exists; the line says how far off that is.
+    private var walletCaption: String {
+        if let short = model.ausdShortfall {
+            return short == model.minimumToOpenDesk
+                ? "In wallet · \(model.minimumToOpenDesk.display(fractionDigits: 0)) AUSD opens a desk"
+                : "In wallet · \(short.display()) more opens a desk"
+        }
+        return "In wallet · ready to open your desk"
     }
 
     // MARK: Hot markets
@@ -752,9 +764,7 @@ struct PerpDetailScreen: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
-        .fullScreenCover(isPresented: $showsSetup) {
-            FundScreen(model: model) { showsSetup = false }
-        }
+        .sheet(isPresented: $showsSetup) { AddFundsSheet(model: model) }
         .sheet(item: $ticket) { side in
             TicketSheet(
                 side: side, market: market.market, mark: market.mark.value, session: session,

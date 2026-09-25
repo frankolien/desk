@@ -129,9 +129,7 @@ struct TradingShell: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
-        .fullScreenCover(isPresented: $showsSetup) {
-            FundScreen(model: model) { showsSetup = false }
-        }
+        .sheet(isPresented: $showsSetup) { AddFundsSheet(model: model) }
         .task { market.start() }
         .task {
             while !Task.isCancelled {

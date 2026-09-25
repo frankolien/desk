@@ -18,9 +18,7 @@ struct FundScreen: View {
     @State private var showsSwap = false
     @State private var didCopyForDeposit = false
 
-    /// Perpl's `min_account_open_amount`: 100 AUSD on testnet, 10 on mainnet, read from
-    /// each context on 17 September.
-    private var minimum: Money { Money(text: model.network.hasFaucet ? "100" : "10") ?? .zero }
+    private var minimum: Money { model.minimumToOpenDesk }
 
     var body: some View {
         ZStack {
