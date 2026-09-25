@@ -760,7 +760,6 @@ struct TraderProfileScreen: View {
     @State private var tab: Tab = .positions
     @State private var isNaming = false
     @State private var draftName = ""
-    @State private var pendingCopy: TraderPosition?
     @State private var showsAlertsPrimer = false
     @State private var showsAutoCopy = false
     @State private var history: TraderHistory?
@@ -822,16 +821,6 @@ struct TraderProfileScreen: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Only you see this name.")
-        }
-        .confirmationDialog(
-            pendingCopy.map { "Copy \($0.isLong ? "long" : "short") \($0.market) at \(TraderFormat.leverage($0.leverage))" } ?? "",
-            isPresented: Binding(get: { pendingCopy != nil }, set: { if !$0 { pendingCopy = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("Open ticket") { if let position = pendingCopy { onCopy(position) } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Same market, side and leverage on your own account. You choose the amount.")
         }
         .task { await alerts.refreshPermission() }
         .sheet(isPresented: $showsAutoCopy) {
@@ -1082,7 +1071,7 @@ struct TraderProfileScreen: View {
                 // .padding(.top, 6)
                 LazyVStack(spacing: 10) {
                     ForEach(trader.positions) { position in
-                        ProfilePositionCard(position: position) { pendingCopy = position }
+                        ProfilePositionCard(position: position) { onCopy(position) }
                     }
                 }
                 .padding(.horizontal, 20)
@@ -1156,6 +1145,7 @@ private struct ProfilePositionRow: View {
 private struct ProfilePositionCard: View {
     let position: TraderPosition
     let onCopy: () -> Void
+    @State private var bounces = 0
 
     private var sideTint: DeskRGB { position.isLong ? DeskColor.rise : DeskColor.fall }
     private var pnlTint: DeskRGB { position.isProfit ? DeskColor.rise : DeskColor.fall }
@@ -1174,8 +1164,13 @@ private struct ProfilePositionCard: View {
                     .padding(.vertical, 3)
                     .background(sideTint.color.opacity(0.14), in: Capsule())
                 Spacer(minLength: 6)
-                Button(action: onCopy) {
+                Button {
+                    bounces += 1
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    onCopy()
+                } label: {
                     Label("Copy", systemImage: "square.on.square")
+                        .symbolEffect(.bounce, value: bounces)
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 10)

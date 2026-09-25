@@ -15,19 +15,14 @@ struct SignalsScreen: View {
         var id: String { rawValue }
     }
 
-    private struct CopyOrder: Identifiable {
-        let side: Direction
-        let leverage: Int
-        var id: String { "\(side)-\(leverage)" }
-    }
 
     @State private var section: Section = .traders
     @State private var showsMarket = false
     @State private var directory = TraderDirectory()
     @State private var selectedTrader: TraderSnapshot?
     @State private var selectedTrackedWallet: TrackedWallet?
-    @State private var copyOrder: CopyOrder?
-    @State private var pendingCopy: CopyOrder?
+    @State private var copyOrder: CopyIntent?
+    @State private var pendingCopy: CopyIntent?
     @State private var unlistedMarket: String?
     @State private var tradeAlert: TradeAlert?
     @State private var showsCopying = false
@@ -260,7 +255,7 @@ struct SignalsScreen: View {
                 try? await Task.sleep(for: .milliseconds(450))
                 if straightToCopy {
                     for _ in 0..<50 where market.allMarkets.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
-                    copy(market: opened.market, isLong: opened.isLong, leverage: opened.leverage)
+                    copy(market: opened.market, isLong: opened.isLong, leverage: opened.leverage, trader: opened.trader, entry: opened.entry)
                 } else {
                     tradeAlert = opened
                 }
@@ -273,7 +268,7 @@ struct SignalsScreen: View {
             TradeAlertSheet(
                 alert: alert, directory: directory,
                 onCopy: { alert in
-                    afterAlert = { copy(market: alert.market, isLong: alert.isLong, leverage: alert.leverage) }
+                    afterAlert = { copy(market: alert.market, isLong: alert.isLong, leverage: alert.leverage, trader: alert.trader, entry: alert.entry) }
                     tradeAlert = nil
                 },
                 onViewTrader: { address in
@@ -286,17 +281,18 @@ struct SignalsScreen: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
-        .sheet(item: $copyOrder) { order in
-            TicketSheet(
-                side: order.side, market: market.market, mark: market.mark.value,
-                session: session, initialLeverage: order.leverage
-            ) {
-                session.clear()
-                copyOrder = nil
-                onOrderFilled(order.side, market.symbol)
-            }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+        .sheet(item: $copyOrder) { intent in
+            CopyTradeSheet(
+                intent: intent, name: directory.name(for: intent.trader), model: model, market: market, session: session,
+                onFilled: { side, symbol in
+                    session.clear()
+                    copyOrder = nil
+                    onOrderFilled(side, symbol)
+                },
+                onDismiss: {
+                    session.clear()
+                    copyOrder = nil
+                })
         }
         .sheet(item: $pendingCopy) { order in
             LeverageExplainer(
@@ -307,6 +303,9 @@ struct SignalsScreen: View {
                 },
                 onBack: { pendingCopy = nil })
         }
+        #if DEBUG
+        .task { await openDemoCopy() }
+        #endif
         .alert("Not on Desk yet", isPresented: Binding(
             get: { unlistedMarket != nil },
             set: { if !$0 { unlistedMarket = nil } }
@@ -320,10 +319,11 @@ struct SignalsScreen: View {
     /// Their market, side and leverage on your own testnet ticket. The amount is yours to
     /// choose: their size is sized to their account, not to this one.
     private func copy(_ position: TraderPosition) {
-        copy(market: position.market, isLong: position.isLong, leverage: position.leverage)
+        copy(market: position.market, isLong: position.isLong, leverage: position.leverage,
+             trader: selectedTrader?.address ?? "", entry: position.entry, pnlPercent: position.pnlPercent)
     }
 
-    private func copy(market symbol: String, isLong: Bool, leverage: Double?) {
+    private func copy(market symbol: String, isLong: Bool, leverage: Double?, trader: String, entry: String? = nil, pnlPercent: Double? = nil) {
         guard let target = market.allMarkets.first(where: {
             $0.symbol.caseInsensitiveCompare(symbol) == .orderedSame
         }) else {
@@ -331,16 +331,28 @@ struct SignalsScreen: View {
             return
         }
         market.select(target)
-        let order = CopyOrder(
-            side: isLong ? .up : .down,
-            leverage: max(1, Int((leverage ?? 1).rounded())))
+        // The desk signs against one market at a time; it is pointed at theirs before the sheet asks.
+        Task { await session.selectMarket(target) }
+        let intent = CopyIntent(
+            trader: trader, market: target.symbol, side: isLong ? .up : .down,
+            leverage: max(1, Int((leverage ?? 1).rounded())), entry: entry, pnlPercent: pnlPercent)
         selectedTrader = nil
-        if order.leverage > 1 && !model.hasSeenLeverageExplainer {
-            pendingCopy = order
+        if intent.leverage > 1 && !model.hasSeenLeverageExplainer {
+            pendingCopy = intent
         } else {
-            copyOrder = order
+            copyOrder = intent
         }
     }
+
+    #if DEBUG
+    /// `-open-copy` brings the copy sheet up on a long BTC, for a screenshot.
+    private func openDemoCopy() async {
+        guard ProcessInfo.processInfo.arguments.contains("-open-copy") else { return }
+        for _ in 0..<50 where market.allMarkets.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
+        model.hasSeenLeverageExplainer = true
+        copy(market: "BTC", isLong: true, leverage: 10, trader: "0x52AC212e7187a799a7382C7A768cb35B72A3E20A", entry: "84120.5", pnlPercent: 12.4)
+    }
+    #endif
 
     /// Liquid Glass where the system has it: the chosen segment is a glass pill that slides
     /// between positions. A material with a hairline stands in below iOS 26.
