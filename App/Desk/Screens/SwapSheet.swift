@@ -432,7 +432,7 @@ final class SwapModel {
         } catch TransactionSender.Failure.notMinedInTime {
             phase = .failed("Monad has not confirmed the swap yet. Your balances will update when it does.")
         } catch {
-            phase = .failed("The swap could not be sent. No MON was taken.")
+            phase = .failed("The swap could not be sent. No MON was taken. (\(String(describing: error)))")
         }
     }
 }

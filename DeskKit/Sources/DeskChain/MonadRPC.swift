@@ -146,9 +146,11 @@ public actor MonadRPC {
             if call.value.contains(where: { $0 != 0 }) { fields["value"] = .string(Quantity.encode(call.value)) }
             return .object(fields)
         }
+        // Validation is left at the node's default. Monad's mainnet node refuses
+        // `"validation": false` outright, and the caller has the balance a validated
+        // simulation checks for anyway.
         let request: JSONValue = .object([
             "blockStateCalls": .array([.object(["calls": .array(encoded)])]),
-            "validation": .bool(false),
             "traceTransfers": .bool(false),
         ])
         return try await call("eth_simulateV1", [request, .string("latest")]) { value in

@@ -106,7 +106,8 @@ struct SimulationTests {
         #expect(request["method"] as? String == "eth_simulateV1")
         let params = try #require(request["params"] as? [Any])
         let block = try #require(params.first as? [String: Any])
-        #expect(block["validation"] as? Bool == false)
+        // The node refuses an explicit `false`; nothing is sent and the default applies.
+        #expect(block["validation"] == nil)
         let calls = try #require(((block["blockStateCalls"] as? [[String: Any]])?.first?["calls"]) as? [[String: Any]])
         #expect(calls.count == 2)
         #expect(calls[0]["from"] == nil)
