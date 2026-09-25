@@ -1622,37 +1622,6 @@ private struct SpotBuyTicket: View {
     }
     private var isBuyable: Bool { token.buyable ?? false }
     @State private var risk = TokenRiskModel()
-    @State private var acknowledged = false
-    @State private var quoteAge = 0
-
-    private var firstTimeHere: Bool {
-        guard let address = model.address else { return false }
-        return !SpotPurchases.load(for: address).contains { $0.contract.caseInsensitiveCompare(token.contract) == .orderedSame }
-    }
-
-    private var presignWarnings: [PreSignWarning] {
-        var out: [PreSignWarning] = []
-        if let impact = purchase.quoted?.impactPercent.flatMap(Double.init) {
-            let loss = -impact
-            if loss >= 5 { out.append(.init(text: String(format: "Impact %.1f%%. You'd get about %.0f%% less than mid.", loss, loss), level: .high)) }
-            else if loss >= 3 { out.append(.init(text: String(format: "Impact %.1f%%. Larger pools lose less.", loss), level: .caution)) }
-            else if loss >= 1 { out.append(.init(text: String(format: "Impact %.1f%%.", loss), level: .info)) }
-        }
-        if quoteAge > 15 { out.append(.init(text: "Quote is \(quoteAge)s old. It is refreshed before signing.", level: .info)) }
-        if let level = risk.risk?.level, level == .high, let reason = risk.risk?.reasons.first {
-            out.append(.init(text: "High risk: \(reason.text.lowercased()).", level: .high))
-        }
-        if firstTimeHere { out.append(.init(text: "First time you're trading \(token.symbol).", level: .info)) }
-        return out
-    }
-
-    private var presignSentence: String? {
-        guard let quoted = purchase.quoted, let typed else { return nil }
-        var parts = ["Buy ≈ \(SpotFormat.amount(quoted.receive.amount)) \(quoted.receive.symbol ?? token.symbol) with \(typed.display()) MON"]
-        parts.append("fee $\(quoted.feeUsd)")
-        if let seconds = quoted.seconds { parts.append("~\(seconds)s") }
-        return parts.joined(separator: " · ")
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -1663,16 +1632,9 @@ private struct SpotBuyTicket: View {
             } else {
                 receipt
                 notices
-                if let sentence = presignSentence {
-                    PreSignPreview(sentence: sentence, warnings: presignWarnings, acknowledged: $acknowledged)
-                }
             }
             Spacer(minLength: 0)
             action
-            Label("Monad mainnet · real funds", systemImage: "exclamationmark.shield.fill")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(DeskColor.action.color)
-                .frame(maxWidth: .infinity)
         }
         .padding(24)
         .preferredColorScheme(.dark)
@@ -1681,12 +1643,6 @@ private struct SpotBuyTicket: View {
         #if DEBUG
         .onAppear { if ProcessInfo.processInfo.arguments.contains("-spot-buy"), amount.isEmpty { amount = "5" } }
         #endif
-        .task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
-                quoteAge = purchase.quoted == nil ? 0 : Int(Date.now.timeIntervalSince(purchase.quotedAt))
-            }
-        }
         .task(id: amount) {
             guard isBuyable, !purchase.phase.isActive, let address = model.address else { return }
             await purchase.quote(token: token, amount: amount, user: address)
@@ -1744,19 +1700,22 @@ private struct SpotBuyTicket: View {
                 emphasised: true)
             row("At least", value: purchase.quoted.map { "\(SpotFormat.amount($0.receive.minimum)) \($0.receive.symbol ?? token.symbol)" })
             row("Network and fill fees", value: purchase.quoted.map { "$\($0.feeUsd)" })
+            if let impact = purchase.quoted?.impactPercent.flatMap(Double.init) {
+                row("Price impact", value: String(format: "%.1f%%", -impact), tint: impact <= -5 ? .yellow : nil)
+            }
             row("Arrives in", value: purchase.quoted.map { $0.seconds.map { "~\($0) s" } ?? "—" })
         }
         .font(.system(size: 13, design: .rounded))
         .redacted(reason: purchase.isQuoting ? .placeholder : [])
     }
 
-    private func row(_ title: String, value: String?, emphasised: Bool = false) -> some View {
+    private func row(_ title: String, value: String?, emphasised: Bool = false, tint: Color? = nil) -> some View {
         HStack {
             Text(title).foregroundStyle(.secondary)
             Spacer()
             Text(value ?? "—")
                 .fontWeight(emphasised ? .bold : .semibold)
-                .foregroundStyle(emphasised ? .primary : .secondary)
+                .foregroundStyle(tint ?? (emphasised ? .primary : .secondary))
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -1765,18 +1724,9 @@ private struct SpotBuyTicket: View {
 
     @ViewBuilder
     private var notices: some View {
-        if let impact = purchase.quoted?.impactPercent.flatMap(Double.init), impact <= -5 {
-            Label("Fees and price impact take \(String(format: "%.1f", -impact))% of this buy. Larger amounts lose less.",
-                  systemImage: "exclamationmark.triangle.fill")
-                .font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.yellow)
-        }
         if let error = purchase.quoteError {
             Label(error, systemImage: "exclamationmark.triangle.fill")
                 .font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.yellow)
-        }
-        if token.communityRecognized == false || (token.liquidity ?? .greatestFiniteMagnitude) < 10_000 {
-            Text("Verify the contract and liquidity independently before trading.")
-                .font(.system(size: 11, weight: .semibold, design: .rounded)).foregroundStyle(.yellow)
         }
     }
 
@@ -1865,7 +1815,6 @@ private struct SpotBuyTicket: View {
                 title: purchase.quoted == nil ? "Enter an amount" : "Hold to buy \(token.symbol)",
                 tint: DeskColor.rise,
                 isEnabled: purchase.quoted != nil && typed != nil && !purchase.isQuoting
-                    && (!presignWarnings.contains { $0.level == .high } || acknowledged)
             ) {
                 guard let typed else { return }
                 Task { await purchase.buy(token: token, amount: amount, typed: typed, model: model) }
