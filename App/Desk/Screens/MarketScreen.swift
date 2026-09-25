@@ -178,7 +178,7 @@ struct MarketScreen: View {
                 }
                 Spacer(minLength: 8)
                 Button(action: onFund) {
-                    Text(model.hasTradingAccount ? "Add funds" : "Open desk")
+                    Text("Add funds")
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.night.color)
                         .padding(.horizontal, 16)

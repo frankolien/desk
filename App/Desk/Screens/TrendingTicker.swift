@@ -48,6 +48,14 @@ struct TrendingTicker: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var rowWidth: CGFloat = 0
+    /// Distance the strip had moved on its own when it was last stopped.
+    @State private var travelled: CGFloat = 0
+    /// When it last started moving on its own; nil while a finger or a tap holds it.
+    @State private var resumedAt: Date?
+    /// Distance the finger has moved it, kept so a swipe back is not undone by the clock.
+    @State private var manual: CGFloat = 0
+    @State private var dragging: CGFloat = 0
+    @State private var resumeTask: Task<Void, Never>?
 
     private static let pointsPerSecond: CGFloat = 28
 
@@ -61,22 +69,65 @@ struct TrendingTicker: View {
                 // The reader takes the width it is given and hands the strip only that,
                 // so the strip's own length never becomes the page's.
                 GeometryReader { proxy in
-                    TimelineView(.animation) { context in
-                        let travelled = CGFloat(context.date.timeIntervalSinceReferenceDate) * Self.pointsPerSecond
-                        let offset = rowWidth > 0 ? -travelled.truncatingRemainder(dividingBy: rowWidth) : 0
+                    TimelineView(.animation(paused: resumedAt == nil)) { context in
+                        let auto = travelled + (resumedAt.map { CGFloat(context.date.timeIntervalSince($0)) * Self.pointsPerSecond } ?? 0)
+                        let position = auto - manual - dragging
+                        let wrapped = rowWidth > 0
+                            ? (position.truncatingRemainder(dividingBy: rowWidth) + rowWidth).truncatingRemainder(dividingBy: rowWidth)
+                            : 0
                         HStack(spacing: 0) {
                             row
                                 .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { rowWidth = $0 }
                             row
                         }
-                        .offset(x: offset)
+                        .offset(x: -wrapped)
                     }
                     .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
                     .clipped()
+                    .contentShape(Rectangle())
+                    // A finger stops the strip and moves it; a tap on the gap stops or
+                    // restarts it. Either way it walks on by itself a few seconds later.
+                    .gesture(
+                        DragGesture(minimumDistance: 8)
+                            .onChanged { value in
+                                stop()
+                                dragging = value.translation.width
+                            }
+                            .onEnded { value in
+                                manual += value.translation.width
+                                dragging = 0
+                                walkOnLater()
+                            }
+                    )
+                    .onTapGesture {
+                        if resumedAt == nil { walkOn() } else { stop(); walkOnLater(after: 8) }
+                    }
+                    .onAppear { walkOn() }
                 }
             }
         }
         .frame(height: 64)
+    }
+
+    private func stop() {
+        guard let start = resumedAt else { return }
+        travelled += CGFloat(Date.now.timeIntervalSince(start)) * Self.pointsPerSecond
+        resumedAt = nil
+        resumeTask?.cancel()
+    }
+
+    private func walkOn() {
+        resumeTask?.cancel()
+        resumedAt = .now
+    }
+
+    private func walkOnLater(after seconds: Double = 4) {
+        resumeTask?.cancel()
+        resumeTask = Task {
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            walkOn()
+        }
     }
 
     private var row: some View {
