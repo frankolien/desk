@@ -131,15 +131,16 @@ test("the indexer takes the newest page first, then only what is new, and prices
   assert.ok(calls.every(([method, params]) => method !== "getSignaturesForAddress" || params[0] === WALLET));
 });
 
-test("a Solana wallet can be tracked, keeps its case, and its push names its chain", () => {
+test("a Solana wallet is dropped from a subscription without refusing it; an EVM one is kept", () => {
   const base = { install: "ab".repeat(32), token: "cd".repeat(32), traders: [] };
-  const parsed = parseSubscription({ ...base, wallets: [{ address: WALLET, name: "sol whale" }, { address: "0x52AC212e7187a799a7382C7A768cb35B72A3E20A" }] });
-  assert.equal(parsed.record.wallets[0].address, WALLET);
-  assert.equal(parsed.record.wallets[1].address, "0x52ac212e7187a799a7382c7a768cb35b72a3e20a");
+  const parsed = parseSubscription({ ...base, wallets: [{ address: WALLET, name: "sol whale" }, { address: "0x52AC212e7187a799a7382C7A768cb35B72A3E20A", name: "evm whale" }] });
+  assert.equal(parsed.error, undefined);
+  assert.equal(parsed.record.wallets.length, 1);
+  assert.equal(parsed.record.wallets[0].address, "0x52ac212e7187a799a7382c7a768cb35b72a3e20a");
   assert.equal(parseSubscription({ ...base, wallets: [{ address: "not-an-address" }] }).error != null, true);
-  const payload = walletPayload(parsed.record, parsed.record.wallets[0], { kind: "first", token: BONK, symbol: "Bonk", amount: 1_000_000, value: 3.2, count: 1 });
-  assert.equal(payload.desk.chainIndex, "501");
-  assert.equal(payload.aps.alert.title, "sol whale");
+  const payload = walletPayload(parsed.record, parsed.record.wallets[0], { kind: "first", token: "0x" + "ab".repeat(20), symbol: "Bonk", amount: 1_000_000, value: 3.2, count: 1 });
+  assert.equal(payload.desk.chainIndex, "143");
+  assert.equal(payload.aps.alert.title, "evm whale");
 });
 
 test("a transaction the RPC no longer has is skipped and the cursor still moves on", async () => {

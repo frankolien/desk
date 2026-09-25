@@ -185,7 +185,7 @@ struct MarketSearchScreen: View {
     /// Names look like names: a dot, an @, or an address.
     private var looksLikeAName: Bool {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.hasPrefix("@") || text.hasPrefix("0x") || TrackedWallets.isSolana(text)
+        return text.hasPrefix("@") || text.hasPrefix("0x")
             || text.contains(".") && !text.contains(" ")
     }
     @AppStorage("desk.watchlist") private var savedIDs = ""
@@ -640,7 +640,7 @@ final class TokenDiscoveryModel: ObservableObject {
         if (intoSearch ? searchResults : trending).isEmpty,
            let cached = await ResponseCache.shared.cached(url) {
             let tokens = try? await Task.detached(priority: .utility) {
-                try JSONDecoder().decode(Response.self, from: cached).tokens
+                try JSONDecoder().decode(Response.self, from: cached).tokens.filter { $0.chainIndex != "501" }
             }.value
             if let tokens {
                 if intoSearch { searchResults = tokens } else { trending = tokens }
@@ -651,7 +651,7 @@ final class TokenDiscoveryModel: ObservableObject {
         do {
             let (data, _) = try await ResponseCache.shared.data(from: url)
             let tokens = try await Task.detached(priority: .utility) {
-                try JSONDecoder().decode(Response.self, from: data).tokens
+                try JSONDecoder().decode(Response.self, from: data).tokens.filter { $0.chainIndex != "501" }
             }.value
             guard !intoSearch || latestQuery == query else { return }
             if intoSearch { searchResults = tokens } else { trending = tokens }

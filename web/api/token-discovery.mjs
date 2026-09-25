@@ -64,7 +64,10 @@ function normalize(row) {
 // Every chain Desk can show, so a Monad or BNB contract pasted into search is found.
 // OKX's search refuses a call naming a chain it does not index, and says which; those
 // are dropped and the call retried, and the surviving list is kept for the process.
-let searchChains = Object.keys(CHAINS).filter((index) => CHAINS[index].rpc !== null);
+// Solana is left out on purpose: Desk's wallet cannot hold what it would buy there.
+const SOLANA = "501";
+const MONAD = "143";
+let searchChains = Object.keys(CHAINS).filter((index) => CHAINS[index].rpc !== null && index !== SOLANA);
 
 export async function searchTokens(query, { search = okxGet } = {}) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -94,9 +97,18 @@ export function rankSearch(rows, query) {
     return 3;
   };
   return rows
-    .map((row, index) => ({ row, index, tier: tier(row), cap: Number(row.marketCap) || 0 }))
-    .sort((a, b) => a.tier - b.tier || b.cap - a.cap || a.index - b.index)
+    .map((row, index) => ({ row, index, tier: tier(row), home: String(row.chainIndex) === MONAD ? 0 : 1, cap: Number(row.marketCap) || 0 }))
+    .sort((a, b) => a.tier - b.tier || a.home - b.home || b.cap - a.cap || a.index - b.index)
     .map(({ row }) => row);
+}
+
+/// Monad's own tokens lead; the rest keep their order. Solana never appears.
+export function homeFirst(tokens) {
+  return tokens
+    .filter((token) => token.chainIndex !== SOLANA)
+    .map((token, index) => ({ token, index, home: token.chainIndex === MONAD ? 0 : 1 }))
+    .sort((a, b) => a.home - b.home || a.index - b.index)
+    .map(({ token }) => token);
 }
 
 export default async function handler(req, res) {
@@ -109,7 +121,7 @@ export default async function handler(req, res) {
           rankingType: "4", rankingTimeFrame: "4", riskFilter: "true",
           stableTokenFilter: "true", limit: "20",
         });
-    const tokens = rows.map(normalize).filter((token) => token.symbol && token.contract);
+    const tokens = homeFirst(rows.map(normalize).filter((token) => token.symbol && token.contract));
     res.setHeader("Cache-Control", query
       ? "s-maxage=10, stale-while-revalidate=30"
       : "s-maxage=30, stale-while-revalidate=90");

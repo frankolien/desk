@@ -110,12 +110,16 @@ function parseWallets(wallets) {
   const out = [];
   const seen = new Set();
   for (const entry of wallets) {
-    if (!entry || typeof entry !== "object" || !(validAddress(entry.address) || isSolanaAddress(entry.address))) return null;
+    if (!entry || typeof entry !== "object") return null;
+    // A Solana wallet from an older build is dropped rather than refused, so the rest of
+    // the subscription still saves; Desk no longer follows Solana.
+    if (isSolanaAddress(entry.address)) continue;
+    if (!validAddress(entry.address)) return null;
     const { name, minUsd, firstBuysOnly } = entry;
     if (name != null && typeof name !== "string") return null;
     if (minUsd != null && (typeof minUsd !== "number" || !Number.isFinite(minUsd) || minUsd < 0)) return null;
     if (firstBuysOnly != null && typeof firstBuysOnly !== "boolean") return null;
-    const address = validAddress(entry.address) ? entry.address.toLowerCase() : entry.address;
+    const address = entry.address.toLowerCase();
     if (seen.has(address)) continue;
     seen.add(address);
     out.push({

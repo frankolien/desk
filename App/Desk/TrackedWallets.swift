@@ -29,7 +29,8 @@ final class TrackedWallets {
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.key),
            let stored = try? JSONDecoder().decode([TrackedWallet].self, from: data) {
-            list = stored
+            // Solana wallets tracked by an older build are let go: Desk follows Monad and EVM only.
+            list = stored.filter { Self.isEVM($0.address) }
         } else {
             list = []
         }
@@ -64,7 +65,7 @@ final class TrackedWallets {
         list.map { ["address": $0.id, "name": $0.name, "minUsd": $0.minUsd, "firstBuysOnly": $0.firstBuysOnly] }
     }
 
-    static func isValid(_ address: String) -> Bool { isEVM(address) || isSolana(address) }
+    static func isValid(_ address: String) -> Bool { isEVM(address) }
 
     static func isEVM(_ address: String) -> Bool {
         address.count == 42 && address.hasPrefix("0x") && address.dropFirst(2).allSatisfy(\.isHexDigit)
