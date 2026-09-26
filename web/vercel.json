@@ -115,7 +115,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+          "value": "default-src 'self'; img-src 'self' data: https://analytics.twitter.com https://analytics.x.com https://t.co; style-src 'self' 'unsafe-inline'; script-src 'self' https://static.ads-twitter.com; font-src 'self'; connect-src 'self' https://analytics.twitter.com https://analytics.x.com https://t.co; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
         }
       ]
     },

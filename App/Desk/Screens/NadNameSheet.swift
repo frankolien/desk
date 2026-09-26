@@ -203,7 +203,8 @@ struct NadFindNameView: View {
 
                 Group {
                     if let status, status.available {
-                        Text("\(Self.mon(status.priceMON)) MON one-time" + (status.priceUSDC.map { " · ≈ \($0) USDC" } ?? ""))
+                        Text("\(Self.mon(status.priceMON)) MON one-time" + (status.priceUSDC.map { " · ≈ \($0) USDC" } ?? "")
+                             + (status.canRegister ? "" : " · registering through Desk opens soon"))
                     } else if let problem = names.checkProblem {
                         Text(problem)
                     } else if !label.isEmpty, !valid {
@@ -526,6 +527,12 @@ struct NadConfirmView: View {
             .padding(.horizontal, 14)
             .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
 
+            if !status.canRegister {
+                Label("Registering through Desk isn't open yet. Nad's signing endpoint is pending; nothing can be charged.", systemImage: "clock.fill")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(DeskColor.action.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Label("Sets this as your primary name", systemImage: "checkmark.circle.fill")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundStyle(DeskColor.rise.color)
@@ -557,7 +564,8 @@ struct NadConfirmView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 14)
             }
-            HoldToConfirm(title: "Hold to register \(status.name)", tint: DeskColor.action, isEnabled: shortfall == nil && !isBusy && held != nil) {
+            HoldToConfirm(title: status.canRegister ? "Hold to register \(status.name)" : "Registration opens soon", tint: DeskColor.action,
+                          isEnabled: status.canRegister && shortfall == nil && !isBusy && held != nil) {
                 Task { await register() }
             }
             .padding(.bottom, 12)

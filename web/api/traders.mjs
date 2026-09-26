@@ -312,7 +312,8 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
       if (!label) return res.status(400).json({ error: "Names are 1–32 lower-case letters, digits and hyphens.", reason: "invalid" });
       try {
         res.setHeader("Cache-Control", "public, s-maxage=10, stale-while-revalidate=30");
-        return res.status(200).json(await nameStatus(label, { fetchImpl }));
+        // Whether Desk can sign a registration today, so the phone says so before the walk.
+        return res.status(200).json({ ...(await nameStatus(label, { fetchImpl })), registration: Boolean(process.env.NAD_REGISTER_URL) });
       } catch {
         return res.status(502).json({ error: "Nad Name Service could not be read right now." });
       }

@@ -22,8 +22,11 @@ struct NadNameStatus: Decodable, Hashable, Sendable {
     let priceUSDC: String?
     let owner: String?
     let records: [String: String]?
+    /// False while nad's signing endpoint is not open to Desk; absent from older answers.
+    let registration: Bool?
 
     var priceWei: NativeAmount? { NativeAmount(decimalText: priceMON) }
+    var canRegister: Bool { registration ?? true }
 }
 
 /// A transaction nad's contracts want, built by Desk's server and checked here before
