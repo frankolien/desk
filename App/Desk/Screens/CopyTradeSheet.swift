@@ -52,6 +52,7 @@ struct CopyTradeSheet: View {
     private var tint: DeskRGB { intent.side.color }
     private var free: Money? { session.account.value?.free }
     private var settled: Bool { session.order.outcome == .settled }
+    private var priceIsFresh: Bool { !market.freshness.freezesDigits }
 
     private var quote: OrderQuote? {
         guard let listed, let mark = market.mark.value, let margin = Money(text: amount.isEmpty ? "0" : amount),
@@ -95,10 +96,16 @@ struct CopyTradeSheet: View {
             }
 
             if !settled {
+                if quote != nil, priceIsFresh {
+                    Label("Face ID confirms this exact order after the hold.", systemImage: "faceid")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
                 HoldToConfirm(
                     title: session.isBusy ? "Copying…" : "Hold to copy \(name)",
                     tint: tint,
-                    isEnabled: quote != nil && shortfall == nil && !session.isBusy && listed != nil
+                    isEnabled: quote != nil && shortfall == nil && !session.isBusy && listed != nil && priceIsFresh
                 ) {
                     typing = false
                     Task { await submit() }
@@ -282,11 +289,11 @@ struct CopyTradeSheet: View {
     }
 
     private var figures: some View {
-        HStack(spacing: 14) {
+        LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], spacing: 12) {
+            figure("Mark", market.mark.value.map { "$" + $0.display(fractionDigits: listed?.config.priceDecimals ?? 2) } ?? "—")
             figure("Size", quote.map { "\($0.size.display(fractionDigits: $0.size.decimals)) \(intent.market)" } ?? "—")
             figure("Liq. away", quote.map { Percent.micros($0.liquidationDistanceMicros, signed: false) } ?? "—")
-            figure("Fee", quote.map { "\($0.fee.display()) AUSD" } ?? "—")
-            Spacer(minLength: 0)
+            figure("Est. fee", quote.map { "\($0.fee.display()) AUSD" } ?? "—")
         }
         .redacted(reason: quote == nil && !amount.isEmpty ? .placeholder : [])
     }
@@ -299,6 +306,9 @@ struct CopyTradeSheet: View {
     }
 
     private var statusLine: String? {
+        if !priceIsFresh {
+            return "Price is stale. Desk kept your order intact and will enable confirmation when the live mark returns."
+        }
         if let shortfall, let quote {
             return "This costs \(quote.total.display()) AUSD with its fee, \(shortfall.display()) more than your free collateral."
         }

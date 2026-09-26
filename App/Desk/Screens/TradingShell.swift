@@ -86,7 +86,8 @@ struct TradingShell: View {
                     onActivity: { showsActivity = true },
                     onSpot: { tab = .search },
                     onSwap: { showsSwap = true },
-                    onAccount: { showsAccount = true })
+                    onAccount: { showsAccount = true },
+                    isActive: tab == .home)
             }
         }
         .tint(.white)
@@ -170,19 +171,32 @@ struct TradingShell: View {
         .onChange(of: market.headBlock) { _, block in session.noteHeadBlock(block) }
         .onDisappear(perform: market.stop)
         .overlay(alignment: .top) {
-            if let fillConfirmation {
-                Label(fillConfirmation, systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 16)
-                    .frame(height: 44)
-                    .background(DeskColor.rise.color, in: Capsule())
-                    .shadow(color: .black.opacity(0.35), radius: 14, y: 6)
-                    .padding(.top, 8)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+            VStack(spacing: 8) {
+                if !Connectivity.shared.isOnline {
+                    Label("Offline · showing saved data", systemImage: "wifi.slash")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .padding(.horizontal, 14)
+                        .frame(height: 36)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.5))
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                if let fillConfirmation {
+                    Label(fillConfirmation, systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 16)
+                        .frame(height: 44)
+                        .background(DeskColor.rise.color, in: Capsule())
+                        .shadow(color: .black.opacity(0.35), radius: 14, y: 6)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
+            .padding(.top, 8)
         }
         .animation(.snappy(duration: 0.28), value: fillConfirmation)
+        .animation(.snappy(duration: 0.28), value: Connectivity.shared.isOnline)
     }
 
     private func orderFilled(_ side: Direction, _ symbol: String) {

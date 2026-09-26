@@ -47,6 +47,7 @@ struct RemoteImage<Placeholder: View>: View {
     var fill = false
     @ViewBuilder let placeholder: () -> Placeholder
     @State private var image: UIImage?
+    @State private var loadedURL: URL?
     @State private var round = 0
 
     private let rounds = 6
@@ -66,14 +67,26 @@ struct RemoteImage<Placeholder: View>: View {
     }
 
     private func load() async {
-        guard let url else { image = nil; return }
+        guard let url else {
+            image = nil
+            loadedURL = nil
+            return
+        }
+        // Reused list cells must never show the previous token or trader while their new
+        // URL is loading. A stable placeholder is less misleading than the wrong identity.
+        if loadedURL != url {
+            image = nil
+            loadedURL = url
+            round = 0
+        }
         if let found = await ImageStore.shared.image(for: url) {
+            guard loadedURL == url else { return }
             withAnimation(.easeOut(duration: 0.2)) { image = found }
             return
         }
         // Still on screen and still without a picture: another round in a while.
         guard round < rounds else { return }
         try? await Task.sleep(for: .seconds(15 * (round + 1)))
-        if !Task.isCancelled, image == nil { round += 1 }
+        if !Task.isCancelled, image == nil, loadedURL == url { round += 1 }
     }
 }

@@ -3,6 +3,7 @@ import DeskMoney
 import DeskPerpl
 import DeskUI
 import SwiftUI
+import UIKit
 
 /// Profile: who this is, what it is worth, and what it holds.
 ///
@@ -39,6 +40,7 @@ struct HomeScreen: View {
     var onSpot: () -> Void = {}
     var onSwap: () -> Void = {}
     let onAccount: () -> Void
+    var isActive: Bool = true
 
     @AppStorage("desk.hidesBalance") private var hidesBalance = false
     @AppStorage("desk.firstOpened") private var firstOpened: Double = 0
@@ -50,6 +52,7 @@ struct HomeScreen: View {
     @State private var equity: [EquityLog.Point] = []
     @State private var copiedAddress = false
     @State private var editsProfile = false
+    @State private var showsPortfolioReplay = false
 
     // MARK: Figures
 
@@ -93,6 +96,15 @@ struct HomeScreen: View {
         return contexts.reduce(.zero) { $0 + $1.figures.unrealisedPnL }
     }
 
+    /// The share card is a record, not merely a snapshot of currently open positions.
+    /// Keep realised results visible after the position has closed, then add any live P&L.
+    private var totalTradingPnL: Money? {
+        let realisedRaw = model.closedTrades.compactMap(\.realisedPnLRaw).reduce(Int64(0), +)
+        let hasRealised = model.closedTrades.contains { $0.realisedPnLRaw != nil }
+        guard hasRealised || totalPositionPnL != nil else { return nil }
+        return Money(raw: realisedRaw).map { $0 + (totalPositionPnL ?? .zero) }
+    }
+
     private var ownName: String? {
         model.address.flatMap { IdentityDirectory.shared.name(for: $0.checksummed) }
     }
@@ -108,11 +120,58 @@ struct HomeScreen: View {
     private var shownEquity: [EquityLog.Point] {
         guard let seconds = range.seconds else { return equity }
         let cutoff = Date.now.addingTimeInterval(-seconds)
-        return equity.filter { $0.at >= cutoff }
+        let window = equity.filter { $0.at >= cutoff }
+        if hasPortfolioMovement(window) { return window }
+        let lastActivity = Array(equity.suffix(72))
+        return hasPortfolioMovement(lastActivity) ? lastActivity : window
+    }
+
+    private var showsLastActivity: Bool {
+        guard let seconds = range.seconds, let first = shownEquity.first else { return false }
+        return first.at < Date.now.addingTimeInterval(-seconds)
+    }
+
+    private func hasPortfolioMovement(_ points: [EquityLog.Point]) -> Bool {
+        guard let first = points.first else { return false }
+        return points.count >= 2 && points.contains { $0.raw != first.raw || $0.pnlRaw != first.pnlRaw }
+    }
+
+    private func hasValueMovement(_ values: [Double]) -> Bool {
+        guard let first = values.first else { return false }
+        return values.count >= 2 && values.contains { abs($0 - first) > 0.000_001 }
     }
 
     private var chartPoints: [Double] {
-        shownEquity.map { Double($0.raw) / 1_000_000 }
+        let values = shownEquity.map { Double($0.raw) / 1_000_000 }
+        if hasValueMovement(values) { return values }
+        let pnl = shownEquity.compactMap { $0.pnlRaw.map { Double($0) / 1_000_000 } }
+        if hasValueMovement(pnl) { return pnl }
+        let realised = realisedTradeChart
+        return realised.isEmpty ? values : realised
+    }
+
+    private var realisedTradeChart: [Double] {
+        let realised = model.closedTrades
+            .filter { $0.realisedPnLRaw != nil }
+            .sorted { $0.closedAt < $1.closedAt }
+        guard !realised.isEmpty else { return [] }
+        var running = 0.0
+        return [0] + realised.map { trade in
+            running += Double(trade.realisedPnLRaw ?? 0) / 1_000_000
+            return running
+        }
+    }
+
+    private var usesTradeHistoryChart: Bool {
+        let values = shownEquity.map { Double($0.raw) / 1_000_000 }
+        let pnl = shownEquity.compactMap { $0.pnlRaw.map { Double($0) / 1_000_000 } }
+        return !hasValueMovement(values) && !hasValueMovement(pnl) && hasValueMovement(realisedTradeChart)
+    }
+
+    private var usesPnLHistoryChart: Bool {
+        let values = shownEquity.map { Double($0.raw) / 1_000_000 }
+        let pnl = shownEquity.compactMap { $0.pnlRaw.map { Double($0) / 1_000_000 } }
+        return !hasValueMovement(values) && hasValueMovement(pnl)
     }
 
     private var chartChange: (money: Money, percent: Double)? {
@@ -160,17 +219,46 @@ struct HomeScreen: View {
         .sheet(isPresented: $editsProfile) {
             ProfileEditorSheet(model: model) { editsProfile = false }
         }
+        .fullScreenCover(isPresented: $showsPortfolioReplay) {
+            PortfolioReplaySheet(
+                points: equity,
+                currentTotal: total,
+                currentPnL: totalTradingPnL,
+                displayName: ownName ?? model.addressShort,
+                address: model.addressShort,
+                network: model.network.name,
+                openPositions: model.openPositions.count,
+                closedTrades: model.closedTrades)
+        }
         #if DEBUG
-        .task { if ProcessInfo.processInfo.arguments.contains("-open-profile-editor") { editsProfile = true } }
+        .task {
+            if ProcessInfo.processInfo.arguments.contains("-open-profile-editor") { editsProfile = true }
+            if ProcessInfo.processInfo.arguments.contains("-open-portfolio-replay") {
+                try? await Task.sleep(for: .seconds(1.2))
+                showsPortfolioReplay = true
+            }
+            if ProcessInfo.processInfo.arguments.contains("-simulate-profile-screenshot") {
+                try? await Task.sleep(for: .seconds(1.2))
+                NotificationCenter.default.post(name: UIApplication.userDidTakeScreenshotNotification, object: nil)
+            }
+        }
         #endif
         .task(id: model.address) { await spot.run(for: model.address) }
         .task(id: model.address) {
             if let address = model.address { await IdentityDirectory.shared.resolve([address.checksummed]) }
         }
         .onAppear { if firstOpened == 0 { firstOpened = Date.now.timeIntervalSince1970 } }
-        .task(id: "\(model.address?.checksummed ?? "")|\(total?.raw ?? -1)") {
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.userDidTakeScreenshotNotification)) { _ in
+            guard isActive, !showsPortfolioReplay else { return }
+            showsPortfolioReplay = true
+        }
+        .task(id: "\(model.address?.checksummed ?? "")|\(total?.raw ?? -1)|\(totalPositionPnL?.raw ?? 0)") {
             guard let address = model.address, let total else { return }
-            EquityLog.record(total, network: model.network.rawValue, address: address.checksummed)
+            EquityLog.record(
+                total,
+                pnl: totalPositionPnL,
+                network: model.network.rawValue,
+                address: address.checksummed)
             equity = EquityLog.points(network: model.network.rawValue, address: address.checksummed)
         }
     }
@@ -193,7 +281,13 @@ struct HomeScreen: View {
             HStack {
                 glassCircle(symbol: "gearshape.fill", label: "Account", action: onAccount)
                 Spacer()
-                glassCircle(symbol: "clock.fill", label: "Activity", action: onActivity)
+                HStack(spacing: 8) {
+                    glassCircle(
+                        symbol: "square.and.arrow.up",
+                        label: "Replay and share portfolio",
+                        action: { showsPortfolioReplay = true })
+                    glassCircle(symbol: "clock.fill", label: "Activity", action: onActivity)
+                }
             }
 
             Button(action: onAccount) {
@@ -347,7 +441,13 @@ struct HomeScreen: View {
             } else if let change = chartChange {
                 Text(DisplayCurrency.shared.format(change.money, signed: true) + String(format: " (%+.2f%%)", change.percent))
                     .foregroundStyle((change.money.isNegative ? DeskColor.fall : DeskColor.rise).color)
-                Text(range.rawValue).foregroundStyle(DeskColor.nightMuted.color)
+                Text(showsLastActivity ? "last activity" : range.rawValue)
+                    .foregroundStyle(DeskColor.nightMuted.color)
+            } else if (usesPnLHistoryChart || usesTradeHistoryChart), let pnl = totalTradingPnL {
+                Text(DisplayCurrency.shared.format(pnl, signed: true))
+                    .foregroundStyle((pnl.isNegative ? DeskColor.fall : DeskColor.rise).color)
+                Text(usesPnLHistoryChart ? "P&L history" : "trade history")
+                    .foregroundStyle(DeskColor.nightMuted.color)
             } else if let pnl = totalPositionPnL {
                 Text(DisplayCurrency.shared.format(pnl, signed: true))
                     .foregroundStyle((pnl.isNegative ? DeskColor.fall : DeskColor.rise).color)
@@ -371,7 +471,7 @@ struct HomeScreen: View {
                 Rectangle()
                     .fill(Color.white.opacity(0.10))
                     .frame(height: 0.5)
-                Text(points.isEmpty ? "Draws itself as Desk is used" : "Level so far")
+                Text(points.isEmpty ? "Your record starts with your first trade" : "No change yet")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color.opacity(0.75))
                     .padding(.horizontal, 8)

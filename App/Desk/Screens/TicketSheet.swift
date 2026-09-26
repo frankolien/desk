@@ -17,6 +17,7 @@ struct TicketSheet: View {
     /// Injected rather than built here: the ticket does not own a socket and must not
     /// decide whether an order can be sent. It asks, and is answered in a sentence.
     let session: TradingSession
+    var isPriceFresh = true
     /// Where the leverage rail starts, for a ticket opened from someone else's position.
     var initialLeverage = 1
     /// Protection handed in from the chart, where a level or a ruler chose the price.
@@ -115,6 +116,9 @@ struct TicketSheet: View {
     }
 
     private var blockingReason: String? {
+        if !isPriceFresh {
+            return "Price is stale. Your order is preserved, but confirmation stays disabled until the live mark returns."
+        }
         if hasInvalidProtection {
             return side == .up
                 ? "For a long, the stop must sit below the mark and above the liquidation price, and the take profit above the mark."
@@ -336,7 +340,7 @@ struct TicketSheet: View {
                     : "Hold to \(side.word().lowercased()) \(amount) AUSD · \(leverage)×",
                 tint: side == .up ? DeskColor.rise : DeskColor.fall,
                 isEnabled: quote != nil && !hasInvalidProtection && shortfall == nil && !session.isBusy
-                    && (!needsAcknowledgement || acknowledged)
+                    && isPriceFresh && (!needsAcknowledgement || acknowledged)
             ) {
                 Task { await submit() }
             }

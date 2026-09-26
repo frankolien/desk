@@ -34,6 +34,7 @@ struct SignalsScreen: View {
     @State private var showsTrackNew = false
     @State private var showsSmartMoney = false
     @State private var openToken: TokenOpenRequest.Target?
+    @State private var selectedFollowingTrade: FollowingTrade?
     #if DEBUG
     @State private var debugPrimer: TraderSnapshot?
     @State private var debugAutoCopy: TraderSnapshot?
@@ -71,12 +72,9 @@ struct SignalsScreen: View {
                                 .padding(.top, 20)
                             FollowingFeed(model: followingFeed,
                                           addresses: TrackedWallets.shared.list.map(\.address),
-                                          name: { address in
-                                              let tracked = TrackedWallets.shared.wallet(for: address)
-                                              return tracked?.name.isEmpty == false ? tracked!.name
-                                                  : (IdentityDirectory.shared.name(for: address) ?? tracked?.shortAddress ?? address)
-                                          }, onAdd: { showsTrackNew = true },
-                                          onOpen: { openToken = .init(chainIndex: $0.chainIndex, contract: $0.token, symbol: $0.symbol) })
+                                          name: followingName,
+                                          onAdd: { showsTrackNew = true },
+                                          onOpen: { selectedFollowingTrade = $0 })
                                 .padding(.bottom, 130)
                         case .top:
                             Button { showsSmartMoney = true } label: {
@@ -150,6 +148,24 @@ struct SignalsScreen: View {
             }
             .sheet(isPresented: $showsTrackNew) {
                 TrackWalletSheet(existing: nil).fittedSheet().presentationDragIndicator(.visible)
+            }
+            .sheet(item: $selectedFollowingTrade) { trade in
+                FollowingTradeDetailSheet(
+                    trade: trade,
+                    walletName: followingName(trade.wallet),
+                    onViewWallet: {
+                        openAfterMovementSheet {
+                            selectedTrackedWallet = TrackedWallets.shared.wallet(for: trade.wallet)
+                                ?? TrackedWallet(address: trade.wallet, name: "", minUsd: 250, firstBuysOnly: false)
+                        }
+                    },
+                    onViewToken: {
+                        openAfterMovementSheet {
+                            openToken = .init(chainIndex: trade.chainIndex, contract: trade.token, symbol: trade.symbol)
+                        }
+                    })
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             }
             .navigationDestination(item: $selectedTrader) { trader in
                 TraderProfileScreen(initial: trader, directory: directory, copier: copier) { copy($0) }
@@ -323,6 +339,20 @@ struct SignalsScreen: View {
              trader: selectedTrader?.address ?? "", entry: position.entry, pnlPercent: position.pnlPercent)
     }
 
+    private func followingName(_ address: String) -> String {
+        let tracked = TrackedWallets.shared.wallet(for: address)
+        return tracked?.name.isEmpty == false ? tracked!.name
+            : (IdentityDirectory.shared.name(for: address) ?? tracked?.shortAddress ?? address)
+    }
+
+    private func openAfterMovementSheet(_ action: @escaping @MainActor () -> Void) {
+        selectedFollowingTrade = nil
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            action()
+        }
+    }
+
     private func copy(market symbol: String, isLong: Bool, leverage: Double?, trader: String, entry: String? = nil, pnlPercent: Double? = nil) {
         guard let target = market.allMarkets.first(where: {
             $0.symbol.caseInsensitiveCompare(symbol) == .orderedSame
@@ -410,6 +440,8 @@ struct SignalsScreen: View {
         Text(item.rawValue)
             .font(.system(size: 13, weight: section == item ? .bold : .medium, design: .rounded))
             .foregroundStyle(DeskColor.nightText.color)
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
             .frame(maxWidth: .infinity)
             .frame(height: 36)
             .contentShape(Capsule())

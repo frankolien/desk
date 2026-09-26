@@ -93,7 +93,7 @@ targets:
         # it does not ship non-exempt encryption. This suppresses the export-compliance
         # questionnaire for each uploaded build.
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
-        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: Desk saves the trade cards you choose to keep.
+        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: Desk saves the portfolio cards and videos you choose to keep.
         INFOPLIST_KEY_NSFaceIDUsageDescription: Desk derives your trading key from your face. Nothing is stored.
 
   # Home Screen and Lock Screen widget, the auto-copy Live Activity and the Control

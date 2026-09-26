@@ -768,6 +768,7 @@ struct PerpDetailScreen: View {
         .sheet(item: $ticket) { side in
             TicketSheet(
                 side: side, market: market.market, mark: market.mark.value, session: session,
+                isPriceFresh: !market.freshness.freezesDigits,
                 preset: ticketPreset
             ) {
                 session.clear()

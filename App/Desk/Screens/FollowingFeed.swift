@@ -3,7 +3,7 @@ import Foundation
 import Observation
 import SwiftUI
 
-struct FollowingTrade: Decodable, Identifiable, Sendable {
+struct FollowingTrade: Codable, Identifiable, Sendable {
     let wallet: String
     let chainIndex: String
     let time: Double
@@ -22,7 +22,7 @@ struct FollowingTrade: Decodable, Identifiable, Sendable {
 @MainActor
 @Observable
 final class FollowingFeedModel {
-    struct Sync: Decodable {
+    struct Sync: Codable {
         let workerDelayed: Bool
         let pushDelayed: Bool
     }
@@ -32,19 +32,37 @@ final class FollowingFeedModel {
         let stale: [String]?
         let sync: Sync?
     }
+    private struct CachedFeed: Codable {
+        let events: [FollowingTrade]
+        let pending: [String]
+        let stale: [String]
+        let savedAt: Date
+    }
 
     private(set) var events: [FollowingTrade] = []
     private(set) var pending: [String] = []
     private(set) var stale: [String] = []
     private(set) var loaded = false
+    private(set) var isRefreshing = false
+    private(set) var isShowingCached = false
+    private(set) var lastUpdated: Date?
     private(set) var problem: String?
     private(set) var sync: Sync?
+    private var activeKey = ""
+
+    var updatedLabel: String? {
+        guard let lastUpdated else { return nil }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return "Updated " + formatter.localizedString(for: lastUpdated, relativeTo: .now)
+    }
 
     func run(addresses: [String]) async {
         guard !addresses.isEmpty else {
             events = []; pending = []; stale = []; loaded = true; problem = nil; sync = nil
             return
         }
+        prepare(addresses: addresses)
         while !Task.isCancelled {
             await load(addresses: addresses)
             try? await Task.sleep(for: .seconds(45))
@@ -56,12 +74,15 @@ final class FollowingFeedModel {
             events = []; pending = []; stale = []; loaded = true; problem = nil; sync = nil
             return
         }
+        prepare(addresses: addresses)
         var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/activity")!
         components.queryItems = [
             URLQueryItem(name: "view", value: "feed"),
             URLQueryItem(name: "addresses", value: addresses.joined(separator: ",")),
         ]
         guard let url = components.url else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
             guard !Task.isCancelled else { return }
@@ -72,11 +93,50 @@ final class FollowingFeedModel {
             stale = feed.stale ?? []
             sync = feed.sync
             problem = nil
+            isShowingCached = false
+            lastUpdated = .now
+            persist(addresses: addresses)
         } catch {
             guard !Task.isCancelled else { return }
-            problem = "Following activity couldn't be refreshed. Pull down to retry."
+            problem = events.isEmpty
+                ? "Following activity couldn’t be loaded. Pull down to retry."
+                : "Live refresh failed. Showing your last saved activity."
+            isShowingCached = !events.isEmpty
         }
         loaded = true
+    }
+
+    private func prepare(addresses: [String]) {
+        let key = cacheKey(addresses)
+        guard key != activeKey else { return }
+        activeKey = key
+        events = []
+        pending = []
+        stale = []
+        sync = nil
+        problem = nil
+        loaded = false
+        lastUpdated = nil
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let cached = try? JSONDecoder().decode(CachedFeed.self, from: data)
+        else { return }
+        events = cached.events
+        pending = cached.pending
+        stale = cached.stale
+        lastUpdated = cached.savedAt
+        loaded = true
+        isShowingCached = true
+    }
+
+    private func persist(addresses: [String]) {
+        let cache = CachedFeed(events: events, pending: pending, stale: stale, savedAt: .now)
+        if let data = try? JSONEncoder().encode(cache) {
+            UserDefaults.standard.set(data, forKey: cacheKey(addresses))
+        }
+    }
+
+    private func cacheKey(_ addresses: [String]) -> String {
+        "desk.following.feed." + addresses.map(TrackedWallet.key).sorted().joined(separator: ",")
     }
 }
 
@@ -89,10 +149,33 @@ struct FollowingFeed: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Recent activity")
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-                .foregroundStyle(DeskColor.nightText.color)
-                .padding(.bottom, 6)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Recent activity")
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightText.color)
+                Spacer()
+                if model.isRefreshing {
+                    ProgressView().controlSize(.small).tint(DeskColor.nightMuted.color)
+                } else if let updated = model.updatedLabel {
+                    Text(updated)
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+            }
+            .padding(.bottom, 6)
+
+            if let problem = model.problem {
+                Label(problem, systemImage: model.isShowingCached ? "clock.arrow.circlepath" : "wifi.exclamationmark")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(model.isShowingCached ? DeskColor.action.color : DeskColor.nightMuted.color)
+                    .padding(.vertical, 10)
+            } else if !model.pending.isEmpty || !model.stale.isEmpty {
+                let count = model.pending.count + model.stale.count
+                Label("Indexing \(count) followed \(count == 1 ? "wallet" : "wallets")", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .padding(.vertical, 10)
+            }
 
             if addresses.isEmpty {
                 Button(action: onAdd) {
@@ -111,10 +194,16 @@ struct FollowingFeed: View {
                 }
                 .padding(.top, 14)
             } else if model.events.isEmpty {
-                Text("No recent activity yet")
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-                    .padding(.top, 14)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("No confirmed movements yet")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                    Text("Desk will keep this feed ready and add the next confirmed buy or sell from a wallet you track.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 14)
             } else {
                 LazyVStack(spacing: 0) {
                     ForEach(model.events) { trade in
@@ -123,6 +212,133 @@ struct FollowingFeed: View {
                 }
             }
         }
+    }
+}
+
+struct FollowingTradeDetailSheet: View {
+    let trade: FollowingTrade
+    let walletName: String
+    let onViewWallet: () -> Void
+    let onViewToken: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var copied = false
+
+    private var timeLabel: String {
+        Date(timeIntervalSince1970: trade.time / 1_000)
+            .formatted(date: .abbreviated, time: .shortened)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 12) {
+                    TraderAvatar(address: trade.wallet, size: 48)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(walletName)
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                        Text(timeLabel)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                    }
+                    Spacer()
+                    Text(trade.isBuy ? "BUY" : "SELL")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .foregroundStyle((trade.isBuy ? DeskColor.rise : DeskColor.fall).color)
+                        .padding(.horizontal, 9)
+                        .frame(height: 26)
+                        .background((trade.isBuy ? DeskColor.rise : DeskColor.fall).color.opacity(0.14), in: Capsule())
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(trade.isBuy ? "Bought" : "Sold")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                    Text(trade.value.formatted(.currency(code: "USD").precision(.fractionLength(2))))
+                        .font(.system(size: 36, weight: .heavy, design: .rounded).monospacedDigit())
+                    HStack(spacing: 10) {
+                        MarketTokenLogo(symbol: trade.symbol, size: 36)
+                        Text(trade.symbol)
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                        if let amount = trade.amount {
+                            Text("· \(amount.formatted(.number.precision(.fractionLength(0...4)))) tokens")
+                                .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
+                                .foregroundStyle(DeskColor.nightMuted.color)
+                        }
+                    }
+                }
+                .padding(18)
+                .deskGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+
+                VStack(spacing: 0) {
+                    detailRow("Network", trade.chainIndex == "143" ? "Monad" : "Chain \(trade.chainIndex)")
+                    detailRow("Source", "Confirmed on-chain movement")
+                    Button {
+                        UIPasteboard.general.string = trade.hash
+                        copied = true
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } label: {
+                        HStack {
+                            Text("Transaction")
+                            Spacer()
+                            Text(copied ? "Copied" : "\(trade.hash.prefix(7))…\(trade.hash.suffix(5))")
+                                .monospaced()
+                                .foregroundStyle(copied ? DeskColor.rise.color : DeskColor.nightMuted.color)
+                            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .frame(height: 44)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                HStack(spacing: 10) {
+                    Button {
+                        dismiss()
+                        onViewWallet()
+                    } label: {
+                        Label("View wallet", systemImage: "person.crop.circle")
+                            .frame(maxWidth: .infinity).frame(height: 50)
+                    }
+                    .buttonStyle(.plain)
+                    .deskGlass(interactive: true, in: Capsule())
+
+                    Button {
+                        dismiss()
+                        onViewToken()
+                    } label: {
+                        Label("View token", systemImage: "chart.line.uptrend.xyaxis")
+                            .frame(maxWidth: .infinity).frame(height: 50)
+                            .foregroundStyle(DeskColor.onAction.color)
+                            .background(DeskColor.action.color, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+            .foregroundStyle(DeskColor.nightText.color)
+            .background(DeskBackground())
+            .navigationTitle("Trade movement")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).foregroundStyle(DeskColor.nightMuted.color)
+            Spacer()
+            Text(value).foregroundStyle(DeskColor.nightText.color)
+        }
+        .font(.system(size: 13, weight: .semibold, design: .rounded))
+        .frame(height: 40)
     }
 }
 
