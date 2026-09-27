@@ -48,13 +48,16 @@ struct CurrencySheet: View {
             .navigationTitle("Currency")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }.fontWeight(.semibold)
+                    
                 }
             }
             .task { await currency.refresh() }
         }
         .preferredColorScheme(.dark)
+        
     }
 
     private func sample(_ option: DisplayCurrency.Option) -> String {

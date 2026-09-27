@@ -6,6 +6,7 @@
 import { redisStore } from "./_store.mjs";
 import { walletResource } from "./_wallet-resource.mjs";
 import { postMessage, readRoom } from "./_chat.mjs";
+import { act, authorized, overview, report } from "./_moderation.mjs";
 import { HEARTBEAT_KEY, QUOTE_SYMBOLS, ledgerKey, TRACKED_KEY, URGENT_KEY } from "./_ledger.mjs";
 
 const ETHERSCAN = "https://api.etherscan.io/v2/api";
@@ -143,6 +144,21 @@ export function createHandler(fetchImpl = fetch, key = () => process.env.ETHERSC
       } catch {
         return res.status(502).json({ error: "The room could not be reached right now." });
       }
+    }
+    if (req.query.view === "chat-report") {
+      if (req.method !== "POST") return res.status(405).json({ error: "POST required" });
+      const outcome = await report(store, { kind: "message", ...(req.body ?? {}) });
+      return res.status(outcome.status).json(outcome.body);
+    }
+    // Moderation: the reports and the lists, and the decisions, behind the cron secret.
+    if (req.query.view === "moderation") {
+      if (!authorized(req)) return res.status(401).json({ error: "Unauthorized." });
+      if (!store) return res.status(503).json({ error: "Moderation is not configured." });
+      if (req.method === "POST") {
+        const outcome = await act(store, req.body ?? {});
+        return res.status(outcome.status).json(outcome.body);
+      }
+      return res.status(200).json(await overview(store));
     }
     if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
     const address = String(req.query.address || "");

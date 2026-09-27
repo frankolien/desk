@@ -6,6 +6,7 @@
 /// avatar without anything about the person leaving the phone. The address and name
 /// beside a message are what the app said they were; the app marks them as such.
 import crypto from "node:crypto";
+import { blockedWhos, hiddenMessageIDs } from "./_moderation.mjs";
 
 export const ROOM_CAP = 200;
 export const PAGE = 80;
@@ -44,11 +45,15 @@ export async function readRoom(store, { market, install }, now = Date.now()) {
     await store.zadd(presenceKey(symbol), now, who(install));
   }
   await store.zremrangebyscore(presenceKey(symbol), "-inf", now - PRESENT_MS);
-  const [raw, here] = await Promise.all([
+  const [raw, here, hidden, blocked] = await Promise.all([
     store.lrange(messagesKey(symbol), 0, PAGE - 1),
     store.zcount(presenceKey(symbol), now - PRESENT_MS, "+inf"),
+    hiddenMessageIDs(store),
+    blockedWhos(store),
   ]);
-  const messages = raw.map((entry) => { try { return JSON.parse(entry); } catch { return null; } }).filter(Boolean).reverse();
+  const messages = raw.map((entry) => { try { return JSON.parse(entry); } catch { return null; } })
+    .filter((message) => message && !hidden.has(message.id) && !blocked.has(message.who))
+    .reverse();
   return { status: 200, body: { market: symbol, here: Number(here) || 0, messages, observedAt: now } };
 }
 
@@ -60,6 +65,7 @@ export async function postMessage(store, { market, install, address, name, text 
   if (!validInstall(String(install ?? ""))) return { status: 401, body: { error: "This install is not recognised." } };
   const body = cleanText(text);
   if (!body) return { status: 400, body: { error: "Write something first." } };
+  if ((await blockedWhos(store)).has(who(install))) return { status: 403, body: { error: "You can't post in the rooms right now." } };
 
   const rateKey = `chat:rate:${who(install)}`;
   const sent = await store.incr(rateKey);

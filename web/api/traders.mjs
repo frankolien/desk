@@ -6,6 +6,7 @@ import { EXCHANGE_VIEWS } from "./_perpl-abi.mjs";
 import { DEFAULT_WINDOW, WINDOWS, cachedSignals } from "./_signals.mjs";
 import { redisStore } from "./_store.mjs";
 import { publicProfile, readProfile, saveProfile } from "./_profile.mjs";
+import { isProfileHidden, report } from "./_moderation.mjs";
 import { cleanLabel, nameStatus, namesOf, registerRequest, setPrimaryCalldata, setRecordsCalldata } from "./_nad.mjs";
 
 /// Perpl mainnet, read-only. Following is about real traders, so it reads the live venue
@@ -283,11 +284,19 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
       }
       const address = String(req.query.address ?? "");
       if (!validAddress(address)) return res.status(400).json({ error: "A wallet address is required." });
+      if (await isProfileHidden(store, address)) return res.status(200).json({ profile: null });
       return res.status(200).json({ profile: publicProfile(address, await readProfile(store, address)) });
+    }
+    if (view === "profile-report") {
+      if (req.method !== "POST") return res.status(405).json({ error: "POST required" });
+      res.setHeader("Cache-Control", "private, no-store");
+      const outcome = await report(store, { kind: "profile", ...(req.body ?? {}) });
+      return res.status(outcome.status).json(outcome.body);
     }
     if (view === "avatar") {
       const address = String(req.query.address ?? "");
       if (!validAddress(address)) return res.status(400).json({ error: "A wallet address is required." });
+      if (await isProfileHidden(store, address)) return res.status(404).json({ error: "No picture." });
       const stored = await readProfile(store, address);
       if (!stored?.image) return res.status(404).json({ error: "No picture." });
       // The URL carries the version, so a picture can be cached hard and replaced by a new URL.

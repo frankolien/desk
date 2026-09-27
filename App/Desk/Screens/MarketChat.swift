@@ -63,7 +63,19 @@ final class MarketChatModel {
         here = room.here
         let known = Set(room.messages.map(\.id))
         pending.removeAll { known.contains($0.id) }
-        messages = room.messages + pending
+        messages = (room.messages + pending).filter { !Moderation.blockedWhos.contains($0.who) }
+    }
+
+    /// Reports go to the server; a block is this phone's alone and takes effect now.
+    func report(_ message: ChatMessage) async {
+        let sent = await Moderation.reportMessage(message, market: symbol)
+        problem = sent ? "Reported. Thanks." : "Couldn't send the report. Try again."
+    }
+
+    func block(_ message: ChatMessage) {
+        Moderation.block(message.who)
+        messages.removeAll { $0.who == message.who }
+        problem = "Blocked. You won't see their messages."
     }
 
     /// Sends, and shows the message at once; the next poll confirms it or the failure says why.
@@ -130,7 +142,8 @@ struct MarketChatSheet: View {
                                 .padding(.top, 60)
                         }
                         ForEach(chat.messages) { message in
-                            ChatMessageRow(message: message, isMine: message.who == chat.mine, position: position(for: message))
+                            ChatMessageRow(message: message, isMine: message.who == chat.mine, position: position(for: message),
+                                           onReport: { Task { await chat.report(message) } }, onBlock: { chat.block(message) })
                                 .id(message.id)
                         }
                     }
@@ -225,6 +238,7 @@ struct MarketChatSheet: View {
                 .buttonStyle(.plain)
                 .disabled(!canSend)
                 .accessibilityLabel("Send")
+                
             }
         }
         .padding(.horizontal, 16)
@@ -254,6 +268,8 @@ private struct ChatMessageRow: View {
     let message: ChatMessage
     let isMine: Bool
     let position: MarketHolder?
+    var onReport: () -> Void = {}
+    var onBlock: () -> Void = {}
 
     private var displayName: String {
         if let name = message.name, !name.isEmpty { return name }
@@ -292,6 +308,13 @@ private struct ChatMessageRow: View {
                     .textSelection(.enabled)
             }
             Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        .contextMenu {
+            if !isMine {
+                Button(role: .destructive, action: onReport) { Label("Report", systemImage: "flag") }
+                Button(role: .destructive, action: onBlock) { Label("Block", systemImage: "hand.raised") }
+            }
         }
     }
 }

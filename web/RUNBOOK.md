@@ -57,3 +57,22 @@ heartbeat is over 4 minutes old and `fail` past 10. A redeploy clears both withi
 - Worker: `railway logs` (or the Railway service's Deployments tab).
 - Redis: Upstash console shows commands per second and memory; there is no per-request log.
 - Public API usage: `GET /api/v1/stats` (requests per day, tracked wallets, subscriptions — no addresses).
+
+## Moderation
+
+People report a room message (`POST /api/activity?view=chat-report`) or a Desk profile
+(`POST /api/traders?view=profile-report`) from the app. Three distinct phones reporting the
+same message hide it; three hidden messages from one poster in a day block that poster from
+the rooms; three phones reporting a profile hide its Desk name and picture. Review and act
+with the cron secret:
+
+```
+curl -H "Authorization: Bearer $CRON_SECRET" "https://trydesk.trade/api/activity?view=moderation"
+curl -H "Authorization: Bearer $CRON_SECRET" -H "content-type: application/json" \
+  -d '{"action":"unhide-message","id":"<id>"}' "https://trydesk.trade/api/activity?view=moderation"
+```
+
+Actions: `block-who` / `unblock-who` (`who`), `hide-message` / `unhide-message` (`id`),
+`hide-profile` / `unhide-profile` (`address`). Look at the reports list once a day while the
+rooms are open to the public; App Review expects action within 24 hours.
+

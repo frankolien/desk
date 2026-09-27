@@ -6,6 +6,7 @@
 /// served through the identity resolver as the first source, ahead of Farcaster and ENS.
 import { verifyMessage } from "viem";
 
+import { hiddenProfiles } from "./_moderation.mjs";
 export const MAX_NAME = 24;
 /// Base64 of a 256×256 JPEG at moderate quality runs 15–40 KB; this leaves headroom.
 export const MAX_IMAGE_BASE64 = 120_000;
@@ -59,9 +60,12 @@ export async function deskProfiles(store, addresses) {
   const found = new Map();
   const evm = addresses.filter(evmAddress);
   if (!store || evm.length === 0) return found;
-  const rows = await store.mget(evm.map(profileKey)).catch(() => evm.map(() => null));
+  const [rows, hidden] = await Promise.all([
+    store.mget(evm.map(profileKey)).catch(() => evm.map(() => null)),
+    hiddenProfiles(store),
+  ]);
   evm.forEach((address, index) => {
-    if (!rows[index]) return;
+    if (!rows[index] || hidden.has(address.toLowerCase())) return;
     try {
       const stored = JSON.parse(rows[index]);
       const profile = publicProfile(address, stored);

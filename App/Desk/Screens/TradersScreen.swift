@@ -759,6 +759,7 @@ struct TraderProfileScreen: View {
     @State private var snapshot: TraderSnapshot?
     @State private var tab: Tab = .positions
     @State private var isNaming = false
+    @State private var reportsProfile = false
     @State private var draftName = ""
     @State private var showsAlertsPrimer = false
     @State private var showsAutoCopy = false
@@ -811,6 +812,14 @@ struct TraderProfileScreen: View {
                 historyLoaded = true
                 try? await Task.sleep(for: .seconds(120))
             }
+        }
+        .confirmationDialog("Report this profile?", isPresented: $reportsProfile, titleVisibility: .visible) {
+            Button("Report name or picture", role: .destructive) {
+                Task { await Moderation.reportProfile(trader.address) }
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
+        } message: {
+            Text("Desk hides a name or picture that several people report.")
         }
         .alert("Name this trader", isPresented: $isNaming) {
             TextField(trader.shortAddress, text: $draftName)
@@ -1010,6 +1019,7 @@ struct TraderProfileScreen: View {
                 draftName = directory.nicknames[trader.address.lowercased()] ?? ""
                 isNaming = true
             }
+            outlineButton("Report", symbol: "flag") { reportsProfile = true }
         }
     }
 

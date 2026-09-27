@@ -28,7 +28,7 @@ Desk uses a passkey to derive signing material when needed. There is no seed phr
 Desk includes Home Screen widgets, Live Activities and push alerts so important activity is visible without keeping the app open.
 
 IMPORTANT
-This release operates on Monad testnet with test assets only. No real-money trading is available. Perpetual futures are leveraged and involve significant risk. Market data may be delayed or unavailable, and simulated or past performance does not guarantee future results.
+Desk starts on Monad testnet with test assets. Monad mainnet, with real funds, can be chosen in Settings. Perpetual futures are leveraged and involve significant risk; you can lose what you put in. Market data may be delayed or unavailable, and past performance does not guarantee future results.
 
 ## Keywords — 85/100 bytes
 
@@ -45,3 +45,18 @@ https://trydesk.trade/privacy
 ## Marketing URL
 
 https://trydesk.trade
+
+## Notes for App Review
+
+Sign-in creates a passkey on the device, so there is no shared demo account. Please create an
+account in the app: Continue with passkey, then Face ID. The app opens on Monad testnet; the
+Add funds sheet has "Get test AUSD", which funds the wallet from a faucet within a minute, and
+"Open desk" then creates the trading account. Everything can be reviewed on testnet with no
+real money. Mainnet is opt-in from Settings and requires the reviewer's own MON.
+
+User-generated content: each market has a live chat and wallets can set a name and picture.
+Every message can be reported or its poster blocked from a long press; every profile can be
+reported from its screen. Reports are reviewed within 24 hours, and content that several
+people report is hidden automatically until reviewed. Contact for review questions: the
+support URL above.
+
