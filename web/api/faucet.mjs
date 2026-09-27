@@ -185,7 +185,9 @@ export async function limited(store, recipient, headers) {
     if (count > CALLER_LIMIT) return { error: "That is a lot of wallets. Try again later.", reason: "too-soon" };
     return null;
   } catch {
-    return { error: "The faucet could not check its limits.", reason: "unavailable" };
+    // The store is down, not the faucet. The in-memory throttle and the on-chain
+    // thresholds still hold, so the drip goes ahead rather than every phone being refused.
+    return null;
   }
 }
 

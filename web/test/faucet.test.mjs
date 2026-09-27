@@ -55,8 +55,9 @@ test("shared limits stop one caller bringing a hundred fresh wallets", async () 
   assert.equal(repeat?.reason, "too-soon");
 
   // A store that cannot answer refuses rather than waving everyone through.
+  // A store that is down does not refuse the drip: the on-chain thresholds still hold.
   const broken = { set: async () => { throw new Error("redis"); } };
-  assert.equal((await limited(broken, wallet(1), headers))?.reason, "unavailable");
+  assert.equal(await limited(broken, wallet(1), headers), null);
   // No store configured at all keeps the in-memory behaviour.
   assert.equal(await limited(null, wallet(1), headers), null);
 });

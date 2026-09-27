@@ -763,6 +763,8 @@ struct PerpDetailScreen: View {
             MarketChatSheet(chat: chat, market: market, holders: holders, model: model) { showsChat = false }
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
+                .onAppear { chat.isLive = true }
+                .onDisappear { chat.isLive = false }
         }
         .sheet(isPresented: $showsSetup) { AddFundsSheet(model: model) }
         .sheet(item: $ticket) { side in

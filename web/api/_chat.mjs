@@ -44,7 +44,8 @@ export async function readRoom(store, { market, install }, now = Date.now()) {
   if (validInstall(String(install ?? ""))) {
     await store.zadd(presenceKey(symbol), now, who(install));
   }
-  await store.zremrangebyscore(presenceKey(symbol), "-inf", now - PRESENT_MS);
+  // Stale readers are swept on about one read in eight; the count below ignores them anyway.
+  if (Math.random() < 0.125) await store.zremrangebyscore(presenceKey(symbol), "-inf", now - PRESENT_MS);
   const [raw, here, hidden, blocked] = await Promise.all([
     store.lrange(messagesKey(symbol), 0, PAGE - 1),
     store.zcount(presenceKey(symbol), now - PRESENT_MS, "+inf"),

@@ -36,7 +36,11 @@ final class MarketChatModel {
     var latest: ChatMessage? { messages.last }
     var mine: String? { InstallSecret.value().map(Self.who) }
 
-    func run(symbol: String, every seconds: Double = 4) async {
+    /// True while the room is on screen as a sheet; the preview on the market page gets by
+    /// on a slower poll, which is most of the difference to Desk's store bill.
+    var isLive = false { didSet { if isLive, !oldValue { Task { await load() } } } }
+
+    func run(symbol: String) async {
         if self.symbol != symbol {
             self.symbol = symbol
             messages = []
@@ -44,7 +48,7 @@ final class MarketChatModel {
         }
         while !Task.isCancelled {
             await load()
-            try? await Task.sleep(for: .seconds(seconds))
+            try? await Task.sleep(for: .seconds(isLive ? 5 : 20))
         }
     }
 

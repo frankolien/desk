@@ -14,7 +14,11 @@ export function redisStore({
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!response.ok) throw new Error(`redis ${response.status}`);
+    if (!response.ok) {
+      // The status alone hid the one answer that matters: a quota, not a fault.
+      const reason = await response.text().catch(() => "");
+      throw new Error(`redis ${response.status}${reason ? `: ${reason.slice(0, 120)}` : ""}`);
+    }
     return response.json();
   }
 

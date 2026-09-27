@@ -43,8 +43,23 @@ export function cleanReason(value) {
   return text.length > MAX_REASON ? text.slice(0, MAX_REASON).trim() : text;
 }
 
-async function members(store, key) {
-  try { return new Set(await store.smembers(key)); } catch { return new Set(); }
+/// The three sets change rarely and are read on every room poll, so an instance keeps
+/// them for a minute. A decision taken through this instance drops its copy at once.
+const SETS_TTL_MS = 60_000;
+const cachedSets = new Map();
+
+export function forgetSets() { cachedSets.clear(); }
+
+async function members(store, key, now = Date.now()) {
+  const kept = cachedSets.get(key);
+  if (kept && now - kept.at < SETS_TTL_MS) return kept.set;
+  try {
+    const set = new Set(await store.smembers(key));
+    cachedSets.set(key, { set, at: now });
+    return set;
+  } catch {
+    return kept?.set ?? new Set();
+  }
 }
 
 export const hiddenMessageIDs = (store) => members(store, KEYS.hiddenMessages);
@@ -91,6 +106,7 @@ export async function report(store, { kind, install, market, id, who, address, r
   let hidden = false;
   let blocked = false;
   if (distinct >= AUTO_HIDE_REPORTS) {
+    forgetSets();
     if (kind === "message") {
       hidden = Boolean(await store.sadd(KEYS.hiddenMessages, String(id)));
       if (hidden && who) {
@@ -116,6 +132,7 @@ export async function overview(store) {
 
 /// A moderator's decision. Each action is idempotent.
 export async function act(store, { action, who, id, address }) {
+  forgetSets();
   switch (action) {
     case "block-who": if (!validWho(who)) break; await store.sadd(KEYS.blockedWhos, who); return { status: 200, body: { done: action, who } };
     case "unblock-who": if (!validWho(who)) break; await store.srem(KEYS.blockedWhos, who); return { status: 200, body: { done: action, who } };
