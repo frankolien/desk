@@ -115,7 +115,9 @@ final class AppModel {
         showsNameOnboarding = false
     }
     /// Shown once, ever, the first time leverage is reached.
-    var hasSeenLeverageExplainer = false
+    var hasSeenLeverageExplainer = UserDefaults.standard.bool(forKey: "desk.leverageExplainerSeen") {
+        didSet { UserDefaults.standard.set(hasSeenLeverageExplainer, forKey: "desk.leverageExplainerSeen") }
+    }
     private let session = SigningSession()
     private let passkey: any PasskeyService
     private var apiKeys: APIKeyStore { APIKeyStore.forNetwork(network) }

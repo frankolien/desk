@@ -30,41 +30,6 @@ struct TicketSheet: View {
     @State private var takeProfit = ""
     @State private var handledFill = false
     @State private var showsProtection = false
-    @State private var acknowledged = false
-
-    private var presignSentence: String? {
-        guard let quote, let market else { return nil }
-        var parts = ["\(side == .up ? "Long" : "Short") \(market.symbol) \(leverage)×",
-                     "\(quote.margin.display()) AUSD margin", "~\(quote.notional.display()) AUSD size"]
-        if leverage > 1 { parts.append("liq \(liquidationText(quote)) (\(percent(quote.liquidationDistanceMicros)) away)") }
-        if let protection {
-            let decimals = market.config.priceDecimals
-            if let sl = protection.stopLoss { parts.append("stop \(sl.display(fractionDigits: decimals))") }
-            if let tp = protection.takeProfit { parts.append("take profit \(tp.display(fractionDigits: decimals))") }
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    private var presignWarnings: [PreSignWarning] {
-        guard let quote else { return [] }
-        var out: [PreSignWarning] = []
-        if leverage > 1 {
-            let away = Double(quote.liquidationDistanceMicros) / 10_000
-            if away < 5 { out.append(.init(text: String(format: "Liquidation is %.1f%% away. A small move closes this.", away), level: .high)) }
-            else if away < 10 { out.append(.init(text: String(format: "Liquidation is %.1f%% away.", away), level: .caution)) }
-        }
-        if leverage > 25 { out.append(.init(text: "\(leverage)×: a \(String(format: "%.1f", 100.0 / Double(leverage)))% move against you wipes the margin.", level: .high)) }
-        else if leverage > 10 { out.append(.init(text: "\(leverage)×: a \(String(format: "%.0f", 100.0 / Double(leverage)))% move against you wipes the margin.", level: .caution)) }
-        if let free = session.account.value?.free, free.raw > 0 {
-            let share = Double(quote.total.raw) / Double(free.raw)
-            if share > 0.5 { out.append(.init(text: "This is \(Int((share * 100).rounded()))% of your free collateral.", level: .high)) }
-            else if share > 0.25 { out.append(.init(text: "This is \(Int((share * 100).rounded()))% of your free collateral.", level: .caution)) }
-        }
-        if protection == nil, leverage > 1, stopLoss.isEmpty { out.append(.init(text: "No stop loss. Perpl closes it at liquidation.", level: .info)) }
-        return out
-    }
-
-    private var needsAcknowledgement: Bool { presignWarnings.contains { $0.level == .high } }
 
     private var quote: OrderQuote? {
         guard let market, let mark, let margin = Money(text: amount.isEmpty ? "0" : amount),
@@ -328,19 +293,12 @@ struct TicketSheet: View {
                 .padding(.bottom, 12)
             }
 
-            if let presignSentence, !session.isBusy, blockingReason == nil {
-                PreSignPreview(sentence: presignSentence, warnings: presignWarnings, acknowledged: $acknowledged)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 10)
-            }
-
             HoldToConfirm(
                 title: quote == nil
                     ? "Enter order size"
                     : "Hold to \(side.word().lowercased()) \(amount) AUSD · \(leverage)×",
                 tint: side == .up ? DeskColor.rise : DeskColor.fall,
-                isEnabled: quote != nil && !hasInvalidProtection && shortfall == nil && !session.isBusy
-                    && isPriceFresh && (!needsAcknowledgement || acknowledged)
+                isEnabled: quote != nil && !hasInvalidProtection && shortfall == nil && !session.isBusy && isPriceFresh
             ) {
                 Task { await submit() }
             }
