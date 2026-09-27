@@ -312,7 +312,7 @@ struct HomeScreen: View {
                 .frame(height: 42)
                 .contentShape(Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(DeskPressStyle())
             .homeGlass(interactive: true, in: Capsule())
             .accessibilityLabel("Your account, \(model.addressShort)")
         }
@@ -326,7 +326,7 @@ struct HomeScreen: View {
                 .frame(width: 42, height: 42)
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeskPressStyle())
         .homeGlass(interactive: true, in: Circle())
         .accessibilityLabel(label)
     }
@@ -351,7 +351,7 @@ struct HomeScreen: View {
                     }
                     .contentShape(Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(DeskPressStyle())
             .accessibilityLabel("Edit profile")
 
             VStack(alignment: .leading, spacing: 5) {
@@ -382,7 +382,7 @@ struct HomeScreen: View {
                     Button(action: onFollowing) {
                         (Text("\(followingCount) ").bold() + Text("Following"))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(DeskPressStyle())
                     (Text("\(model.closedTrades.count) ").bold() + Text(model.closedTrades.count == 1 ? "trade" : "trades"))
                     if !sinceText.isEmpty { Text(sinceText) }
                 }
@@ -525,7 +525,7 @@ struct HomeScreen: View {
             .frame(height: 52)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeskPressStyle())
     }
 
     private func squareButton(symbol: String, label: String, isEnabled: Bool = true, action: @escaping () -> Void) -> some View {
@@ -536,7 +536,7 @@ struct HomeScreen: View {
                 .frame(width: 44, height: 44)
                 .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeskPressStyle())
         .homeGlass(interactive: true, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .opacity(isEnabled ? 1 : 0.42)
         .disabled(!isEnabled)
@@ -573,7 +573,7 @@ struct HomeScreen: View {
                 .stroke(mainnet ? DeskColor.action.color.opacity(0.35) : Color.white.opacity(0.08), lineWidth: 0.75))
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeskPressStyle())
     }
 
     // MARK: Positions
@@ -587,7 +587,11 @@ struct HomeScreen: View {
                 Spacer()
                 HStack(spacing: 2) {
                     ForEach(Book.allCases, id: \.self) { item in
-                        Button { withAnimation(.snappy(duration: 0.2)) { book = item } } label: {
+                        Button {
+                            guard book != item else { return }
+                            Haptics.selection()
+                            withAnimation(.snappy(duration: 0.2)) { book = item }
+                        } label: {
                             Text(item.rawValue)
                                 .font(.system(size: 12, weight: .bold, design: .rounded))
                                 .foregroundStyle(book == item ? DeskColor.nightText.color : DeskColor.nightMuted.color)
@@ -596,7 +600,7 @@ struct HomeScreen: View {
                                 .background(book == item ? Color.white.opacity(0.16) : .clear, in: Capsule())
                                 .contentShape(Capsule())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(DeskPressStyle(haptic: false))
                     }
                 }
                 .padding(2)
@@ -605,7 +609,11 @@ struct HomeScreen: View {
             if book == .open {
                 HStack(spacing: 8) {
                     ForEach(Filter.allCases) { item in
-                        Button { withAnimation(.snappy(duration: 0.2)) { filter = item } } label: {
+                        Button {
+                            guard filter != item else { return }
+                            Haptics.selection()
+                            withAnimation(.snappy(duration: 0.2)) { filter = item }
+                        } label: {
                             Text(item.rawValue)
                                 .font(.system(size: 12, weight: .bold, design: .rounded))
                                 .foregroundStyle(filter == item ? DeskColor.night.color : DeskColor.nightText.color)
@@ -614,7 +622,7 @@ struct HomeScreen: View {
                                 .background(filter == item ? DeskColor.nightText.color : Color.white.opacity(0.08), in: Capsule())
                                 .contentShape(Capsule())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(DeskPressStyle(haptic: false))
                     }
                 }
             }
@@ -695,7 +703,7 @@ struct HomeScreen: View {
             .frame(height: 44)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeskPressStyle())
     }
 
     /// One line of the ledger: no container, a hairline under it, figures on the right.
@@ -734,7 +742,7 @@ struct HomeScreen: View {
             .overlay(alignment: .bottom) { hairline.padding(.leading, 52) }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeskPressStyle())
     }
 
     /// Liquidation distance rather than size, because distance is the figure that
@@ -774,7 +782,7 @@ struct HomeScreen: View {
             .frame(height: 52)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeskPressStyle())
     }
 }
 

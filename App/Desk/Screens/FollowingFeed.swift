@@ -178,15 +178,25 @@ struct FollowingFeed: View {
             }
 
             if addresses.isEmpty {
-                Button(action: onAdd) {
-                    Label("Follow a wallet", systemImage: "plus.circle.fill")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundStyle(DeskColor.action.color)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(18)
-                        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 18))
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Your first signal takes three steps")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                    guideStep("1", "Follow a wallet you want to learn from")
+                    guideStep("2", "Desk confirms its buys and sells on-chain")
+                    guideStep("3", "Inspect the movement, then decide whether to trade")
+                    Button(action: onAdd) {
+                        Label("Follow your first wallet", systemImage: "plus")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(DeskColor.onAction.color)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                            .background(DeskColor.action.color, in: Capsule())
+                    }
+                    .buttonStyle(DeskPressStyle(scale: 0.98))
                 }
-                .buttonStyle(.plain)
+                .padding(18)
+                .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .padding(.top, 8)
             } else if !model.loaded {
                 VStack(alignment: .leading, spacing: 10) {
@@ -211,6 +221,20 @@ struct FollowingFeed: View {
                     }
                 }
             }
+        }
+    }
+
+    private func guideStep(_ number: String, _ text: String) -> some View {
+        HStack(spacing: 11) {
+            Text(number)
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .foregroundStyle(DeskColor.night.color)
+                .frame(width: 24, height: 24)
+                .background(DeskColor.action.color, in: Circle())
+            Text(text)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(DeskColor.nightText.color.opacity(0.86))
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -290,7 +314,7 @@ struct FollowingTradeDetailSheet: View {
                         .foregroundStyle(DeskColor.nightText.color)
                         .frame(height: 44)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(DeskPressStyle())
                 }
 
                 HStack(spacing: 10) {
@@ -301,7 +325,7 @@ struct FollowingTradeDetailSheet: View {
                         Label("View wallet", systemImage: "person.crop.circle")
                             .frame(maxWidth: .infinity).frame(height: 50)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(DeskPressStyle())
                     .deskGlass(interactive: true, in: Capsule())
 
                     Button {
@@ -412,6 +436,6 @@ private struct FollowingTradeRow: View {
             .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.1)).frame(height: 1) }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeskPressStyle())
     }
 }

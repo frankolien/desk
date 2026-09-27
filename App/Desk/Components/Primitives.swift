@@ -1,5 +1,62 @@
 import DeskUI
 import SwiftUI
+import UIKit
+
+/// One tactile vocabulary for Desk. Navigation is soft, changing a choice is a precise
+/// tick, committing money is firm, and outcomes use the system's success/error patterns.
+/// Keeping it here stops every screen inventing its own vibration strength.
+@MainActor
+enum Haptics {
+    static func touch() {
+        let generator = UIImpactFeedbackGenerator(style: .soft)
+        generator.prepare()
+        generator.impactOccurred(intensity: 0.72)
+    }
+
+    static func selection() {
+        let generator = UISelectionFeedbackGenerator()
+        generator.prepare()
+        generator.selectionChanged()
+    }
+
+    static func commit() {
+        let generator = UIImpactFeedbackGenerator(style: .rigid)
+        generator.prepare()
+        generator.impactOccurred(intensity: 0.9)
+    }
+
+    static func success() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+    static func error() { UINotificationFeedbackGenerator().notificationOccurred(.error) }
+    static func failure() { error() }
+}
+
+/// A plain button should still feel pressed. The small compression is quick enough to
+/// read as contact rather than decoration and freezes automatically with Reduce Motion.
+struct DeskPressStyle: ButtonStyle {
+    var haptic = true
+    var scale: CGFloat = 0.975
+
+    func makeBody(configuration: Configuration) -> some View {
+        Pressed(configuration: configuration, haptic: haptic, scale: scale)
+    }
+
+    private struct Pressed: View {
+        let configuration: Configuration
+        let haptic: Bool
+        let scale: CGFloat
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            configuration.label
+                .scaleEffect(configuration.isPressed && !reduceMotion ? scale : 1)
+                .opacity(configuration.isPressed ? 0.82 : 1)
+                .animation(.snappy(duration: 0.14), value: configuration.isPressed)
+                .onChange(of: configuration.isPressed) { _, pressed in
+                    if pressed, haptic { Haptics.touch() }
+                }
+        }
+    }
+}
 
 /// The approved Desk identity from the app asset catalog.
 ///
@@ -50,6 +107,7 @@ struct PrimaryButton: View {
                 .background(tint.color.opacity(isEnabled ? 1 : 0.35))
                 .clipShape(Capsule())
         }
+        .buttonStyle(DeskPressStyle(scale: 0.985))
         .disabled(!isEnabled)
     }
 }
@@ -153,6 +211,7 @@ struct AmountKeypad: View {
                         .frame(maxWidth: .infinity, minHeight: 56)
                 }
                 .accessibilityLabel(key == "\u{232B}" ? "Delete" : key)
+                .buttonStyle(DeskPressStyle(scale: 0.92))
             }
         }
     }

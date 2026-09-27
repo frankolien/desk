@@ -225,7 +225,7 @@ struct PortfolioReplaySheet: View {
                     .font(.system(size: 16, weight: .bold))
                     .frame(width: 40, height: 40)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(DeskPressStyle())
             .foregroundStyle(DeskColor.nightText.color)
             .deskGlass(interactive: true, in: Circle())
             .accessibilityLabel(progress >= 0.999 ? "Replay" : (isPlaying ? "Pause" : "Play"))
@@ -275,7 +275,7 @@ struct PortfolioReplaySheet: View {
                     .background(DeskColor.action.color, in: Capsule())
                     .contentShape(Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(DeskPressStyle(scale: 0.985))
 
             HStack(spacing: 10) {
                 snapshotAction(symbol: "square.and.arrow.down", title: "Save image", action: saveImage)
@@ -302,7 +302,7 @@ struct PortfolioReplaySheet: View {
                         .foregroundStyle(DeskColor.nightText.color)
                         .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(DeskPressStyle())
                 .deskGlass(interactive: true, in: Capsule())
                 .disabled(exportProgress != nil)
 
@@ -330,7 +330,7 @@ struct PortfolioReplaySheet: View {
             .frame(height: 58)
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeskPressStyle())
         .deskGlass(interactive: true, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
@@ -354,7 +354,7 @@ struct PortfolioReplaySheet: View {
             .background(DeskColor.action.color, in: Capsule())
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeskPressStyle(scale: 0.985))
         .disabled(exportProgress != nil)
     }
 
@@ -422,6 +422,7 @@ struct PortfolioReplaySheet: View {
             return
         }
         imageSaver.save(image) { saved in
+            if saved { Haptics.success() } else { Haptics.failure() }
             showNotice(Notice(
                 text: saved ? "Image saved to Photos" : "Couldn’t save the image",
                 isError: !saved))
@@ -443,7 +444,7 @@ struct PortfolioReplaySheet: View {
             return
         }
         UIPasteboard.general.image = image
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptics.success()
         showNotice(Notice(text: "Image copied", isError: false))
     }
 

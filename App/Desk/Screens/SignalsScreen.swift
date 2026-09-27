@@ -391,7 +391,7 @@ struct SignalsScreen: View {
             GlassEffectContainer(spacing: 0) {
                 HStack(spacing: 0) {
                     ForEach(Section.allCases) { item in
-                        Button { withAnimation(.snappy(duration: 0.3)) { section = item } } label: {
+                        Button { select(item) } label: {
                             sectionLabel(item)
                         }
                         .buttonStyle(.plain)
@@ -407,7 +407,7 @@ struct SignalsScreen: View {
         } else {
             HStack(spacing: 0) {
                 ForEach(Section.allCases) { item in
-                    Button { withAnimation(.easeOut(duration: 0.18)) { section = item } } label: {
+                    Button { select(item) } label: {
                         sectionLabel(item)
                             .background(section == item ? Color.white.opacity(0.24) : .clear, in: Capsule())
                     }
@@ -445,6 +445,12 @@ struct SignalsScreen: View {
             .frame(maxWidth: .infinity)
             .frame(height: 36)
             .contentShape(Capsule())
+    }
+
+    private func select(_ item: Section) {
+        guard section != item else { return }
+        Haptics.selection()
+        withAnimation(.snappy(duration: 0.28)) { section = item }
     }
 
     @ViewBuilder

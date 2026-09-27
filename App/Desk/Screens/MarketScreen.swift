@@ -820,7 +820,7 @@ struct PerpDetailScreen: View {
                     .frame(width: 32, height: 44)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(DeskPressStyle())
             .foregroundStyle(DeskColor.nightMuted.color)
 
             MarketTokenLogo(symbol: market.symbol, size: 46)
@@ -849,7 +849,7 @@ struct PerpDetailScreen: View {
                     .frame(width: 40, height: 44)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(DeskPressStyle(haptic: false))
             .foregroundStyle(isSaved ? DeskColor.action.color : DeskColor.nightMuted.color)
             ShareLink(item: URL(string: "https://trydesk.trade/app/trade/\(market.symbol)")!) {
                 Image(systemName: "square.and.arrow.up")
@@ -857,7 +857,7 @@ struct PerpDetailScreen: View {
                     .frame(width: 36, height: 44)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(DeskPressStyle())
             .foregroundStyle(DeskColor.nightMuted.color)
         }
     }

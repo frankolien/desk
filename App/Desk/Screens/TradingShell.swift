@@ -91,6 +91,7 @@ struct TradingShell: View {
             }
         }
         .tint(.white)
+        .onChange(of: tab) { _, _ in Haptics.selection() }
         .onChange(of: TokenOpenRequest.shared.pending) { _, target in if target != nil { tab = .search } }
         .onChange(of: MarketOpenRequest.shared.pending) { _, symbol in if symbol != nil { tab = .perps } }
         .sheet(isPresented: $showsAccount) {

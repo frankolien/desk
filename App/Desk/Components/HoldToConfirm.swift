@@ -102,22 +102,3 @@ struct HoldToConfirm: View {
         withAnimation(.easeOut(duration: 0.2)) { progress = 0 }
     }
 }
-
-/// The three moments in this app worth a physical response.
-///
-/// Deliberately few. Haptics used as decoration stop meaning anything, and on a trading
-/// screen the one that matters is the fill — the confirmation that something irreversible
-/// happened while the user was looking at their thumb rather than at the screen.
-enum Haptics {
-    static func selection() {
-        UISelectionFeedbackGenerator().selectionChanged()
-    }
-
-    static func success() {
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
-    }
-
-    static func failure() {
-        UINotificationFeedbackGenerator().notificationOccurred(.error)
-    }
-}

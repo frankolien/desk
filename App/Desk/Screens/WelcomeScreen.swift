@@ -7,10 +7,10 @@ struct WelcomeScreen: View {
     @State private var showsCreateWarning = false
 
     private let features: [(symbol: String, title: String)] = [
-        ("person.badge.key.fill", "Passkey Sign-In"),
-        ("key.slash", "No Seed Phrase"),
-        ("bolt.fill", "Gasless Orders"),
-        ("lock.open", "Key Never Stored"),
+        ("person.2.wave.2.fill", "Follow wallet moves"),
+        ("scope", "Inspect every signal"),
+        ("chart.line.uptrend.xyaxis", "Trade on Monad"),
+        ("faceid", "Confirm with Face ID"),
     ]
 
     var body: some View {
@@ -30,14 +30,14 @@ struct WelcomeScreen: View {
                     DeskBrandMark(size: compact ? 48 : 52)
                         .padding(.horizontal, contentInset)
 
-                    Text("Trade perps")
+                    Text("Follow the move.\nTrade the moment.")
                         .font(.system(size: compact ? 39 : 44, weight: .heavy, design: .rounded))
                         .foregroundStyle(.white)
                         .lineSpacing(1)
                         .padding(.horizontal, contentInset)
                         .padding(.top, compact ? 18 : 24)
 
-                    Text("Perpetuals on Monad. Face ID signs every order — no seed phrase, no wallet app.")
+                    Text("Track wallets, inspect confirmed movements, then trade perpetuals on Monad. No seed phrase or wallet app.")
                         .font(.system(size: compact ? 15 : 16, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.62))
                         .fixedSize(horizontal: false, vertical: true)
@@ -66,7 +66,7 @@ struct WelcomeScreen: View {
                         .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 0.7))
                         .shadow(color: DeskColor.action.color.opacity(0.2), radius: 22, y: 9)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(DeskPressStyle(scale: 0.985))
                     .disabled(model.isWorking)
                     .padding(.horizontal, contentInset)
                     .padding(.top, compact ? 20 : 24)

@@ -181,6 +181,7 @@ struct MarketSearchScreen: View {
     @State private var nameWasNotFound = false
     @State private var nameLookupUnavailable = false
     @StateObject private var discovery = TokenDiscoveryModel()
+    @Namespace private var navigationSpace
 
     /// Names look like names: a dot, an @, or an address.
     private var looksLikeAName: Bool {
@@ -295,14 +296,14 @@ struct MarketSearchScreen: View {
                                     .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                                     .contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(DeskPressStyle())
                             }
                         }
                         .padding(.top, 12)
                     }
 
                     if !looksLikeAName {
-                    Text("Perp Cards")
+                    Text("Trade markets")
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
                         .padding(.top, 32)
@@ -313,7 +314,7 @@ struct MarketSearchScreen: View {
                                 Button { open(entry) } label: {
                                     SearchMarketCard(model: market, market: entry)
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(DeskPressStyle())
                             }
                         }
                     }
@@ -327,7 +328,7 @@ struct MarketSearchScreen: View {
                             Text(query.isEmpty ? "Trending coins" : "Coins")
                                 .font(.system(size: 18, weight: .bold, design: .rounded))
                             Spacer()
-                            Text("SPOT PREVIEW")
+                            Text("VIEW ONLY")
                                 .font(.system(size: 10, weight: .heavy, design: .rounded))
                                 .foregroundStyle(DeskColor.nightMuted.color)
                                 .tracking(1.2)
@@ -338,9 +339,11 @@ struct MarketSearchScreen: View {
                         LazyVStack(spacing: 10) {
                             ForEach(spotResults) { token in
                                 Button { selectedSpot = token } label: {
-                                    TrendingSpotRow(token: token).contentShape(Rectangle())
+                                    TrendingSpotRow(token: token)
+                                        .contentShape(Rectangle())
+                                        .matchedTransitionSource(id: "spot-\(token.id)", in: navigationSpace)
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(DeskPressStyle())
                             }
                         }
                         .padding(.top, 12)
@@ -360,7 +363,7 @@ struct MarketSearchScreen: View {
 
                     // Directly above the rows it titles.
                     HStack {
-                        Text("All Perpl Markets")
+                        Text("All perpetual markets")
                             .font(.system(size: 18, weight: .bold, design: .rounded))
                         Spacer()
                         Text("\(market.allMarkets.count) live")
@@ -445,6 +448,7 @@ struct MarketSearchScreen: View {
             #endif
             .navigationDestination(item: $selectedSpot) { token in
                 SpotTokenDetailScreen(token: token, model: model)
+                    .navigationTransition(.zoom(sourceID: "spot-\(token.id)", in: navigationSpace))
                     .toolbar(.hidden, for: .tabBar)
             }
             .task { await discovery.run() }
@@ -513,7 +517,7 @@ struct MarketSearchScreen: View {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(DeskColor.nightMuted.color)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(DeskPressStyle())
                 .accessibilityLabel("Clear search")
             } else {
                 Button("Paste") {
@@ -521,7 +525,7 @@ struct MarketSearchScreen: View {
                 }
                 .font(.system(size: 13, weight: .bold, design: .rounded))
                 .foregroundStyle(DeskColor.nightText.color)
-                .buttonStyle(.plain)
+                .buttonStyle(DeskPressStyle())
                 .padding(.horizontal, 12)
                 .frame(height: 30)
                 .background(Color.white.opacity(0.12), in: Capsule())
@@ -540,6 +544,7 @@ struct MarketSearchScreen: View {
         // defaults value on every toggle even when the membership had not changed.
         savedIDs = next.sorted().map(String.init).joined(separator: ",")
         TradeAlerts.shared.watchlistChanged()
+        Haptics.selection()
     }
 
     private func open(_ entry: Market) {
