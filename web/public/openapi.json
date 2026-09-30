@@ -67,8 +67,8 @@
                   "data": {
                     "collateral": "AUSD",
                     "markets": [
-                      { "id": 1, "name": "BTC", "mark": 81336.1, "prev": 80450.8, "change": 0.011004241101393683, "volume24h": 40231735.848404, "openInterest": 444435.90425900003, "tvl": 165893.458031, "fundingRate": 0.00004, "fundingIntervalSec": 2580, "maxLeverage": 15, "priceDecimals": 1, "sizeDecimals": 5, "makerFee": 90, "takerFee": 690, "maintenanceMargin": 2500, "isOpen": true },
-                      { "id": 10, "name": "MON", "mark": 0.024766, "prev": 0.024106, "change": 0.027379075748776276, "volume24h": 455063.158205, "openInterest": 173152.47964, "tvl": 116062.974387, "fundingRate": 0, "fundingIntervalSec": 2580, "maxLeverage": 10, "priceDecimals": 6, "sizeDecimals": 0, "makerFee": 90, "takerFee": 690, "maintenanceMargin": 2000, "isOpen": true }
+                      { "id": 1, "name": "BTC", "mark": 81336.1, "prev": 80450.8, "change": 0.011004241101393683, "volume24h": 40231735.848404, "openInterest": 444435.90425900003, "tvl": 165893.458031, "fundingRate": 0.00004, "fundingIntervalSec": 2580, "maxLeverage": 15, "priceDecimals": 1, "sizeDecimals": 5, "makerFee": 45, "takerFee": 345, "maintenanceMargin": 2500, "isOpen": true },
+                      { "id": 10, "name": "MON", "mark": 0.024766, "prev": 0.024106, "change": 0.027379075748776276, "volume24h": 455063.158205, "openInterest": 173152.47964, "tvl": 116062.974387, "fundingRate": 0, "fundingIntervalSec": 2580, "maxLeverage": 10, "priceDecimals": 6, "sizeDecimals": 0, "makerFee": 45, "takerFee": 345, "maintenanceMargin": 2000, "isOpen": true }
                     ]
                   },
                   "meta": { "asOf": "2026-09-21T04:37:15.970Z", "chain": "monad", "cached": false }
@@ -498,8 +498,8 @@
           "maxLeverage": { "type": "integer", "description": "Whole-number leverage cap: 100 over the initial-margin percentage, rounded down." },
           "priceDecimals": { "type": "integer", "description": "Decimals the market quotes prices in; `mark`, `prev` and the candles are already scaled by it." },
           "sizeDecimals": { "type": "integer", "description": "Decimals the market sizes positions in." },
-          "makerFee": { "type": "integer", "description": "Maker fee in micros of notional: 90 is 0.009%." },
-          "takerFee": { "type": "integer", "description": "Taker fee in micros of notional: 690 is 0.069%." },
+          "makerFee": { "type": "integer", "description": "Maker fee in micros of notional: 45 is 0.0045%." },
+          "takerFee": { "type": "integer", "description": "Taker fee in micros of notional: 345 is 0.0345%." },
           "maintenanceMargin": { "type": "integer", "description": "Perpl's maintenance divisor in hundredths: the maintenance fraction is 100 / value, so 2500 is 4%." },
           "isOpen": { "type": "boolean", "const": true, "description": "Always true here; closed markets are filtered out." }
         }

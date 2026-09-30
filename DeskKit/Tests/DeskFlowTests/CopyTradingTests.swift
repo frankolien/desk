@@ -165,8 +165,12 @@ struct CopyTradingTests {
         let fill = try shadowFill(rules: rules)
         #expect(abs(fill.entry - 60_018) < 0.001)
         #expect(abs(fill.fees - 0.01725) < 0.00001)
-        // Flat price: the round trip costs slippage and the opening fee.
+        // Flat price: the round trip costs slippage and both fees.
         #expect(fill.pnl(at: 60_000, takerFeeMicros: 345) < 0)
+        let exit = 60_000 * (1 - ShadowFill.slippageBps / 10_000)
+        let expected = (exit - fill.entry) * fill.units - fill.fees - exit * fill.units * 345 / 1_000_000
+        #expect(abs(fill.pnl(at: 60_000, takerFeeMicros: 345) - expected) < 1e-9)
+        #expect(fill.pnl(at: 60_000, takerFeeMicros: 345) < fill.pnl(at: 60_000, takerFeeMicros: 0))
         #expect(fill.triggered(at: 57_000)?.exit == .stop)
         #expect(fill.triggered(at: 66_100)?.exit == .take)
         #expect(fill.triggered(at: 60_500) == nil)

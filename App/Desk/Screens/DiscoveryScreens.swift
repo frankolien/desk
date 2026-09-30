@@ -198,7 +198,7 @@ struct MarketSearchScreen: View {
     /// "Solana" finds SOL: the market's common name counts as much as its ticker.
     private static let marketNames: [String: String] = [
         "BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "MON": "Monad", "ZEC": "Zcash",
-        "HYPE": "Hyperliquid", "LIT": "Lighter", "PUMP": "Pump", "DOGE": "Dogecoin", "XRP": "Ripple",
+        "HYPE": "Hyperliquid", "LIT": "Lighter", "PUMP": "Pump", "VVV": "Venice", "NEAR": "NEAR Protocol", "DOGE": "Dogecoin", "XRP": "Ripple",
         "BNB": "BNB", "AVAX": "Avalanche", "LINK": "Chainlink", "ARB": "Arbitrum", "OP": "Optimism", "SUI": "Sui",
     ]
 

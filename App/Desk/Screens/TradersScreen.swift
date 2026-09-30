@@ -341,6 +341,8 @@ enum TraderFormat {
         case "ZEC": "Zcash"
         case "LIT": "Lighter"
         case "PUMP": "Pump.fun"
+        case "VVV": "Venice"
+        case "NEAR": "NEAR Protocol"
         default: symbol
         }
     }

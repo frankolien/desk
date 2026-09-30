@@ -36,7 +36,11 @@ public struct PerplPosition: Decodable, Sendable, Hashable {
     public let entryResidue: Int?
     /// Size, at the market's size decimals.
     public let sizeRaw: Int64
+    /// Since contract 1.7.5 (23 September 2026): on an open position, the entry-side fee
+    /// still carried by the remaining size; on a closed one, every fee it paid.
     public let feeRaw: Int64
+    /// `cfee`, the part of `fee` that closes and reductions paid. Absent from older frames.
+    public let closeFeeRaw: Int64?
     /// Funding accumulator at entry, signed.
     public let entryFundingSum: Int64
     /// Funding accumulator at exit, signed. Meaningless while the position is open.
@@ -70,6 +74,7 @@ public struct PerplPosition: Decodable, Sendable, Hashable {
         case entryResidue = "epr"
         case size = "s"
         case fee
+        case closeFee = "cfee"
         case entryFundingSum = "efs"
         case exitFundingSum = "xfs"
         case leverage = "lv"
@@ -90,6 +95,7 @@ public struct PerplPosition: Decodable, Sendable, Hashable {
         entryResidue = try box.decodeIfPresent(Int.self, forKey: .entryResidue)
         sizeRaw = try box.decodeWireInt(.size)
         feeRaw = (try? box.decodeWireInt(.fee)) ?? 0
+        closeFeeRaw = try? box.decodeWireInt(.closeFee)
         entryFundingSum = (try? box.decodeWireInt(.entryFundingSum)) ?? 0
         exitFundingSum = (try? box.decodeWireInt(.exitFundingSum)) ?? 0
         leverageHundredths = try box.decode(Int.self, forKey: .leverage)

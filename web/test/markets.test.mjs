@@ -34,25 +34,29 @@ test("closed markets are left out and the collateral is named", () => {
   assert.equal(out.collateral, "AUSD");
 });
 
-test("candles come back ascending, cached a minute, and only for known assets", async () => {
-  let calls = 0;
+test("candles come from Perpl at the market's scales, ascending, cached a minute, and only for listed markets", async () => {
+  let candleCalls = 0;
   const fetchImpl = async (url) => {
-    calls += 1;
-    assert.match(url, /instId=BTC-USDT&bar=15m/);
-    return { ok: true, json: async () => ({ code: "0", data: [["120000", "2", "3", "1", "2.5", "9"], ["60000", "1", "2", "0.5", "2", "8"]] }) };
+    if (url.includes("/pub/context")) return { ok: true, json: async () => ({ markets: [BTC], tokens: [{ symbol: "AUSD" }] }) };
+    candleCalls += 1;
+    assert.match(url, /market-data\/1\/candles\/900\/\d+-\d+$/);
+    return { ok: true, json: async () => ({ d: [{ t: 120000, o: 20, h: 30, l: 10, c: 25, v: "9000000", n: 3 }, { t: 60000, o: 10, h: 20, l: 5, c: 20, v: "8000000", n: 2 }] }) };
   };
-  let clock = 1_000_000;
+  let clock = 1_790_000_000_000;
   const source = createMarkets({ fetchImpl, now: () => clock });
   const rows = await source.candles("btc", "15m");
   assert.deepEqual(rows.map((r) => r.time), [60, 120]);
   assert.equal(rows[0].close, 2);
+  assert.equal(rows[1].volume, 9);
   await source.candles("BTC", "15m");
-  assert.equal(calls, 1);
+  assert.equal(candleCalls, 1);
   clock += 61_000;
   await source.candles("BTC", "15m");
-  assert.equal(calls, 2);
+  assert.equal(candleCalls, 2);
   assert.equal(await source.candles("DOGE", "15m"), null);
   assert.equal(await source.candles("BTC", "2m"), null);
+  assert.equal(await source.hasInstrument("btc"), true);
+  assert.equal(await source.hasInstrument("DOGE"), false);
 });
 
 function recorder() {

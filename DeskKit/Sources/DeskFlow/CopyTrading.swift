@@ -377,16 +377,17 @@ public struct ShadowFill: Sendable, Hashable, Codable {
 
     /// Profit at `mark` if closed there.
     ///
-    /// Only the opening fee is charged: the venue takes a fee on size that opens or increases
-    /// a position and nothing on the way out, so charging an exit fee understated the result
-    /// of every simulated round trip.
+    /// Both fees are charged. Until 23 September 2026 Perpl took nothing on the way out and
+    /// this charged only the opening fee; contract 1.7.5 takes the taker rate on closes and
+    /// reductions too, so leaving it out overstated every simulated round trip.
     public func pnl(at mark: Double, takerFeeMicros: Int64) -> Double {
         // Past its liquidation price the collateral is the venue's, whatever the arithmetic
         // of the close would have said.
         if let liquidation, isLong ? mark <= liquidation : mark >= liquidation { return -margin }
         let exit = mark * (1 + (isLong ? -1 : 1) * Self.slippageBps / 10_000)
         let gross = (exit - entry) * units * (isLong ? 1 : -1)
-        return max(gross - fees, -margin)
+        let exitFee = exit * units * Double(takerFeeMicros) / 1_000_000
+        return max(gross - fees - exitFee, -margin)
     }
 
     /// What would have ended this copy at `mark`, and the price it would have ended at.

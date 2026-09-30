@@ -180,13 +180,16 @@ interval and the sign is observed.
 
 ## 7. Fees
 
-Maker and taker are in **micros**, not basis points. Testnet **45 / 345** = 0.45 and
-3.45 bps; mainnet **90 / 690** = 0.9 and 6.9 bps.
+Maker and taker are in **micros**, not basis points: **45 / 345** = 0.45 and 3.45 bps on
+both networks since Perpl's fee cut of 23 September 2026 (mainnet was 90 / 690 before).
+Desk reads them live from context and never hardcodes them.
 
-**Fees are charged only on size that opens or increases a position.** Closing and
-reducing are free. Two consequences:
+**Since contract 1.7.5 (23 September 2026), closing and reducing pay a fee too**, taken
+from the close proceeds. A live position's `fee` is the entry-side fee still carried by
+its remaining size; `cfee` is what closes have paid. Consequences:
 
-- The ticket must show an opening cost, never a round trip.
+- The ticket shows the opening cost; the position and close screens show an estimated
+  exit fee (size × mark × taker rate) beside it.
 - **Every close path must use order type 3 or 4.** Closing a long by opening a short
   inverts the position and pays taker on the way; on a $9,931 position that is $6.85 for
   the same economic action. The close types are also exempt from the initial margin

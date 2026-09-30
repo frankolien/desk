@@ -382,10 +382,12 @@ final class AppModel {
         startPollingBalances()
         if hasDesk.value == true, let stored = apiKeys.load(for: address) {
             let context = try await PerplREST(configuration: network.perpl()).context()
+            noteMinimumToOpen(context)
             await enterTrading(stored, context: context)
         } else {
             considerNameOnboarding(address)
             stage = .trading
+            Task { await refreshMinimumToOpen() }
         }
     }
 
@@ -455,6 +457,7 @@ final class AppModel {
             }
             let rest = PerplREST(configuration: try network.perpl())
             let context = try await rest.context()
+            noteMinimumToOpen(context)
             let addresses = try ExchangeAddresses(context: context, pinnedTo: network)
             if let address, let stored = apiKeys.load(for: address) {
                 await enterTrading(stored, context: context)
@@ -629,7 +632,22 @@ final class AppModel {
     /// MON this wallet could swap for AUSD right now, or nil when there is none to spare.
     /// Perpl's `min_account_open_amount`: 100 AUSD on testnet, 10 on mainnet, read from
     /// each context on 17 September.
-    var minimumToOpenDesk: Money { Money(text: network.hasFaucet ? "100" : "10") ?? .zero }
+    var minimumToOpenDesk: Money {
+        liveMinimumToOpen[network] ?? Money(text: network.hasFaucet ? "100" : "10") ?? .zero
+    }
+
+    /// Perpl's `min_account_open_amount` per network, once its context has been read; the
+    /// values its docs publish stand in until then. Perpl asks integrators not to hardcode it.
+    private var liveMinimumToOpen: [DeskNetwork: Money] = [:]
+
+    private func noteMinimumToOpen(_ context: PerplContext) {
+        if let minimum = context.instances.first?.minAccountOpen { liveMinimumToOpen[network] = minimum }
+    }
+
+    private func refreshMinimumToOpen() async {
+        guard let context = try? await PerplREST(configuration: network.perpl()).context() else { return }
+        noteMinimumToOpen(context)
+    }
 
     /// How much more AUSD the wallet needs before a desk can open; nil once it has enough.
     var ausdShortfall: Money? {

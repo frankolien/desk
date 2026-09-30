@@ -366,7 +366,7 @@ X-RateLimit-Reset: 1789960140</code></pre>
                 <span class="docs-tablist-end" data-tablist-end></span>
               </div>
               <div class="docs-panel" role="tabpanel" id="panel-markets-200" aria-labelledby="tab-markets-200" data-status="200">
-                <p>Captured live, trimmed to two of eight markets. <code>Content-Type: application/json</code>.</p>
+                <p>Captured live, trimmed to two markets. <code>Content-Type: application/json</code>.</p>
 <pre><code class="lang-json" data-example>{
   "data": {
     "collateral": "AUSD",
@@ -385,8 +385,8 @@ X-RateLimit-Reset: 1789960140</code></pre>
         "maxLeverage": 15,
         "priceDecimals": 1,
         "sizeDecimals": 5,
-        "makerFee": 90,
-        "takerFee": 690,
+        "makerFee": 45,
+        "takerFee": 345,
         "maintenanceMargin": 2500,
         "isOpen": true
       },
@@ -404,8 +404,8 @@ X-RateLimit-Reset: 1789960140</code></pre>
         "maxLeverage": 10,
         "priceDecimals": 6,
         "sizeDecimals": 0,
-        "makerFee": 90,
-        "takerFee": 690,
+        "makerFee": 45,
+        "takerFee": 345,
         "maintenanceMargin": 2000,
         "isOpen": true
       }
@@ -429,7 +429,7 @@ X-RateLimit-Reset: 1789960140</code></pre>
                   <div><dt><code>markets[].fundingIntervalSec</code><span class="docs-type">integer | null</span></dt><dd>Seconds between funding payments; 2580 is 43 minutes.</dd></div>
                   <div><dt><code>markets[].maxLeverage</code><span class="docs-type">integer</span></dt><dd>Whole-number leverage cap: 100 over the initial-margin percentage, rounded down.</dd></div>
                   <div><dt><code>markets[].priceDecimals</code> <code>markets[].sizeDecimals</code><span class="docs-type">integer</span></dt><dd>Decimals the market quotes prices and sizes in. <code>mark</code>, <code>prev</code> and the candles are already scaled by the first.</dd></div>
-                  <div><dt><code>markets[].makerFee</code> <code>markets[].takerFee</code><span class="docs-type">integer</span></dt><dd>Fees in micros of notional: <code>90</code> is 0.009%, <code>690</code> is 0.069%.</dd></div>
+                  <div><dt><code>markets[].makerFee</code> <code>markets[].takerFee</code><span class="docs-type">integer</span></dt><dd>Fees in micros of notional: <code>45</code> is 0.0045%, <code>345</code> is 0.0345%.</dd></div>
                   <div><dt><code>markets[].maintenanceMargin</code><span class="docs-type">integer</span></dt><dd>Perpl&rsquo;s maintenance divisor in hundredths: the maintenance fraction is <code>100 / value</code>, so <code>2500</code> is 4% and <code>2000</code> is 5%.</dd></div>
                   <div><dt><code>markets[].isOpen</code><span class="docs-type">boolean</span></dt><dd>Always <code>true</code> here; closed markets are filtered out.</dd></div>
                 </dl>

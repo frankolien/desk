@@ -240,8 +240,10 @@ struct ChartExpandButton: View {
 struct CandleIntervalRail: View {
     let market: MarketModel
 
-    static let intervals = [(60, "1m"), (180, "3m"), (300, "5m"), (900, "15m"),
-                            (1_800, "30m"), (3_600, "1H"), (14_400, "4H"), (86_400, "1D")]
+    /// Only resolutions Perpl serves: 60, 300, 900, 1,800, 3,600, 7,200, 14,400, 28,800,
+    /// 43,200 and 86,400 seconds. It answers 180 with a 400, which read as an empty chart.
+    static let intervals = [(60, "1m"), (300, "5m"), (900, "15m"), (1_800, "30m"),
+                            (3_600, "1H"), (7_200, "2H"), (14_400, "4H"), (86_400, "1D")]
 
     var body: some View {
         HStack {

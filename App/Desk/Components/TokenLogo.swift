@@ -95,6 +95,8 @@ struct MarketTokenLogo: View {
         case "SOL": "https://assets.coingecko.com/coins/images/4128/large/solana.png"
         case "MON": "https://coin-images.coingecko.com/coins/images/38909/large/monad.png"
         case "ZEC": "https://assets.coingecko.com/coins/images/486/large/circle-zcash-color.png"
+        case "VVV": "https://coin-images.coingecko.com/coins/images/54023/large/VVV_Token_Transparent.png"
+        case "NEAR": "https://coin-images.coingecko.com/coins/images/10365/large/near.jpg"
         default: ""
         }
         return URL(string: address)
@@ -104,9 +106,8 @@ struct MarketTokenLogo: View {
 
     var body: some View {
         Group {
-            // Every market Perpl lists is in the catalog, so a listed market never
-            // flashes a placeholder while a CDN answers. The fetch is for the spot
-            // tokens, whose artwork arrives with the feed.
+            // Perpl's markets are in the catalog or have fixed artwork above; a market
+            // Perpl lists before either is added shows its symbol badge.
             if remoteURL == nil, UIImage(named: symbol.uppercased()) != nil {
                 Image(symbol.uppercased()).resizable().scaledToFit()
             } else {

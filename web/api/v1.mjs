@@ -175,7 +175,7 @@ export function createHandler({
         const bar = String(query.bar ?? "15m");
         if (!BARS.has(bar)) return fail(problem("invalid_request", "bar must be one of 1m, 5m, 15m, 1H, 4H, 1D.", instance));
         const source = get("markets", () => createMarkets({ now }));
-        if (!source.hasInstrument(route.market)) return fail(problem("not_found", `No candles for ${route.market}.`, instance));
+        if (!(await source.hasInstrument(route.market))) return fail(problem("not_found", `No candles for ${route.market}.`, instance));
         try {
           const rows = await source.candles(route.market, bar);
           return envelope(200, { market: route.market.toUpperCase(), bar, candles: rows ?? [] }, CACHE.candles);

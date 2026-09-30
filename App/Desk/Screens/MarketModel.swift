@@ -45,13 +45,13 @@ final class MarketModel {
     private(set) var headBlock: Int64 = 0
     /// Every market the venue lists, from the same context call. Kept so Watchlist and
     /// Search can show real instruments at real prices rather than a table of invented
-    /// ones — the venue publishes seven, and none of them needed making up.
+    /// ones — whatever the venue lists, read live, never a fixed count.
     private(set) var allMarkets: [Market] = []
     private(set) var quotes: [UInt32: Quote] = [:]
 
     /// The one market Desk trades. A deliberate scope decision rather than a limitation
     /// of the code — `OrderBuilder` takes the market as a parameter — and the discovery
-    /// screens say so rather than hiding the other six.
+    /// screens say so rather than hiding the others.
     static let tradableMarketID: UInt32 = 16
 
     private static let historyLimit = 90

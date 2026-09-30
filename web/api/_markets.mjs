@@ -1,6 +1,6 @@
-/// Perpl's open markets as decimal numbers a page can print, and exchange candles for
-/// each market's asset. Perpl publishes no candle history, so the chart is the asset's
-/// own tape on OKX; the mark shown beside it is Perpl's.
+/// Perpl's open markets as decimal numbers a page can print, and Perpl's own candles for
+/// each of them. The venue serves candle history for every listed market, so a market it
+/// adds (VVV, NEAR) has a chart the day it lists, with no second exchange to map it to.
 
 import { createPublicClient, http } from "viem";
 
@@ -8,12 +8,11 @@ import { EXCHANGE_VIEWS } from "./_perpl-abi.mjs";
 
 const CONTEXT_URL = "https://app.perpl.xyz/api/v1/pub/context";
 const EXCHANGE = "0x34B6552d57a35a1D042CcAe1951BD1C370112a6F";
-const CANDLE_URL = "https://www.okx.com/api/v5/market/candles";
-const INSTRUMENTS = {
-  BTC: "BTC-USDT", ETH: "ETH-USDT", SOL: "SOL-USDT", PUMP: "PUMP-USDT",
-  HYPE: "HYPE-USDT", ZEC: "ZEC-USDT", MON: "MON-USDT", LIT: "LIT-USDT",
-};
-export const BARS = new Set(["1m", "5m", "15m", "1H", "4H", "1D"]);
+const CANDLE_URL = "https://app.perpl.xyz/api/v1/market-data";
+/// The bars the public API offers, as the resolutions Perpl serves.
+export const BAR_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "1H": 3_600, "4H": 14_400, "1D": 86_400 };
+export const BARS = new Set(Object.keys(BAR_SECONDS));
+const CANDLE_COUNT = 300;
 const COLLATERAL_DECIMALS = 6;
 
 const scaled = (raw, decimals) => Number(raw ?? 0) / 10 ** decimals;
@@ -84,20 +83,31 @@ export function createMarkets({ fetchImpl = fetch, now = Date.now, readMark = nu
     return value;
   }
 
+  async function find(name) {
+    const { markets } = await context();
+    return markets.find((m) => String(m.name).toUpperCase() === String(name).toUpperCase()) ?? null;
+  }
+
+  /// Ascending candles in decimal prices and AUSD volume, or null for an unknown market or bar.
   async function candles(name, bar) {
-    const instrument = INSTRUMENTS[String(name).toUpperCase()];
-    if (!instrument || !BARS.has(bar)) return null;
-    const key = `${instrument}:${bar}`;
+    if (!BARS.has(bar)) return null;
+    const market = await find(name);
+    if (!market) return null;
+    const key = `${market.id}:${bar}`;
     const cached = candleCache.get(key);
     if (cached && now() - cached.at < 60_000) return cached.value;
-    const query = new URLSearchParams({ instId: instrument, bar, limit: "300" });
-    const response = await fetchImpl(`${CANDLE_URL}?${query}`);
-    if (!response.ok) throw new Error(`OKX HTTP ${response.status}`);
+    const seconds = BAR_SECONDS[bar];
+    const to = now();
+    const from = to - seconds * CANDLE_COUNT * 1000;
+    const response = await fetchImpl(`${CANDLE_URL}/${market.id}/candles/${seconds}/${from}-${to}`);
+    if (!response.ok) throw new Error(`Perpl HTTP ${response.status}`);
     const body = await response.json();
-    if (body.code !== "0" || !Array.isArray(body.data)) throw new Error(body.msg || `OKX code ${body.code}`);
-    const value = body.data
-      .map(([time, open, high, low, close, volume]) => ({
-        time: Math.floor(Number(time) / 1000), open: Number(open), high: Number(high), low: Number(low), close: Number(close), volume: Number(volume),
+    if (!Array.isArray(body?.d)) throw new Error("Perpl answered without candles");
+    const price = (raw) => Number(raw) / 10 ** market.priceDecimals;
+    const value = body.d
+      .map((c) => ({
+        time: Math.floor(Number(c.t) / 1000), open: price(c.o), high: price(c.h), low: price(c.l), close: price(c.c),
+        volume: Number(c.v) / 10 ** COLLATERAL_DECIMALS,
       }))
       .sort((a, b) => a.time - b.time);
     candleCache.set(key, { at: now(), value });
@@ -113,5 +123,5 @@ export function createMarkets({ fetchImpl = fetch, now = Date.now, readMark = nu
     return { at: now(), marks: out };
   }
 
-  return { context, candles, marks, hasInstrument: (name) => Boolean(INSTRUMENTS[String(name).toUpperCase()]) };
+  return { context, candles, marks, hasInstrument: async (name) => Boolean(await find(name).catch(() => null)) };
 }

@@ -241,8 +241,9 @@ the source of truth. No pre-selected Max chip — that defaults the user to the 
 **Everything above the confirm, always.** Order value, margin, liquidation price with
 its distance, fee, and price impact for market orders. Perpl's own word is "liquidation
 distance", and distance is the number that means something; the absolute price hides how
-close you are. The fee is an absolute AUSD figure, not basis points, and it must not
-imply a round trip — Perpl charges on open only, and closing is free.
+close you are. The fee is an absolute AUSD figure, not basis points. The ticket shows the
+opening fee; since Perpl's contract 1.7.5 (23 September 2026) closing pays the taker rate
+too, and the position screen shows that estimated exit fee beside the entry fee.
 
 **The confirm button says what it does.** "Long 0.0148 BTC · 1×", never "Confirm".
 

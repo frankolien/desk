@@ -378,6 +378,15 @@ struct PositionScreen: View {
 
     // MARK: Figures
 
+    /// What closing the whole position at the mark would cost at the taker rate. Perpl has
+    /// charged closes since contract 1.7.5; this is an estimate, not a quote.
+    private func exitFee(_ figures: PositionFigures) -> Money? {
+        guard let taker = market.market?.config.takerFeeMicros, taker > 0,
+              let notional = Money.notional(price: figures.mark, size: figures.size, rounding: .towardZero)
+        else { return nil }
+        return Money(raw: Int64((Int128(notional.raw) * Int128(taker) / 1_000_000)))
+    }
+
     /// What the position is worth at the current mark. Not the collateral, and not the
     /// size: the number a person means when they ask how big the position is.
     private func value(_ figures: PositionFigures) -> Money? {
@@ -405,7 +414,8 @@ struct PositionScreen: View {
                 (PositionCardMetric(label: "Size", value: figures.size.display(fractionDigits: figures.size.decimals) + " " + market.symbol),
                  PositionCardMetric(label: "Collateral", value: figures.collateral.display() + " AUSD")),
                 (PositionCardMetric(label: "Funding", value: figures.fundingSinceEntry.map { $0.display() + " AUSD" } ?? Unavailable.text, detail: "since you opened"),
-                 PositionCardMetric(label: "Fees", value: Money(raw: active.feeRaw).map { $0.display() + " AUSD" } ?? Unavailable.text, detail: "charged so far")),
+                 PositionCardMetric(label: "Fees", value: Money(raw: active.feeRaw).map { $0.display() + " AUSD" } ?? Unavailable.text,
+                                    detail: exitFee(figures).map { "on entry · exit ≈ \($0.display())" } ?? "on entry")),
             ]) {
             PositionCardShareButton { showsShare = true }
         }

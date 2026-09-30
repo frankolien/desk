@@ -4,7 +4,7 @@
 /// alert says the number a person would say.
 
 export const ASSET_NAMES = {
-  BTC: "Bitcoin", ETH: "Ethereum", SOL: "Solana", MON: "Monad", HYPE: "Hyperliquid", ZEC: "Zcash", LIT: "Lighter", PUMP: "Pump",
+  BTC: "Bitcoin", ETH: "Ethereum", SOL: "Solana", MON: "Monad", HYPE: "Hyperliquid", ZEC: "Zcash", LIT: "Lighter", PUMP: "Pump", VVV: "Venice", NEAR: "NEAR",
 };
 export const MOVE_THRESHOLDS = [0.05, 0.1, 0.2];
 const LEVEL_QUIET_S = 6 * 3600;
