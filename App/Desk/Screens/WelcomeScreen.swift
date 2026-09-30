@@ -31,9 +31,12 @@ struct WelcomeScreen: View {
                         .padding(.horizontal, contentInset)
 
                     Text("Follow the move.\nTrade the moment.")
-                        .font(.system(size: compact ? 39 : 44, weight: .heavy, design: .rounded))
+                        .font(.system(size: compact ? 34 : 38, weight: .heavy, design: .rounded))
                         .foregroundStyle(.white)
                         .lineSpacing(1)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.85)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, contentInset)
                         .padding(.top, compact ? 18 : 24)
 

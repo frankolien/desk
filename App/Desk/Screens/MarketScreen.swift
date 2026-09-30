@@ -705,10 +705,11 @@ struct PerpDetailScreen: View {
     @State private var showsChat = false
     @State private var showsStudio = false
     @State private var ticketPreset: TicketPreset?
+    @State private var scrolledPastHeader = false
     @AppStorage("desk.watchlist") private var savedIDs = ""
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             Color.black.ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
@@ -728,17 +729,21 @@ struct PerpDetailScreen: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
-                .padding(.bottom, 120)
+                .padding(.bottom, 24)
             }
             .refreshable { await market.refreshNow(); await holders.load(symbol: market.symbol) }
-
-            HStack(spacing: 10) {
-                tradeButton(.down, title: "Short")
-                tradeButton(.up, title: "Long")
+            // Once the big header has scrolled away, a compact one holds the market and
+            // its price at the top for as long as the list goes on.
+            .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y > 150 }) { _, past in
+                withAnimation(.snappy(duration: 0.22)) { scrolledPastHeader = past }
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 12)
         }
+        .overlay(alignment: .top) {
+            if scrolledPastHeader {
+                compactHeader.transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) { tradeBar }
         .toolbar(.hidden, for: .navigationBar)
         .task(id: market.symbol) { await holders.run(symbol: market.symbol) }
         .task(id: market.symbol) { await chat.run(symbol: market.symbol) }
@@ -750,6 +755,7 @@ struct PerpDetailScreen: View {
             if ProcessInfo.processInfo.arguments.contains("-open-ticket") { ticket = .up }
             if ProcessInfo.processInfo.arguments.contains("-open-chat") { showsChat = true }
             if ProcessInfo.processInfo.arguments.contains("-open-studio") { showsStudio = true }
+            if ProcessInfo.processInfo.arguments.contains("-detail-scrolled") { scrolledPastHeader = true }
             #endif
         }
         .fullScreenCover(isPresented: $showsStudio) {
@@ -810,6 +816,81 @@ struct PerpDetailScreen: View {
         savedIDs = ids.map(String.init).joined(separator: ",")
         TradeAlerts.shared.watchlistChanged()
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    /// What stays when the header has scrolled away: the market and its price.
+    private var compactHeader: some View {
+        HStack(spacing: 10) {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 15, weight: .bold))
+                    .frame(width: 28, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(DeskPressStyle())
+            .foregroundStyle(DeskColor.nightMuted.color)
+
+            MarketTokenLogo(symbol: market.symbol, size: 30)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(market.symbol)
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                    if let leverage = market.market?.config.maxLeverage, leverage > 0 {
+                        Text("\(leverage)x")
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .foregroundStyle(DeskColor.nightText.color)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    }
+                }
+                Text(TraderFormat.assetName(market.symbol))
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(market.markText == "—" ? "—" : "$" + market.markText)
+                    .font(.system(size: 17, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .contentTransition(.numericText())
+                if let percent = market.changePercentText {
+                    HStack(spacing: 3) {
+                        Image(systemName: (change?.up ?? true) ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                            .font(.system(size: 8, weight: .bold))
+                        Text(percent)
+                    }
+                    .font(.system(size: 12, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(market.trend.color)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 56)
+        .background(Color.black.ignoresSafeArea(edges: .top))
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5) }
+    }
+
+    /// The order buttons as the screen's bottom edge; rows fade into it rather than
+    /// showing through the glass.
+    private var tradeBar: some View {
+        HStack(spacing: 10) {
+            tradeButton(.down, title: "Short")
+            tradeButton(.up, title: "Long")
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .background {
+            Color.black
+                .overlay(alignment: .top) {
+                    LinearGradient(colors: [.black.opacity(0), .black], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 30)
+                        .offset(y: -30)
+                }
+                .ignoresSafeArea()
+        }
     }
 
     private var detailHeader: some View {
