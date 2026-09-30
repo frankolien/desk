@@ -154,3 +154,42 @@ struct OrderProgressTests {
         #expect(progress.outcome?.isTerminal == true)
     }
 }
+
+@Suite("Order progress follows failures and fills")
+struct OrderProgressFailureTests {
+    @Test("A failure can be overturned by a later fill, and carries the fill once it is")
+    func failureThenFill() {
+        var progress = OrderProgress()
+        progress.begin()
+        progress.associate(1)
+        progress.apply(id: 1, phase: .failed(reason: 36, failure: 7))
+        #expect(progress.outcome == .failed(reason: 36, failure: 7))
+        let fill = OrderFill(status: 4, originalRaw: 10, filledRaw: 10, priceRaw: 5, feeRaw: 1)
+        progress.apply(id: 1, phase: .settled, fill: fill)
+        #expect(progress.outcome == .settled)
+        #expect(progress.fill == fill)
+    }
+
+    @Test("A fill is never overturned, and begin forgets the last fill")
+    func settledIsFinal() {
+        var progress = OrderProgress()
+        progress.begin()
+        progress.associate(1)
+        progress.apply(id: 1, phase: .settled, fill: OrderFill(status: 4, originalRaw: 1, filledRaw: 1, priceRaw: 1, feeRaw: 0))
+        progress.apply(id: 1, phase: .failed(reason: 44, failure: 1))
+        progress.apply(id: 1, phase: .unfilled)
+        #expect(progress.outcome == .settled)
+        progress.begin()
+        #expect(progress.fill == nil)
+    }
+
+    @Test("An unfilled order is terminal and not busy")
+    func unfilled() {
+        var progress = OrderProgress()
+        progress.begin()
+        progress.associate(1)
+        progress.apply(id: 1, phase: .unfilled)
+        #expect(progress.outcome == .unfilled)
+        #expect(progress.outcome?.isBusy == false)
+    }
+}

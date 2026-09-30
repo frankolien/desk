@@ -202,7 +202,9 @@ struct TradingShell: View {
 
     private func orderFilled(_ side: Direction, _ symbol: String) {
         tab = .perps
-        toast("\(side.word()) \(symbol) filled")
+        let said = session.lastFillSentence
+        session.lastFillSentence = nil
+        toast(said.flatMap { $0 == "Filled" ? nil : "\(side.word()) · \($0)" } ?? "\(side.word()) \(symbol) filled")
     }
 
     private func toast(_ message: String) {

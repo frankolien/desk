@@ -128,3 +128,94 @@ struct OrderTrackerTests {
         }
     }
 }
+
+@Suite("Order outcomes follow the venue's status")
+struct OrderStatusRulesTests {
+    private func frame(_ json: String) throws -> InboundFrame { try InboundFrame(payload: Data(json.utf8)) }
+
+    private func tracker(_ frames: Int64...) async throws -> OrderTracker {
+        let tracker = OrderTracker()
+        for id in frames { try await tracker.track(frameID: id, requestID: id, deadlineBlock: 1_000) }
+        return tracker
+    }
+
+    @Test("A failed update is a failure with its reasons, never a fill")
+    func failureIsNotAFill() async throws {
+        // The bug this suite exists for: every update used to read as "Filled".
+        let tracker = try await tracker(1)
+        await tracker.apply(try frame(#"{"mt":24,"d":[{"rq":1,"st":7,"sr":44,"fr":8,"os":"1000","fs":"0"}]}"#))
+        #expect(await tracker.phase(of: 1) == .failed(reason: 44, failure: 8))
+        #expect(await tracker.phase(of: 1)?.hasReachedTheBook == false)
+        #expect(await tracker.phase(of: 1)?.isTerminal == true)
+        #expect(await tracker.fill(of: 1) == nil)
+    }
+
+    @Test("Forwarding off arrives as a failed update, not a gateway rejection")
+    func forwardingOffOnUpdate() async throws {
+        let tracker = try await tracker(1)
+        await tracker.apply(try frame(#"{"mt":24,"d":[{"rq":1,"st":7,"sr":34}]}"#))
+        #expect(await tracker.phase(of: 1) == .failed(reason: 34, failure: nil))
+    }
+
+    @Test("A later non-failure decides an order that first failed; the first failure otherwise stands")
+    func failureThenSuccess() async throws {
+        let tracker = try await tracker(1, 2)
+        await tracker.apply(try frame(#"{"mt":24,"d":[{"rq":1,"st":7,"sr":36,"fr":7}]}"#))
+        await tracker.apply(try frame(#"{"mt":24,"d":[{"rq":1,"st":4,"os":10,"fs":10,"fp":8312050,"f":350000}]}"#))
+        #expect(await tracker.phase(of: 1) == .settled)
+        #expect(await tracker.fill(of: 1)?.isComplete == true)
+
+        await tracker.apply(try frame(#"{"mt":24,"d":[{"rq":2,"st":7,"sr":36,"fr":7}]}"#))
+        await tracker.apply(try frame(#"{"mt":24,"d":[{"rq":2,"st":7,"sr":44,"fr":1}]}"#))
+        #expect(await tracker.phase(of: 2) == .failed(reason: 36, failure: 7))
+    }
+
+    @Test("The first non-failure is definitive; a failure after it is ignored")
+    func successThenFailure() async throws {
+        let tracker = try await tracker(1)
+        await tracker.apply(try frame(#"{"mt":24,"d":[{"rq":1,"st":4,"os":10,"fs":10}]}"#))
+        await tracker.apply(try frame(#"{"mt":24,"d":[{"rq":1,"st":7,"sr":44,"fr":1}]}"#))
+        #expect(await tracker.phase(of: 1) == .settled)
+    }
+
+    @Test("A market order that filled nothing within its bound is unfilled")
+    func iocWithNoFill() async throws {
+        let tracker = try await tracker(1, 2)
+        await tracker.apply(try frame(#"{"mt":24,"d":[{"rq":1,"st":5,"sr":16,"os":10,"fs":0,"t":3}]}"#))
+        #expect(await tracker.phase(of: 1) == .unfilled)
+        #expect(await tracker.fill(of: 1)?.isClose == true)
+        await tracker.apply(try frame(#"{"mt":24,"d":[{"rq":2,"st":6,"os":10}]}"#))
+        #expect(await tracker.phase(of: 2) == .unfilled)
+    }
+
+    @Test("A partial fill settles with the size it filled, its price and its fee, numbers or strings")
+    func partialFill() async throws {
+        let tracker = try await tracker(1)
+        await tracker.apply(try frame(#"{"mt":24,"d":[{"rq":1,"st":5,"sr":16,"os":"12000","fs":"8000","fp":"8312050","f":"240000","t":1}]}"#))
+        #expect(await tracker.phase(of: 1) == .settled)
+        let fill = try #require(await tracker.fill(of: 1))
+        #expect(fill.isPartial)
+        #expect(!fill.isComplete)
+        #expect(fill.filledRaw == 8_000 && fill.originalRaw == 12_000)
+        #expect(fill.priceRaw == 8_312_050 && fill.feeRaw == 240_000)
+        #expect(!fill.isClose)
+    }
+
+    @Test("Pending and unspecified updates leave the order in flight")
+    func pendingIsNotAnOutcome() async throws {
+        let tracker = try await tracker(1)
+        #expect(await tracker.apply(try frame(#"{"mt":24,"d":[{"rq":1,"st":1}]}"#)) == nil)
+        #expect(await tracker.phase(of: 1) == .sent)
+        #expect(await tracker.pending == [1])
+    }
+
+    @Test("One frame carrying two of our orders moves both")
+    func batchWithTwoOrders() async throws {
+        // An opening order and its stop can arrive together; the stop used to be dropped.
+        let tracker = try await tracker(1, 2)
+        let moved = await tracker.applyAll(try frame(#"{"mt":24,"d":[{"rq":1,"st":4,"os":5,"fs":5},{"rq":2,"st":8,"os":5,"fs":0},{"rq":99,"st":4}]}"#))
+        #expect(moved == [1, 2])
+        #expect(await tracker.phase(of: 1) == .settled)
+        #expect(await tracker.phase(of: 2) == .settled)
+    }
+}

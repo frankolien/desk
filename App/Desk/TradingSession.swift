@@ -22,7 +22,11 @@ final class TradingSession {
         case nil: nil
         case .sending: "Sending to Perpl…"
         case .forwarded: "Forwarded — waiting for the book"
-        case .settled: "Filled"
+        case .settled: filledSentence
+        case .failed(let reason, let failure): Self.failure(reason: reason, failure: failure)
+        case .unfilled:
+            (order.fill?.isClose == true ? "Not closed." : "Not filled.")
+                + " The price moved past your slippage limit before the order could match. Nothing changed."
         case .expired: "The order expired before it reached the book. Nothing was filled."
         case .abandoned:
             "The connection to Perpl dropped before the order settled. "
@@ -35,9 +39,33 @@ final class TradingSession {
     var isBusy: Bool { order.outcome?.isBusy == true }
     var hasFailed: Bool {
         switch order.outcome {
-        case .rejected, .expired, .abandoned: true
+        case .rejected, .failed, .unfilled, .expired, .abandoned: true
         default: false
         }
+    }
+
+    /// The market the desk is signing for, so a fill can be read at its scales.
+    private(set) var market: Market?
+
+    /// The last fill in words, kept past `clear()` so the toast after a ticket closes can
+    /// say what filled rather than only that something did.
+    var lastFillSentence: String?
+
+    /// "Filled 0.012 BTC at 83,120.5 · fee 0.35 AUSD", or the partial version of it. Falls
+    /// back to one word when the venue's update carried no sizes.
+    private var filledSentence: String {
+        guard let fill = order.fill, fill.filledRaw > 0, let market,
+              let filled = market.size(fill.filledRaw) else { return "Filled" }
+        let decimals = market.config.priceDecimals
+        let price = market.price(fill.priceRaw).map { " at \($0.display(fractionDigits: decimals))" } ?? ""
+        let fee = Money(raw: fill.feeRaw).map { " · fee \($0.display()) AUSD" } ?? ""
+        let amount = filled.display(fractionDigits: filled.decimals)
+        let verb = fill.isClose ? "Closed" : "Filled"
+        guard fill.isPartial, let asked = market.size(fill.originalRaw) else {
+            return "\(verb) \(amount) \(market.symbol)\(price)\(fee)"
+        }
+        return "Partly \(verb.lowercased()): \(amount) of \(asked.display(fractionDigits: asked.decimals)) \(market.symbol)\(price)\(fee). "
+            + "The rest was cancelled at your slippage limit."
     }
 
     /// A failure raised before the order ever reached the desk — no enrolled key, no
@@ -80,6 +108,7 @@ final class TradingSession {
     func adopt(apiKey: APIKey, session: SigningSession, market: Market) {
         credentials = PerplCredentials(apiKey: apiKey, session: session)
         desk = OrderDesk(socket: network.tradingSocket(), market: market)
+        self.market = market
     }
 
     /// Forgets the enrolled key along with the socket, for a switch to another network
@@ -98,6 +127,7 @@ final class TradingSession {
         watching?.cancel()
         await desk?.close()
         desk = OrderDesk(socket: network.tradingSocket(), market: market)
+        self.market = market
         isConnected = false
         try? await connect()
     }
@@ -112,7 +142,7 @@ final class TradingSession {
             guard let self, let desk = self.desk else { return }
             for id in await desk.expire(headBlock: current) {
                 guard let phase = await desk.phase(of: id) else { continue }
-                self.record(id, phase)
+                self.record(id, phase, nil)
             }
         }
     }
@@ -205,8 +235,8 @@ final class TradingSession {
             }
             let id = try await desk.place(draft, headBlock: headBlock)
             order.associate(id)
-            if let current = await desk.phase(of: id) { order.apply(id: id, phase: current) }
-            if order.outcome == .settled { Haptics.success() }
+            if let current = await desk.phase(of: id) { order.apply(id: id, phase: current, fill: await desk.fill(of: id)) }
+            if order.outcome == .settled { Haptics.success(); lastFillSentence = filledSentence }
         } catch {
             Haptics.failure()
             localProblem = Self.sentence(for: error)
@@ -230,8 +260,8 @@ final class TradingSession {
             let id = try await desk.closePosition(
                 position, size: size, slippageBps: slippageBps, headBlock: headBlock)
             order.associate(id)
-            if let current = await desk.phase(of: id) { order.apply(id: id, phase: current) }
-            if order.outcome == .settled { Haptics.success() }
+            if let current = await desk.phase(of: id) { order.apply(id: id, phase: current, fill: await desk.fill(of: id)) }
+            if order.outcome == .settled { Haptics.success(); lastFillSentence = filledSentence }
         } catch {
             Haptics.failure()
             localProblem = Self.sentence(for: error)
@@ -260,6 +290,10 @@ final class TradingSession {
         await desk?.phase(of: frameID)
     }
 
+    func fill(of frameID: Int64) async -> OrderFill? {
+        await desk?.fill(of: frameID)
+    }
+
     func protectPosition(
         _ position: PerplPosition, stopLoss: Price?, takeProfit: Price?, slippageBps: Int
     ) async -> Bool {
@@ -284,13 +318,15 @@ final class TradingSession {
         localProblem = nil
     }
 
-    private func record(_ id: Int64, _ phase: OrderPhase) {
+    private func record(_ id: Int64, _ phase: OrderPhase, _ fill: OrderFill?) {
         let before = order.outcome
-        order.apply(id: id, phase: phase)
+        order.apply(id: id, phase: phase, fill: fill)
         guard order.outcome != before else { return }
         switch order.outcome {
-        case .settled: Haptics.success()
-        case .rejected, .expired: Haptics.failure()
+        case .settled:
+            lastFillSentence = filledSentence
+            order.fill?.isPartial == true ? Haptics.selection() : Haptics.success()
+        case .rejected, .failed, .unfilled, .expired: Haptics.failure()
         default: break
         }
     }
@@ -306,8 +342,8 @@ final class TradingSession {
                 : PositionBook.merging(existing: positions.value ?? [], updates: value)
             positions.record(portfolio)
             onPositions?(portfolio)
-        case .order(let id, let phase):
-            record(id, phase)
+        case .order(let id, let phase, let fill):
+            record(id, phase, fill)
         }
     }
 
@@ -333,6 +369,34 @@ final class TradingSession {
     /// `32` is the one worth naming: it means the request id was at or below the last
     /// forwarded one, which is this app's bug rather than the user's, and a generic
     /// "rejected" would send them hunting for a problem with their account.
+    /// A venue refusal (`mt: 24`, `st: 7`) in words. `fr` says why and is the better
+    /// sentence when present; `sr` says where, and covers the refusals that carry no `fr`.
+    static func failure(reason: Int, failure: Int?) -> String {
+        switch failure {
+        case 1: return "Not enough free collateral for this order and its fee. Nothing was filled."
+        case 2: return "Not enough free collateral to add to this position. Nothing was filled."
+        case 3: return "Not enough free collateral to flip this position. Nothing was filled."
+        case 4: return "There was no position left to close. It may already be closed."
+        case 5: return "Perpl refused this fill to keep the market solvent. Nothing was filled; try a smaller size."
+        case 6: return "Closing at this price would realise a negative position value. Nothing was closed."
+        case 7: return "Perpl had no fresh price to value the order. Nothing was filled; try again in a moment."
+        case 8: return "This position's unrealised loss is above what the order may cover. Nothing was filled."
+        default: break
+        }
+        switch reason {
+        case 1: return "Not enough free collateral for this order. Nothing was filled."
+        case 2: return "This Perpl account is frozen. Nothing was filled."
+        case 10: return "The close was larger than the position. Nothing was closed."
+        case 14: return "The order reached Perpl too late to execute. Nothing was filled; try again."
+        case 17, 39: return "The order is below Perpl's minimum size. Nothing was filled."
+        case 34: return "Perpl will not accept orders on this account until order forwarding is switched on. Nothing was sent."
+        case 40: return "The price was outside the range Perpl accepts. Nothing was filled."
+        case 42: return "The size was outside the range Perpl accepts. Nothing was filled."
+        case 12: return "Perpl's exchange is paused right now. Nothing was filled."
+        default: return "Perpl refused the order (reason \(reason)). Nothing was filled."
+        }
+    }
+
     static func reason(code: Int, subReason: Int?) -> String {
         switch subReason {
         case 32:

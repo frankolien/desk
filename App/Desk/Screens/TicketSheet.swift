@@ -316,10 +316,11 @@ struct TicketSheet: View {
             // The one place the venue's own vocabulary is worth showing, because
             // "forwarded" is a real state a user can be stuck in and a spinner is not an
             // explanation.
-            if session.isBusy, let status = session.statusText {
+            if session.isBusy || session.order.outcome == .settled, let status = session.statusText {
                 Text(status)
                     .font(DeskType.caption)
-                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .foregroundStyle(session.order.outcome == .settled ? DeskColor.rise.color : DeskColor.nightMuted.color)
+                    .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
                     .padding(.top, 10)
                     .transition(.opacity)
@@ -334,7 +335,7 @@ struct TicketSheet: View {
                 // Leave the venue's confirmation visible for a beat before returning to
                 // the portfolio. Forwarded is deliberately not enough: only a real fill
                 // earns automatic dismissal.
-                try? await Task.sleep(for: .milliseconds(650))
+                try? await Task.sleep(for: .milliseconds(session.order.fill?.isPartial == true ? 2_600 : 650))
                 guard !Task.isCancelled else { return }
                 onDismiss()
             }

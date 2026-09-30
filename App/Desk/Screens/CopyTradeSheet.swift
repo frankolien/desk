@@ -126,7 +126,7 @@ struct CopyTradeSheet: View {
             handledFill = true
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(900))
+                try? await Task.sleep(for: .milliseconds(session.order.fill?.isPartial == true ? 2_600 : 900))
                 onFilled(intent.side, intent.market)
             }
         }
@@ -224,8 +224,10 @@ struct CopyTradeSheet: View {
                 .foregroundStyle(DeskColor.rise.color)
                 .symbolEffect(.bounce, value: settled)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Copied").font(.system(size: 17, weight: .bold, design: .rounded))
-                Text("\(intent.side.word()) \(intent.market) at \(leverage)× is open on your desk.")
+                Text(session.order.fill?.isPartial == true ? "Partly copied" : "Copied")
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                Text(session.statusText.flatMap { $0 == "Filled" ? nil : $0 }
+                     ?? "\(intent.side.word()) \(intent.market) at \(leverage)× is open on your desk.")
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
             }

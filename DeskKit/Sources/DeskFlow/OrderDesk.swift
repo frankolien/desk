@@ -26,7 +26,7 @@ public actor OrderDesk {
         case account(PerplAccount)
         /// mt:26 replaces the portfolio; mt:27 only patches the positions it carries.
         case positions([PerplPosition], isSnapshot: Bool)
-        case order(frameID: Int64, phase: OrderPhase)
+        case order(frameID: Int64, phase: OrderPhase, fill: OrderFill?)
     }
     public enum Failure: Error, Sendable, Equatable {
         /// No enrolled key, so nothing can be signed. The honest state before enrolment.
@@ -318,9 +318,10 @@ public actor OrderDesk {
                                 positions.positions,
                                 isSnapshot: frame.kind == .positionsSnapshot))
                         }
-                        guard let moved = await apply(frame),
-                              let phase = await phase(of: moved) else { continue }
-                        continuation.yield(.order(frameID: moved, phase: phase))
+                        for moved in await applyAll(frame) {
+                            guard let phase = await phase(of: moved) else { continue }
+                            continuation.yield(.order(frameID: moved, phase: phase, fill: await fill(of: moved)))
+                        }
                     }
                 } catch {
                     // Falls through to finish: the socket closing is the event, and the
@@ -334,6 +335,15 @@ public actor OrderDesk {
 
     public func phase(of frameID: Int64) async -> OrderPhase? {
         await tracker.phase(of: frameID)
+    }
+
+    public func fill(of frameID: Int64) async -> OrderFill? {
+        await tracker.fill(of: frameID)
+    }
+
+    /// Every order one frame moved; an order update can carry several of ours at once.
+    public func applyAll(_ frame: InboundFrame) async -> [Int64] {
+        await tracker.applyAll(frame)
     }
 
     /// Feeds one inbound frame to the tracker and reports which order it moved, if any.

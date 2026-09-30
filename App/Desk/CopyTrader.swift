@@ -610,9 +610,13 @@ final class CopyTrader {
             switch await settlement(of: frameID, session: session) {
             case .settled:
                 let filled = await newPosition(marketID: target.id, isLong: side == .long, model: model)
+                // A market order can fill in part; the copy is the size that filled.
+                let got = await session.fill(of: frameID)
+                let sizeRaw = (got?.filledRaw ?? 0) > 0 ? got!.filledRaw : plan.draft.size.raw
+                if got?.isPartial == true { entry.detail += " · partly filled" }
                 open.append(OpenCopy(
                     id: UUID(), trader: trader, marketID: target.id, symbol: symbol, isLong: side == .long,
-                    sizeRaw: plan.draft.size.raw, leverage: plan.leverage, margin: plan.margin,
+                    sizeRaw: sizeRaw, leverage: plan.leverage, margin: plan.margin,
                     positionID: filled?.positionID, openedAt: .now, theirEntry: theirs.entry))
                 entry.fillSeconds = Date.now.timeIntervalSince(seenAt)
                 if let filled, let price = target.price(filled.entryRaw) {
@@ -624,6 +628,10 @@ final class CopyTrader {
                 onEvent?("Copied \(Self.name(for: trader)): \(label)")
             case .rejected(let code, let subReason, let error):
                 note(.failed, error ?? TradingSession.reason(code: code, subReason: subReason))
+            case .failed(let reason, let failure):
+                note(.failed, TradingSession.failure(reason: reason, failure: failure))
+            case .unfilled:
+                note(.failed, "Not filled within the slippage limit. Nothing was opened.")
             default:
                 // The venue stopped answering, which is not the same as nothing happening.
                 // A fill that lands after the poll gives up is a real position: recording it
@@ -691,6 +699,10 @@ final class CopyTrader {
                 onEvent?("Closed copy of \(Self.name(for: trader)) \(symbol)")
             case .rejected(let code, let subReason, let error):
                 note(.failed, (error ?? TradingSession.reason(code: code, subReason: subReason)) + " Your copy is still open.")
+            case .failed(let reason, let failure):
+                note(.failed, TradingSession.failure(reason: reason, failure: failure) + " Your copy is still open.")
+            case .unfilled:
+                note(.failed, "The close did not fill within the slippage limit. Your copy is still open.")
             default:
                 note(.failed, "The close expired before it filled. Your copy is still open.")
             }

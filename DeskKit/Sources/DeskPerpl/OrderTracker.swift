@@ -14,8 +14,17 @@ public enum OrderPhase: Sendable, Hashable {
     case forwarded
     /// `mt: 3`, non-zero. Terminal: no update will follow.
     case rejected(code: Int, subReason: Int?, error: String? = nil)
-    /// `mt: 24`. The only frame that settles anything.
+    /// `mt: 24` with a non-failure status: the venue posted it and it did something —
+    /// filled in full or in part, or rests on the book, or waits for its trigger. What it
+    /// filled is `OrderTracker.fill(of:)`.
     case settled
+    /// `mt: 24` with `st: 7`. The venue refused to post or settle it: `reason` (`sr`) says
+    /// where, `failure` (`fr`) why. Nothing changed on the book.
+    case failed(reason: Int, failure: Int?)
+    /// `mt: 24`, cancelled or expired having filled nothing. A market order is an
+    /// immediate-or-cancel limit at the slippage bound, so a book that has moved past the
+    /// bound ends here.
+    case unfilled
     /// The deadline block passed with no update. The order is gone, and saying so is
     /// better than a spinner that never ends.
     case expired
@@ -23,7 +32,7 @@ public enum OrderPhase: Sendable, Hashable {
     public var isTerminal: Bool {
         switch self {
         case .sent, .forwarded: false
-        case .rejected, .settled, .expired: true
+        case .rejected, .settled, .failed, .unfilled, .expired: true
         }
     }
 
@@ -34,8 +43,41 @@ public enum OrderPhase: Sendable, Hashable {
     }
 }
 
+/// What an order did, from the venue's own update. Raw integers at the market's scales.
+public struct OrderFill: Sendable, Hashable {
+    /// `st`, the venue's OrderStatus.
+    public let status: Int
+    /// `os`, the size the order asked for.
+    public let originalRaw: Int64
+    /// `fs`, the size it filled.
+    public let filledRaw: Int64
+    /// `fp`, the size-weighted average fill price; zero when nothing filled.
+    public let priceRaw: Int64
+    /// `f`, the fee paid, gross of any builder fee.
+    public let feeRaw: Int64
+    /// `t`, the OrderType: 3 and 4 close a position.
+    public let orderType: Int
+
+    public init(status: Int, originalRaw: Int64, filledRaw: Int64, priceRaw: Int64, feeRaw: Int64, orderType: Int = 0) {
+        self.status = status
+        self.originalRaw = originalRaw
+        self.filledRaw = filledRaw
+        self.priceRaw = priceRaw
+        self.feeRaw = feeRaw
+        self.orderType = orderType
+    }
+
+    public var isClose: Bool { orderType == 3 || orderType == 4 }
+    public var isComplete: Bool { originalRaw > 0 && filledRaw >= originalRaw }
+    public var isPartial: Bool { filledRaw > 0 && !isComplete }
+}
+
 /// Follows orders from send to outcome, over a socket that reports both out of order and
 /// more than once.
+///
+/// An order can get several `mt: 24` updates. Perpl's rule, followed here: the first
+/// non-failure status (`st` 2–6, 8–10) is definitive and everything after it is ignored;
+/// if only failures (`st: 7`) arrive, the first one stands.
 public actor OrderTracker {
     public enum Failure: Error, Sendable, Equatable {
         case frameIDMustBeNonZero
@@ -46,6 +88,9 @@ public actor OrderTracker {
         var phase: OrderPhase
         let requestID: Int64
         let deadlineBlock: Int64
+        /// A non-failure update has been applied; nothing after it counts.
+        var decided = false
+        var fill: OrderFill?
     }
 
     private var entries: [Int64: Entry] = [:]
@@ -84,8 +129,29 @@ public actor OrderTracker {
 
     public func phase(of frameID: Int64) -> OrderPhase? { entries[frameID]?.phase }
 
+    /// Size, price and fee from the update that decided the order, when there was one.
+    public func fill(of frameID: Int64) -> OrderFill? { entries[frameID]?.fill }
+
     public var pending: [Int64] {
         entries.filter { !$0.value.phase.isTerminal }.keys.sorted()
+    }
+
+    /// Every order a frame moved. An `mt: 24` frame can carry an opening order and its
+    /// stop and take profit together; `apply` alone reports only the first of them.
+    public func applyAll(_ frame: InboundFrame) -> [Int64] {
+        guard frame.kind == .orderUpdate,
+              let root = try? JSONSerialization.jsonObject(with: frame.payload) as? [String: Any],
+              let items = root["d"] as? [Any], items.count > 1 else {
+            return apply(frame).map { [$0] } ?? []
+        }
+        var moved: [Int64] = []
+        for item in items {
+            guard let payload = try? JSONSerialization.data(withJSONObject: ["mt": 24, "d": [item]]),
+                  let single = try? InboundFrame(payload: payload),
+                  let id = apply(single), !moved.contains(id) else { continue }
+            moved.append(id)
+        }
+        return moved
     }
 
     /// Applies an inbound frame. Unknown frame types and frames for orders we are not
@@ -109,17 +175,13 @@ public actor OrderTracker {
             return frameID
 
         case .orderUpdate:
-            struct Update: Decodable {
-                let sn: Int64?
-                let rq: Int64?
-            }
-            struct Batch: Decodable { let d: [Update] }
+            struct Batch: Decodable { let d: [OrderUpdate] }
 
             // v235 sends `{mt:24,d:[{rq:...}]}`. Older captures used a root `sn`.
             let update = (try? frame.decode(Batch.self).d.first { item in
                 guard let requestID = item.rq else { return false }
                 return entries.values.contains { $0.requestID == requestID }
-            }) ?? (try? frame.decode(Update.self))
+            }) ?? (try? frame.decode(OrderUpdate.self))
             guard let update else { return nil }
             let frameID: Int64?
             if let requestID = update.rq {
@@ -127,10 +189,28 @@ public actor OrderTracker {
             } else {
                 frameID = update.sn
             }
-            guard let frameID, var entry = entries[frameID] else { return nil }
-            // An update settles even an order we had already written off as rejected —
-            // the venue is the authority on its own book, not our state machine.
-            entry.phase = .settled
+            guard let frameID, var entry = entries[frameID], !entry.decided else { return nil }
+            // A gateway rejection (mt 3) or a first failure is not the last word: the venue
+            // is the authority on its own book, so a later non-failure still decides it.
+            switch update.st {
+            case nil:
+                // Captures from before orders carried a status. The old reading stands.
+                entry.phase = .settled
+                entry.decided = true
+            case 0, 1:
+                // Unspecified or pending: the order is on its way, not yet anywhere.
+                return nil
+            case 7:
+                if case .failed = entry.phase { return nil }
+                entry.phase = .failed(reason: update.sr ?? 0, failure: update.fr)
+            case let status?:
+                let fill = OrderFill(
+                    status: status, originalRaw: update.os ?? 0, filledRaw: update.fs ?? 0,
+                    priceRaw: update.fp ?? 0, feeRaw: update.f ?? 0, orderType: update.t ?? 0)
+                entry.fill = fill
+                entry.decided = true
+                entry.phase = (status == 5 || status == 6) && fill.filledRaw == 0 ? .unfilled : .settled
+            }
             entries[frameID] = entry
             return frameID
 
@@ -152,4 +232,38 @@ public actor OrderTracker {
     }
 
     public func forget(_ frameID: Int64) { entries.removeValue(forKey: frameID) }
+}
+
+/// One order in an `mt: 24` frame. Sizes, prices and fees arrive as numbers or as strings
+/// depending on their magnitude, so each is read either way.
+struct OrderUpdate: Decodable {
+    let sn: Int64?
+    let rq: Int64?
+    let st: Int?
+    let sr: Int?
+    let fr: Int?
+    let os: Int64?
+    let fs: Int64?
+    let fp: Int64?
+    let f: Int64?
+    let t: Int?
+
+    private enum CodingKeys: String, CodingKey { case sn, rq, st, sr, fr, os, fs, fp, f, t }
+
+    init(from decoder: any Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        func number(_ key: CodingKeys) -> Int64? {
+            (try? box.decode(Int64.self, forKey: key)) ?? (try? box.decode(String.self, forKey: key)).flatMap(Int64.init)
+        }
+        sn = number(.sn)
+        rq = number(.rq)
+        st = number(.st).map(Int.init)
+        sr = number(.sr).map(Int.init)
+        fr = number(.fr).map(Int.init)
+        os = number(.os)
+        fs = number(.fs)
+        fp = number(.fp)
+        f = number(.f)
+        t = number(.t).map(Int.init)
+    }
 }

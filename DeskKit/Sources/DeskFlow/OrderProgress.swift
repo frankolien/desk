@@ -29,6 +29,11 @@ public struct OrderProgress: Sendable, Equatable {
         /// `mt: 3`, `code: 0`. The gateway has it; the book does not.
         case forwarded
         case settled
+        /// The venue refused to post or settle it (`st: 7`); `failure` is Perpl's `fr`.
+        case failed(reason: Int, failure: Int?)
+        /// Cancelled or expired having filled nothing: for a market order, the book moved
+        /// past the slippage bound.
+        case unfilled
         case rejected(code: Int, subReason: Int?, error: String? = nil)
         case expired
         /// The socket went away while the order was still in flight, so no answer is
@@ -38,7 +43,7 @@ public struct OrderProgress: Sendable, Equatable {
         public var isTerminal: Bool {
             switch self {
             case .sending, .forwarded: false
-            case .settled, .rejected, .expired, .abandoned: true
+            case .settled, .failed, .unfilled, .rejected, .expired, .abandoned: true
             }
         }
 
@@ -46,6 +51,8 @@ public struct OrderProgress: Sendable, Equatable {
     }
 
     public private(set) var outcome: Outcome?
+    /// What the order filled, from the update that decided it.
+    public private(set) var fill: OrderFill?
     private var frameID: Int64?
     private var held: [Held] = []
 
@@ -55,6 +62,7 @@ public struct OrderProgress: Sendable, Equatable {
     private struct Held: Sendable, Equatable {
         let id: Int64
         let phase: OrderPhase
+        let fill: OrderFill?
     }
 
     public init() {}
@@ -64,6 +72,7 @@ public struct OrderProgress: Sendable, Equatable {
     /// An order has been handed to the desk but has no id yet.
     public mutating func begin() {
         outcome = .sending
+        fill = nil
         frameID = nil
         held.removeAll()
     }
@@ -73,28 +82,40 @@ public struct OrderProgress: Sendable, Equatable {
         frameID = id
         let replay = held
         held.removeAll()
-        for update in replay where update.id == id { apply(id: id, phase: update.phase) }
+        for update in replay where update.id == id { apply(id: id, phase: update.phase, fill: update.fill) }
     }
 
     /// One update from the socket.
-    public mutating func apply(id: Int64, phase: OrderPhase) {
+    public mutating func apply(id: Int64, phase: OrderPhase, fill: OrderFill? = nil) {
         guard let frameID else {
             // Only while an order of this screen's is in flight. Auto-copy sends its orders
             // through the same desk, and their frames were buffered here forever: the array
             // grew for the life of the session and, being observed state, invalidated every
             // view reading it on each one.
-            if outcome != nil { held.append(Held(id: id, phase: phase)) }
+            if outcome != nil { held.append(Held(id: id, phase: phase, fill: fill)) }
             return
         }
-        guard id == frameID, outcome?.isTerminal != true else { return }
+        guard id == frameID else { return }
+        // Terminal outcomes never walk back, with one exception the venue documents: a
+        // failure is not final while a non-failure for the same order can still follow.
+        if outcome?.isTerminal == true {
+            guard case .failed = outcome else { return }
+            switch phase {
+            case .settled, .unfilled: break
+            default: return
+            }
+        }
         outcome = switch phase {
         case .sent: .sending
         case .forwarded: .forwarded
         case .settled: .settled
+        case .failed(let reason, let failure): .failed(reason: reason, failure: failure)
+        case .unfilled: .unfilled
         case .expired: .expired
         case .rejected(let code, let subReason, let error):
             .rejected(code: code, subReason: subReason, error: error)
         }
+        if let fill { self.fill = fill }
     }
 
     /// The socket ended. Only meaningful while an order is still in flight — an order that
@@ -112,6 +133,7 @@ public struct OrderProgress: Sendable, Equatable {
 
     public mutating func reset() {
         outcome = nil
+        fill = nil
         frameID = nil
         held.removeAll()
     }
