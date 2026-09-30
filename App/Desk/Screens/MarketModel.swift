@@ -48,6 +48,12 @@ final class MarketModel {
     /// ones — whatever the venue lists, read live, never a fixed count.
     private(set) var allMarkets: [Market] = []
     private(set) var quotes: [UInt32: Quote] = [:]
+    /// The selected market's L2 book while a screen asks for it, from `order-book@<id>`.
+    private(set) var book = OrderBook()
+    private var wantsBook = false
+    /// The market whose book stream the live socket is subscribed to, and its `sid`.
+    private var bookMarket: UInt32?
+    private var bookSID: Int?
 
     /// The one market Desk trades. A deliberate scope decision rather than a limitation
     /// of the code — `OrderBuilder` takes the market as a parameter — and the discovery
@@ -163,7 +169,29 @@ final class MarketModel {
         history = []
         lastCandleFetch = nil
         applyQuote(for: selected)
+        book.reset()
         Task { await refreshCandles() }
+        Task { await syncBookSubscription() }
+    }
+
+    /// Follows the selected market's book while a screen shows it. Leaving does not
+    /// unsubscribe — Perpl allows ten subscription requests a minute per connection — so
+    /// the next market swaps streams in a single request.
+    func watchBook(_ on: Bool) {
+        wantsBook = on
+        if on { Task { await syncBookSubscription() } }
+    }
+
+    private func syncBookSubscription() async {
+        guard wantsBook, bookMarket != marketID, let socket = liveSocket else { return }
+        var subscriptions: [[String: Any]] = []
+        if let old = bookMarket { subscriptions.append(["stream": "order-book@\(old)", "subscribe": false]) }
+        subscriptions.append(["stream": "order-book@\(marketID)", "subscribe": true])
+        bookMarket = marketID
+        bookSID = nil
+        book.reset()
+        guard let data = try? JSONSerialization.data(withJSONObject: ["mt": 5, "subs": subscriptions] as [String: Any]) else { return }
+        try? await socket.send(String(decoding: data, as: UTF8.self))
     }
 
     func selectCandleInterval(_ seconds: Int) {
@@ -289,8 +317,14 @@ final class MarketModel {
                     let socket = try URLSessionWebSocket(url: network.marketDataURL)
                     liveSocket = socket
                     let ids = allMarkets.isEmpty ? [marketID] : allMarkets.map(\.id)
-                    let subscriptions = (["heartbeat@\(network.chainID)"] + ids.map { "market-state@\($0)" })
-                        .map { ["stream": $0, "subscribe": true] as [String: Any] }
+                    // A fresh connection starts with no book stream; it joins the first
+                    // subscription when a screen is showing one.
+                    book.reset()
+                    bookSID = nil
+                    bookMarket = wantsBook ? marketID : nil
+                    let streams = ["heartbeat@\(network.chainID)"] + ids.map { "market-state@\($0)" }
+                        + (wantsBook ? ["order-book@\(marketID)"] : [])
+                    let subscriptions = streams.map { ["stream": $0, "subscribe": true] as [String: Any] }
                     let payload: [String: Any] = ["mt": 5, "subs": subscriptions]
                     let data = try JSONSerialization.data(withJSONObject: payload)
                     try await socket.send(String(decoding: data, as: UTF8.self))
@@ -298,10 +332,15 @@ final class MarketModel {
                     while !Task.isCancelled {
                         let text = try await socket.receive()
                         let data = Data(text.utf8)
-                        let updates = await Task.detached(priority: .utility) {
-                            Self.decodeLiveQuotes(data)
+                        let frame = await Task.detached(priority: .utility) {
+                            Self.decodeLive(data)
                         }.value
-                        ingestLiveQuotes(updates)
+                        switch frame {
+                        case .quotes(let updates): ingestLiveQuotes(updates)
+                        case .subscribed(let sids): noteSubscriptions(sids)
+                        case .book(let update): ingestBook(update)
+                        case .other: break
+                        }
                     }
                 } catch {
                     self?.liveSocket?.close()
@@ -311,6 +350,48 @@ final class MarketModel {
                 }
             }
         }
+    }
+
+    private enum LiveFrame: Sendable {
+        case quotes([UInt32: Int64])
+        case subscribed([String: Int])
+        case book(OrderBook.Frame)
+        case other
+    }
+
+    nonisolated private static func decodeLive(_ data: Data) -> LiveFrame {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let mt = (root["mt"] as? NSNumber)?.intValue else { return .other }
+        switch mt {
+        case 9: return .quotes(decodeLiveQuotes(data))
+        case 6:
+            var sids: [String: Int] = [:]
+            for entry in root["subs"] as? [[String: Any]] ?? [] {
+                guard let stream = entry["stream"] as? String, let sid = (entry["sid"] as? NSNumber)?.intValue,
+                      ((entry["status"] as? [String: Any])?["code"] as? NSNumber)?.intValue ?? 0 == 0 else { continue }
+                sids[stream] = sid
+            }
+            return .subscribed(sids)
+        case 15, 16: return OrderBook.Frame(json: root).map(LiveFrame.book) ?? .other
+        default: return .other
+        }
+    }
+
+    private func noteSubscriptions(_ sids: [String: Int]) {
+        guard let bookMarket, let sid = sids["order-book@\(bookMarket)"] else { return }
+        bookSID = sid
+    }
+
+    /// Frames from a stream this socket has since left are dropped by their `sid`; before
+    /// the subscription is confirmed, only a snapshot is taken, which a later one replaces.
+    private func ingestBook(_ frame: OrderBook.Frame) {
+        guard wantsBook, bookMarket == marketID else { return }
+        if let bookSID {
+            guard frame.subscriptionID == nil || frame.subscriptionID == bookSID else { return }
+        } else if frame.kind == .snapshot, let sid = frame.subscriptionID {
+            bookSID = sid
+        }
+        book.apply(frame)
     }
 
     nonisolated private static func decodeLiveQuotes(_ data: Data) -> [UInt32: Int64] {

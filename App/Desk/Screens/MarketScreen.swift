@@ -691,13 +691,13 @@ struct PerpDetailScreen: View {
     let session: TradingSession
     let onOrderFilled: (Direction, String) -> Void
 
-    private enum Tab: String, CaseIterable { case holders = "Holders", about = "About" }
+    private enum Tab: String, CaseIterable { case book = "Book", holders = "Holders", about = "About" }
 
     @Environment(\.dismiss) private var dismiss
     @State private var ticket: Direction?
     @State private var showsSetup = false
     @State private var pendingSide: Direction?
-    @State private var tab: Tab = .holders
+    @State private var tab: Tab = .book
     @State private var holders = MarketHoldersModel()
     @State private var directory = TraderDirectory()
     @State private var openHolder: MarketHolder?
@@ -706,6 +706,7 @@ struct PerpDetailScreen: View {
     @State private var showsStudio = false
     @State private var ticketPreset: TicketPreset?
     @State private var scrolledPastHeader = false
+    @State private var scrollPosition = ScrollPosition(edge: .top)
     @AppStorage("desk.watchlist") private var savedIDs = ""
 
     var body: some View {
@@ -721,6 +722,8 @@ struct PerpDetailScreen: View {
                     MarketChatPreview(chat: chat) { showsChat = true }.padding(.top, 26)
                     tabs.padding(.top, 26)
                     switch tab {
+                    case .book:
+                        OrderBookView(market: market).padding(.top, 14)
                     case .holders:
                         MarketHoldersList(model: holders, directory: directory) { openHolder = $0 }
                     case .about:
@@ -732,6 +735,7 @@ struct PerpDetailScreen: View {
                 .padding(.bottom, 24)
             }
             .refreshable { await market.refreshNow(); await holders.load(symbol: market.symbol) }
+            .scrollPosition($scrollPosition)
             // Once the big header has scrolled away, a compact one holds the market and
             // its price at the top for as long as the list goes on.
             .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y > 150 }) { _, past in
@@ -747,6 +751,8 @@ struct PerpDetailScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .task(id: market.symbol) { await holders.run(symbol: market.symbol) }
         .task(id: market.symbol) { await chat.run(symbol: market.symbol) }
+        .onAppear { market.watchBook(true) }
+        .onDisappear { market.watchBook(false) }
         .task { await directory.refreshFollowing() }
         .task {
             #if DEBUG
@@ -756,6 +762,11 @@ struct PerpDetailScreen: View {
             if ProcessInfo.processInfo.arguments.contains("-open-chat") { showsChat = true }
             if ProcessInfo.processInfo.arguments.contains("-open-studio") { showsStudio = true }
             if ProcessInfo.processInfo.arguments.contains("-detail-scrolled") { scrolledPastHeader = true }
+            // `-detail-bottom` scrolls to the tabs once the book has loaded, for a screenshot.
+            if ProcessInfo.processInfo.arguments.contains("-detail-bottom") {
+                try? await Task.sleep(for: .seconds(7))
+                withAnimation { scrollPosition.scrollTo(edge: .bottom) }
+            }
             #endif
         }
         .fullScreenCover(isPresented: $showsStudio) {
