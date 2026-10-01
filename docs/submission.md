@@ -5,14 +5,15 @@ where you can copy the traders who are actually winning on Perpl — automatical
 shadow or live, with your own limits.**
 
 Sign in with Face ID. No seed phrase, no wallet connect, no extension. One passkey derives
-both the wallet that funds the account and the key that signs every order, on demand, and
-neither is ever stored.
+both the wallet that funds the account and the key that signs orders. The wallet key that
+moves your AUSD is never stored. The order key, which can't withdraw, is sealed to your
+Face ID on this iPhone.
 
 - Platform: native Swift 6 / SwiftUI, iOS 18.4+, iPhone.
 - Chain: Monad. Exchange: Perpl. Collateral: AUSD. Credential: Mera passkeys.
 - Repository: this repo. Server: 12 Vercel functions in [`web/`](../web).
-- Tests: 467 Swift tests (`swift test --package-path DeskKit`, ~0.3 s, no simulator) and
-  64 Node tests (`cd web && node --test`).
+- Tests: 535 Swift tests in 86 suites (`swift test --package-path DeskKit`, ~0.3 s once
+  built, no simulator) and 212 Node tests (`cd web && node --test`).
 
 ---
 
@@ -21,10 +22,14 @@ neither is ever stored.
 ### What makes it a mobile app rather than a website in a shell
 
 - **The phone is the wallet.** The passkey's PRF output derives the EOA and the Perpl
-  signing key. Face ID is not a lock screen over a stored key; there is no stored key.
-  Losing the phone and its iCloud backup means the funds are gone, and the app says so in
-  those words during onboarding.
-- **Every control is Apple's.** `TabView`, `Picker`, `Stepper`, `Toggle`,
+  signing key. The wallet key that moves AUSD is derived again for each transaction and
+  never stored. The order key can place and close orders but cannot withdraw. It is sealed
+  in the keychain with `biometryCurrentSet` and `WhenPasscodeSetThisDeviceOnly`, so only
+  this iPhone's current Face ID enrolment opens it. It leaves memory when you lock Desk,
+  when the phone locks with Desk open, and after five minutes in the background (twelve
+  hours if away copying is on). Losing the phone and its iCloud backup means the funds are
+  gone, and the app says so in those words during onboarding.
+- **Apple's own controls.** `TabView`, `Picker`, `Toggle`, `Menu`,
   `ContentUnavailableView`, context menus, sheets with detents. On iOS 26 the surfaces are
   Liquid Glass; older versions get the material equivalent. Dark only, because a trading
   app on a near-black ground has no light mode worth testing.
@@ -37,18 +42,20 @@ neither is ever stored.
 
 ### The screens
 
-| Screen | What it does |
+Four tabs.
+
+| Tab | What it does |
 |---|---|
-| Home | Balance, collateral, funding, network switch, activity |
-| Perps | Market, chart, ticket with leverage and hold-to-confirm |
-| Signals | Leaderboard of Perpl traders, trader profiles, scores, copy controls |
-| Auto-Copy | The copy engine: result, traders, open copies, history, limits |
-| Search / Watchlist | Markets and tokens |
+| Home | Perpl's markets and where traders are crowding; each market's chart and the ticket, with leverage and hold-to-confirm |
+| Search | Markets and tokens |
+| Signals | Following, Top traders, Watchlist, and Market (the crowd, long against short); trader profiles, scores and copy rules; the Auto-Copy hub with its result, open copies, history and limits |
+| Profile | The AUSD balance, open and closed positions, Add funds, Withdraw, activity, and Settings with the network switch |
 
 ### Beyond the app itself
 
-Push alerts for the traders you follow, with **Copy Trade**, **View Trader** and **Mute**
-buttons on the notification; an Auto-Copy widget with a working pause button; a Live
+Push alerts for the traders you follow, with **Copy Trade**, **View Trader** and **Mute This
+Trader** on the notification (Copy Trade asks for Face ID and opens Desk on a filled-in
+ticket); an Auto-Copy widget with a working pause button; a Live
 Activity that shows today's copy result in the Dynamic Island; and Siri phrases
 ("Pause auto-copy in Desk", "How is my copy trading in Desk").
 
@@ -57,15 +64,17 @@ Activity that shows today's copy result in the Dynamic Island; and Siri phrases
 ## 2. Perpl — Best use of Perpl's API
 
 Desk uses Perpl three ways: as a venue it trades on, as a data source it reads other
-people's books from, and as an event stream it reacts to in the block the trade lands in.
+people's books from, and as an event stream it reacts to as soon as a trade's block lands.
 
 ### Execution
 
 - Orders are signed on the device with the passkey-derived key and sent over Perpl's
   websocket, tracked frame by frame to a terminal phase (settled, rejected with a reason,
   or expired). Rejection reasons are translated into sentences, never codes.
-- Every order is deadline-bound to the head block Desk already receives on the context
-  call, so a stale order cannot fill late.
+- A market order goes out immediate-or-cancel with a slippage limit, so Perpl fills it at
+  once within that limit or not at all. Orders carry `lb: 0`, as Perpl's own client does.
+  Desk's deadline is a local timeout only: past it, the ticket says Perpl has not confirmed
+  the order yet and asks you to check your positions, because the answer may still come.
 - Stops and take profits for live copies are placed **on Perpl**, not in the app, so a
   copy stays protected after Desk is closed. This is the difference between a toy copy bot
   and one you can leave.
@@ -80,7 +89,7 @@ Rules are per trader; guards are account-wide:
 | Direction | Follow or **fade** — take the opposite side of a trader you think is wrong |
 | Sizing | Fixed margin, or **conviction**: scaled by how much of their own account they put in |
 | Leverage cap | Their leverage, capped by yours |
-| Price protection | A copy is skipped if the market has already moved past your limit from their entry, and the order can never fill beyond it |
+| Price protection | A copy is skipped if the market has already moved past your limit from their entry, and what is left of the limit becomes the order's slippage bound on Perpl |
 | Stop / take profit | Percent of margin, converted to a price and placed on the venue |
 | Open copies | Maximum open at once |
 | Daily loss limit | Auto-copy pauses itself when today's closed copies hit it |
@@ -100,16 +109,17 @@ be proven before any money moves.
   the account, its position bitmap, and each open position row with its mark.
 - A websocket subscription on `wss://rpc.monad.xyz` watches that contract's position
   events — `OpenedV2`, `IncreasedV2`, `Decreased`, `Closed`, `Liquidated`. An event naming
-  a copied trader's account wakes the copy loop at once, so a copy follows in the block the
-  trader moved in, with a 4-second poll underneath as the fallback.
+  a copied trader's account wakes the copy loop at once, as soon as the trader's block lands,
+  not on the next poll. A poll runs underneath: every 15 seconds while the stream is up,
+  every 4 when it is down.
 - Trader history and scores are indexed from those same events through Envio HyperSync,
   sharded per account, with a resumable cursor.
 
 ### The trader score
 
-Traders are ranked on what survives: 45% win rate, 35% profit factor (capped at 3), 20%
-freedom from drawdown, multiplied by a confidence factor for both the number of trades and
-the money at risk, minus a liquidation penalty. Dust scalpers with a 90% win rate on
+Traders are scored out of 100: 45% win rate, 35% profit factor (capped at 3), 20%
+freedom from drawdown, multiplied by a confidence factor for the number of trades, the
+money at risk and whether they trade more than one market, minus a liquidation penalty. Dust scalpers with a 90% win rate on
 $3 positions do not outrank real traders — that confidence factor exists because an early
 version of the score put one at the top.
 
@@ -133,12 +143,13 @@ web/api/           12 Vercel functions: market data, faucet, swaps, traders, ale
 ```
 
 **No server can trade for anyone.** The server pushes notifications, reads public chain
-data and indexes history. The signing key exists only in the app's memory, only while it
-is open and unlocked. That is the trade-off behind "copying runs while Desk is open", and
-it is deliberate.
+data and indexes history. It never holds a user's key. The order key is sealed to Face ID
+on the phone and signs only while Desk has it unlocked. That is the trade-off behind
+"copying runs while Desk has its key", and it is deliberate.
 
-**Secrets** live only in Vercel's environment: the APNs key, the cron secret, the indexer
-token. Nothing sensitive ships in the app binary.
+**Secrets** live only in the server's environment, on Vercel and on the Railway worker: the
+APNs key, the cron secret, the indexer token, the data-service keys and the testnet faucet
+key. Nothing sensitive ships in the app binary.
 
 ---
 
@@ -151,14 +162,19 @@ Being explicit, because judges should not have to guess:
   APNs, the copy engine and all its guards.
 - Simulated by design: shadow copies. They fill at the real mainnet mark and pay real taker
   fees in the arithmetic, but send nothing.
-- Requires the app to be open: live copying, because the signing key is never on a server.
+- Requires the app: live copying, because the signing key is never on a server. It runs
+  while Desk is open, or in the background with away copying on, until iOS closes the app.
+- Live fills so far: the only recorded one is on testnet, a 0.06518 BTC long placed from
+  the app on Perpl testnet on 15 September 2026, documented in
+  [`perpl-order-400-audit-2026-09-15.md`](perpl-order-400-audit-2026-09-15.md).
+- Mainnet fills: *(add dated explorer links after the founder's mainnet run)*
 
 ---
 
 ## 5. Links
 
 - Demo video: *(add link)*
-- Site: `https://desk.trade`
+- Site: `https://trydesk.trade`
 - Server: `https://web-lovat-nine-49.vercel.app`
 - Exchange contract: `0x34B6552d57a35a1D042CcAe1951BD1C370112a6F` (Monad)
 - Build: `xcodegen generate && open Desk.xcodeproj`, scheme **Desk**, iOS 18.4+

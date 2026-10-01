@@ -2,17 +2,21 @@
 
 Target: **2 minutes 30**, screen recording from a real iPhone, voice-over recorded after.
 Judges watch dozens of these; the first fifteen seconds decide whether they watch the rest,
-so the hook is the copy engine, not the sign-in.
+so the hook is one real fill, not the sign-in.
 
 ## Before recording
 
 - Real device, not a simulator. Live Activity and the Dynamic Island only look right there.
-- Do Not Disturb **off** — a trade alert has to arrive on camera.
 - Battery above 50%, Wi-Fi strong, brightness high, no other notifications pending.
-- The account is funded and already copying one trader with a history behind it, so the
-  Auto-Copy screen is not empty.
-- Have a second phone or a friend ready to trigger a push, or use the confirmation push by
-  turning alerts on for a trader during the recording.
+- Section 2 needs an account with no desk yet, so Add funds and Open desk appear. Use a
+  second iPhone or Apple account for it, because signing out clears the follow list and
+  the copy history the other sections need.
+- The main account is funded and already copying one trader in Shadow, so the Auto-Copy
+  hub is not empty.
+- Face ID shows on the ticket only when Desk is locked. Lock Desk in Settings just before
+  the take, or the hold sends straight away. Never cut in a prompt from another take.
+- Section 5 needs a real trade alert for a trader you follow. Keep Do Not Disturb **off**
+  and the recording running while you wait. If none lands, cut the section.
 - Record in one take per section; cut later. iOS screen recording (Control Center) captures
   the Dynamic Island; a camera shot of the phone in hand is worth it for the Lock Screen.
 
@@ -20,25 +24,24 @@ so the hook is the copy engine, not the sign-in.
 
 | Time | Shot | Voice-over |
 |---|---|---|
-| 0:00–0:12 | Cold open: a trade alert lands on the Lock Screen. Press and hold. **Copy Trade** appears. Tap it; the ticket opens already filled in; hold to confirm; the fill toast. | "A trader you follow just opened a long on Perpl. You copied it from the Lock Screen, in about four seconds, and never opened the app." |
-| 0:12–0:25 | Face ID sign-in on a fresh install: tap Continue with Face ID, straight into Home. | "This is Desk. Your face is the trading key. No seed phrase, no wallet connect — one passkey derives the wallet and the signing key, and neither is ever stored." |
-| 0:25–0:50 | Signals tab: leaderboard, scroll, open a trader profile. Score gauge, stats, closed trades, style tags. | "Every trader here is read straight off Perpl's exchange contract on Monad. Their history is indexed from the chain's own position events, and scored on what survives: win rate, profit factor, drawdown, weighted by how much they actually risk." |
-| 0:50–1:20 | Turn on Auto-Copy for that trader. Walk the Copy Rules sheet: Shadow/Live, Follow/Fade, Conviction sizing, leverage cap, stop loss, price protection. | "Copy them, or fade them. Size every copy by how much of their own account they put in. Cap their leverage with yours. Stops go on Perpl itself, so your copy stays protected even when Desk is closed — and price protection skips the copy if the market already ran away from their entry." |
-| 1:20–1:45 | Auto-Copy screen: the result card, the traders, open copies, recent activity. Point at time-to-fill and slippage. | "It measures itself. Realised result, win rate, how many seconds after their move you filled, and how far from their entry. Shadow mode proves a strategy before a cent moves." |
-| 1:45–2:05 | A copy fires live: the chain event arrives, the copy opens, the toast, the row in Recent. | "Desk watches Perpl's position events on Monad over a websocket, so a copy follows in the same block the trader moved in — not on the next poll." |
-| 2:05–2:20 | Leave the app: the Dynamic Island shows today's result; swipe to the Lock Screen Live Activity; the Home Screen widget; say "Hey Siri, pause auto-copy in Desk". | "Then it lives where you already look. The Dynamic Island, the Lock Screen, the Home Screen, Control Center, and Siri." |
-| 2:20–2:30 | Auto-Copy screen with the share-card summary, hold on it. | "Desk. Copy the best traders on Perpl, with your face as the key. Built on Monad." |
+| 0:00–0:20 | Cold open on the BTC ticket. Liquidation price, fee, and Est. fill from Perpl's book. Hold to confirm. Face ID. The status reads Forwarded, then the Filled receipt. Land on the position. | "This is a real BTC order on Perpl, on testnet. Before I commit, Desk shows where I'd be liquidated, the fee, and the price Perpl's book would fill me at. Hold. Face ID. Filled." |
+| 0:20–0:55 | One take, second account. Continue with passkey, Face ID. Profile, the AUSD figure first. Add funds. Get test AUSD. Open desk, each step in a sentence, under one Face ID. | "This is Desk on Monad testnet. I sign in with a passkey and Face ID. No seed phrase. AUSD comes first, because AUSD is the money. Get test AUSD claims it from Agora's faucet. Open desk sets up my Perpl account in a few plain steps, under one Face ID." |
+| 0:55–1:20 | The position: live PnL, distance to liquidation. Close 50% as a checkout, with the AUSD you get back shown before the hold. Hold. Realised PnL. | "The position updates live, and Desk shows how far the price is from my liquidation. Closing half reads like a checkout: this is the AUSD I get back. Hold. That's my realised result." |
+| 1:20–1:50 | Signals. Market: the crowd, long against short. Top traders: open one with a real score and a recent trade. Auto-Copy rules in Shadow with price protection. The hub's result card. | "All of this comes from Perpl. The crowd, long against short, across every open position. A trader, scored on their record: win rate, profit factor, drawdown, and how much they risk. I copy them in Shadow first. Nothing is sent, but every copy is priced at the real mark with fees. Price protection skips a copy if the market already ran past their entry. The hub keeps the score." |
+| 1:50–2:05 | **Only if a real push was captured live.** The alert on the Lock Screen. Press and hold, Copy Trade, Face ID, Desk opens on the ticket filled in. Hold, fill. Then pause from the Live Activity or the widget. If it was not captured, cut this row and give the time to the rows either side. | "A trader I follow just opened a position. Copy Trade asks for Face ID and opens Desk with the ticket filled in. Hold, and it's mine. And I can pause copying from the Lock Screen." |
+| 2:05–2:30 | Withdraw AUSD: the step list, Face ID, the explorer receipt. End on the AUSD balance. | "And the money comes back out. Withdraw shows each step, then a receipt on Monad's explorer. Desk. Perps on Monad, in AUSD, with Face ID as the key." |
 
 ## Rules for the cut
 
 - No title cards longer than a second and no music that fights the voice.
-- Every claim on screen must be visibly happening. If a live copy will not fire on cue,
-  show a shadow copy and say it is shadow.
+- Every claim on screen must be visibly happening. Say testnet whenever it is testnet. A
+  shadow copy is called a shadow copy. A push is never staged or faked.
 - Keep one unbroken shot of a real order filling. That is the proof.
 - End on the app, not a logo.
 
 ## Stills to capture while recording
 
-For the submission form and the README, six screenshots in this order: Lock Screen alert
-with buttons, trader profile, Copy Rules sheet, Auto-Copy summary, Dynamic Island, Home
-Screen widget.
+For the submission form and the README, six screenshots in this order: the BTC ticket with
+Est. fill, the Filled receipt, Profile with the AUSD balance, the close checkout, a trader
+profile with its score, and the Withdraw receipt. Add the Lock Screen alert with its
+buttons only if it was captured live.

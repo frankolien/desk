@@ -168,7 +168,7 @@
   var car = $("[data-carousel]");
   if (car) {
     var cslides = [
-      { title: "No server can trade for anyone.", text: "Including ours. The signing key exists only in the app’s memory, only while it is open and unlocked. Ours pushes notifications and reads public chain data — nothing it holds could move your money." },
+      { title: "No server can trade for anyone.", text: "Including ours. Your keys stay on your iPhone. The wallet key is made fresh for each transaction and never stored, and the order key is sealed to your Face ID. Our server pushes notifications and reads public chain data. Nothing it holds could move your money." },
       { title: "Rounding goes against you.", text: "Every figure rounds in the direction that costs you rather than the one that flatters you, and the arithmetic lives in a module that cannot reach the network by construction." },
       { title: "Unreadable is never empty.", text: "A position book that cannot be read is never treated as an empty one, because that would announce closes that never happened." }
     ];

@@ -4,11 +4,12 @@
 
 A native iPhone app for perpetual futures on [Perpl](https://perpl.xyz), where Face ID is
 the trading key. Sign in and a passkey derives both the wallet that holds the collateral
-and the key that signs every order — on demand, in memory, never stored. No seed phrase,
-no wallet app, no extension.
+and the key that signs your orders. The wallet key that moves your AUSD is never stored.
+The order key, which can't withdraw, is sealed to your Face ID on this iPhone. No seed
+phrase, no wallet app, no extension.
 
 And copy the traders who are actually winning: read straight off Perpl's exchange
-contract, copied in the block they move in, measured on every fill.
+contract, copied as soon as their trade lands on the chain, measured on every fill.
 
 Site: [trydesk.trade](https://trydesk.trade). App Store name: *Desk: Trade Perps on Monad*.
 On TestFlight (testnet build).
@@ -21,13 +22,14 @@ Monad* and Perpl's *Best Use of Perpl's API*. Swift 6, SwiftUI, iOS 18.4+, iPhon
 | [Mera](https://mera.category.xyz) | The only credential. Both keys derive from a passkey's PRF output. |
 | AUSD | The collateral, and the only balance the app shows. |
 | [Perpl](https://perpl.xyz) | The exchange: the account, the book, the position, the event stream. |
-| Monad | The chain. Position events wake the copy loop in the block they land in. |
+| Monad | The chain. Position events wake the copy loop as soon as their block lands. |
 
 ## What it does
 
 - **Trade perps** — market and limit orders signed on the device, sent over Perpl's
-  websocket, tracked to a terminal phase, deadline-bound to the head block so a stale
-  order cannot fill late. Hold to confirm. Every figure rounds the way that costs you.
+  websocket and tracked to a terminal phase. A market order is immediate-or-cancel within
+  its slippage limit, so it fills at once or not at all. Hold to confirm. Every figure
+  rounds the way that costs you.
 - **See which way the crowd leans** — every open position on every market summed live:
   long against short, traders on each side, the biggest single position in the book, and
   a floor note when the book could not be read in full.
@@ -38,8 +40,8 @@ Monad* and Perpl's *Best Use of Perpl's API*. Swift 6, SwiftUI, iOS 18.4+, iPhon
 - **Copy them, or fade them** — shadow or live, fixed or conviction sizing, a leverage
   cap, price-protected entries, stops placed on Perpl itself, daily loss limits,
   per-market exposure caps, and baskets of the leaderboard's best.
-- **Know the moment they trade** — push alerts with *Copy Trade*, *View* and *Mute* on
-  the notification; the ticket opens already filled in.
+- **Know the moment they trade** — push alerts with *Copy Trade*, *View Trader* and *Mute
+  This Trader* on the notification; Copy Trade opens the ticket already filled in.
 - **It doesn't leave the phone** — Portfolio, Watchlist and Auto-Copy widgets; a Live
   Activity with a working pause in the Dynamic Island; a Control Center toggle; Siri.
 - **Spot, too** — trending tokens with a live chart, transactions, holders and the order
@@ -48,12 +50,15 @@ Monad* and Perpl's *Best Use of Perpl's API*. Swift 6, SwiftUI, iOS 18.4+, iPhon
 
 ## Security, in one paragraph
 
-No server can trade for anyone, including ours. The signing key exists only in the app's
-memory, only while it is open and unlocked; it is wiped on lock and after a short grace
-period in the background. The server pushes notifications and reads public chain data —
-nothing it holds could move money, which is why live copying needs Desk open, and why
-that is a deliberate trade rather than a shortcut. An unreadable position book is never
-treated as an empty one, because that would announce closes that never happened.
+No server can trade for anyone, including ours. The wallet key that moves AUSD is derived
+from the passkey for each transaction and never stored. The order key can place and close
+orders but cannot withdraw. It is sealed in the keychain so only this iPhone's current
+Face ID enrolment opens it, and it leaves memory when you lock Desk, when the phone locks
+with Desk open, and after five minutes in the background (twelve hours with away copying
+on). The server pushes notifications and reads public chain data. Nothing it holds could
+move your money, which is why live copying needs Desk and its key, and why that is a
+deliberate trade rather than a shortcut. An unreadable position book is never treated as
+an empty one, because that would announce closes that never happened.
 
 ## Layout
 
@@ -77,8 +82,8 @@ tools/              testflight.sh, ExportOptions.plist, check-relying-party.sh
 
 ```sh
 xcodegen generate && open Desk.xcodeproj      # project.yml is the source of truth
-swift test --package-path DeskKit             # 481 tests in 74 suites, ~0.3 s, no simulator
-cd web && node --test                         # 76 server tests
+swift test --package-path DeskKit             # 535 tests in 86 suites, ~0.3 s, no simulator
+cd web && node --test                         # 212 server tests
 node web/tools/serve.mjs                      # the site on :8790 with the live API
 tools/testflight.sh                           # archive, export, upload to App Store Connect
 ```
@@ -89,8 +94,8 @@ home|market|signals|fund|empty|welcome`, plus `-copy-demo`, `-crowd-demo`,
 `-copy-activity`, `-widget-gallery` — so every screen can be captured without walking
 the flow.
 
-Secrets live only in Vercel's environment. Nothing in the app can reach them, by
-construction: the app has no server credential to leak.
+Secrets live only in the server's environment, on Vercel and on the Railway worker. Nothing
+in the app can reach them, by construction: the app has no server credential to leak.
 
 ## Documents
 
@@ -110,8 +115,11 @@ construction: the app has no server credential to leak.
 
 ## Status
 
-Shipped to TestFlight on a testnet build. 481 Swift tests and 76 server tests pass. The
+Shipped to TestFlight on a testnet build. 535 Swift tests and 212 server tests pass. The
 site, the alerts pipeline, the history indexer and the twelve functions are deployed.
 
-The bounty closes 14 October 2026 at 04:59 GMT+1. Left: the demo video, mainnet
-verification of a live fill, and the public TestFlight link on the site.
+The only recorded live fill so far is on testnet: a 0.06518 BTC long on 15 September 2026,
+in [`docs/perpl-order-400-audit-2026-09-15.md`](docs/perpl-order-400-audit-2026-09-15.md).
+
+The bounty closes 14 October 2026 at 04:59 GMT+1. Left: the demo video and a dated live
+fill on mainnet.

@@ -10,14 +10,14 @@ endpoints. Sources are listed by what they are for.
 |---|---|---|---|
 | Perpl — `app.perpl.xyz`, `testnet.perpl.xyz` (REST context + trading/market websockets) | Markets, prices, order placement, positions, the mainnet leaderboard, trade history | App (trading), `traders.mjs`, `alerts.mjs`, `_history.mjs` | none |
 | Monad RPC — `rpc.monad.xyz`, `testnet-rpc.monad.xyz` | Reading the Perpl exchange contract, balances, sending transactions | App, `traders.mjs`, `activity.mjs`, `faucet.mjs` | none (optional `MONAD_MAINNET_RPC`, `MONAD_TESTNET_RPC`) |
-| Envio HyperSync — `143.hypersync.xyz` | Indexing Perpl fills for trader history and scores | `_history.mjs`, `alerts.mjs` | `HYPERSYNC_TOKEN` |
+| Envio HyperSync — `143.hypersync.xyz` | Indexing Perpl fills for trader history and scores | `_history.mjs`, `alerts.mjs`, the Railway worker | `HYPERSYNC_TOKEN`, optional `HYPERSYNC_INDEX_TOKEN` for the index |
 | Monad faucet — `faucet.monad.xyz` | Testnet gas for new accounts | `faucet.mjs` | `FAUCET_PRIVATE_KEY` (Desk's own testnet wallet) |
 
 ## Spot tokens
 
 | Service | Used for | Where | Key |
 |---|---|---|---|
-| OKX DEX API — `web3.okx.com`, `wsdex.okx.com` | Trending tokens, token details, candles, holders, live trades, swap quotes | `token-discovery.mjs`, `token-details.mjs`, `market-snapshot.mjs`, `market-stream.mjs`, `swap-quote.mjs`, `_holdings.mjs` | `OKX_API_KEY`, `OKX_SECRET_KEY`, `OKX_PASSPHRASE` |
+| OKX DEX API — `web3.okx.com`, `wsdex.okx.com` | Trending tokens, token details, candles, holders, live trades, swap quotes | `token-discovery.mjs`, `token-details.mjs`, `market-snapshot.mjs`, `swap-quote.mjs`, `_holdings.mjs` | `OKX_API_KEY`, `OKX_SECRET_KEY`, `OKX_PASSPHRASE` |
 | 0x — `api.0x.org` | Swap quotes on chains OKX does not quote | `swap-quote.mjs` | `ZEROX_API_KEY` |
 | Relay — `api.relay.link` | Cross-chain buys: quote, execute, status | `relay-quote.mjs`, `relay-status.mjs`, `activity.mjs` | optional `RELAY_API_KEY` |
 | Public RPCs — Base, Optimism, Arbitrum, Polygon, BNB, Avalanche, Linea, Scroll, Mantle, Berachain, Sonic, Unichain, Ink, Abstract, Plasma, Tempo, Robinhood Chain, World Chain (Alchemy), Solana | Reading balances of tokens bought through Desk, on the token's own chain | `_chains.mjs`, `_holdings.mjs` | none |
@@ -50,6 +50,11 @@ endpoints. Sources are listed by what they are for.
 
 ## Scheduling
 
-`.github/workflows/scan.yml` calls `/api/alerts?job=scan` and `?job=index` with
-`Authorization: Bearer $CRON_SECRET`. GitHub fires it every five minutes at best; an
-external one-minute scheduler is the production answer.
+The Railway worker (`web/worker/index.mjs`) runs the alerts scan every 60 s and the
+trader index every 15 min, with backoff when HyperSync refuses. `.github/workflows/scan.yml`
+is only an hourly health watchdog that fails when the scan or the index falls behind.
+
+## Website
+
+The landing page (`web/public/index.html`, through `site.js`) loads X's ad pixel to
+measure the X campaign. The app itself has no analytics.

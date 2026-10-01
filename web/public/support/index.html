@@ -75,17 +75,17 @@
           <li><strong>Install:</strong> Desk is on TestFlight for iPhone. <a href="https://testflight.apple.com/join/zjQdZzMX" target="_blank" rel="noreferrer">Join here</a>, install TestFlight if asked, then open Desk.</li>
           <li><strong>Sign in:</strong> tap <em>Continue with passkey</em>. iOS creates a passkey and Face ID confirms it. There is no seed phrase and no password.</li>
           <li><strong>Fund:</strong> on testnet, one tap gives you test MON and test AUSD. On mainnet, send MON for fees and at least 10 AUSD to the address shown, by copying it or scanning the code.</li>
-          <li><strong>Trade:</strong> pick a market, Long or Short, set your margin and leverage, and hold to confirm. Face ID signs the order.</li>
+          <li><strong>Trade:</strong> pick a market, Long or Short, set your margin and leverage, and hold to confirm. If Desk is locked, Face ID unlocks it first.</li>
         </ul>
 
         <h2 id="questions">Common questions</h2>
         <p><strong>Where is my seed phrase?</strong> There isn't one. Your passkey lives in your iCloud Keychain and syncs to your other Apple devices. Sign in on a new iPhone with the same Apple account and you have the same wallet.</p>
-        <p><strong>Why does it ask for Face ID?</strong> Face ID unlocks the trading key that signs your orders. Nothing is sent until you confirm.</p>
-        <p><strong>Testnet or mainnet?</strong> The network chip on Home says which you are on. Testnet uses test assets and a free faucet. Mainnet is real money. Switch from the chip.</p>
+        <p><strong>Why does it ask for Face ID?</strong> Face ID unlocks the order key that signs your orders, and it approves every move of your AUSD. Nothing is sent until you confirm.</p>
+        <p><strong>Testnet or mainnet?</strong> Profile shows a Testnet label next to your address when you are on testnet. Mainnet has no label. Testnet uses test assets and a free faucet. Mainnet is real money. Tap your address to open Settings, and switch there.</p>
         <p><strong>My order was rejected.</strong> The message on the ticket says why: usually not enough free AUSD once the fee is counted, or the price moved past your slippage. Add funds or try again.</p>
         <p><strong>Alerts are not arriving.</strong> Check that notifications are allowed for Desk in iPhone Settings, and that the trader or wallet still shows a bell in Signals. Price alerts cover Bitcoin, Monad and anything on your Watchlist.</p>
         <p><strong>What is shadow copying?</strong> A copy that sends nothing: it fills at the live mainnet price with fees and is liquidated where the venue would liquidate it, so you can try a trader before any money follows them.</p>
-        <p><strong>Where are my closed positions?</strong> Perps, then the History tab. Every close the venue has reported to this phone is kept there.</p>
+        <p><strong>Where are my closed positions?</strong> Profile, then Closed. Every close the venue has reported to this phone is kept there.</p>
 
         <h2 id="bug">Report a problem</h2>
         <p>Open an issue at <a href="https://github.com/frankolien/desk/issues" target="_blank" rel="noreferrer">github.com/frankolien/desk/issues</a> with what you did, what you expected, and a screenshot if you have one. Include the network you were on. Never include your passkey or any private key; we will never ask for them.</p>

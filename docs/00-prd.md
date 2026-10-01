@@ -53,7 +53,7 @@ and this is not their app.
 
 | Ingredient | Role | Why it is not decoration |
 |---|---|---|
-| Mera passkey | The only credential | Derives both keys. There is no other login, no other key, and no fallback that stores one. |
+| Mera passkey | The only credential | Derives both keys. There is no other login and no other key. |
 | AUSD | The collateral | The only balance the app shows. Every number on screen is denominated in it. |
 | Perpl | The exchange | The account, the order book, the position, the funding, the withdrawal. |
 
@@ -62,14 +62,18 @@ next section.
 
 ## What makes it different
 
-**The key does not exist at rest.** Mera's model is that a passkey's PRF output is the
-root and keys are derived from it on demand. Desk takes that literally. A Face ID
-touch derives the Ed25519 key that Perpl trades with; the key lives in memory while
-Desk is open, and is zeroed twenty seconds after Desk leaves the foreground, the moment
-the phone locks, or when the person locks Desk themselves. The
-secp256k1 wallet key is derived only for a contract call or an enrolment and zeroed on
-the next line. There is no key in the keychain to steal and no export screen, because
-there is nothing to export.
+**The wallet key does not exist at rest.** Mera's model is that a passkey's PRF output
+is the root and keys are derived from it on demand. Desk takes that literally for the key
+that moves money. The secp256k1 wallet key is derived only for a contract call or an
+enrolment and zeroed on the next line. It is never stored, and there is no export
+screen, because there is nothing to export.
+
+The Ed25519 key that Perpl trades with is derived from the same passkey, then sealed in
+the keychain with `biometryCurrentSet` and `WhenPasscodeSetThisDeviceOnly`, so only this
+iPhone's current Face ID enrolment opens it. It can place and close orders but cannot
+withdraw. It lives in memory while Desk is open, and is zeroed five minutes after Desk
+leaves the foreground, the moment the phone locks, or when the person locks Desk
+themselves.
 
 This is a real security property and also a real product one: the Account screen shows
 whether the key is unlocked, and a button that locks it now. Most apps
@@ -92,8 +96,9 @@ These decide arguments later, so they are written before the arguments happen.
 1. **Never ask for a wallet.** No WalletConnect, no deep link into another app, no
    "connect" anywhere in the product. The account comes from the passkey or the app
    has failed.
-2. **Never store a key.** The keychain holds the credential id and Perpl's opaque API
-   token. Neither is a secret that can move money.
+2. **Never store a key that can withdraw.** The keychain holds the credential id, Perpl's
+   opaque API token, and the order key sealed to Face ID on this device. None of them can
+   take money out.
 3. **Say the number before the signature.** Every order shows size, price, leverage,
    fee and liquidation price in AUSD before Face ID is asked for. The same rule as
    the Convert screen in Recourse.
@@ -180,8 +185,8 @@ key is unlocked, a button that locks it now, and sign out.
 There is no countdown. A fifteen-minute window was specified here first, and it was
 wrong: when it ran out it put Face ID — or a sign-out — between a person and closing a
 losing position. The trading key cannot move money, so a timer on it bought no safety.
-It lives while Desk is open, survives a twenty-second trip to another app, and is wiped
-after that or when the phone locks.
+It lives while Desk is open, survives five minutes in another app, and is wiped after
+that or when the phone locks.
 
 Withdrawals are contract calls the wallet signs, never the API key. That is worth a
 sentence on the screen, because it is the reason a stolen API token cannot take the
@@ -190,7 +195,7 @@ money.
 Done when:
 - Nothing interrupts an order while Desk is open, and locking Desk forces a Face ID
   prompt on the next order.
-- Leaving Desk for more than twenty seconds, or locking the phone, zeroes the key,
+- Leaving Desk for more than five minutes, or locking the phone, zeroes the key,
   provable by the next order asking for Face ID.
 - A withdrawal reaches the derived address on Monad and the collateral figure drops by
   the right amount.

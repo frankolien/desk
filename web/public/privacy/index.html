@@ -54,7 +54,7 @@
     <div class="site-wrap">
       <p class="site-eyebrow">Privacy</p>
       <h1 id="privacy-title" class="page-title">Your keys stay on your phone. So does almost everything else.</h1>
-      <p class="site-sub">Desk has no accounts and no analytics. This page says exactly what leaves your iPhone, where it goes, and how to make it go away.</p>
+      <p class="site-sub">The app has no accounts and no analytics. This site&rsquo;s home page uses an X ad pixel. This page says exactly what leaves your iPhone and this site, where it goes, and how to make it go away.</p>
     </div>
   </section>
 
@@ -73,15 +73,15 @@
       </nav>
 
       <div class="page-prose">
-        <p><em>Effective 24 September 2026.</em></p>
+        <p><em>Effective 1 October 2026.</em></p>
 
         <h2 id="short">The short version</h2>
-        <p>Desk has no accounts, no passwords and no analytics. Your keys are made and kept on your iPhone. The only things our server ever learns about you are what it needs to send you a push notification you asked for, and the public wallet address you are looking at. Signing out deletes what the server holds for your phone.</p>
+        <p>The app has no accounts, no passwords and no analytics. Your keys are made and kept on your iPhone. The only things our server ever learns about you are what it needs to send you a push notification you asked for, and the public wallet address you are looking at. Signing out deletes what the server holds for your phone. The one exception to &ldquo;no tracking&rdquo; is the X ad pixel on this site&rsquo;s home page, described below.</p>
 
         <h2 id="phone">What stays on your iPhone</h2>
         <ul>
           <li><strong>Your passkey.</strong> Created by iOS and kept in your iCloud Keychain. Apple syncs it between your devices; we never see it.</li>
-          <li><strong>Your trading key.</strong> Derived from the passkey on the phone, sealed in the iOS keychain, unlocked with Face ID. It is never sent anywhere and never leaves the device.</li>
+          <li><strong>Your keys.</strong> Both are derived from the passkey on the phone. The wallet key that moves your AUSD is never stored: it is made again for each transaction. The order key, which can place and close orders but can&rsquo;t withdraw, is sealed in the iOS keychain so only this iPhone&rsquo;s Face ID opens it. Neither key is ever sent anywhere.</li>
           <li><strong>Your settings and history.</strong> Watchlist, tracked wallets and the names you give them, copy rules and the copy log, positions you have closed, your display currency, and the spot tokens you bought through Desk. Stored in the app's own storage on the phone.</li>
         </ul>
 
@@ -107,13 +107,14 @@
           <li><strong>Nad Name Service, nad.fun, ENS, Neynar (Farcaster) and Bonfida (Solana names)</strong> receive wallet addresses to look up public names and pictures.</li>
           <li><strong>CoinGecko and OKX image servers</strong> serve token logos; like any image, they see your IP address.</li>
           <li><strong>Apple</strong> receives push notifications addressed to your device token.</li>
+          <li><strong>X (Twitter)</strong> receives a visit to this site&rsquo;s home page through its ad pixel: the page address, your IP address and browser details, and it may set cookies. When you tap Get the app there, X also receives that click, so we can count how many people go on to TestFlight. Only the home page loads it. The app and this site&rsquo;s other pages do not.</li>
           <li><strong>Anthropic</strong> receives a public trader's aggregate figures to write a one-paragraph summary of their style. Never your data, and never an address.</li>
         </ul>
         <p>The full list, with what each service is used for, is kept in the <a href="https://github.com/frankolien/desk/blob/main/docs/third-parties.md" target="_blank" rel="noreferrer">open repository</a>.</p>
 
         <h2 id="not">What we do not do</h2>
         <ul>
-          <li>No analytics, advertising or crash-reporting SDKs. There is no tracking identifier in the app.</li>
+          <li>No analytics, advertising or crash-reporting SDKs in the app, and no tracking identifier. The only tracking anywhere is the X pixel on this site&rsquo;s home page.</li>
           <li>No account, email or phone number is needed to use Desk.</li>
           <li>We do not sell data and we do not share it beyond the services above.</li>
           <li>Desk is not for anyone under 18.</li>
@@ -123,6 +124,7 @@
         <ul>
           <li><strong>Sign out</strong> in the app: the server forgets your push token, install secret, followed traders, tracked wallets and watchlist, and the app forgets everything it stored on the phone.</li>
           <li><strong>Turn off alerts, tracking or away copying</strong> and the matching data is removed from the server on the next sync.</li>
+          <li><strong>Block the X pixel</strong> with any content blocker. The site works the same without it.</li>
           <li><strong>Ask us</strong> to delete a waitlist email or anything else, through the contact on the <a href="/support">support page</a>.</li>
         </ul>
 

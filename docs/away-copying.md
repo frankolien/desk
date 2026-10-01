@@ -25,10 +25,9 @@ with the process; the normal alert still lands ("X opened a long — open Desk t
 the copy is one tap away. There is no way to make this reliable from the phone, and it is
 not presented as reliable: the setting's own text says "until iOS closes the app".
 
-**What it depends on.** The alerts scan has to run on a schedule. `.github/workflows/scan.yml`
-calls it every five minutes at best; an external one-minute scheduler pointed at
-`/api/alerts?job=scan` with the `Authorization: Bearer <CRON_SECRET>` header is the
-production answer.
+**What it depends on.** The alerts scan has to run on a schedule. The Railway worker runs
+it every 60 s (`WORKER_SCAN_MS`); `.github/workflows/scan.yml` only checks hourly that it
+is still running.
 
 **Where it lives.** `CopyTrader.wake()`, `DeskAppDelegate.application(_:didReceiveRemoteNotification:)`,
 `SigningSession.allowAway`, `AppModel.enterForeground`, `TradeAlerts.setCopying`, and on the

@@ -79,7 +79,7 @@
 
       <div class="page-prose">
         <h2 id="what">What Desk is</h2>
-        <p>Desk is a native iOS app for trading perpetuals on Monad. The key that signs orders is derived on the phone, held only in the app&rsquo;s memory while it is open and unlocked, and unlocked with Face ID. It is never sent anywhere.</p>
+        <p>Desk is a native iOS app for trading perpetuals on Monad. Both of its keys are derived on the phone from a passkey. The wallet key that moves AUSD is made again for each transaction and never stored. The order key, which can place and close orders but can&rsquo;t withdraw, is sealed in the iOS keychain so only this iPhone&rsquo;s current Face ID opens it. Neither key is ever sent anywhere.</p>
         <p>The server side, at <code>trydesk.trade</code>, reads public chain data, quotes swaps, sends push notifications and runs a worker that indexes wallet history. It holds credentials for third-party data services and for a testnet faucet, and nothing that could move a real person&rsquo;s money. The <a href="/docs">public API</a> is read-only.</p>
 
         <h2 id="scope">In scope</h2>

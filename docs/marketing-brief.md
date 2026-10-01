@@ -7,14 +7,15 @@ in this file should be asked about rather than assumed.*
 ## The product, in the words we use
 
 Desk is a native iPhone app for trading perpetual futures on Monad, through the Perpl
-exchange. Face ID is the trading key: a passkey derives the wallet and the signing key on
-demand, nothing is stored, there is no seed phrase and no wallet app.
+exchange. Face ID is the trading key: a passkey derives the wallet and the order key. The
+wallet key that moves your AUSD is never stored. The order key, which can't withdraw, is
+sealed to your Face ID on this iPhone. There is no seed phrase and no wallet app.
 
 The hook is not Face ID. The hook is: **copy the traders who are actually winning.** Desk
-reads every trader off Perpl's exchange contract — nobody submits a record — ranks them
-on what survives (win rate, profit factor, drawdown, weighted by money at risk), and copies
-their moves in the same block they happen, under rules you set. Shadow mode copies with no
-money so a strategy can be proven first.
+reads every trader off Perpl's exchange contract — nobody submits a record — ranks them on
+what survives (win rate, profit factor, drawdown, weighted by money at risk), and copies
+their moves as soon as their trade lands on the chain, under rules you set. Shadow mode
+copies with no money so a strategy can be proven first.
 
 Other things it does, all real and shipped: a live crowd view (long vs short on every
 market), push alerts with a Copy button on the notification, Home Screen widgets
@@ -64,9 +65,9 @@ Vanity metrics (followers, impressions) are not goals. Installs and cards are.
   positions) and `?view=crowd` (long/short per market). Real numbers, refreshed on request,
   quotable in posts as "right now on Perpl: …".
 
-Coming this week: per-trader public pages — `trydesk.trade/t/<address>` — with a live OG
-card showing that trader's PnL and positions and a "Copy on Desk" button. These are the
-things we tag traders with.
+Planned, not built yet: per-trader public pages at `trydesk.trade/t/<address>`, with a live
+OG card showing that trader's PnL and positions and a "Copy on Desk" button. Do not post or
+promise them until they are live.
 
 ## The loop we are building
 
@@ -137,7 +138,8 @@ that appears in this brief.
 4. **Discord post** — for a builder channel: what it is, what's real, the TestFlight link,
    a request for testers. Under 120 words. Follows whatever self-promotion rule you found.
 5. **Reply templates** — for "is this real money" (no, testnet, here's why), "where's the
-   key" (in memory, never stored, here's the doc), "Android?" (no, iPhone, here's why).
+   key" (the wallet key is never stored; the order key can't withdraw and is sealed to your
+   Face ID; here's the doc), "Android?" (no, iPhone, here's why).
 6. **A daily post calendar for 21 days** — one post a day, alternating: a trader page, a
    product clip, a live number from the API, a share card someone posted. Each entry:
    day, format, the asset, the one-line caption.

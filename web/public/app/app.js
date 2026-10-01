@@ -314,7 +314,7 @@ export function toast({ logoHTML = "", title, sub = "", amount = "", ttl = 6000 
 export const APP_URL = "https://testflight.apple.com/join/zjQdZzMX";
 
 /// The web cannot sign. Anything that would be an order opens this instead.
-export function handoff({ title = "Trade this in Desk", sub = "Every order signs with Face ID in the app. Scan to get Desk on your iPhone." } = {}) {
+export function handoff({ title = "Trade this in Desk", sub = "In the app, Face ID unlocks the key that signs your orders. Scan to get Desk on your iPhone." } = {}) {
   $("#handoff-title").textContent = title;
   $("#handoff-sub").textContent = sub;
   const box = $("#handoff-qr");

@@ -1,10 +1,10 @@
 # Desk App Store metadata — English (U.S.)
 
-## Promotional Text — 150/170 characters
+## Promotional Text — 143/170 characters
 
-Follow top Perpl traders on Monad, shadow-copy strategies before money moves, see live market positioning, and sign every order securely with Face ID.
+Follow top Perpl traders on Monad, shadow-copy strategies before money moves, see live market positioning, and unlock your orders with Face ID.
 
-## Description — 1,480/4,000 characters
+## Description — 1,532/4,000 characters
 
 Desk is a native iPhone app for discovering and following perpetual-futures traders on Monad.
 
@@ -23,7 +23,7 @@ SEE THE MARKET
 • Share position results with customizable cards.
 
 SECURED BY FACE ID
-Desk uses a passkey to derive signing material when needed. There is no seed phrase and no separate wallet app. The trading key is held in memory while Desk is open and is not stored on the device.
+Desk uses a passkey to derive your keys. There is no seed phrase and no separate wallet app. The wallet key that moves your AUSD is never stored. The order key, which can't withdraw, is sealed to your Face ID on this iPhone.
 
 Desk includes Home Screen widgets, Live Activities and push alerts so important activity is visible without keeping the app open.
 
