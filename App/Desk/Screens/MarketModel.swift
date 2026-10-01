@@ -54,6 +54,9 @@ final class MarketModel {
     /// The market whose book stream the live socket is subscribed to, and its `sid`.
     private var bookMarket: UInt32?
     private var bookSID: Int?
+    /// Book and candle streams the live socket holds beyond prices, and the candle `sid`.
+    private var liveExtras: Set<String> = []
+    private var candleSID: Int?
 
     /// The one market Desk trades. A deliberate scope decision rather than a limitation
     /// of the code — `OrderBuilder` takes the market as a parameter — and the discovery
@@ -171,7 +174,7 @@ final class MarketModel {
         applyQuote(for: selected)
         book.reset()
         Task { await refreshCandles() }
-        Task { await syncBookSubscription() }
+        Task { await syncLiveSubscriptions() }
     }
 
     /// Follows the selected market's book while a screen shows it. Leaving does not
@@ -179,17 +182,35 @@ final class MarketModel {
     /// the next market swaps streams in a single request.
     func watchBook(_ on: Bool) {
         wantsBook = on
-        if on { Task { await syncBookSubscription() } }
+        if on { Task { await syncLiveSubscriptions() } }
     }
 
-    private func syncBookSubscription() async {
-        guard wantsBook, bookMarket != marketID, let socket = liveSocket else { return }
-        var subscriptions: [[String: Any]] = []
-        if let old = bookMarket { subscriptions.append(["stream": "order-book@\(old)", "subscribe": false]) }
-        subscriptions.append(["stream": "order-book@\(marketID)", "subscribe": true])
-        bookMarket = marketID
-        bookSID = nil
-        book.reset()
+    /// The streams beyond prices this socket should hold: the selected market's candles at
+    /// the chosen interval, and its book while a screen shows it or while it is already
+    /// held — Perpl allows ten subscription requests a minute, so leaving a page keeps it.
+    private func wantedExtras() -> Set<String> {
+        let bookStream = "order-book@\(marketID)"
+        var wanted: Set<String> = ["candles@\(marketID)*\(candleIntervalSeconds)"]
+        if wantsBook || liveExtras.contains(bookStream) { wanted.insert(bookStream) }
+        return wanted
+    }
+
+    /// Swaps streams in one request: every unsubscribe and subscribe in a single `mt: 5`.
+    private func syncLiveSubscriptions() async {
+        guard let socket = liveSocket else { return }
+        let wanted = wantedExtras()
+        let leaving = liveExtras.subtracting(wanted)
+        let joining = wanted.subtracting(liveExtras)
+        guard !leaving.isEmpty || !joining.isEmpty else { return }
+        if joining.contains(where: { $0.hasPrefix("order-book@") }) || leaving.contains(where: { $0.hasPrefix("order-book@") }) {
+            bookSID = nil
+            book.reset()
+        }
+        if joining.contains(where: { $0.hasPrefix("candles@") }) { candleSID = nil }
+        bookMarket = wanted.contains("order-book@\(marketID)") ? marketID : nil
+        liveExtras = wanted
+        let subscriptions = leaving.sorted().map { ["stream": $0, "subscribe": false] as [String: Any] }
+            + joining.sorted().map { ["stream": $0, "subscribe": true] as [String: Any] }
         guard let data = try? JSONSerialization.data(withJSONObject: ["mt": 5, "subs": subscriptions] as [String: Any]) else { return }
         try? await socket.send(String(decoding: data, as: UTF8.self))
     }
@@ -201,6 +222,7 @@ final class MarketModel {
         reachedOldestCandle = false
         lastCandleFetch = nil
         Task { await refreshCandles() }
+        Task { await syncLiveSubscriptions() }
     }
 
     /// Raising the depth refetches at once; lowering it takes effect on the next refresh.
@@ -321,9 +343,12 @@ final class MarketModel {
                     // subscription when a screen is showing one.
                     book.reset()
                     bookSID = nil
-                    bookMarket = wantsBook ? marketID : nil
+                    candleSID = nil
+                    liveExtras = []
+                    liveExtras = wantedExtras()
+                    bookMarket = liveExtras.contains("order-book@\(marketID)") ? marketID : nil
                     let streams = ["heartbeat@\(network.chainID)"] + ids.map { "market-state@\($0)" }
-                        + (wantsBook ? ["order-book@\(marketID)"] : [])
+                        + liveExtras.sorted()
                     let subscriptions = streams.map { ["stream": $0, "subscribe": true] as [String: Any] }
                     let payload: [String: Any] = ["mt": 5, "subs": subscriptions]
                     let data = try JSONSerialization.data(withJSONObject: payload)
@@ -339,6 +364,7 @@ final class MarketModel {
                         case .quotes(let updates): ingestLiveQuotes(updates)
                         case .subscribed(let sids): noteSubscriptions(sids)
                         case .book(let update): ingestBook(update)
+                        case .candles(let sid, let update): ingestCandles(sid: sid, update)
                         case .other: break
                         }
                     }
@@ -356,7 +382,13 @@ final class MarketModel {
         case quotes([UInt32: Int64])
         case subscribed([String: Int])
         case book(OrderBook.Frame)
+        case candles(sid: Int?, [Candle])
         case other
+    }
+
+    private struct CandleFrame: Decodable {
+        let sid: Int?
+        let d: [Candle]
     }
 
     nonisolated private static func decodeLive(_ data: Data) -> LiveFrame {
@@ -373,13 +405,38 @@ final class MarketModel {
             }
             return .subscribed(sids)
         case 15, 16: return OrderBook.Frame(json: root).map(LiveFrame.book) ?? .other
+        // The snapshot repeats what the REST fetch already holds; updates carry the candle
+        // that just closed and the one forming.
+        case 12:
+            guard let frame = try? JSONDecoder().decode(CandleFrame.self, from: data) else { return .other }
+            return .candles(sid: frame.sid, frame.d)
         default: return .other
         }
     }
 
     private func noteSubscriptions(_ sids: [String: Int]) {
-        guard let bookMarket, let sid = sids["order-book@\(bookMarket)"] else { return }
-        bookSID = sid
+        if let bookMarket, let sid = sids["order-book@\(bookMarket)"] { bookSID = sid }
+        if let sid = sids["candles@\(marketID)*\(candleIntervalSeconds)"] { candleSID = sid }
+    }
+
+    /// Folds a candle update into the series: the forming candle replaces itself, a new
+    /// one is appended, a closed one replaces its slot. Frames from a stream this socket
+    /// has since left are dropped by their `sid`.
+    private func ingestCandles(sid: Int?, _ update: [Candle]) {
+        guard let candleSID, sid == candleSID, !candles.isEmpty else { return }
+        for candle in update.sorted(by: { $0.t < $1.t }) {
+            if let last = candles.last, candle.t > last.t {
+                candles.append(candle)
+            } else if let index = candles.lastIndex(where: { $0.t == candle.t }) {
+                candles[index] = candle
+            }
+        }
+        if candles.count > Self.candleCap { candles.removeFirst(candles.count - Self.candleCap) }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-log-candles"), let last = candles.last {
+            print("live candle \(symbol) \(candleIntervalSeconds)s t=\(last.t) c=\(last.c) count=\(candles.count)")
+        }
+        #endif
     }
 
     /// Frames from a stream this socket has since left are dropped by their `sid`; before
