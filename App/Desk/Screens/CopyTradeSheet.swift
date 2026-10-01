@@ -312,7 +312,7 @@ struct CopyTradeSheet: View {
 
     private var statusLine: String? {
         if !priceIsFresh {
-            return "Price is stale. Desk kept your order intact and will enable confirmation when the live mark returns."
+            return "Waiting for a live price."
         }
         if let shortfall, let quote {
             return "This costs \(quote.total.display()) AUSD with its fee, \(shortfall.display()) more than your free collateral."

@@ -139,7 +139,7 @@ final class TradingSession {
     }
 
     func noteHeadBlock(_ block: Int64) {
-        // Monotonic. The context and the market-state stream can report out of order, and
+        // Monotonic. The context and the heartbeat stream can report out of order, and
         // an order deadline computed from an older block than one already seen would be
         // shorter than intended.
         headBlock = max(headBlock, block)

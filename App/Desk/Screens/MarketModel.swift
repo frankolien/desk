@@ -39,10 +39,12 @@ final class MarketModel {
     private(set) var reachedOldestCandle = false
     static let defaultCandleDepth = 80
     private static let candleCap = 3_000
-    /// The block the venue last reported, carried on the same context call the price
-    /// comes from. Every order's deadline is computed against it, so a stale one produces
-    /// an order that expires on arrival.
-    private(set) var headBlock: Int64 = 0
+    /// The block the venue last reported: the heartbeat stream's on every block, the
+    /// context call's between connections. Every order's deadline is computed against it,
+    /// so a stale one produces an order that expires on arrival. It changes every block
+    /// and only the trading session needs it, so it reaches it by `onHeadBlock`, unobserved.
+    @ObservationIgnored private(set) var headBlock: Int64 = 0
+    @ObservationIgnored var onHeadBlock: ((Int64) -> Void)?
     /// Every market the venue lists, from the same context call. Kept so Watchlist and
     /// Search can show real instruments at real prices rather than a table of invented
     /// ones — whatever the venue lists, read live, never a fixed count.
@@ -70,6 +72,8 @@ final class MarketModel {
     /// When an unchanged price for each market was last stamped, so freshness keeps moving
     /// without every repeated frame redrawing the screen.
     private var restampedAt: [UInt32: ContinuousClock.Instant] = [:]
+    /// Whether this connection's state stream has delivered a frame yet.
+    @ObservationIgnored private var statesFlowing = false
     private var poller: Task<Void, Never>?
     private var liveReader: Task<Void, Never>?
     private var liveSocket: URLSessionWebSocket?
@@ -308,7 +312,7 @@ final class MarketModel {
             }
             self.market = market
             symbol = market.symbol
-            if let head = context.chain.gas?.headBlock { headBlock = max(headBlock, head) }
+            if let head = context.chain.gas?.headBlock { noteHead(head) }
             allMarkets = context.markets.filter(\.config.isOpen)
             // Alerts need symbols for the watchlist's ids without a model of their own.
             UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: allMarkets.map { (String($0.id), $0.symbol) }), forKey: "desk.marketSymbols")
@@ -338,16 +342,18 @@ final class MarketModel {
                     guard let self else { return }
                     let socket = try URLSessionWebSocket(url: network.marketDataURL)
                     liveSocket = socket
-                    let ids = allMarkets.isEmpty ? [marketID] : allMarkets.map(\.id)
                     // A fresh connection starts with no book stream; it joins the first
                     // subscription when a screen is showing one.
+                    statesFlowing = false
                     book.reset()
                     bookSID = nil
                     candleSID = nil
                     liveExtras = []
                     liveExtras = wantedExtras()
                     bookMarket = liveExtras.contains("order-book@\(marketID)") ? marketID : nil
-                    let streams = ["heartbeat@\(network.chainID)"] + ids.map { "market-state@\($0)" }
+                    // One state stream per chain carries every market; Perpl answers a
+                    // per-market `market-state@<id>` with "unknown stream".
+                    let streams = ["heartbeat@\(network.chainID)", "market-state@\(network.chainID)"]
                         + liveExtras.sorted()
                     let subscriptions = streams.map { ["stream": $0, "subscribe": true] as [String: Any] }
                     let payload: [String: Any] = ["mt": 5, "subs": subscriptions]
@@ -361,10 +367,15 @@ final class MarketModel {
                             Self.decodeLive(data)
                         }.value
                         switch frame {
-                        case .quotes(let updates): ingestLiveQuotes(updates)
+                        case .quotes(let updates):
+                            statesFlowing = true
+                            ingestLiveQuotes(updates)
                         case .subscribed(let sids): noteSubscriptions(sids)
                         case .book(let update): ingestBook(update)
                         case .candles(let sid, let update): ingestCandles(sid: sid, update)
+                        case .head(let block):
+                            noteHead(block)
+                            restampQuietMark()
                         case .other: break
                         }
                     }
@@ -383,6 +394,7 @@ final class MarketModel {
         case subscribed([String: Int])
         case book(OrderBook.Frame)
         case candles(sid: Int?, [Candle])
+        case head(Int64)
         case other
     }
 
@@ -410,8 +422,24 @@ final class MarketModel {
         case 12:
             guard let frame = try? JSONDecoder().decode(CandleFrame.self, from: data) else { return .other }
             return .candles(sid: frame.sid, frame.d)
+        case 100: return wireInt(root["h"]).map(LiveFrame.head) ?? .other
         default: return .other
         }
+    }
+
+    /// A market is sent only when its state changes, so a quiet one can go many seconds
+    /// without a frame. A heartbeat on a connection whose state stream is flowing says
+    /// the last price still stands.
+    private func restampQuietMark() {
+        guard statesFlowing, quotes[marketID] != nil, unchangedIsDue(marketID),
+              let selected = allMarkets.first(where: { $0.id == marketID }) else { return }
+        applyQuote(for: selected)
+    }
+
+    private func noteHead(_ block: Int64) {
+        guard block > headBlock else { return }
+        headBlock = block
+        onHeadBlock?(block)
     }
 
     private func noteSubscriptions(_ sids: [String: Int]) {

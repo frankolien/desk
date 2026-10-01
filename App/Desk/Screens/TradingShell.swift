@@ -167,9 +167,11 @@ struct TradingShell: View {
                 leverage: 4, entry: "1847.99", value: "12236.1", observedAt: .now.addingTimeInterval(-95))
         }
         #endif
-        // The head block arrives on the same context call the price does, and every
-        // order's deadline is computed against it.
-        .onChange(of: market.headBlock) { _, block in session.noteHeadBlock(block) }
+        .onAppear {
+            let session = session
+            market.onHeadBlock = { [weak session] block in session?.noteHeadBlock(block) }
+            if market.headBlock > 0 { session.noteHeadBlock(market.headBlock) }
+        }
         .onDisappear(perform: market.stop)
         .overlay(alignment: .top) {
             VStack(spacing: 8) {
