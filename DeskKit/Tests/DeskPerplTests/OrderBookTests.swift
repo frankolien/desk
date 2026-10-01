@@ -51,4 +51,28 @@ struct OrderBookTests {
         #expect(book.levels(.bid, depth: 8).first?.priceRaw == 30)
         #expect(OrderBook.Frame(json: ["mt": 9, "d": [:]]) == nil)
     }
+
+    @Test("A market order's estimate walks the book from the best level and stops at its limit")
+    func estimate() throws {
+        var book = OrderBook()
+        book.apply(try frame(#"{"mt":15,"bid":[{"p":990,"s":4,"o":1},{"p":980,"s":10,"o":1}],"ask":[{"p":1010,"s":2,"o":1},{"p":1020,"s":3,"o":1},{"p":1100,"s":50,"o":1}]}"#))
+
+        let buy = book.estimateFill(buying: true, sizeRaw: 4, limitRaw: 1_050)
+        #expect(buy.isComplete)
+        #expect(buy.filledRaw == 4)
+        let buyAverage: Double = (2 * 1010 + 2 * 1020) / 4
+        #expect(buy.averagePriceRaw == buyAverage)
+
+        // Only 5 sits within the limit, so a buy of 10 fills in part.
+        let thin = book.estimateFill(buying: true, sizeRaw: 10, limitRaw: 1_050)
+        #expect(!thin.isComplete)
+        #expect(thin.filledRaw == 5)
+
+        let sell = book.estimateFill(buying: false, sizeRaw: 6, limitRaw: nil)
+        #expect(sell.isComplete)
+        let sellAverage: Double = (4 * 990 + 2 * 980) / 6
+        #expect(sell.averagePriceRaw == sellAverage)
+
+        #expect(OrderBook().estimateFill(buying: true, sizeRaw: 1, limitRaw: nil).filledRaw == 0)
+    }
 }

@@ -198,17 +198,19 @@ struct Chip<Content: View>: View {
 /// figure the user is deciding about.
 struct AmountKeypad: View {
     @Binding var text: String
+    var keyHeight: CGFloat = 56
+    var spacing: CGFloat = 8
 
     private let keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "\u{232B}"]
 
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: spacing) {
             ForEach(keys, id: \.self) { key in
                 Button { press(key) } label: {
                     Text(key)
                         .font(.system(size: 26, weight: .medium))
                         .foregroundStyle(DeskColor.nightText.color)
-                        .frame(maxWidth: .infinity, minHeight: 56)
+                        .frame(maxWidth: .infinity, minHeight: keyHeight)
                 }
                 .accessibilityLabel(key == "\u{232B}" ? "Delete" : key)
                 .buttonStyle(DeskPressStyle(scale: 0.92))

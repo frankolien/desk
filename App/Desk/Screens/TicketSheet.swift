@@ -22,6 +22,8 @@ struct TicketSheet: View {
     var initialLeverage = 1
     /// Protection handed in from the chart, where a level or a ruler chose the price.
     var preset: TicketPreset?
+    /// The market's live book, when the screen behind the ticket follows one.
+    var book: OrderBook? = nil
     let onDismiss: () -> Void
 
     @State private var amount = ""
@@ -84,7 +86,7 @@ struct TicketSheet: View {
 
     private var blockingReason: String? {
         if !isPriceFresh {
-            return "Price is stale. Your order is preserved, but confirmation stays disabled until the live mark returns."
+            return "Waiting for a live price."
         }
         if hasInvalidProtection {
             return side == .up
@@ -169,6 +171,27 @@ struct TicketSheet: View {
                             figure("Fee", quote?.fee.display(fractionDigits: 4) ?? Unavailable.text)
                             figure("Total", quote?.total.display() ?? Unavailable.text,
                                    alignment: .trailing)
+                        }
+                        if let estimate = bookEstimate {
+                            HStack(spacing: 6) {
+                                Text("Est. fill")
+                                    .foregroundStyle(DeskColor.nightMuted.color)
+                                Text(estimate.price)
+                                    .foregroundStyle(DeskColor.nightText.color)
+                                Spacer(minLength: 8)
+                                Text("\(estimate.impact) impact")
+                                    .foregroundStyle(DeskColor.nightMuted.color)
+                            }
+                            .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
+                            .lineLimit(1)
+                            .accessibilityElement(children: .combine)
+                            if let short = estimate.short {
+                                Text(short)
+                                    .font(DeskType.caption)
+                                    .foregroundStyle(DeskColor.action.color)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
                     }
                     .padding(14)
@@ -257,8 +280,10 @@ struct TicketSheet: View {
                     }
                     .padding(.top, 14)
 
-                    AmountKeypad(text: $amount)
-                        .padding(.top, 8)
+                    // Shorter keys than the other sheets: the ticket carries the most above
+                    // its pad, and the bottom row has to stay above the confirm control.
+                    AmountKeypad(text: $amount, keyHeight: 46, spacing: 4)
+                        .padding(.top, 2)
 
                     if let blockingReason, !session.hasFailed {
                         HStack(alignment: .top, spacing: 8) {
@@ -347,6 +372,31 @@ struct TicketSheet: View {
                 onDismiss()
             }
         }
+    }
+
+    /// What this market order would take from the live book: the average price, its
+    /// distance from the mark, and whether the book holds the whole size within the
+    /// slippage bound the order carries. Less than that comes back partly filled.
+    private var bookEstimate: (price: String, impact: String, short: String?)? {
+        guard let book, book.isReady, let quote, let market, let mark, mark.raw > 0 else { return nil }
+        let bps = min(50, market.maxMarketSlippageBps)
+        let buying = side == .up
+        let bound = Double(mark.raw) * (1 + (buying ? 1 : -1) * Double(bps) / 10_000)
+        let estimate = book.estimateFill(
+            buying: buying, sizeRaw: quote.size.raw,
+            limitRaw: Int64(bound.rounded(buying ? .down : .up)))
+        let limitText = String(format: "%.2f%%", Double(bps) / 100)
+        guard let average = estimate.averagePriceRaw else {
+            return ("—", "—", "Nothing on the book within \(limitText). This would not fill.")
+        }
+        let decimals = market.config.priceDecimals
+        let price = Price(raw: Int64(average.rounded()), decimals: decimals)?.display(fractionDigits: decimals) ?? "—"
+        let impact = abs(average - Double(mark.raw)) / Double(mark.raw) * 100
+        var short: String?
+        if !estimate.isComplete, let held = market.size(estimate.filledRaw) {
+            short = "Only \(held.display(fractionDigits: held.decimals)) of \(quote.size.display(fractionDigits: quote.size.decimals)) \(market.symbol) would fill within \(limitText)."
+        }
+        return (price, String(format: "%.3f%%", impact), short)
     }
 
     /// Builds the draft and hands it to the session.

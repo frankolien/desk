@@ -43,6 +43,39 @@ public struct OrderBook: Sendable, Equatable {
         return ask - bid
     }
 
+    /// What a market order of `sizeRaw` would take from the book, walking from the best
+    /// level outward and stopping at `limitRaw` — the slippage bound an IOC order carries.
+    /// A buy walks the asks, a sell the bids.
+    public struct FillEstimate: Sendable, Equatable {
+        /// Size the book holds within the limit, capped at the order's size.
+        public let filledRaw: Int64
+        /// Size-weighted average price of that size, in raw price units; nil if none fills.
+        public let averagePriceRaw: Double?
+        public let isComplete: Bool
+    }
+
+    public func estimateFill(buying: Bool, sizeRaw: Int64, limitRaw: Int64?) -> FillEstimate {
+        guard isReady, sizeRaw > 0 else { return FillEstimate(filledRaw: 0, averagePriceRaw: nil, isComplete: false) }
+        let levels = buying
+            ? askLevels.values.sorted { $0.priceRaw < $1.priceRaw }
+            : bidLevels.values.sorted { $0.priceRaw > $1.priceRaw }
+        var remaining = sizeRaw
+        var filled: Int64 = 0
+        var notional: Double = 0
+        for level in levels {
+            if let limitRaw, buying ? level.priceRaw > limitRaw : level.priceRaw < limitRaw { break }
+            let take = min(remaining, level.sizeRaw)
+            filled += take
+            notional += Double(take) * Double(level.priceRaw)
+            remaining -= take
+            if remaining == 0 { break }
+        }
+        return FillEstimate(
+            filledRaw: filled,
+            averagePriceRaw: filled > 0 ? notional / Double(filled) : nil,
+            isComplete: remaining == 0)
+    }
+
     public mutating func reset() {
         bidLevels.removeAll()
         askLevels.removeAll()

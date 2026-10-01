@@ -793,7 +793,8 @@ struct PerpDetailScreen: View {
             TicketSheet(
                 side: side, market: market.market, mark: market.mark.value, session: session,
                 isPriceFresh: !market.freshness.freezesDigits,
-                preset: ticketPreset
+                preset: ticketPreset,
+                book: market.book
             ) {
                 session.clear()
                 ticket = nil
