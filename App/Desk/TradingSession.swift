@@ -96,6 +96,9 @@ final class TradingSession {
     /// Why saving a stop or take profit failed, for the sheet that asked.
     private(set) var protectionProblem: String?
 
+    /// A new protection sheet starts without the last one's failure.
+    func clearProtectionProblem() { protectionProblem = nil }
+
     /// Orders the person sent by hand, per market. Copy trading reads it to tell a
     /// position the person opened from one its own unanswered order opened.
     @ObservationIgnored private(set) var handOrders: [UInt32: Int] = [:]
@@ -164,8 +167,13 @@ final class TradingSession {
     /// Set before a desk is adopted; every socket this session opens belongs to it.
     var network: DeskNetwork = .testnet
 
-    func adopt(apiKey: APIKey, session: SigningSession, market: Market) {
-        if desk != nil { orphanOrder() }
+    func adopt(apiKey: APIKey, session: SigningSession, market: Market) async {
+        // A desk being replaced is closed first, so a connect can't join its handshake.
+        if desk != nil {
+            await close()
+            await retireDesk()
+            orphanOrder()
+        }
         credentials = PerplCredentials(apiKey: apiKey, session: session)
         desk = OrderDesk(socket: network.tradingSocket(), market: market, firstFrameID: frameSeed)
         self.market = market
@@ -203,6 +211,7 @@ final class TradingSession {
         orderOrigin = nil
         handOrders = [:]
         unresolvedHand = [:]
+        protectionProblem = nil
         credentials = nil
         desk = nil
         // Block numbers belong to a chain; another network's are tens of millions apart.

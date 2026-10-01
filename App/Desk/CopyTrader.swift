@@ -734,11 +734,15 @@ final class CopyTrader {
                                 kind: kind, detail: detail, leverage: copy.leverage, margin: copy.margin, pnl: pnl))
         }
         let side: Side = copy.isLong ? .long : .short
+        // An unread book is not an empty one: the copy stays until a read book lacks it.
+        guard model.trading.positions.value != nil else {
+            return note(.failed, "They \(verb), but Desk hasn't read your positions yet. Your copy is still open; close it from Perps.")
+        }
         guard let position = model.openPositions.first(where: { candidate in
             copy.positionID.map { candidate.positionID == $0 } ?? (candidate.marketID == copy.marketID && candidate.side == side)
         }) else {
             open.removeAll { $0.id == copy.id }
-            return
+            return note(.protected, "Already closed on Perpl before they \(verb).")
         }
         guard model.isKeyUnlocked else {
             return note(.failed, "They \(verb), but Desk was locked. Your copy is still open; close it from Perps.")
@@ -751,7 +755,7 @@ final class CopyTrader {
             let epoch = session.connectionEpoch
             let frameID = try await session.closeCopy(position, size: size, in: target)
             let outcome = await settlement(of: frameID, session: session, retryBlocks: target.orderRetryBlocks, since: epoch)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return note(.failed, "Perpl didn't confirm the close. Check your \(symbol) position.") }
             switch outcome {
             case .settled:
                 // A close is an immediate-or-cancel order and can fill in part. The rest of

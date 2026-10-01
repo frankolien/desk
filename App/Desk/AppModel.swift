@@ -509,7 +509,7 @@ final class AppModel {
             sessionTradingIndex = nil
             isKeyUnlocked = false
         }
-        trading.adopt(apiKey: stored.apiKey, session: session, market: market)
+        await trading.adopt(apiKey: stored.apiKey, session: session, market: market)
         hasTradingAccount = true
         if let head = context.chain.gas?.headBlock { trading.noteHeadBlock(head) }
         // The account and API key already exist at this point. A live-stream outage is
@@ -1196,16 +1196,16 @@ final class AppModel {
     /// A desk the first read missed, found by a later one: trading picks up without a
     /// second sign-in.
     private func resumeTradingIfFound(_ address: EthereumAddress) async {
-        guard hasDesk.value == true, !hasTradingAccount, !isWorking, !isResumingTrading,
+        guard hasDesk.value == true, !hasTradingAccount, !isWorking,
               stage == .trading, let stored = apiKeys.load(for: address) else { return }
-        isResumingTrading = true
-        defer { isResumingTrading = false }
+        // Held like every other way into trading, so Open desk and a network switch wait.
+        isWorking = true
+        defer { isWorking = false }
         guard let configuration = try? network.perpl(),
               let context = try? await PerplREST(configuration: configuration).context() else { return }
         noteMinimumToOpen(context)
         await enterTrading(stored, context: context)
     }
-    private var isResumingTrading = false
 
     private func record<Value>(_ read: BalanceReader.Read<Value>, into slot: inout LastGood<Value>) {
         switch read {

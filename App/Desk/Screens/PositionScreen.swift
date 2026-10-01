@@ -651,6 +651,7 @@ private struct PositionProtectionSheet: View {
             }
             .buttonStyle(.borderedProminent).tint(DeskColor.rise.color).disabled(!valid)
         }
+        .onAppear { session.clearProtectionProblem() }
         .padding(20).foregroundStyle(DeskColor.nightText.color).background(DeskColor.night.color)
         .presentationDetents([.large]).presentationDragIndicator(.hidden)
         .onAppear {

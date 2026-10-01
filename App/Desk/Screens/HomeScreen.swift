@@ -640,7 +640,10 @@ struct HomeScreen: View {
         let perps = filter == .tokens ? [] : positionContexts
         let tokens = filter == .perps ? [] : spot.holdings
         if perps.isEmpty && tokens.isEmpty {
-            emptyLine(filter == .tokens ? "No tokens bought through Desk yet" : "No open positions", action: onTrade)
+            // An account whose book hasn't been read yet is not one with no positions.
+            let unread = filter != .tokens && model.hasTradingAccount && model.trading.positions.value == nil
+            emptyLine(filter == .tokens ? "No tokens bought through Desk yet"
+                      : unread ? "Reading your positions…" : "No open positions", action: onTrade)
         } else {
             ForEach(perps) { position in
                 ledgerRow(
