@@ -1011,7 +1011,8 @@ final class AppModel {
             TradingKeyVault.forget(address: address, network: network.rawValue)
             ClosedPositionsStore.shared.forget(address: address.checksummed)
         }
-        await trading.close()
+        // The next account adopts its own desk; this one's order can no longer be heard.
+        await trading.abandon()
         await session.end()
         isKeyUnlocked = false
         unlockProblem = nil

@@ -31,6 +31,8 @@ struct CopyTradeSheet: View {
     @State private var leverage: Int
     @State private var revealed = false
     @State private var handledFill = false
+    /// This sheet sent the order in flight; another screen's order is not this copy.
+    @State private var submitted = false
     @FocusState private var typing: Bool
 
     private static let quickAmounts = [25, 50, 100]
@@ -51,7 +53,8 @@ struct CopyTradeSheet: View {
     private var maxLeverage: Int { max(1, Int(listed?.config.maxLeverage ?? 1)) }
     private var tint: DeskRGB { intent.side.color }
     private var free: Money? { session.account.value?.free }
-    private var settled: Bool { session.order.outcome == .settled }
+    private var settled: Bool { submitted && session.order.outcome == .settled }
+    private var busyHere: Bool { submitted && session.isBusy }
     private var priceIsFresh: Bool { !market.freshness.freezesDigits }
 
     private var quote: OrderQuote? {
@@ -81,7 +84,7 @@ struct CopyTradeSheet: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .disabled(session.isBusy)
+                .disabled(busyHere)
             }
 
             theirs
@@ -91,7 +94,7 @@ struct CopyTradeSheet: View {
             if let sentence = statusLine {
                 Text(sentence)
                     .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(session.hasFailed || shortfall != nil ? DeskColor.fall.color : DeskColor.nightMuted.color)
+                    .foregroundStyle((submitted && session.hasFailed) || shortfall != nil ? DeskColor.fall.color : DeskColor.nightMuted.color)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -103,7 +106,7 @@ struct CopyTradeSheet: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
                 HoldToConfirm(
-                    title: session.isBusy ? "Copying…" : "Hold to copy \(name)",
+                    title: busyHere ? "Copying…" : "Hold to copy \(name)",
                     tint: tint,
                     isEnabled: quote != nil && shortfall == nil && !session.isBusy && listed != nil && priceIsFresh
                 ) {
@@ -117,16 +120,15 @@ struct CopyTradeSheet: View {
         .preferredColorScheme(.dark)
         .fittedSheet()
         .presentationDragIndicator(.visible)
-        .interactiveDismissDisabled(session.isBusy)
+        .interactiveDismissDisabled(busyHere)
         .onAppear {
             // An earlier order's outcome is not this copy's.
             if !session.isBusy { session.clear() }
             withAnimation(.spring(duration: 0.6, bounce: 0.28).delay(0.18)) { revealed = true }
         }
         .onChange(of: session.order.outcome) { _, outcome in
-            guard outcome == .settled, !handledFill else { return }
+            guard outcome == .settled, submitted, !handledFill else { return }
             handledFill = true
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(session.order.fill?.isPartial == true ? 2_600 : 900))
                 guard session.order.outcome == .settled else { return }
@@ -317,7 +319,8 @@ struct CopyTradeSheet: View {
         if let shortfall, let quote {
             return "This costs \(quote.total.display()) AUSD with its fee, \(shortfall.display()) more than your free collateral."
         }
-        if let text = session.statusText, session.isBusy || session.hasFailed { return text }
+        if submitted, let text = session.statusText, session.isBusy || session.hasFailed { return text }
+        if session.isBusy { return "Another order is still in flight." }
         if let free, amount.isEmpty { return "\(free.display()) AUSD free to trade." }
         return nil
     }
@@ -341,6 +344,7 @@ struct CopyTradeSheet: View {
             leverageHundredths: leverage * 100,
             slippageBps: min(50, listed.maxMarketSlippageBps),
             protection: nil)
-        await session.place(draft)
+        submitted = true
+        await session.place(draft, in: listed, origin: .copySheet(market: listed.id))
     }
 }

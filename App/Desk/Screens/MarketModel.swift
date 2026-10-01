@@ -320,9 +320,14 @@ final class MarketModel {
             allMarkets = context.markets.filter(\.config.isOpen)
             // Alerts need symbols for the watchlist's ids without a model of their own.
             UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: allMarkets.map { (String($0.id), $0.symbol) }), forKey: "desk.marketSymbols")
-            // The stream keeps quotes current while it flows; otherwise the context does.
-            for item in allMarkets where quotes[item.id] == nil || !statesFlowing {
-                quotes[item.id] = Quote(markRaw: item.state.markRaw, previousRaw: item.state.previousRaw)
+            // The stream keeps marks current while it flows; otherwise the context does. The
+            // previous price is always the venue's, never one a stream frame stood in for.
+            for item in allMarkets {
+                if statesFlowing, let streamed = quotes[item.id] {
+                    quotes[item.id] = Quote(markRaw: streamed.markRaw, previousRaw: item.state.previousRaw, receivedAt: streamed.receivedAt)
+                } else {
+                    quotes[item.id] = Quote(markRaw: item.state.markRaw, previousRaw: item.state.previousRaw)
+                }
             }
             // The context is cached for seconds at the edge; a flowing stream's price is newer.
             if statesFlowing, mark.hasValue {

@@ -33,8 +33,15 @@ struct TicketSheet: View {
     @State private var handledFill = false
     /// Set once this sheet sends an order, so a fill from an earlier one is never shown here.
     @State private var submitted = false
-    /// Opened while an earlier order was still in flight; its fill is shown here.
+    /// Opened while an earlier order from a ticket like this one was still in flight; its
+    /// fill is shown here.
     @State private var watchingEarlier = false
+    /// The order in flight or last finished is this ticket's to speak for.
+    private var mine: Bool { submitted || watchingEarlier }
+
+    private func origin(for market: Market) -> TradingSession.OrderOrigin {
+        .ticket(market: market.id, side: side == .up ? .long : .short)
+    }
     @State private var showsProtection = false
 
     private var quote: OrderQuote? {
@@ -282,7 +289,7 @@ struct TicketSheet: View {
                     AmountKeypad(text: $amount, keyHeight: 46, spacing: 4)
                         .padding(.top, 2)
 
-                    if let blockingReason, !session.hasFailed {
+                    if let blockingReason, !(mine && session.hasFailed) {
                         HStack(alignment: .top, spacing: 8) {
                             Image(systemName: "exclamationmark.circle.fill")
                                 .font(.system(size: 13, weight: .bold))
@@ -296,7 +303,7 @@ struct TicketSheet: View {
                         .transition(.opacity)
                     }
 
-                    if session.hasFailed, let reason = session.statusText {
+                    if mine, session.hasFailed, let reason = session.statusText {
                         // Above the control rather than in an alert: an alert is dismissed and
                         // forgotten, and the reason is the thing the user has to act on.
                         HStack(alignment: .top, spacing: 8) {
@@ -352,7 +359,9 @@ struct TicketSheet: View {
             // The one place the venue's own vocabulary is worth showing, because
             // "forwarded" is a real state a user can be stuck in and a spinner is not an
             // explanation.
-            if session.isBusy || ((submitted || watchingEarlier) && session.order.outcome == .settled), let status = session.statusText {
+            if let status = mine
+                ? (session.isBusy || session.order.outcome == .settled ? session.statusText : nil)
+                : (session.isBusy ? "Another order is still in flight." : nil) {
                 Text(status)
                     .font(DeskType.caption)
                     .foregroundStyle(session.order.outcome == .settled ? DeskColor.rise.color : DeskColor.nightMuted.color)
@@ -364,10 +373,15 @@ struct TicketSheet: View {
         }
         .padding(.bottom, 8)
         .background(DeskColor.night.color)
-        .interactiveDismissDisabled(session.isBusy)
+        .interactiveDismissDisabled(mine && session.isBusy)
         .onAppear {
-            // An earlier order's outcome is not this ticket's, unless it is still in flight.
-            if session.isBusy { watchingEarlier = true } else { session.clear() }
+            // An earlier order's outcome is not this ticket's, unless a ticket for the same
+            // market and side sent it and it is still in flight.
+            if session.isBusy {
+                watchingEarlier = market.map { session.orderOrigin == origin(for: $0) } ?? false
+            } else {
+                session.clear()
+            }
         }
         .onChange(of: session.order.outcome) { _, outcome in
             guard outcome == .settled, submitted || watchingEarlier, !handledFill else { return }
@@ -431,7 +445,7 @@ struct TicketSheet: View {
             slippageBps: min(50, market.maxMarketSlippageBps),
             protection: protection)
 
-        await session.place(draft)
+        await session.place(draft, in: market, origin: origin(for: market))
     }
 
     private func figure(

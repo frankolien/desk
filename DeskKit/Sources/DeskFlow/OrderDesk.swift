@@ -271,8 +271,10 @@ public actor OrderDesk {
         _ position: PerplPosition,
         stopLoss: Price?,
         takeProfit: Price?,
-        slippageBps: Int
+        slippageBps: Int,
+        in other: Market? = nil
     ) async throws {
+        let market = try target(other)
         guard let account else { throw Failure.notConnected }
         guard let counter else { throw Failure.notConnected }
         guard allowsForwarding else { throw Failure.forwardingNotAllowed }

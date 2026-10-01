@@ -51,12 +51,36 @@ final class TradingSession {
     /// failure. The ticket stays busy until then, so a second order can't double the first.
     private(set) var retryingUntil: Int64?
     private var retryBackstop: Task<Void, Never>?
+    private var retryStartedAt = ContinuousClock.now
+    /// Monad's slowest recent block time, for turning a block window into a wait.
+    static let blockTime = Duration.milliseconds(400)
     /// The socket went away during the retry wait, so Perpl's retry could have filled
     /// unheard.
     private var retryUnheard = false
 
-    /// The market of the order in flight or last sent by hand.
-    var orderMarketID: UInt32? { orderMarket?.id }
+    /// Which screen sent the order in flight or last sent by hand. A sheet reacts only to
+    /// its own order, never to one another screen sent.
+    enum OrderOrigin: Equatable {
+        case ticket(market: UInt32, side: Side)
+        case copySheet(market: UInt32)
+        case close(market: UInt32)
+    }
+    private(set) var orderOrigin: OrderOrigin?
+
+    /// Changes whenever the trading socket goes away, so a wait can tell whether it was
+    /// listening the whole time.
+    @ObservationIgnored private(set) var connectionEpoch = 0
+
+    /// Whether the last hand order on this market may still fill: in flight, retrying, or
+    /// with no answer heard.
+    func handOrderUnresolved(on marketID: UInt32) -> Bool {
+        guard orderMarket?.id == marketID else { return false }
+        if retryingUntil != nil { return true }
+        switch order.outcome {
+        case .sending?, .forwarded?, .expired?, .abandoned?: return true
+        default: return false
+        }
+    }
 
     /// Orders the person sent by hand, per market. Copy trading reads it to tell a
     /// position the person opened from one its own unanswered order opened.
@@ -127,6 +151,7 @@ final class TradingSession {
     var network: DeskNetwork = .testnet
 
     func adopt(apiKey: APIKey, session: SigningSession, market: Market) {
+        if desk != nil { orphanOrder() }
         credentials = PerplCredentials(apiKey: apiKey, session: session)
         desk = OrderDesk(socket: network.tradingSocket(), market: market, firstFrameID: frameSeed)
         self.market = market
@@ -142,16 +167,23 @@ final class TradingSession {
         await desk.close()
     }
 
+    /// The desk following the current order is going away, so no answer can reach it.
+    private func orphanOrder() {
+        if retryingUntil != nil { retryUnheard = true }
+        endRetrying()
+        order.connectionLost()
+    }
+
     /// Forgets the enrolled key along with the socket, for a switch to another network
     /// whose exchange has never seen that key.
     func abandon() async {
         await close()
         await retireDesk()
+        orphanOrder()
         credentials = nil
         desk = nil
         // Block numbers belong to a chain; another network's are tens of millions apart.
         headBlock = 0
-        endRetrying()
     }
 
     /// Points the order desk at the instrument the person selected. Within one exchange
@@ -166,8 +198,8 @@ final class TradingSession {
             return
         }
         watching?.cancel()
-        if retryingUntil != nil { retryUnheard = true }
         await retireDesk()
+        orphanOrder()
         desk = OrderDesk(socket: network.tradingSocket(), market: market, firstFrameID: frameSeed)
         self.market = market
         startClean()
@@ -189,7 +221,12 @@ final class TradingSession {
         // shorter than intended.
         headBlock = max(headBlock, block)
         let current = headBlock
-        if let until = retryingUntil, current > until { endRetrying() }
+        // A head that was stale when the failure came can jump past the window at once,
+        // so the wait also runs its length in time.
+        if let until = retryingUntil, current > until,
+           ContinuousClock.now - retryStartedAt >= Self.blockTime * Int(orderMarket?.orderWaitBlocks ?? 22) {
+            endRetrying()
+        }
         Task { [weak self] in
             guard let self, let desk = self.desk else { return }
             for id in await desk.expire(headBlock: current) {
@@ -250,6 +287,7 @@ final class TradingSession {
 
     func close() async {
         if retryingUntil != nil { retryUnheard = true }
+        connectionEpoch += 1
         connectionID = UUID()
         connecting?.cancel()
         connecting = nil
@@ -265,12 +303,15 @@ final class TradingSession {
     /// while the id was unknown is replayed by `associate`, and the tracker — which is the
     /// authority and never walks a terminal phase backwards — is asked directly in case an
     /// update landed with no watcher tick left to carry it.
-    func place(_ draft: OrderDesk.Draft) async {
+    /// `market` is the one the draft was priced on, never the desk's default: the desk
+    /// may point elsewhere by the time the send goes out.
+    func place(_ draft: OrderDesk.Draft, in market: Market, origin: OrderOrigin) async {
         localProblem = nil
         endRetrying()
         order.begin()
         orderMarket = market
-        if let id = market?.id { handOrders[id, default: 0] += 1 }
+        orderOrigin = origin
+        handOrders[market.id, default: 0] += 1
         do {
             guard let desk else { throw OrderDesk.Failure.notEnrolled }
             if !isConnected {
@@ -289,11 +330,12 @@ final class TradingSession {
                     if !isConnected { try await connect() }
                 }
             }
-            let id = try await desk.place(draft, headBlock: headBlock)
+            let id = try await desk.place(draft, headBlock: headBlock, in: market)
             let before = order.outcome
             order.associate(id)
             if let current = await desk.phase(of: id) { order.apply(id: id, phase: current, fill: await desk.fill(of: id)) }
             noteOutcome(since: before)
+            awaitAnswer(id)
         } catch {
             Haptics.failure()
             localProblem = Self.sentence(for: error)
@@ -301,11 +343,12 @@ final class TradingSession {
         }
     }
 
-    func closePosition(_ position: PerplPosition, size: Size? = nil, slippageBps: Int) async {
+    func closePosition(_ position: PerplPosition, size: Size? = nil, slippageBps: Int, in market: Market) async {
         localProblem = nil
         endRetrying()
         order.begin()
         orderMarket = market
+        orderOrigin = .close(market: position.marketID)
         handOrders[position.marketID, default: 0] += 1
         do {
             guard let desk else { throw OrderDesk.Failure.notEnrolled }
@@ -318,11 +361,12 @@ final class TradingSession {
                 }
             }
             let id = try await desk.closePosition(
-                position, size: size, slippageBps: slippageBps, headBlock: headBlock)
+                position, size: size, slippageBps: slippageBps, headBlock: headBlock, in: market)
             let before = order.outcome
             order.associate(id)
             if let current = await desk.phase(of: id) { order.apply(id: id, phase: current, fill: await desk.fill(of: id)) }
             noteOutcome(since: before)
+            awaitAnswer(id)
         } catch {
             Haptics.failure()
             localProblem = Self.sentence(for: error)
@@ -363,7 +407,7 @@ final class TradingSession {
     }
 
     func protectPosition(
-        _ position: PerplPosition, stopLoss: Price?, takeProfit: Price?, slippageBps: Int
+        _ position: PerplPosition, stopLoss: Price?, takeProfit: Price?, slippageBps: Int, in market: Market
     ) async -> Bool {
         localProblem = nil
         do {
@@ -371,7 +415,7 @@ final class TradingSession {
             if !isConnected { try await connect() }
             try await desk.protectPosition(
                 position, stopLoss: stopLoss, takeProfit: takeProfit,
-                slippageBps: slippageBps)
+                slippageBps: slippageBps, in: market)
             Haptics.success()
             return true
         } catch {
@@ -414,11 +458,22 @@ final class TradingSession {
     /// after twenty seconds if the head block stops arriving.
     private func beginRetrying() {
         guard retryingUntil == nil else { return }
+        retryStartedAt = .now
         retryingUntil = headBlock + Int64(orderMarket?.orderWaitBlocks ?? market?.orderWaitBlocks ?? 22)
         retryBackstop = Task { [weak self] in
             try? await Task.sleep(for: .seconds(20))
             guard !Task.isCancelled else { return }
             self?.endRetrying()
+        }
+    }
+
+    /// Desk's deadline runs on the head block, which stops if the market feed does. A
+    /// minute without an answer is called unconfirmed so no screen waits for ever.
+    private func awaitAnswer(_ id: Int64) {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(60))
+            guard let self, self.order.outcome?.isBusy == true else { return }
+            self.record(id, .expired, nil)
         }
     }
 
@@ -462,6 +517,7 @@ final class TradingSession {
     private func socketEnded(id: UUID) {
         guard id == connectionID else { return }
         isConnected = false
+        connectionEpoch += 1
         if retryingUntil != nil { retryUnheard = true }
         account.recordFailure("The Perpl account stream disconnected.")
         positions.recordFailure("The Perpl position stream disconnected.")

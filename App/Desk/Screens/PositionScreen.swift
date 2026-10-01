@@ -559,12 +559,19 @@ private struct MarketCloseSheet: View {
             }
             .padding(16).background(DeskColor.nightChip.color, in: RoundedRectangle(cornerRadius: 18))
             Spacer()
+            if session.hasFailed, session.orderOrigin == .close(market: position.marketID), let reason = session.statusText {
+                Text(reason)
+                    .font(DeskType.caption)
+                    .foregroundStyle(DeskColor.fall.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             Button {
                 guard let closeSize else { return }
                 Task {
                     await session.closePosition(
                         position, size: closeSize,
-                        slippageBps: min(50, market.maxMarketSlippageBps))
+                        slippageBps: min(50, market.maxMarketSlippageBps), in: market)
                     if !session.hasFailed { onDone() }
                 }
             } label: {
@@ -629,7 +636,7 @@ private struct PositionProtectionSheet: View {
                 Task {
                     let saved = await session.protectPosition(
                         position, stopLoss: sl, takeProfit: tp,
-                        slippageBps: min(50, market.maxMarketSlippageBps))
+                        slippageBps: min(50, market.maxMarketSlippageBps), in: market)
                     if saved { onDone() }
                 }
             } label: {

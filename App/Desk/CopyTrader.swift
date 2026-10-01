@@ -613,21 +613,32 @@ final class CopyTrader {
                 .filter { $0.marketID == target.id && ($0.side == .long) == isLong }
                 .map { ($0.positionID, $0.sizeRaw) })
             let handOrders = session.handOrders[target.id] ?? 0
-            let handInFlight = session.isBusy && session.orderMarketID == target.id
+            let handInFlight = session.handOrderUnresolved(on: target.id)
+            // Positions read without a live connection may predate what a reconnect shows.
+            let snapshotIsLive = session.isConnected
+            let epoch = session.connectionEpoch
             let frameID = try await session.placeCopy(plan.draft, in: target)
-            var outcome = await settlement(of: frameID, session: session, retryBlocks: target.orderRetryBlocks)
-            // Perpl never answered. A position that appears on this side anyway is the
-            // order's fill, and its answer may land while that is looked for.
+            var outcome = await settlement(of: frameID, session: session, retryBlocks: target.orderRetryBlocks, since: epoch)
+            guard !Task.isCancelled else { return }
+            // Perpl never answered, or Desk stopped listening. A position that appears on
+            // this side anyway is the order's fill, and its answer may land while that is
+            // looked for.
             var late: PerplPosition?
             switch outcome {
             case .settled?, .unfilled?, .rejected?, .failed?: break
             default:
                 late = await newPosition(marketID: target.id, isLong: isLong, model: model, excluding: held)
                 outcome = await session.phase(of: frameID)
-                // A first failure that only now arrived gets its retry window too.
+                // A first failure that only now arrived gets its retry window, if Desk was
+                // listening throughout; otherwise it is no answer at all.
                 if case .failed? = outcome {
-                    outcome = await settlement(of: frameID, session: session, retryBlocks: target.orderRetryBlocks)
+                    if session.connectionEpoch == epoch {
+                        outcome = await settlement(of: frameID, session: session, retryBlocks: target.orderRetryBlocks, since: epoch)
+                    } else {
+                        outcome = nil
+                    }
                 }
+                guard !Task.isCancelled else { return }
             }
             switch outcome {
             case .settled:
@@ -670,18 +681,25 @@ final class CopyTrader {
                 // side, where Perpl merges fills. Anything else is the person's own trade.
                 let planned = plan.draft.size.raw
                 let byHand = handInFlight || (session.handOrders[target.id] ?? 0) != handOrders
-                let grown = model.openPositions.first { position in
-                    guard let before = heldSizes[position.positionID] else { return false }
-                    return position.sizeRaw > before && position.sizeRaw - before <= planned
+                let changed = model.openPositions.filter { position in
+                    heldSizes[position.positionID].map { position.sizeRaw != $0 } ?? false
                 }
+                let grown = changed.count == 1 ? changed.first.flatMap { position -> PerplPosition? in
+                    let before = heldSizes[position.positionID] ?? 0
+                    return position.sizeRaw > before && position.sizeRaw - before <= planned ? position : nil
+                } : nil
                 var adopted: (positionID: Int64, sizeRaw: Int64)?
-                if !byHand {
-                    if let late, late.sizeRaw <= planned {
+                if !byHand, snapshotIsLive {
+                    if let late, late.sizeRaw <= planned, changed.isEmpty {
                         adopted = (late.positionID, late.sizeRaw)
-                    } else if let grown {
+                    } else if late == nil, let grown {
                         adopted = (grown.positionID, grown.sizeRaw - (heldSizes[grown.positionID] ?? 0))
                     }
                 }
+                // "Nothing was opened" only when Desk listened throughout and nothing on
+                // this side moved; anything less is a position to check.
+                let provablyNothing = late == nil && changed.isEmpty && !byHand && snapshotIsLive
+                    && session.isConnected && session.connectionEpoch == epoch
                 if let adopted {
                     open.append(OpenCopy(
                         id: UUID(), trader: trader, marketID: target.id, symbol: symbol, isLong: isLong,
@@ -691,10 +709,10 @@ final class CopyTrader {
                     entry.detail += " · filled late"
                     record(entry)
                     onEvent?("Copied \(Self.name(for: trader)): \(label)")
-                } else if late != nil || grown != nil || !session.isConnected {
-                    note(.failed, "Perpl didn't confirm this copy. Check your \(symbol) position; Desk isn't tracking it.")
-                } else {
+                } else if provablyNothing {
                     note(.failed, "The order expired before it filled. Nothing was opened.")
+                } else {
+                    note(.failed, "Perpl didn't confirm this copy. Check your \(symbol) position; Desk isn't tracking it.")
                 }
             }
         } catch {
@@ -733,8 +751,11 @@ final class CopyTrader {
             return note(.failed, "The \(symbol) market couldn't be read, so your copy is still open.")
         }
         do {
+            let epoch = session.connectionEpoch
             let frameID = try await session.closeCopy(position, size: size, in: target)
-            switch await settlement(of: frameID, session: session, retryBlocks: target.orderRetryBlocks) {
+            let outcome = await settlement(of: frameID, session: session, retryBlocks: target.orderRetryBlocks, since: epoch)
+            guard !Task.isCancelled else { return }
+            switch outcome {
             case .settled:
                 // A close is an immediate-or-cancel order and can fill in part. The rest of
                 // the copy is still a live position, so it stays tracked at what is left.
@@ -764,7 +785,7 @@ final class CopyTrader {
             case .unfilled:
                 note(.failed, "The close did not fill within the slippage limit. Your copy is still open.")
             default:
-                note(.failed, "The close expired before it filled. Your copy is still open.")
+                note(.failed, "Perpl didn't confirm the close. Check your \(symbol) position.")
             }
         } catch {
             note(.failed, TradingSession.sentence(for: error) + " Your copy is still open.")
@@ -801,8 +822,14 @@ final class CopyTrader {
     /// was first seen have both passed, because a later non-failure still decides the
     /// order. A local expiry is only Desk's own timeout, and orders carry no venue
     /// deadline, so it is waited out to the end.
-    private func settlement(of frameID: Int64, session: TradingSession, retryBlocks: UInt32) async -> OrderPhase? {
+    /// A failure that stands while Desk was not listening the whole time is no answer, and
+    /// comes back nil.
+    private func settlement(
+        of frameID: Int64, session: TradingSession, retryBlocks: UInt32, since epoch: Int
+    ) async -> OrderPhase? {
         let start = ContinuousClock.now
+        // A head that was stale when the failure came can jump past the window at once.
+        let minimum = TradingSession.blockTime * Int(retryBlocks)
         var failedAt: (block: Int64, at: ContinuousClock.Instant)?
         while true {
             switch await session.phase(of: frameID) {
@@ -810,16 +837,20 @@ final class CopyTrader {
             case .failed?:
                 let seen = failedAt ?? (session.headBlock, .now)
                 failedAt = seen
-                let windowPassed = await session.isPastDeadline(frameID)
+                let elapsed = ContinuousClock.now - seen.at
+                let pastDeadline = await session.isPastDeadline(frameID)
+                let windowPassed = pastDeadline && elapsed >= minimum
                     && session.headBlock > seen.block + Int64(retryBlocks)
                 // Counted from the failure, not the send, in case the head stops arriving.
-                if windowPassed || ContinuousClock.now - seen.at > .seconds(12) {
-                    return await session.phase(of: frameID)
+                if windowPassed || elapsed > .seconds(12) {
+                    let phase = await session.phase(of: frameID)
+                    if case .failed? = phase, session.connectionEpoch != epoch { return nil }
+                    return phase
                 }
             default:
                 if ContinuousClock.now - start > .seconds(20) { return await session.phase(of: frameID) }
             }
-            try? await Task.sleep(for: .milliseconds(250))
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return nil }
         }
     }
 
