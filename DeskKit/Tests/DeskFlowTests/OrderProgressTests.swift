@@ -193,3 +193,22 @@ struct OrderProgressFailureTests {
         #expect(progress.outcome?.isBusy == false)
     }
 }
+
+@Suite("A settlement read without its fill")
+struct OrderProgressLateFillTests {
+    @Test("A second read of the same settlement supplies the fill the first one lacked")
+    func lateFill() {
+        var progress = OrderProgress()
+        progress.begin()
+        progress.associate(1)
+        progress.apply(id: 1, phase: .settled)
+        #expect(progress.fill == nil)
+        let fill = OrderFill(status: 5, originalRaw: 12, filledRaw: 8, priceRaw: 3, feeRaw: 1)
+        progress.apply(id: 1, phase: .settled, fill: fill)
+        #expect(progress.outcome == .settled)
+        #expect(progress.fill == fill)
+        // And a later read never replaces the fill that decided it.
+        progress.apply(id: 1, phase: .settled, fill: OrderFill(status: 4, originalRaw: 12, filledRaw: 12, priceRaw: 3, feeRaw: 1))
+        #expect(progress.fill == fill)
+    }
+}

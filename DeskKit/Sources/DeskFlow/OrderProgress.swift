@@ -96,6 +96,11 @@ public struct OrderProgress: Sendable, Equatable {
             return
         }
         guard id == frameID else { return }
+        // The same settlement read twice, once without its fill: keep the fill.
+        if outcome == .settled, case .settled = phase {
+            if self.fill == nil, let fill { self.fill = fill }
+            return
+        }
         // Terminal outcomes never walk back, with one exception the venue documents: a
         // failure is not final while a non-failure for the same order can still follow.
         if outcome?.isTerminal == true {

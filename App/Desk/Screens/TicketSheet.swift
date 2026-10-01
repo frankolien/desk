@@ -29,6 +29,8 @@ struct TicketSheet: View {
     @State private var stopLoss = ""
     @State private var takeProfit = ""
     @State private var handledFill = false
+    /// Set once this sheet sends an order, so a fill from an earlier one is never shown here.
+    @State private var submitted = false
     @State private var showsProtection = false
 
     private var quote: OrderQuote? {
@@ -299,6 +301,7 @@ struct TicketSheet: View {
                     : "Hold to \(side.word().lowercased()) \(amount) AUSD · \(leverage)×",
                 tint: side == .up ? DeskColor.rise : DeskColor.fall,
                 isEnabled: quote != nil && !hasInvalidProtection && shortfall == nil && !session.isBusy && isPriceFresh
+                    && !handledFill
             ) {
                 Task { await submit() }
             }
@@ -316,7 +319,7 @@ struct TicketSheet: View {
             // The one place the venue's own vocabulary is worth showing, because
             // "forwarded" is a real state a user can be stuck in and a spinner is not an
             // explanation.
-            if session.isBusy || session.order.outcome == .settled, let status = session.statusText {
+            if session.isBusy || (submitted && session.order.outcome == .settled), let status = session.statusText {
                 Text(status)
                     .font(DeskType.caption)
                     .foregroundStyle(session.order.outcome == .settled ? DeskColor.rise.color : DeskColor.nightMuted.color)
@@ -328,15 +331,19 @@ struct TicketSheet: View {
         }
         .padding(.bottom, 8)
         .background(DeskColor.night.color)
+        .onAppear {
+            // An earlier order's outcome is not this ticket's.
+            if !session.isBusy { session.clear() }
+        }
         .onChange(of: session.order.outcome) { _, outcome in
-            guard outcome == .settled, !handledFill else { return }
+            guard outcome == .settled, submitted, !handledFill else { return }
             handledFill = true
             Task { @MainActor in
                 // Leave the venue's confirmation visible for a beat before returning to
                 // the portfolio. Forwarded is deliberately not enough: only a real fill
                 // earns automatic dismissal.
                 try? await Task.sleep(for: .milliseconds(session.order.fill?.isPartial == true ? 2_600 : 650))
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, session.order.outcome == .settled else { return }
                 onDismiss()
             }
         }
@@ -348,6 +355,7 @@ struct TicketSheet: View {
     /// session's answer, arrived at through the same call the real path takes, so the day
     /// a key exists nothing in this file changes.
     private func submit() async {
+        submitted = true
         guard let market, let quote else { return }
         let draft = OrderDesk.Draft(
             side: side == .up ? .long : .short,

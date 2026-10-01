@@ -610,13 +610,16 @@ final class CopyTrader {
             switch await settlement(of: frameID, session: session) {
             case .settled:
                 let filled = await newPosition(marketID: target.id, isLong: side == .long, model: model)
-                // A market order can fill in part; the copy is the size that filled.
+                // A market order can fill in part; the copy is the size that filled, and the
+                // margin behind it in the same proportion, so the exposure cap counts it right.
                 let got = await session.fill(of: frameID)
-                let sizeRaw = (got?.filledRaw ?? 0) > 0 ? got!.filledRaw : plan.draft.size.raw
+                let planned = plan.draft.size.raw
+                let sizeRaw = (got?.filledRaw ?? 0) > 0 ? min(got!.filledRaw, planned) : planned
+                let margin = planned > 0 ? plan.margin * Double(sizeRaw) / Double(planned) : plan.margin
                 if got?.isPartial == true { entry.detail += " · partly filled" }
                 open.append(OpenCopy(
                     id: UUID(), trader: trader, marketID: target.id, symbol: symbol, isLong: side == .long,
-                    sizeRaw: sizeRaw, leverage: plan.leverage, margin: plan.margin,
+                    sizeRaw: sizeRaw, leverage: plan.leverage, margin: margin,
                     positionID: filled?.positionID, openedAt: .now, theirEntry: theirs.entry))
                 entry.fillSeconds = Date.now.timeIntervalSince(seenAt)
                 if let filled, let price = target.price(filled.entryRaw) {
@@ -689,6 +692,19 @@ final class CopyTrader {
             let frameID = try await session.closeCopy(position, size: size, in: target)
             switch await settlement(of: frameID, session: session) {
             case .settled:
+                // A close is an immediate-or-cancel order and can fill in part. The rest of
+                // the copy is still a live position, so it stays tracked at what is left.
+                if let got = await session.fill(of: frameID), got.isPartial, got.filledRaw < copy.sizeRaw {
+                    let left = copy.sizeRaw - got.filledRaw
+                    let share = copy.sizeRaw > 0 ? Double(left) / Double(copy.sizeRaw) : 1
+                    open.removeAll { $0.id == copy.id }
+                    open.append(OpenCopy(
+                        id: copy.id, trader: copy.trader, marketID: copy.marketID, symbol: copy.symbol,
+                        isLong: copy.isLong, sizeRaw: left, leverage: copy.leverage, margin: copy.margin * share,
+                        positionID: copy.positionID, openedAt: copy.openedAt, theirEntry: copy.theirEntry))
+                    note(.failed, "Partly closed within the slippage limit. The rest of your copy is still open.")
+                    return
+                }
                 open.removeAll { $0.id == copy.id }
                 let pnl = await realised(positionID: position.positionID, model: model)
                 let entryID = UUID()
@@ -735,12 +751,24 @@ final class CopyTrader {
     }
 
     /// The order's final phase, or nil after twenty seconds without one.
+    /// The order's outcome, or nil if the venue never decided it in twenty seconds.
+    ///
+    /// A failure is held for three seconds before it is believed: Perpl lets a later
+    /// non-failure decide an order that first failed, and a copy that fills after its first
+    /// failure is a live position this loop would otherwise never track.
     private func settlement(of frameID: Int64, session: TradingSession) async -> OrderPhase? {
+        var failure: OrderPhase?
+        var failurePolls = 0
         for _ in 0..<80 {
-            if let phase = await session.phase(of: frameID), phase.isTerminal { return phase }
+            if let phase = await session.phase(of: frameID), phase.isTerminal {
+                guard case .failed = phase else { return phase }
+                failure = failure ?? phase
+                failurePolls += 1
+                if failurePolls >= 12 { return failure }
+            }
             try? await Task.sleep(for: .milliseconds(250))
         }
-        return nil
+        return failure
     }
 
     /// The position a fill just opened, once the stream reports it.

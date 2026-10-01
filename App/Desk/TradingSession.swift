@@ -44,8 +44,11 @@ final class TradingSession {
         }
     }
 
-    /// The market the desk is signing for, so a fill can be read at its scales.
+    /// The market the desk is signing for.
     private(set) var market: Market?
+    /// The market the current order was sent on, so its fill is read at its own scales
+    /// even after the person has moved to another market.
+    private var orderMarket: Market?
 
     /// The last fill in words, kept past `clear()` so the toast after a ticket closes can
     /// say what filled rather than only that something did.
@@ -54,7 +57,7 @@ final class TradingSession {
     /// "Filled 0.012 BTC at 83,120.5 · fee 0.35 AUSD", or the partial version of it. Falls
     /// back to one word when the venue's update carried no sizes.
     private var filledSentence: String {
-        guard let fill = order.fill, fill.filledRaw > 0, let market,
+        guard let fill = order.fill, fill.filledRaw > 0, let market = orderMarket ?? market,
               let filled = market.size(fill.filledRaw) else { return "Filled" }
         let decimals = market.config.priceDecimals
         let price = market.price(fill.priceRaw).map { " at \($0.display(fractionDigits: decimals))" } ?? ""
@@ -128,6 +131,8 @@ final class TradingSession {
         await desk?.close()
         desk = OrderDesk(socket: network.tradingSocket(), market: market)
         self.market = market
+        // A finished order belongs to the market it was sent on; the next screen starts clean.
+        if order.outcome?.isTerminal == true { order.reset(); localProblem = nil }
         isConnected = false
         try? await connect()
     }
@@ -142,7 +147,7 @@ final class TradingSession {
             guard let self, let desk = self.desk else { return }
             for id in await desk.expire(headBlock: current) {
                 guard let phase = await desk.phase(of: id) else { continue }
-                self.record(id, phase, nil)
+                self.record(id, phase, await desk.fill(of: id))
             }
         }
     }
@@ -215,6 +220,7 @@ final class TradingSession {
     func place(_ draft: OrderDesk.Draft) async {
         localProblem = nil
         order.begin()
+        orderMarket = market
         do {
             guard let desk else { throw OrderDesk.Failure.notEnrolled }
             if !isConnected {
@@ -247,6 +253,7 @@ final class TradingSession {
     func closePosition(_ position: PerplPosition, size: Size? = nil, slippageBps: Int) async {
         localProblem = nil
         order.begin()
+        orderMarket = market
         do {
             guard let desk else { throw OrderDesk.Failure.notEnrolled }
             if !isConnected {

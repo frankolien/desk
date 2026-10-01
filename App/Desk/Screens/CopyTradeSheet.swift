@@ -119,6 +119,8 @@ struct CopyTradeSheet: View {
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(session.isBusy)
         .onAppear {
+            // An earlier order's outcome is not this copy's.
+            if !session.isBusy { session.clear() }
             withAnimation(.spring(duration: 0.6, bounce: 0.28).delay(0.18)) { revealed = true }
         }
         .onChange(of: session.order.outcome) { _, outcome in
@@ -127,6 +129,7 @@ struct CopyTradeSheet: View {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(session.order.fill?.isPartial == true ? 2_600 : 900))
+                guard session.order.outcome == .settled else { return }
                 onFilled(intent.side, intent.market)
             }
         }
