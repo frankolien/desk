@@ -1099,10 +1099,8 @@ struct PerpDetailScreen: View {
         ticketPreset = preset
         if !model.hasTradingAccount {
             showsSetup = true
-        } else if model.hasSeenLeverageExplainer {
-            ticket = side
         } else {
-            pendingSide = side
+            ticket = side
         }
     }
 

@@ -93,6 +93,24 @@ struct TicketSheet: View {
         return Money(raw: quote.total.raw - free.raw)
     }
 
+    /// The least margin that buys one size unit at this leverage, when what was typed
+    /// buys none. Perpl sets no other minimum.
+    private var smallestMargin: String? {
+        guard quote == nil, let market, let mark, mark.raw > 0,
+              let margin = Money(text: amount.isEmpty ? "0" : amount), margin.raw > 0 else { return nil }
+        let exponent = Int(market.config.sizeDecimals) + Int(market.config.priceDecimals)
+        let unitNotional = Double(mark.raw) * 1_000_000 / pow(10, Double(exponent))
+        let smallest = (unitNotional / Double(leverage) / 1_000_000 * 100).rounded(.up) / 100
+        return String(format: "%.2f", max(smallest, 0.01))
+    }
+
+    /// Said once, the first time someone sends with leverage, in place of the disclaimer.
+    @AppStorage("desk.leverageExplainerSeen") private var leverageUnderstood = false
+    private var firstLeverageLine: String? {
+        guard leverage > 1, !leverageUnderstood, let quote else { return nil }
+        return "At \(leverage)×, a \(percent(quote.liquidationDistanceMicros)) move against you closes it. No margin call."
+    }
+
     private var blockingReason: String? {
         if !isPriceFresh {
             return "Waiting for a live price."
@@ -102,8 +120,9 @@ struct TicketSheet: View {
                 ? "For a long, the stop must sit below the mark and above the liquidation price, and the take profit above the mark."
                 : "For a short, the stop must sit above the mark and below the liquidation price, and the take profit below the mark."
         }
+        if let smallest = smallestMargin { return "Too small for one \(market?.symbol ?? "") unit. Enter at least \(smallest) AUSD." }
         guard let shortfall, let quote else { return nil }
-        return "This order costs \(DisplayCurrency.shared.format(quote.total)) with its fee — \(DisplayCurrency.shared.format(shortfall)) more than your free collateral."
+        return "This order costs \(quote.total.display()) AUSD with its fee, \(shortfall.display()) AUSD more than you have free."
     }
 
     private func sizeFor(_ notional: Money, mark: Price, market: Market) -> Size? {
@@ -151,10 +170,18 @@ struct TicketSheet: View {
                     }
                     .padding(.top, 12)
 
-                    Text("Leveraged size  \(quote?.notional.display() ?? Unavailable.text) AUSD")
-                        .font(DeskType.caption)
-                        .foregroundStyle(DeskColor.nightMuted.color)
-                        .padding(.top, 4)
+                    HStack {
+                        Text("Leveraged size  \(quote?.notional.display() ?? Unavailable.text) AUSD")
+                        Spacer(minLength: 8)
+                        if let free = session.account.value?.free {
+                            Text("Free  \(free.display()) AUSD")
+                        }
+                    }
+                    .font(DeskType.caption)
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .padding(.top, 4)
 
                     // What it costs, immediately under what was typed. Paired rather than
                     // stacked: five full-width rows for four figures did not leave the
@@ -162,7 +189,8 @@ struct TicketSheet: View {
                     VStack(spacing: 12) {
                         HStack(alignment: .top, spacing: 12) {
                             figure("Your margin", quote?.margin.display() ?? Unavailable.text)
-                            if leverage == 1 {
+                            // A 1x long can't be liquidated; a 1x short can, if the price roughly doubles.
+                            if leverage == 1 && side == .up {
                                 // A default of 1× is invisible unless it is said out loud.
                                 figure("Liquidation", "None",
                                        detail: "No leverage", tint: DeskColor.rise,
@@ -338,8 +366,8 @@ struct TicketSheet: View {
             .padding(.top, 8)
 
             if quote != nil, !session.isBusy {
-                if let short = bookEstimate?.short {
-                    Text(short)
+                if let warning = bookEstimate?.short ?? firstLeverageLine {
+                    Text(warning)
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .foregroundStyle(DeskColor.action.color)
                         .lineLimit(1)
@@ -434,6 +462,7 @@ struct TicketSheet: View {
     /// a key exists nothing in this file changes.
     private func submit() async {
         submitted = true
+        if leverage > 1 { leverageUnderstood = true }
         guard let market, let quote else { return }
         let draft = OrderDesk.Draft(
             side: side == .up ? .long : .short,

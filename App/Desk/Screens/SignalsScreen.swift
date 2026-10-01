@@ -370,11 +370,7 @@ struct SignalsScreen: View {
             trader: trader, market: target.symbol, side: isLong ? .up : .down,
             leverage: max(1, Int((leverage ?? 1).rounded())), entry: entry, pnlPercent: pnlPercent)
         selectedTrader = nil
-        if intent.leverage > 1 && !model.hasSeenLeverageExplainer {
-            pendingCopy = intent
-        } else {
-            copyOrder = intent
-        }
+        copyOrder = intent
     }
 
     #if DEBUG

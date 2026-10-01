@@ -259,7 +259,7 @@ private struct CreateAccountSheet: View {
                 AccountNote(
                     symbol: "key.fill",
                     title: "No seed phrase",
-                    detail: "Your passkey protects the account.")
+                    detail: "Your passkey protects the account. If you lose it and its iCloud backup, nobody can recover the funds.")
                 AccountNote(
                     symbol: "iphone.gen3",
                     title: "Already have an account?",

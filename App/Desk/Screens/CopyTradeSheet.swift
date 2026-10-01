@@ -55,6 +55,14 @@ struct CopyTradeSheet: View {
     private var maxLeverage: Int { max(1, Int(listed?.config.maxLeverage ?? 1)) }
     private var tint: DeskRGB { intent.side.color }
     private var free: Money? { session.account.value?.free }
+    /// The most margin that, with its taker fee at this leverage, fits in free collateral.
+    private var maxMargin: String? {
+        guard let free, free.raw > 0, let listed else { return nil }
+        let rate = 1 + Double(leverage) * Double(listed.config.takerFeeMicros) / 1_000_000
+        let cents = (Double(free.raw) / rate / 10_000).rounded(.down)
+        return cents > 0 ? String(format: "%.2f", cents / 100) : nil
+    }
+    @AppStorage("desk.lastCopyAmount") private var lastCopyAmount = ""
     private var settled: Bool { submitted && session.order.outcome == .settled }
     private var busyHere: Bool { submitted && session.isBusy }
     private var priceIsFresh: Bool { !market.freshness.freezesDigits }
@@ -126,6 +134,8 @@ struct CopyTradeSheet: View {
         .onAppear {
             // An earlier order's outcome is not this copy's.
             if !session.isBusy { session.clear() }
+            // The amount last copied with, so a repeat copy is already filled in.
+            if amount.isEmpty { amount = lastCopyAmount }
             withAnimation(.spring(duration: 0.6, bounce: 0.28).delay(0.18)) { revealed = true }
         }
         .onChange(of: session.order.outcome) { _, outcome in
@@ -209,8 +219,8 @@ struct CopyTradeSheet: View {
                 ForEach(Self.quickAmounts, id: \.self) { value in
                     chip("\(value)", selected: amount == "\(value)") { amount = "\(value)" }
                 }
-                if let free, free.raw > 0 {
-                    chip("Max", selected: amount == free.display()) { amount = free.display() }
+                if let max = maxMargin {
+                    chip("Max", selected: amount == max) { amount = max }
                 }
                 Spacer(minLength: 0)
             }
@@ -347,6 +357,7 @@ struct CopyTradeSheet: View {
             slippageBps: min(50, listed.maxMarketSlippageBps),
             protection: nil)
         submitted = true
+        lastCopyAmount = amount
         await session.place(draft, in: listed, origin: .copySheet(market: listed.id))
     }
 }
