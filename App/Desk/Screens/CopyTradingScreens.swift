@@ -120,7 +120,7 @@ private struct CopyRulesSections: View {
             ? "Shadow sends nothing: each copy fills at the live mainnet price with fees, against a 1,000 AUSD paper balance, and is liquidated where the venue would liquidate it."
             : "Live sends real orders to your Perpl \(network.shortName.lowercased()) account, signed on this iPhone."
         let direction = rules.direction == .fade ? " Fade takes the opposite side of every trade they make." : ""
-        return mode + direction
+        return mode + direction + " Their past results don't predict yours."
     }
 
     private var sizeFooter: String {

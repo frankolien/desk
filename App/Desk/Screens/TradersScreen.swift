@@ -587,7 +587,7 @@ struct TradersFeed: View {
                 .padding(.top, 6)
             }
 
-            Text("Live from Perpl mainnet. PnL is on open positions, funding included. Copying a trade opens your own ticket.")
+            Text("Live from Perpl mainnet. PnL is on open positions, funding included. Past results don't predict future ones.")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(DeskColor.nightMuted.color.opacity(0.7))
                 .fixedSize(horizontal: false, vertical: true)
