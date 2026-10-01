@@ -9,6 +9,7 @@ struct FundingHistoryView: View {
     let market: MarketModel
     @State private var events: [MarketFunding] = []
     @State private var loaded = false
+    @State private var failed = false
 
     private var current: MarketFunding? { events.last ?? market.market?.funding }
     private var weekMicros: Int64 { events.reduce(0) { $0 + $1.rateMicros } }
@@ -102,7 +103,7 @@ struct FundingHistoryView: View {
                     .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
                     .foregroundStyle(DeskColor.nightMuted.color)
             } else if loaded {
-                Text("No funding history for this market yet.")
+                Text(failed ? "Couldn't load funding history." : "No funding history for this market yet.")
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
             }
@@ -110,7 +111,9 @@ struct FundingHistoryView: View {
         .padding(16)
         .deskGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .task(id: market.symbol) {
-            events = await market.fundingHistory() ?? []
+            let history = await market.fundingHistory()
+            events = history ?? []
+            failed = history == nil
             loaded = true
         }
     }

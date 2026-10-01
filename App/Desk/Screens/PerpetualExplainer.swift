@@ -12,31 +12,16 @@ struct PerpetualExplainer: View {
     }
 
     private let points: [Point] = [
-        Point(
-            symbol: "infinity",
-            title: "It never expires",
-            body: "A normal futures contract has a settlement date. A perpetual does not — "
-                + "you hold it until you close it, or until it closes you."),
-        Point(
-            symbol: "arrow.up.arrow.down",
-            title: "You can bet either way",
-            body: "Long profits when the price rises. Short profits when it falls. "
-                + "You are not buying Bitcoin; you are taking a position on its price."),
-        Point(
-            symbol: "dial.medium",
-            title: "Leverage multiplies both directions",
-            body: "$100 at 10× moves like $1,000 — up and down. It is the reason perpetuals "
-                + "are interesting and the reason they are dangerous."),
-        Point(
-            symbol: "exclamationmark.triangle.fill",
-            title: "Liquidation ends it for you",
-            body: "If the price moves far enough against you, the position is closed "
-                + "automatically and the collateral behind it is gone. No warning, no call."),
-        Point(
-            symbol: "clock.arrow.2.circlepath",
-            title: "Funding is the rent",
-            body: "Every 43 minutes, one side pays the other a small fee to keep the "
-                + "perpetual's price near the real one. Holding a position is not free."),
+        Point(symbol: "infinity", title: "It never expires",
+              body: "Hold it until you close it, or until it closes you."),
+        Point(symbol: "arrow.up.arrow.down", title: "Bet either way",
+              body: "A long gains when the price rises, a short when it falls."),
+        Point(symbol: "dial.medium", title: "Leverage cuts both ways",
+              body: "100 AUSD at 10× moves like 1,000 AUSD, up and down."),
+        Point(symbol: "exclamationmark.triangle.fill", title: "Liquidation ends it",
+              body: "Move far enough against you and Perpl closes it. No call first."),
+        Point(symbol: "clock.arrow.2.circlepath", title: "Funding is the rent",
+              body: "On a schedule, one side pays the other to keep the price in line."),
     ]
 
     var body: some View {
@@ -66,9 +51,7 @@ struct PerpetualExplainer: View {
                     // The honest footer. Someone reading an explainer because they did not
                     // know the word is exactly the person who should be told this plainly,
                     // and burying it would be the trick this app is supposed to not play.
-                    Text("Most people who trade perpetuals with leverage lose money. "
-                         + "On testnet nothing is real; on mainnet it is, and the "
-                         + "arithmetic is the same on both.")
+                    Text("Most people who trade with leverage lose money. Testnet funds aren't real; mainnet funds are.")
                         .font(.system(size: 13, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
                         .fixedSize(horizontal: false, vertical: true)

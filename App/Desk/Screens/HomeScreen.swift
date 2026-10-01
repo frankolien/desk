@@ -238,10 +238,6 @@ struct HomeScreen: View {
                 try? await Task.sleep(for: .seconds(1.2))
                 showsPortfolioReplay = true
             }
-            if ProcessInfo.processInfo.arguments.contains("-simulate-profile-screenshot") {
-                try? await Task.sleep(for: .seconds(1.2))
-                NotificationCenter.default.post(name: UIApplication.userDidTakeScreenshotNotification, object: nil)
-            }
         }
         #endif
         .task(id: model.address) { await spot.run(for: model.address) }
@@ -249,10 +245,6 @@ struct HomeScreen: View {
             if let address = model.address { await IdentityDirectory.shared.resolve([address.checksummed]) }
         }
         .onAppear { if firstOpened == 0 { firstOpened = Date.now.timeIntervalSince1970 } }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.userDidTakeScreenshotNotification)) { _ in
-            guard isActive, !showsPortfolioReplay else { return }
-            showsPortfolioReplay = true
-        }
         .task(id: "\(model.address?.checksummed ?? "")|\(total?.raw ?? -1)|\(totalPositionPnL?.raw ?? 0)") {
             guard let address = model.address, let total else { return }
             EquityLog.record(
@@ -777,7 +769,7 @@ struct HomeScreen: View {
                     Text("Face ID trading key")
                         .font(.system(size: 15, weight: .semibold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
-                    Text(model.isKeyUnlocked ? "Held in memory while Desk is open" : "Locked · never stored")
+                    Text(model.isKeyUnlocked ? "Unlocked while Desk is open" : "Locked · sealed to your Face ID")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
                 }
