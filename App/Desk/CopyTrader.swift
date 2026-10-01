@@ -609,7 +609,17 @@ final class CopyTrader {
             // Positions that existed before this copy can never be its fill.
             let held = Set(model.openPositions.map(\.positionID))
             let frameID = try await session.placeCopy(plan.draft, in: target)
-            switch await settlement(of: frameID, session: session) {
+            var outcome = await settlement(of: frameID, session: session)
+            // Perpl never answered. A position that appears on this side anyway is the
+            // order's fill, and its answer may land while that is looked for.
+            var late: PerplPosition?
+            switch outcome {
+            case .settled?, .unfilled?, .rejected?, .failed?: break
+            default:
+                late = await newPosition(marketID: target.id, isLong: side == .long, model: model, excluding: held)
+                outcome = await session.phase(of: frameID)
+            }
+            switch outcome {
             case .settled:
                 // The venue confirmed this fill, so the position it landed in may be one the
                 // person already held on this side; it is attached either way.
@@ -636,19 +646,7 @@ final class CopyTrader {
             case .rejected(let code, let subReason, let error):
                 note(.failed, error ?? TradingSession.reason(code: code, subReason: subReason))
             case .failed(let reason, let failure):
-                // Believed only after the order's wait; a position that appeared anyway is
-                // the venue's answer, and the copy is recorded rather than left untracked.
-                if let filled = await newPosition(marketID: target.id, isLong: side == .long, model: model, excluding: held) {
-                    open.append(OpenCopy(
-                        id: UUID(), trader: trader, marketID: target.id, symbol: symbol, isLong: side == .long,
-                        sizeRaw: plan.draft.size.raw, leverage: plan.leverage, margin: plan.margin,
-                        positionID: filled.positionID, openedAt: .now, theirEntry: theirs.entry))
-                    entry.detail += " · filled late"
-                    record(entry)
-                    onEvent?("Copied \(Self.name(for: trader)): \(label)")
-                } else {
-                    note(.failed, TradingSession.failure(reason: reason, failure: failure))
-                }
+                note(.failed, TradingSession.failure(reason: reason, failure: failure))
             case .unfilled:
                 note(.failed, "Not filled within the slippage limit. Nothing was opened.")
             default:
@@ -657,7 +655,7 @@ final class CopyTrader {
                 // is what keeps the open-copy limit, the exposure cap and closing with the
                 // trader true. Saying "nothing was opened" and walking away was a position
                 // the app then had no idea it held.
-                if let filled = await newPosition(marketID: target.id, isLong: side == .long, model: model, excluding: held) {
+                if let filled = late {
                     open.append(OpenCopy(
                         id: UUID(), trader: trader, marketID: target.id, symbol: symbol, isLong: side == .long,
                         sizeRaw: plan.draft.size.raw, leverage: plan.leverage, margin: plan.margin,
@@ -766,25 +764,24 @@ final class CopyTrader {
         }
     }
 
-    /// The order's outcome, or nil if the venue never decided it in twenty seconds.
+    /// The order's phase once the venue has decided it, or its last phase after twenty
+    /// seconds of waiting.
     ///
-    /// A failure is not believed while the order's own wait is still running: Perpl lets
-    /// a later non-failure decide an order that first failed, and a copy that fills after
-    /// its first failure is a live position this loop would otherwise never track. The
-    /// phase is read once more after the wait, so a fill that landed in its last moments
-    /// still counts.
+    /// A failure is held until Perpl's retry window has passed, because a later
+    /// non-failure still decides the order. A local expiry is only Desk's own timeout, and
+    /// orders carry no venue deadline, so it is waited out to the end.
     private func settlement(of frameID: Int64, session: TradingSession) async -> OrderPhase? {
-        var sawFailure = false
+        var phase: OrderPhase?
         for _ in 0..<80 {
-            if let phase = await session.phase(of: frameID), phase.isTerminal {
-                guard case .failed = phase else { return phase }
-                sawFailure = true
-                if await session.isPastDeadline(frameID) { break }
+            phase = await session.phase(of: frameID)
+            switch phase {
+            case .settled?, .unfilled?, .rejected?: return phase
+            case .failed?: if await session.isPastDeadline(frameID) { return phase }
+            default: break
             }
             try? await Task.sleep(for: .milliseconds(250))
         }
-        guard sawFailure else { return nil }
-        return await session.phase(of: frameID)
+        return phase
     }
 
     /// The position a fill just opened, once the stream reports it.

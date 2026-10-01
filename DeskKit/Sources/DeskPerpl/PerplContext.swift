@@ -135,6 +135,8 @@ public struct Market: Decodable, Sendable {
     public let sizeUnits: String
     public let fundingIntervalSeconds: Int
     public let orderTTLBlocks: UInt32
+    /// How long Perpl keeps retrying an order that failed to post, in blocks.
+    public let orderRetryBlocks: UInt32
     public let maxMarketSlippageBps: Int
     public let maxNegativePnLCollateralBps: Int
     public let config: MarketConfig
@@ -147,6 +149,7 @@ public struct Market: Decodable, Sendable {
         case sizeUnits = "size_units"
         case fundingIntervalSeconds = "funding_interval_sec"
         case orderTTLBlocks = "order_ttl_blocks"
+        case orderRetryBlocks = "order_retry_blocks"
         case maxMarketSlippageBps = "order_max_market_slippage_bps"
         case maxNegativePnLCollateralBps = "order_max_neg_pnl_collat_bps"
     }
@@ -165,12 +168,17 @@ public struct Market: Decodable, Sendable {
         sizeUnits = try box.decode(String.self, forKey: .sizeUnits)
         fundingIntervalSeconds = try box.decode(Int.self, forKey: .fundingIntervalSeconds)
         orderTTLBlocks = try box.decode(UInt32.self, forKey: .orderTTLBlocks)
+        orderRetryBlocks = try box.decodeIfPresent(UInt32.self, forKey: .orderRetryBlocks) ?? orderTTLBlocks
         maxMarketSlippageBps = try box.decode(Int.self, forKey: .maxMarketSlippageBps)
         maxNegativePnLCollateralBps = try box.decode(Int.self, forKey: .maxNegativePnLCollateralBps)
         config = try box.decode(MarketConfig.self, forKey: .config)
         state = try box.decode(MarketState.self, forKey: .state)
         funding = try box.decodeIfPresent(MarketFunding.self, forKey: .funding)
     }
+
+    /// How long Desk waits for the venue's answer to an order. A first failure can still
+    /// be overturned while Perpl retries, so the wait covers the retry window too.
+    public var orderWaitBlocks: UInt32 { max(orderTTLBlocks, orderRetryBlocks) }
 
     public func price(_ raw: Int64) -> Price? { Price(raw: raw, decimals: config.priceDecimals) }
     public func size(_ raw: Int64) -> Size? { Size(raw: raw, decimals: config.sizeDecimals) }

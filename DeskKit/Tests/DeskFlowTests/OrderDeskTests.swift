@@ -309,15 +309,17 @@ struct OrderDeskTests {
 
     /// An order whose deadline block has passed is expired rather than pending forever —
     /// the difference between a sentence and a spinner that never ends.
-    @Test("An order past its deadline block expires")
+    @Test("An order past its deadline block expires, after Perpl's retry window as well as its lifetime")
     func expiry() async throws {
         let channel = ScriptedChannel(inbound: [snapshot])
         let subject = try desk(channel)
         try await subject.open(credentials: credentials())
         let frameID = try await subject.place(try draft(), headBlock: 1_000, ttlBlocks: 30)
 
-        #expect(await subject.expire(headBlock: 1_020).isEmpty)
-        #expect(await subject.expire(headBlock: 1_100) == [frameID])
+        // The fixture's market lives 20 blocks and is retried for 22.
+        #expect(await subject.deadline(of: frameID) == 1_022)
+        #expect(await subject.expire(headBlock: 1_022).isEmpty)
+        #expect(await subject.expire(headBlock: 1_023) == [frameID])
     }
 
     /// Reconnecting reseeds from the venue's counter rather than carrying ours across,

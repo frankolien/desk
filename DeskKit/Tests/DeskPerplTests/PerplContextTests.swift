@@ -33,6 +33,8 @@ struct PerplContextTests {
         #expect(btc.config.takerFeeMicros == 345)
         #expect(btc.fundingIntervalSeconds == 2580)
         #expect(btc.orderTTLBlocks == 20)
+        #expect(btc.orderRetryBlocks == 22)
+        #expect(btc.orderWaitBlocks == 22)
         #expect(btc.maxMarketSlippageBps == 1000)
     }
 

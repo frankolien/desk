@@ -152,8 +152,8 @@ public actor OrderDesk {
         // and a status frame for an untracked id is dropped — which the user experiences
         // as an order that disappeared.
         // `lb` is zero in the v235 wire request, but the UI still needs a local timeout.
-        // Keep that deadline out of the payload and derive it from the advertised TTL.
-        let (deadline, overflow) = headBlock.addingReportingOverflow(Int64(market.orderTTLBlocks))
+        // Keep that deadline out of the payload and derive it from the advertised windows.
+        let (deadline, overflow) = headBlock.addingReportingOverflow(Int64(market.orderWaitBlocks))
         try await tracker.track(
             frameID: frameID,
             requestID: request.requestID,
@@ -238,7 +238,7 @@ public actor OrderDesk {
             side: position.side, market: market, account: account, size: size,
             slippageBps: slippageBps, headBlock: headBlock,
             requestID: await counter.take(), frameID: frameID)
-        let (deadline, overflow) = headBlock.addingReportingOverflow(Int64(market.orderTTLBlocks))
+        let (deadline, overflow) = headBlock.addingReportingOverflow(Int64(market.orderWaitBlocks))
         try await tracker.track(
             frameID: frameID, requestID: request.requestID,
             deadlineBlock: overflow ? Int64.max : deadline)
