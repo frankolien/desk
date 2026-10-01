@@ -450,6 +450,19 @@ final class MarketModel {
         return nil
     }
 
+    /// The selected market's funding events over the last `days`, oldest first.
+    func fundingHistory(days: Int = 7) async -> [MarketFunding]? {
+        let requestedMarket = marketID
+        let to = Int64(Date().timeIntervalSince1970 * 1_000)
+        let from = to - Int64(days) * 86_400_000
+        guard let endpoint = try? PerplEndpoint(
+                method: .get, path: "/v1/market-data/\(requestedMarket)/funding/\(from)-\(to)"),
+              let data = try? await rest.publicData(endpoint),
+              let series = try? JSONDecoder().decode(FundingSeries.self, from: data),
+              requestedMarket == marketID else { return nil }
+        return series.events
+    }
+
     private func refreshCandles() async {
         let requestedMarket = marketID
         let requestedInterval = candleIntervalSeconds

@@ -253,6 +253,13 @@ public struct MarketState: Decodable, Sendable {
     }
 }
 
+/// `GET /v1/market-data/:market_id/funding/:from-:to`: one event per funding interval,
+/// oldest first. The newest event's time may be an estimate for up to a minute.
+public struct FundingSeries: Decodable, Sendable {
+    public let events: [MarketFunding]
+    enum CodingKeys: String, CodingKey { case events = "d" }
+}
+
 public struct MarketFunding: Decodable, Sendable {
     public let observedAt: BlockStamp
     public let eventBlock: Int64

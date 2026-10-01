@@ -727,7 +727,11 @@ struct PerpDetailScreen: View {
                     case .holders:
                         MarketHoldersList(model: holders, directory: directory) { openHolder = $0 }
                     case .about:
-                        about.padding(.top, 16)
+                        VStack(spacing: 12) {
+                            about
+                            FundingHistoryView(market: market)
+                        }
+                        .padding(.top, 16)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -762,6 +766,7 @@ struct PerpDetailScreen: View {
             if ProcessInfo.processInfo.arguments.contains("-open-chat") { showsChat = true }
             if ProcessInfo.processInfo.arguments.contains("-open-studio") { showsStudio = true }
             if ProcessInfo.processInfo.arguments.contains("-detail-scrolled") { scrolledPastHeader = true }
+            if ProcessInfo.processInfo.arguments.contains("-detail-about") { tab = .about }
             // `-detail-bottom` scrolls to the tabs once the book has loaded, for a screenshot.
             if ProcessInfo.processInfo.arguments.contains("-detail-bottom") {
                 try? await Task.sleep(for: .seconds(7))
