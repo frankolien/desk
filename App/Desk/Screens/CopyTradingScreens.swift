@@ -571,10 +571,14 @@ struct CopyActivityScreen: View {
                     .foregroundStyle(.white.opacity(0.62))
             }
 
-            HStack(spacing: 22) {
+            HStack(spacing: 18) {
                 stat(figures.winRate.map { String(format: "%.0f%%", $0 * 100) } ?? "—", "Win rate")
                 stat("\(figures.copies)", "Copies")
                 stat(figures.averageFillSeconds.map { String(format: "%.1fs", $0) } ?? "—", "To fill")
+                // Shadow copies fill at the mark by construction, so only live ones have slippage.
+                if !showsShadow {
+                    stat(figures.averageSlippageBps.map { String(format: "%+.0f bps", $0) } ?? "—", "Vs mark")
+                }
             }
             .padding(.top, 2)
 
