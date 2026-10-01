@@ -169,10 +169,17 @@ struct TradingShell: View {
         #endif
         .onAppear {
             let session = session
-            market.onHeadBlock = { [weak session] block in session?.noteHeadBlock(block) }
-            if market.headBlock > 0 { session.noteHeadBlock(market.headBlock) }
+            let network = market.network
+            market.onHeadBlock = { [weak session] block in
+                guard let session, session.network == network else { return }
+                session.noteHeadBlock(block)
+            }
+            if market.headBlock > 0, session.network == network { session.noteHeadBlock(market.headBlock) }
         }
-        .onDisappear(perform: market.stop)
+        .onDisappear {
+            market.onHeadBlock = nil
+            market.stop()
+        }
         .overlay(alignment: .top) {
             VStack(spacing: 8) {
                 if !Connectivity.shared.isOnline {

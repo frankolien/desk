@@ -172,26 +172,21 @@ struct TicketSheet: View {
                             figure("Total", quote?.total.display() ?? Unavailable.text,
                                    alignment: .trailing)
                         }
-                        if let estimate = bookEstimate {
+                        // Held from the first frame, dashes until there is a figure, so the
+                        // keypad never moves under a finger.
+                        if book != nil {
                             HStack(spacing: 6) {
                                 Text("Est. fill")
                                     .foregroundStyle(DeskColor.nightMuted.color)
-                                Text(estimate.price)
+                                Text(bookEstimate?.price ?? Unavailable.text)
                                     .foregroundStyle(DeskColor.nightText.color)
                                 Spacer(minLength: 8)
-                                Text("\(estimate.impact) impact")
+                                Text(bookEstimate?.versusMark ?? "")
                                     .foregroundStyle(DeskColor.nightMuted.color)
                             }
                             .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
                             .lineLimit(1)
                             .accessibilityElement(children: .combine)
-                            if let short = estimate.short {
-                                Text(short)
-                                    .font(DeskType.caption)
-                                    .foregroundStyle(DeskColor.action.color)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
                         }
                     }
                     .padding(14)
@@ -334,11 +329,22 @@ struct TicketSheet: View {
             .padding(.top, 8)
 
             if quote != nil, !session.isBusy {
-                Text("Estimated. Fills, fees and liquidation can differ from this preview.")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color.opacity(0.7))
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 8)
+                if let short = bookEstimate?.short {
+                    Text(short)
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DeskColor.action.color)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 8)
+                } else {
+                    Text("Estimated. Fills, fees and liquidation can differ from this preview.")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color.opacity(0.7))
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 8)
+                }
             }
 
             // The one place the venue's own vocabulary is worth showing, because
@@ -374,11 +380,13 @@ struct TicketSheet: View {
         }
     }
 
-    /// What this market order would take from the live book: the average price, its
-    /// distance from the mark, and whether the book holds the whole size within the
-    /// slippage bound the order carries. Less than that comes back partly filled.
-    private var bookEstimate: (price: String, impact: String, short: String?)? {
-        guard let book, book.isReady, let quote, let market, let mark, mark.raw > 0 else { return nil }
+    /// What this market order would take from the live book: the average price, where it
+    /// sits against the mark positions are valued at, and whether the book holds the whole
+    /// size within the slippage bound the order carries. Less than that comes back partly
+    /// filled. A crossed book is mid-update and shows nothing.
+    private var bookEstimate: (price: String, versusMark: String, short: String?)? {
+        guard let book, book.isReady, (book.spreadRaw ?? 1) > 0,
+              let quote, let market, let mark, mark.raw > 0 else { return nil }
         let bps = min(50, market.maxMarketSlippageBps)
         let buying = side == .up
         let bound = Double(mark.raw) * (1 + (buying ? 1 : -1) * Double(bps) / 10_000)
@@ -387,16 +395,19 @@ struct TicketSheet: View {
             limitRaw: Int64(bound.rounded(buying ? .down : .up)))
         let limitText = String(format: "%.2f%%", Double(bps) / 100)
         guard let average = estimate.averagePriceRaw else {
-            return ("—", "—", "Nothing on the book within \(limitText). This would not fill.")
+            return ("—", "", "Nothing on the book within \(limitText). This would not fill.")
         }
         let decimals = market.config.priceDecimals
         let price = Price(raw: Int64(average.rounded()), decimals: decimals)?.display(fractionDigits: decimals) ?? "—"
-        let impact = abs(average - Double(mark.raw)) / Double(mark.raw) * 100
+        let gap = (average - Double(mark.raw)) / Double(mark.raw) * 100
+        let versusMark = String(format: "%.3f%%", abs(gap)) == "0.000%"
+            ? "at mark"
+            : String(format: "%.3f%% ", abs(gap)) + (gap > 0 ? "above mark" : "below mark")
         var short: String?
         if !estimate.isComplete, let held = market.size(estimate.filledRaw) {
             short = "Only \(held.display(fractionDigits: held.decimals)) of \(quote.size.display(fractionDigits: quote.size.decimals)) \(market.symbol) would fill within \(limitText)."
         }
-        return (price, String(format: "%.3f%%", impact), short)
+        return (price, versusMark, short)
     }
 
     /// Builds the draft and hands it to the session.

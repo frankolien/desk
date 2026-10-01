@@ -17,6 +17,21 @@ struct LastGoodTests {
         #expect(held.freshness() == .disconnected)
     }
 
+    @Test("A restamp from a second source refreshes the value but keeps the first source's backoff")
+    func restampKeepsBackoff() {
+        var held = LastGood<Money>()
+        held.record(Money(text: "10")!)
+        held.recordFailure("context 503")
+        held.recordFailure("context 503")
+        let delay = held.retryDelay()
+        held.restamp(Money(text: "11")!)
+        #expect(held.value?.text == "11.000000")
+        #expect(held.consecutiveFailures == 2)
+        #expect(held.retryDelay() == delay)
+        held.record(Money(text: "12")!)
+        #expect(held.consecutiveFailures == 0)
+    }
+
     @Test("A failure cannot reach the value it failed to replace")
     func failureKeepsValue() {
         // A trading app that shows a zero position during a reconnect is a trading app

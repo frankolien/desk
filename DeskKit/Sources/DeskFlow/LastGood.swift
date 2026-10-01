@@ -34,6 +34,13 @@ public struct LastGood<Value: Sendable>: Sendable {
     }
 
     /// Deliberately cannot touch `observation`. That is the whole type.
+    /// A value from a second source, such as a live stream beside a polled endpoint. It
+    /// refreshes the value and its age but leaves the polled source's failures alone, so
+    /// that source's backoff keeps growing while it is down.
+    public mutating func restamp(_ value: Value, at instant: ContinuousClock.Instant = ContinuousClock.now) {
+        observation = Observed(value, receivedAt: instant, serverTimestampMilliseconds: nil)
+    }
+
     public mutating func recordFailure(_ reason: String) {
         consecutiveFailures += 1
         lastFailure = reason

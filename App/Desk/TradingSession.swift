@@ -18,7 +18,8 @@ final class TradingSession {
 
     /// The sentence the ticket shows, or nothing while there is no order.
     var statusText: String? {
-        switch order.outcome {
+        if retryingUntil != nil { return "Perpl is retrying this order…" }
+        return switch order.outcome {
         case nil: nil
         case .sending: "Sending to Perpl…"
         case .forwarded: "Forwarded — waiting for the book"
@@ -37,13 +38,23 @@ final class TradingSession {
         }
     }
 
-    var isBusy: Bool { order.outcome?.isBusy == true }
+    var isBusy: Bool { order.outcome?.isBusy == true || retryingUntil != nil }
     var hasFailed: Bool {
-        switch order.outcome {
+        guard retryingUntil == nil else { return false }
+        return switch order.outcome {
         case .rejected, .failed, .unfilled, .expired, .abandoned: true
         default: false
         }
     }
+
+    /// The block until which Perpl may still retry the current order after its first
+    /// failure. The ticket stays busy until then, so a second order can't double the first.
+    private(set) var retryingUntil: Int64?
+    private var retryBackstop: Task<Void, Never>?
+
+    /// Orders the person sent by hand, per market. Copy trading reads it to tell a
+    /// position the person opened from one its own unanswered order opened.
+    @ObservationIgnored private(set) var handOrders: [UInt32: Int] = [:]
 
     /// The market the desk is signing for.
     private(set) var market: Market?
@@ -121,6 +132,9 @@ final class TradingSession {
         await close()
         credentials = nil
         desk = nil
+        // Block numbers belong to a chain; another network's are tens of millions apart.
+        headBlock = 0
+        endRetrying()
     }
 
     /// Rebuilds the order desk for the instrument the person selected. Market discovery
@@ -133,7 +147,7 @@ final class TradingSession {
         desk = OrderDesk(socket: network.tradingSocket(), market: market)
         self.market = market
         // A finished order belongs to the market it was sent on; the next screen starts clean.
-        if order.outcome?.isTerminal == true { order.reset(); localProblem = nil }
+        if order.outcome?.isTerminal == true { order.reset(); localProblem = nil; endRetrying() }
         isConnected = false
         try? await connect()
     }
@@ -144,6 +158,7 @@ final class TradingSession {
         // shorter than intended.
         headBlock = max(headBlock, block)
         let current = headBlock
+        if let until = retryingUntil, current > until { endRetrying() }
         Task { [weak self] in
             guard let self, let desk = self.desk else { return }
             for id in await desk.expire(headBlock: current) {
@@ -220,8 +235,10 @@ final class TradingSession {
     /// update landed with no watcher tick left to carry it.
     func place(_ draft: OrderDesk.Draft) async {
         localProblem = nil
+        endRetrying()
         order.begin()
         orderMarket = market
+        if let id = market?.id { handOrders[id, default: 0] += 1 }
         do {
             guard let desk else { throw OrderDesk.Failure.notEnrolled }
             if !isConnected {
@@ -241,9 +258,10 @@ final class TradingSession {
                 }
             }
             let id = try await desk.place(draft, headBlock: headBlock)
+            let before = order.outcome
             order.associate(id)
             if let current = await desk.phase(of: id) { order.apply(id: id, phase: current, fill: await desk.fill(of: id)) }
-            if order.outcome == .settled { Haptics.success(); lastFillSentence = filledSentence }
+            noteOutcome(since: before)
         } catch {
             Haptics.failure()
             localProblem = Self.sentence(for: error)
@@ -253,8 +271,10 @@ final class TradingSession {
 
     func closePosition(_ position: PerplPosition, size: Size? = nil, slippageBps: Int) async {
         localProblem = nil
+        endRetrying()
         order.begin()
         orderMarket = market
+        handOrders[position.marketID, default: 0] += 1
         do {
             guard let desk else { throw OrderDesk.Failure.notEnrolled }
             if !isConnected {
@@ -267,9 +287,10 @@ final class TradingSession {
             }
             let id = try await desk.closePosition(
                 position, size: size, slippageBps: slippageBps, headBlock: headBlock)
+            let before = order.outcome
             order.associate(id)
             if let current = await desk.phase(of: id) { order.apply(id: id, phase: current, fill: await desk.fill(of: id)) }
-            if order.outcome == .settled { Haptics.success(); lastFillSentence = filledSentence }
+            noteOutcome(since: before)
         } catch {
             Haptics.failure()
             localProblem = Self.sentence(for: error)
@@ -331,19 +352,50 @@ final class TradingSession {
     func clear() {
         order.reset()
         localProblem = nil
+        endRetrying()
     }
 
     private func record(_ id: Int64, _ phase: OrderPhase, _ fill: OrderFill?) {
         let before = order.outcome
         order.apply(id: id, phase: phase, fill: fill)
+        noteOutcome(since: before)
+    }
+
+    private func noteOutcome(since before: OrderProgress.Outcome?) {
         guard order.outcome != before else { return }
         switch order.outcome {
         case .settled:
+            endRetrying()
             lastFillSentence = filledSentence
             order.fill?.isPartial == true ? Haptics.selection() : Haptics.success()
-        case .rejected, .failed, .unfilled, .expired: Haptics.failure()
+        case .failed:
+            beginRetrying()
+        case .rejected, .unfilled, .expired:
+            endRetrying()
+            Haptics.failure()
         default: break
         }
+    }
+
+    /// Perpl retries an order for its retry window after a first failure, and a later
+    /// success still decides it. The failure is said once that window has passed, or
+    /// after twenty seconds if the head block stops arriving.
+    private func beginRetrying() {
+        guard retryingUntil == nil else { return }
+        retryingUntil = headBlock + Int64(orderMarket?.orderWaitBlocks ?? market?.orderWaitBlocks ?? 22)
+        retryBackstop = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(20))
+            guard !Task.isCancelled else { return }
+            self?.endRetrying()
+        }
+    }
+
+    private func endRetrying() {
+        retryBackstop?.cancel()
+        retryBackstop = nil
+        guard retryingUntil != nil else { return }
+        retryingUntil = nil
+        if case .failed = order.outcome { Haptics.failure() }
     }
 
     private func record(_ event: OrderDesk.Event) {

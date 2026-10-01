@@ -73,7 +73,7 @@ final class MarketModel {
     /// without every repeated frame redrawing the screen.
     private var restampedAt: [UInt32: ContinuousClock.Instant] = [:]
     /// Whether this connection's state stream has delivered a frame yet.
-    @ObservationIgnored private var statesFlowing = false
+    private var statesFlowing = false
     private var poller: Task<Void, Never>?
     private var liveReader: Task<Void, Never>?
     private var liveSocket: URLSessionWebSocket?
@@ -104,8 +104,9 @@ final class MarketModel {
         return "\(sign)\(String(format: "%.2f", abs(percent)))% while open"
     }
 
+    /// A failing context poll doesn't make the price stale while the live stream carries it.
     var freshness: Freshness {
-        mark.freshness(socketIsConnected: mark.consecutiveFailures == 0)
+        mark.freshness(socketIsConnected: mark.consecutiveFailures == 0 || statesFlowing)
     }
 
     var markText: String {
@@ -132,7 +133,7 @@ final class MarketModel {
     var problemText: String? {
         // Silent for the first couple of failures. A spinner over a number that is still
         // correct is worse than no spinner.
-        guard mark.shouldReportProblem() else { return nil }
+        guard !statesFlowing, mark.shouldReportProblem() else { return nil }
         return "Reconnecting…"
     }
 
@@ -380,6 +381,7 @@ final class MarketModel {
                         }
                     }
                 } catch {
+                    self?.statesFlowing = false
                     self?.liveSocket?.close()
                     self?.liveSocket = nil
                     guard !Task.isCancelled else { return }
@@ -433,7 +435,7 @@ final class MarketModel {
     private func restampQuietMark() {
         guard statesFlowing, quotes[marketID] != nil, unchangedIsDue(marketID),
               let selected = allMarkets.first(where: { $0.id == marketID }) else { return }
-        applyQuote(for: selected)
+        applyQuote(for: selected, fromStream: true)
     }
 
     private func noteHead(_ block: Int64) {
@@ -469,8 +471,9 @@ final class MarketModel {
 
     /// Frames from a stream this socket has since left are dropped by their `sid`; before
     /// the subscription is confirmed, only a snapshot is taken, which a later one replaces.
+    /// A held stream is applied with no screen showing it, so the book is never stale.
     private func ingestBook(_ frame: OrderBook.Frame) {
-        guard wantsBook, bookMarket == marketID else { return }
+        guard bookMarket == marketID else { return }
         if let bookSID {
             guard frame.subscriptionID == nil || frame.subscriptionID == bookSID else { return }
         } else if frame.kind == .snapshot, let sid = frame.subscriptionID {
@@ -508,7 +511,7 @@ final class MarketModel {
                 ?? raw
             quotes[id] = Quote(markRaw: raw, previousRaw: previous)
             if id == marketID, let selected = allMarkets.first(where: { $0.id == id }) {
-                applyQuote(for: selected)
+                applyQuote(for: selected, fromStream: true)
             }
         }
     }
@@ -521,10 +524,11 @@ final class MarketModel {
         return true
     }
 
-    private func applyQuote(for selected: Market) {
+    /// A stream price leaves the context poll's failure count alone, so its backoff holds.
+    private func applyQuote(for selected: Market, fromStream: Bool = false) {
         let raw = quotes[selected.id]?.markRaw ?? selected.state.markRaw
         guard let price = selected.price(raw) else { return }
-        mark.record(price)
+        if fromStream { mark.restamp(price) } else { mark.record(price) }
         record(market: selected, price: price)
         isLoadingFirstValue = false
     }
