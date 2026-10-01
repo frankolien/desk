@@ -15,8 +15,6 @@ struct TrackedWallet: Codable, Identifiable, Hashable, Sendable {
     static func key(_ address: String) -> String { address.hasPrefix("0x") ? address.lowercased() : address }
 }
 
-/// Wallets this phone wants to hear about. The list lives here; the server only sees
-/// it as part of the alert subscription, the same way followed traders do.
 @MainActor
 @Observable
 final class TrackedWallets {
@@ -29,7 +27,6 @@ final class TrackedWallets {
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.key),
            let stored = try? JSONDecoder().decode([TrackedWallet].self, from: data) {
-            // Solana wallets tracked by an older build are let go: Desk follows Monad and EVM only.
             list = stored.filter { Self.isEVM($0.address) }
         } else {
             list = []
@@ -88,8 +85,6 @@ final class TrackedWallets {
     }
 }
 
-/// A token someone asked to see from somewhere that cannot show it — a push, a signal
-/// row. The search tab picks it up and opens it.
 @MainActor
 @Observable
 final class TokenOpenRequest {
@@ -110,7 +105,6 @@ final class TokenOpenRequest {
     }
 }
 
-/// A perp market a push asked to see. The perps tab picks it up and opens it.
 @MainActor
 @Observable
 final class MarketOpenRequest {

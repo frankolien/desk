@@ -7,16 +7,11 @@ import Testing
 
 @testable import DeskFlow
 
-/// Routes `eth_call` by the contract being called rather than by the method name.
-///
-/// `BalanceReader` fires its reads concurrently, and two of them are `eth_call`. A
-/// transport that queues responses per method would hand them out in whatever order the
-/// scheduler happened to pick, so a test written against it would pass or fail by luck.
-/// Routing on `to` makes the answers deterministic no matter who lands first.
+/// Routes `eth_call` by `to`, not by method: `BalanceReader` fires two calls concurrently,
+/// and per-method queues would answer them in scheduler order.
 private final class ContractTransport: HTTPTransport, @unchecked Sendable {
     enum Reply {
         case word(String)
-        /// A node refusing a call — what a revert looks like over JSON-RPC.
         case revert
         case unreachable
     }
@@ -80,7 +75,6 @@ private func reader(
             collateralToken: token, exchange: exchange, minimumToOpen: Money(text: "100")!))
 }
 
-/// A uint256 word, right-aligned, as a node returns one.
 private func word(_ value: UInt64) -> String {
     "0x" + String(format: "%064llx", value)
 }
@@ -102,9 +96,6 @@ struct BalanceReaderTests {
         #expect(snapshot.isTotalFailure == false)
     }
 
-    /// The bug this suite exists for. A single throwing call that returns the whole
-    /// snapshot would turn one flaky read into a blank screen, and a person reads a blank
-    /// balance as "my money is gone" rather than as "the network is slow".
     @Test("One failed read does not blank the others")
     func failuresAreIsolated() async throws {
         let subject = try reader(
@@ -119,9 +110,6 @@ struct BalanceReaderTests {
         #expect(snapshot.isTotalFailure == false)
     }
 
-    /// `getAccountByAddr` reverts rather than returning zero when there is no account, so
-    /// a revert is the answer "no desk" and must not be reported as a failure — otherwise
-    /// every brand new user is told the network is broken.
     @Test("A revert on the account read means no desk, not an error")
     func revertIsAnAnswer() async throws {
         let subject = try reader(ausd: .word(word(0)), desk: .revert, gas: .word("0x0"))
@@ -139,8 +127,6 @@ struct BalanceReaderTests {
         #expect(snapshot.isTotalFailure)
     }
 
-    /// A transport error can carry the URL it failed against, and a URL can carry a key.
-    /// The sentence shown to a user is written here, never taken from the error.
     @Test("A failure sentence never carries the endpoint")
     func failureSentencesAreClean() async throws {
         let subject = try reader(ausd: .unreachable, desk: .unreachable, gas: .unreachable)
@@ -153,8 +139,6 @@ struct BalanceReaderTests {
         }
     }
 
-    /// Zero and unavailable are different facts, and the screen renders them differently.
-    /// An optional would collapse them.
     @Test("A zero balance is a value, not an absence")
     func zeroIsNotNil() async throws {
         let subject = try reader(ausd: .word(word(0)), desk: .revert, gas: .word("0x0"))
@@ -167,20 +151,14 @@ struct BalanceReaderTests {
 
 @Suite("MON is not AUSD")
 struct NativeAmountTests {
-    /// The trap this type exists to prevent: eighteen decimals through a six-decimal type
-    /// is wrong by a factor of a trillion, and 0.19 MON would render as 190,000,000,000.
     @Test("The same word means different amounts in the two scales")
     func scalesDoNotMix() {
         let raw = Data(hex: "02a303fe4b530000")  // 0.19 × 10^18
         let asGas = NativeAmount(bigEndian: raw)
         #expect(asGas.display(fractionDigits: 2) == "0.19")
-        // Read at AUSD's scale the same bytes are a nonsense figure, which is precisely
-        // why the two are separate types and not one with a parameter.
         #expect(ABIMoney.decode(raw).display() != "0.19")
     }
 
-    /// Eighteen decimals outgrows `UInt64` at about eighteen whole units. A wallet with
-    /// twenty MON is ordinary, and wrapping it would be silent.
     @Test("A balance past UInt64 still reads correctly")
     func beyondUInt64() {
         // 25 MON = 25 × 10^18, which exceeds UInt64.max (≈1.8 × 10^19).
@@ -192,8 +170,6 @@ struct NativeAmountTests {
 
     @Test("Rendering truncates and never rounds up")
     func truncates() {
-        // 1.999999… MON must not present as 2.00, or a gas check passes on a balance
-        // that cannot pay.
         var value = Int128(1_999_999)
         for _ in 0..<12 { value *= 10 }
         let amount = NativeAmount(bigEndian: NativeAmountTests.bigEndian(value))
@@ -218,9 +194,6 @@ struct NativeAmountTests {
         #expect(NativeAmount(bigEndian: Data()).display(fractionDigits: 2) == "0.00")
     }
 
-    /// A number too large to hold is clamped rather than wrapped. Wrapping turns an absurd
-    /// balance into a plausible small one, and a plausible wrong number is the dangerous
-    /// kind — the user acts on it.
     @Test("An absurd word clamps rather than wrapping")
     func clamps() {
         let enormous = Data(repeating: 0xFF, count: 32)

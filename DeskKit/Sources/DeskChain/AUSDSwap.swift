@@ -2,15 +2,8 @@ import DeskAuth
 import DeskMoney
 import Foundation
 
-/// A MON → AUSD swap on Monad mainnet the wallet is about to sign, checked against what
-/// the user typed.
-///
-/// The transaction comes from a quote service, so every field is someone else's claim.
-/// Signing is allowed only for a call to 0x's AllowanceHolder, on Monad mainnet, sending
-/// exactly the typed MON. The route inside the calldata is opaque and stays that way:
-/// the wallet sells its own gas token, so nothing is approved and the most a wrong route
-/// can take is the MON sent with the call. What the route delivers is checked separately,
-/// by simulating it and reading the AUSD it leaves behind, before Face ID is asked.
+/// Every field comes from a quote service. Signing is allowed only for a call to 0x's AllowanceHolder on
+/// Monad mainnet sending exactly the typed MON; what the route delivers is simulated before Face ID.
 public struct AUSDSwap: Sendable, Hashable {
     public enum Failure: Error, Sendable, Equatable {
         case wrongChain(UInt64)
@@ -21,16 +14,13 @@ public struct AUSDSwap: Sendable, Hashable {
     }
 
     public static let chainID: UInt64 = 143
-    /// 0x AllowanceHolder, one CREATE2 address on every chain 0x deploys to. Bytecode is
-    /// present on Monad mainnet.
+    /// 0x AllowanceHolder, one CREATE2 address on every chain 0x deploys to.
     public static let allowanceHolder = "0000000000001ff3684f28c67538d4d072c22734"
-    /// `exec(address,address,uint256,address,bytes)`.
     public static let execSelector = "2213bc0b"
 
     public let to: EthereumAddress
     public let data: Data
     public let value: NativeAmount
-    /// The least AUSD the quote promises after slippage.
     public let minimumOut: Money
 
     public init(

@@ -1,10 +1,6 @@
 import { SOLANA_WSOL, isSolanaAddress } from "./_chains.mjs";
 import { NATIVE, applyMovement, emptyLedger, ledgerKey } from "./_ledger.mjs";
 
-/// A Solana wallet's ledger, in the same shape as a Monad one, read from the public
-/// RPC: each signature's transaction, the wallet's own token balances before and after,
-/// and the lamports it paid or received. Trades are priced off OKX candles like Monad's.
-
 export const SOLANA = "501";
 export { isSolanaAddress };
 const STABLES = new Set([
@@ -14,7 +10,6 @@ const STABLES = new Set([
 /// Rent for a token account is 0.002 SOL; anything under this is rent or fees, not a payment.
 const SOL_DUST = 5_000_000n;
 const LEDGER_TTL_S = 30 * 24 * 3600;
-/// The foundation endpoint refuses busy hosts; this one does not, so far.
 const PUBLIC_RPC = "https://solana-rpc.publicnode.com";
 
 export function solanaRpc(url = process.env.SOLANA_RPC || PUBLIC_RPC, fetchImpl = fetch) {
@@ -30,8 +25,6 @@ export function solanaRpc(url = process.env.SOLANA_RPC || PUBLIC_RPC, fetchImpl 
   };
 }
 
-/// One transaction as a movement of the wallet's own tokens. Stablecoin and SOL legs
-/// only say which way money went; the asset leg is priced from candles, as on Monad.
 export function solanaMovement(wallet, signature, tx) {
   const meta = tx?.meta;
   if (!meta || meta.err) return null;
@@ -86,8 +79,6 @@ export function solanaMovement(wallet, signature, tx) {
   };
 }
 
-/// The chain says what the wallet holds after each transaction; the ledger only knows
-/// what it saw. Anything more is held without a basis, anything less left unseen.
 export function reconcile(ledger, leg) {
   const position = ledger.positions[leg.token];
   if (!position) return;
@@ -108,8 +99,6 @@ export function reconcile(ledger, leg) {
   }
 }
 
-/// Symbol and decimals of a mint. Decimals come with every transaction, so the indexer
-/// teaches them; the symbol is looked up through Desk's own search and kept a month.
 export function solanaMetaReader({ store = null, fetchImpl = fetch, api = "" } = {}) {
   const memory = new Map([[NATIVE, { symbol: "SOL", decimals: 9 }]]);
   const learned = new Map();
@@ -129,7 +118,7 @@ export function solanaMetaReader({ store = null, fetchImpl = fetch, api = "" } =
       const response = await fetchImpl(`${api}/api/token-discovery?q=${encodeURIComponent(token)}`);
       const rows = response.ok ? (await response.json())?.tokens ?? [] : [];
       symbol = rows.find((row) => String(row.chainIndex) === SOLANA && row.contract === token)?.symbol ?? null;
-    } catch { /* the address stands in for the name */ }
+    } catch {}
     const value = { symbol: symbol || `${token.slice(0, 4)}…${token.slice(-3)}`, decimals };
     memory.set(token, value);
     if (store && symbol) store.set(key, JSON.stringify(value), { ex: LEDGER_TTL_S }).catch(() => {});
@@ -139,9 +128,6 @@ export function solanaMetaReader({ store = null, fetchImpl = fetch, api = "" } =
   return meta;
 }
 
-/// Brings a wallet's ledger up to its newest signature. The cursor is the last
-/// signature applied, so a round cut short by the deadline resumes where it stopped.
-/// The first look takes only the newest page: a wallet's whole life is not the point.
 export async function indexSolanaWallet(address, { store, rpc, price, meta, now = Date.now, deadline = Infinity, pageSize = 25, maxSignatures = 100, paceMs = 0 }) {
   if (!isSolanaAddress(address)) throw new Error("not a Solana address");
   const key = ledgerKey(address);
@@ -158,20 +144,17 @@ export async function indexSolanaWallet(address, { store, rpc, price, meta, now 
     if (!ledger.cursor || !page || page.length < pageSize) break;
     before = page[page.length - 1].signature;
   }
-  // Newest first from the RPC; the ledger wants them in the order they happened.
   const pending = signatures.filter((entry) => !entry.err).reverse();
 
   let done = 0;
   let complete = true;
   for (const entry of pending) {
     if (now() >= deadline) { complete = false; break; }
-    // Public endpoints count requests per second; a breath between them keeps the round alive.
     if (paceMs > 0 && done > 0) await new Promise((resolve) => setTimeout(resolve, paceMs));
     let tx = null;
     try {
       tx = await rpc("getTransaction", [entry.signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 1, commitment: "confirmed" }]);
     } catch (error) {
-      // A pruned or unsupported transaction is skipped, not a reason to stall the wallet.
       if (!/-32020|-32015/.test(error.message)) throw error;
     }
     const movement = tx ? solanaMovement(address, entry.signature, tx) : null;

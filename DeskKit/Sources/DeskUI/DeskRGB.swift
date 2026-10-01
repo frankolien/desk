@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// A colour kept as its components, so the palette's contrast can be asserted in a test
-/// rather than checked by eye once and then drifted away from.
 public struct DeskRGB: Sendable, Hashable {
     public let red: Double
     public let green: Double
@@ -22,8 +20,6 @@ public struct DeskRGB: Sendable, Hashable {
 
     public var color: Color { Color(red: red, green: green, blue: blue) }
 
-    /// WCAG 2.1 relative luminance. Also what a grayscale filter leaves behind, which is
-    /// the accessibility test Apple ships and the one the screen designs require.
     public var relativeLuminance: Double {
         func linear(_ channel: Double) -> Double {
             channel <= 0.03928 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)

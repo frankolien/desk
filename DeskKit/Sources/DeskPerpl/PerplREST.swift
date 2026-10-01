@@ -2,10 +2,6 @@ import DeskAuth
 import DeskNet
 import Foundation
 
-/// Perpl's REST surface: the public reads, and the signed reads the API key authorises.
-///
-/// Orders do not come through here. They go over the trading websocket, which is why
-/// nothing in this file retries a write.
 public actor PerplREST {
     public struct Configuration: Sendable {
         public let baseURL: URL
@@ -13,8 +9,7 @@ public actor PerplREST {
         public let retry: RetryPolicy
 
         /// `baseURL` carries the `/api` prefix; `PerplEndpoint.path` does not. The
-        /// gateway signs only what follows the prefix, and getting that backwards
-        /// produces a signature that verifies against a string nobody built.
+        /// gateway signs only what follows the prefix.
         public init(baseURL: URL, chainID: UInt64, retry: RetryPolicy = .default) throws {
             guard baseURL.scheme?.lowercased() == "https" else {
                 throw Failure.baseURLMustBeHTTPS(scheme: baseURL.scheme)
@@ -22,11 +17,8 @@ public actor PerplREST {
             guard baseURL.query == nil, baseURL.fragment == nil else {
                 throw Failure.baseURLHasQueryOrFragment
             }
-            // A trailing slash makes every target `//v1/…` on the wire while `/v1/…` was
-            // signed. The gateway rebuilds the canonical string from what it received, so
-            // every signed call 401s and nothing says why.
-            // `URL.path` strips a trailing slash, and `absoluteString` is what the
-            // target is concatenated onto, so that is what has to be checked.
+            // A trailing slash sends `//v1/…` while `/v1/…` was signed, so every signed call
+            // 401s. Checked on `absoluteString` because `URL.path` strips the slash.
             guard !baseURL.absoluteString.hasSuffix("/") else { throw Failure.baseURLHasTrailingSlash }
             self.baseURL = baseURL
             self.chainID = chainID
@@ -75,10 +67,6 @@ public actor PerplREST {
 
     public typealias Credentials = PerplCredentials
 
-    /// A measured clock difference this large alongside a rejected signature means the
-    /// phone's clock, not the key. The gateway's own window is not published; this is the
-    /// threshold at which we are willing to blame the clock in a sentence to the user,
-    /// set well above the `Date` header's one-second resolution plus a round trip.
     public static let clockSkewToleranceMilliseconds: Int64 = 5_000
 
     private let configuration: Configuration
@@ -99,19 +87,14 @@ public actor PerplREST {
 
     public var isSignedIn: Bool { credentials != nil }
 
-    /// The last measured difference between this device's clock and the gateway's.
     public var clockSkewMilliseconds: Int64? { observedSkewMilliseconds }
 
     public func adopt(_ credentials: Credentials) { self.credentials = credentials }
 
-    /// Ends the signing session. The next signed call fails with `.notSignedIn` rather
-    /// than reaching for a stored key, because there is none.
     public func endSession() {
         credentials = nil
         observedSkewMilliseconds = nil
     }
-
-    // MARK: - Calls
 
     public func publicData(_ endpoint: PerplEndpoint) async throws -> Data {
         try await perform(endpoint, signed: false)
@@ -133,8 +116,6 @@ public actor PerplREST {
         let endpoint = try PerplEndpoint(method: .get, path: "/v1/pub/context")
         return try await publicJSON(endpoint, as: PerplContext.self).validated()
     }
-
-    // MARK: - Machinery
 
     private func perform(_ endpoint: PerplEndpoint, signed: Bool) async throws -> Data {
         let attempts = endpoint.method == .get ? configuration.retry.maximumAttempts : 1
@@ -166,9 +147,7 @@ public actor PerplREST {
 
     func request(for endpoint: PerplEndpoint, signed: Bool) async throws -> URLRequest {
         let text = configuration.baseURL.absoluteString + endpoint.target
-        // `URL(string:)` parses without normalising, so a URL that survives this is one
-        // whose path and query are the bytes that were signed. The equality check is what
-        // makes that a guarantee rather than a belief.
+        // The equality check guarantees the sent path and query are the bytes that were signed.
         guard let url = URL(string: text), url.absoluteString == text else {
             throw Failure.targetNotRepresentable(endpoint.target)
         }
@@ -205,8 +184,6 @@ public actor PerplREST {
         let detail = Self.detail(from: response.body)
         switch response.status {
         case 401, 403:
-            // Only on evidence from this very response. A skew remembered from an earlier
-            // call would throw away the gateway's own reason for refusing this one.
             if let skew, skew.magnitude > UInt64(Self.clockSkewToleranceMilliseconds) {
                 return .clockSkew(offByMilliseconds: skew)
             }
@@ -236,8 +213,6 @@ public actor PerplREST {
         }
     }
 
-    /// Server text, capped. The gateway's own wording is what the user should read, but
-    /// an unbounded string from the network has no business reaching a log line.
     static func detail(from body: Data) -> String? {
         guard !body.isEmpty else { return nil }
         let text: String

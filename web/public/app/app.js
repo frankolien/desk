@@ -1,11 +1,6 @@
-// The shell: routing, fetching, formatting, names and faces, the ticker, search and the
-// hand-off sheet. Pages live in ./views and import what they need from here.
-
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 export const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
-// ── Fetch ───────────────────────────────────────────────
 
 const cache = new Map();
 const inflight = new Map();
@@ -32,13 +27,12 @@ export async function api(path, { ttl = 0, signal } = {}) {
   try { return await run; } finally { inflight.delete(path); }
 }
 
-/// Runs `tick` now and every `ms` until the returned stop is called or the tab hides.
 export function poll(tick, ms) {
   let timer = null;
   let stopped = false;
   const run = async () => {
     if (stopped) return;
-    try { await tick(); } catch { /* the page shows what it has */ }
+    try { await tick(); } catch {}
     if (!stopped) timer = setTimeout(run, document.hidden ? ms * 4 : ms);
   };
   run();
@@ -46,8 +40,6 @@ export function poll(tick, ms) {
   document.addEventListener("visibilitychange", onVisible);
   return () => { stopped = true; clearTimeout(timer); document.removeEventListener("visibilitychange", onVisible); };
 }
-
-// ── Formatting ──────────────────────────────────────────
 
 const usd0 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const usd2 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -76,7 +68,6 @@ export function fmtCompact(value) {
 }
 const trim = (n) => (n >= 100 ? n.toFixed(0) : n >= 10 ? n.toFixed(1) : n.toFixed(2)).replace(/\.0+$|(\.\d*[1-9])0+$/, "$1");
 
-/// Sub-cent prices the way a trader reads them: 0.0₅123 is 0.00000123.
 export function fmtSmall(value) {
   const n = Number(value);
   if (n === 0) return "0";
@@ -87,7 +78,6 @@ export function fmtSmall(value) {
   return zeros >= 3 ? `0.0${sub}${digits}` : n.toFixed(zeros + 4).replace(/0+$/, "");
 }
 
-/// A price at its market's decimals, with grouping.
 export function fmtPrice(value, decimals = 2) {
   if (value == null || !Number.isFinite(Number(value))) return "—";
   const n = Number(value);
@@ -120,8 +110,6 @@ export function ago(ms, { suffix = true } = {}) {
 
 export const dirClass = (n) => (n > 0 ? "up" : n < 0 ? "down" : "muted");
 
-// ── Pictures ────────────────────────────────────────────
-
 const NATIVE_LOGOS = {
   "143": "https://static.oklink.com/cdn/web3/currency/token/large/143-null-110/type=default_90_0?v=1763995219024",
   "1": "https://assets.coingecko.com/coins/images/279/small/ethereum.png",
@@ -144,8 +132,6 @@ export const nativeLogo = (chainIndex) => NATIVE_LOGOS[String(chainIndex)] ?? ""
 
 const hue = (text) => [...String(text)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
 
-/// A round picture with the symbol's initials behind it, so a missing image is a
-/// monogram rather than a hole.
 export function logo(url, label, size = 32, { square = false } = {}) {
   const initials = esc(String(label ?? "?").replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase() || "?");
   const bg = `hsl(${hue(label)} 22% 18%)`;
@@ -154,15 +140,11 @@ export function logo(url, label, size = 32, { square = false } = {}) {
   return `<span class="logo logo-${size}${square ? " sq" : ""}" style="background:${bg}"><span style="position:absolute">${initials}</span>${img}</span>`;
 }
 
-// ── Names and faces ─────────────────────────────────────
-
 const identities = new Map();
 let identityQueue = new Set();
 let identityTimer = null;
 const identityWaiters = [];
 
-/// Who an address is. Asked in batches: every address a page paints within a frame
-/// travels in one request.
 export function identity(address) {
   const key = String(address ?? "").toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(key)) return Promise.resolve(null);
@@ -182,7 +164,7 @@ async function flushIdentities() {
   try {
     const out = await api(`/api/traders?view=identity&addresses=${batch.join(",")}`);
     found = out?.identities ?? {};
-  } catch { /* unnamed stays unnamed */ }
+  } catch {}
   for (const key of batch) identities.set(key, found[key] ?? null);
   for (let i = identityWaiters.length - 1; i >= 0; i -= 1) {
     const waiter = identityWaiters[i];
@@ -193,7 +175,6 @@ async function flushIdentities() {
 
 export const knownIdentity = (address) => identities.get(String(address ?? "").toLowerCase()) ?? null;
 
-/// The person row: face, name or short address, and where the name came from.
 export function person(address, id = knownIdentity(address), { size = 24, via = true, link = true } = {}) {
   const name = id?.name ?? short(address);
   const face = id?.avatar
@@ -206,7 +187,6 @@ export function person(address, id = knownIdentity(address), { size = 24, via = 
 }
 const SOURCE_LABEL = { nad: ".nad", nadfun: "nad.fun", ens: "ENS", farcaster: "Farcaster" };
 
-/// Paints names into every person placeholder under `root` as they arrive.
 export function hydratePeople(root) {
   for (const el of $$("[data-person]", root)) {
     const address = el.dataset.person;
@@ -219,8 +199,6 @@ export function hydratePeople(root) {
     });
   }
 }
-
-// ── Sparkline ───────────────────────────────────────────
 
 export function sparkline(values, { width = 96, height = 28, up = null } = {}) {
   const points = (values ?? []).map(Number).filter(Number.isFinite);
@@ -241,8 +219,6 @@ export function sparkline(values, { width = 96, height = 28, up = null } = {}) {
   </svg>`;
 }
 
-// ── Charts, drawn the way TradingView draws them ────────
-
 export const CANDLE_UP = "#26a69a";
 export const CANDLE_DOWN = "#ef5350";
 
@@ -261,8 +237,6 @@ export function chartOptions(LW, extra = {}) {
 export const candleOptions = (extra = {}) => ({ upColor: CANDLE_UP, downColor: CANDLE_DOWN, borderUpColor: CANDLE_UP, borderDownColor: CANDLE_DOWN, wickUpColor: CANDLE_UP, wickDownColor: CANDLE_DOWN, ...extra });
 export const volumeColor = (up) => (up ? "rgba(38,166,154,0.4)" : "rgba(239,83,80,0.4)");
 
-/// The line TradingView writes over the chart: name, bar, and the candle under the
-/// cursor (or the last one) as O H L C with the change.
 export function chartLegend(host, { title, bar, format }) {
   const el = document.createElement("div");
   el.className = "chart-legend";
@@ -280,7 +254,6 @@ export function chartLegend(host, { title, bar, format }) {
   };
 }
 
-/// The clock to the current bar's close, hung under the last-price label.
 export function chartCountdown(host, { barSeconds, y }) {
   const el = document.createElement("div");
   el.className = "chart-countdown";
@@ -299,8 +272,6 @@ export function chartCountdown(host, { barSeconds, y }) {
   const timer = setInterval(tick, 1000);
   return { tick, remove() { clearInterval(timer); el.remove(); } };
 }
-
-// ── Toasts and the hand-off sheet ───────────────────────
 
 export function toast({ logoHTML = "", title, sub = "", amount = "", ttl = 6000 }) {
   const host = $("#toast");
@@ -327,9 +298,7 @@ export function handoff({ title = "Trade this in Desk", sub = "In the app, Face 
   $("#handoff").hidden = false;
 }
 
-// ── Wallet ──────────────────────────────────────────────
-// Read-only: the web watches an address, it never holds a key. Connecting a browser
-// wallet only asks which address to watch.
+// Read-only: the web watches an address and never holds a key.
 
 const WALLET_KEY = "desk.web.connected";
 let wallet = null;
@@ -338,7 +307,7 @@ export const connectedWallet = () => wallet;
 
 function setWallet(next) {
   wallet = next;
-  try { next ? localStorage.setItem(WALLET_KEY, JSON.stringify(next)) : localStorage.removeItem(WALLET_KEY); } catch { /* private window */ }
+  try { next ? localStorage.setItem(WALLET_KEY, JSON.stringify(next)) : localStorage.removeItem(WALLET_KEY); } catch {}
   paintWalletButton();
   document.dispatchEvent(new CustomEvent("wallet", { detail: next }));
 }
@@ -429,8 +398,6 @@ function startWallet() {
   paintWalletButton();
 }
 
-// ── Router ──────────────────────────────────────────────
-
 const ROUTES = [
   { pattern: /^\/app\/?$/, view: "trade", section: "trade", params: () => ({}) },
   { pattern: /^\/app\/trade\/([A-Za-z0-9]{1,12})\/?$/, view: "trade", section: "trade", params: (m) => ({ market: m[1].toUpperCase() }) },
@@ -456,7 +423,7 @@ async function render() {
   if (!route) return navigate("/app", { replace: true });
   const params = { ...route.params(path.match(route.pattern)), query: Object.fromEntries(new URLSearchParams(location.search)) };
   const token = ++mountToken;
-  if (unmount) { try { unmount(); } catch { /* gone */ } unmount = null; }
+  if (unmount) { try { unmount(); } catch {} unmount = null; }
   for (const link of $$("#side-nav .side-link")) {
     if (link.dataset.section === route.section) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
   }
@@ -483,8 +450,6 @@ document.addEventListener("click", (event) => {
   navigate(url.pathname + url.search);
 });
 window.addEventListener("popstate", render);
-
-// ── Ticker ──────────────────────────────────────────────
 
 let marketsNow = [];
 let headNow = null;
@@ -529,7 +494,6 @@ function startTicker() {
       $("#ticker-dot").className = "dot amber";
     }
   }, 10_000);
-  // Marks come off the exchange contract every two seconds; the list above only every ten.
   poll(async () => {
     if (!marketsNow.length) return;
     const out = await api("/api/v1/markets/marks");
@@ -550,8 +514,6 @@ function startTicker() {
     document.dispatchEvent(new CustomEvent("marks", { detail: { marks, at: out?.at ?? Date.now() } }));
   }, 2_000);
 }
-
-// ── Search ──────────────────────────────────────────────
 
 function startSearch() {
   const overlay = $("#search");
@@ -633,8 +595,6 @@ function startSearch() {
     paintSelection();
   }
 }
-
-// ── Boot ────────────────────────────────────────────────
 
 startWallet();
 $("#handoff").addEventListener("click", (event) => { if (event.target === $("#handoff") || event.target.closest("[data-close]")) $("#handoff").hidden = true; });

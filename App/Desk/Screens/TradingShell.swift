@@ -1,7 +1,6 @@
 import DeskUI
 import SwiftUI
 
-/// Apple's own `TabView`, not a drawn bar: iOS supplies the glass, the selection lens and the safe-area placement.
 struct TradingShell: View {
     let model: AppModel
 
@@ -9,9 +8,8 @@ struct TradingShell: View {
     @State private var copier: CopyTrader
     @State private var glances = HomeGlancePublisher()
     @State private var opensTopTraders = false
-    /// The model's session, never one of our own. `openDesk` hands the enrolled key to
-    /// `model.trading`, so a session created here would be a different object and the
-    /// ticket would talk to one that had never been given a key.
+    /// The model's session, never a new one: `openDesk` gives the enrolled key to `model.trading`,
+    /// and a session created here would never have been given a key.
     private var session: TradingSession { model.trading }
     @State private var tab: Destination
     @State private var showsAccount = false
@@ -34,14 +32,6 @@ struct TradingShell: View {
         _tab = State(initialValue: Self.startingTab())
     }
 
-    /// Which tab a debug launch opens on.
-    ///
-    /// `-stage <name>` already decides whether the app is signed in; this reads the same
-    /// argument to pick a destination, so every tab can be captured and reviewed without
-    /// tapping — which is the only way to look at them in a simulator, and the reason the
-    /// fabricated Watchlist survived as long as it did.
-    ///
-    /// Debug only. A release build always opens on Home.
     private static func startingTab() -> Destination {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
@@ -148,7 +138,6 @@ struct TradingShell: View {
             #endif
             await copier.run(model: model, market: market, session: session)
         }
-        // A tapped trade alert opens on Signals, over whatever was in front.
         .onChange(of: TradeAlerts.shared.opened, initial: true) { _, opened in
             guard opened != nil else { return }
             showsAccount = false

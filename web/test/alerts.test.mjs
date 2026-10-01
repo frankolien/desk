@@ -1,4 +1,3 @@
-// node --test web/test/alerts.test.mjs
 import assert from "node:assert/strict";
 import { generateKeyPairSync, verify } from "node:crypto";
 import { test } from "node:test";
@@ -63,7 +62,6 @@ test("a book diff names opens, flips, meaningful adds and closes, and ignores tr
   assert.deepEqual(tradeEvents({ 20: long }, { 20: { ...long, size: "6" } }).map((e) => e.kind), ["added"]);
   assert.deepEqual(tradeEvents({ 20: long }, { 20: { ...long, size: "5.2" } }), []);
   assert.deepEqual(tradeEvents({ 20: long }, { 20: { ...long, size: "2" } }), []);
-  // A row of nothing that stays nothing is not an add, however 0 >= 0 reads.
   assert.deepEqual(tradeEvents({ 20: { ...long, size: "0" } }, { 20: { ...long, size: "0" } }), []);
 });
 
@@ -93,7 +91,6 @@ test("the first scan sets a baseline, the next one pushes what changed to every 
 
   const subscribed = await handler({ method: "POST", query: {}, body: subscribe() }, recorder());
   assert.equal(subscribed.status, 200);
-  // Registering pushes the confirmation, which is also the proof the token is real.
   assert.equal(apns.sent.length, 1);
   assert.equal(apns.sent[0].payload.desk.type, "confirmation");
   apns.sent.length = 0;
@@ -107,7 +104,6 @@ test("the first scan sets a baseline, the next one pushes what changed to every 
   assert.equal(apns.sent[0].payload.aps.alert.title, "Whale flipped short on ETH");
   assert.equal(apns.sent[0].record.token, TOKEN);
 
-  // An RPC failure keeps the last book, so nothing is announced as closed.
   const failed = await scan({ store, chain: fakeChain({ fail: true }), apns, markets });
   assert.equal(failed.sent, 0);
   state.row = null;
@@ -130,7 +126,6 @@ test("a subscription is only stored once Apple accepts a push for its token", as
 test("the scan budget is shared between subscriptions, not taken first-come", () => {
   const flood = Array.from({ length: 30 }, (_, index) => `0x${String(index).padStart(40, "a")}`);
   const followers = new Map();
-  // One subscription watching thirty addresses, and one watching a single real trader.
   for (const address of flood) followers.set(address, [{ id: "attacker", record: {} }]);
   followers.set(ALICE, [{ id: "victim", record: {} }]);
 
@@ -163,7 +158,6 @@ test("the scan needs the scheduler's secret and runs one at a time", async () =>
   const denied = await handler({ method: "GET", query: { job: "scan" }, headers: { authorization: "Bearer wrong" } }, recorder());
   assert.equal(denied.status, 401);
   const res = await handler({ method: "GET", query: { job: "scan", rounds: "2" }, headers: { authorization: "Bearer s3cret" } }, recorder());
-  // No subscribers: the first round says so and the rest are skipped.
   assert.equal(res.body.rounds.length, 1);
   assert.ok(Date.parse(store.values.get("alerts:lastScan")) > 0);
   await store.set("alerts:lock", "1");
@@ -216,7 +210,6 @@ test("a subscription may name the traders it copies, and a move on one wakes the
   assert.equal(apns.sent[0].payload.aps.alert, undefined);
   assert.equal(apns.sent[0].payload.desk.type, "wake");
   assert.equal(apns.sent[0].options.background, true);
-  // An add is not a move the copy loop follows, so it wakes nobody.
   apns.sent.length = 0;
   state.row = row({ positionType: 1, lotLNS: BigInt(row().lotLNS) * 2n });
   const third = await scan({ store, chain: fakeChain(state), apns, markets });

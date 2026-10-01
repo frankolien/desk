@@ -1,14 +1,10 @@
 import Foundation
 
-/// Reports and blocks for what other people write and show. A block is this phone's own
-/// and takes effect at once; a report goes to Desk's server, where three phones agreeing
-/// hides the thing and repeat offenders lose the rooms.
 @MainActor
 enum Moderation {
     private static let host = "https://web-lovat-nine-49.vercel.app"
     private static let blockedKey = "desk.chat.blocked"
 
-    /// Posters this phone has blocked, by the same hash the rooms use.
     private(set) static var blockedWhos: Set<String> = Set(UserDefaults.standard.stringArray(forKey: blockedKey) ?? [])
 
     static func block(_ who: String) {

@@ -6,9 +6,6 @@ import Testing
 
 @testable import DeskPerpl
 
-/// The 13 September audit of DeskPerpl. Every case here passed the module's own tests at
-/// the time, which is why each one stays.
-
 private func loadContext(mutating: (inout [String: Any]) -> Void = { _ in }) throws -> PerplContext {
     let url = try #require(Bundle.module.url(forResource: "Context-testnet", withExtension: "json"))
     var object = try #require(
@@ -24,8 +21,6 @@ struct OrderAuditTests {
 
     @Test("A close at the wrong size scale is refused, not sent a hundredth the size")
     func closeChecksScale() throws {
-        // BTC sizes to five decimals. A size at three used to pass straight through, so
-        // a 1.5 BTC close went out as 0.015 BTC and the position stayed open.
         let size = try #require(Size(typed: "1.500", decimals: 3))
         #expect(throws: OrderBuilder.Failure.sizeScaleMismatch) {
             try OrderBuilder.close(
@@ -62,8 +57,6 @@ struct OrderAuditTests {
 
     @Test("Leverage is checked against the fraction, not a truncated multiple of it")
     func fractionalLeverageCeiling() throws {
-        // A 12.5x market: `initialMarginFraction / 100 * 100` rounds the ceiling down to
-        // 12x and refuses leverage the venue allows.
         let market = try #require(try loadContext { object in
             var markets = object["markets"] as! [[String: Any]]
             var config = markets[0]["config"] as! [String: Any]
@@ -90,7 +83,6 @@ struct OrderAuditTests {
 
     @Test("A maximal last-forwarded value saturates instead of killing the app")
     func requestCounterSaturates() async {
-        // This seed arrives from the wallet snapshot on every connect.
         let counter = RequestCounter(lastForwarded: .max)
         #expect(await counter.take() == .max)
         let seeded = RequestCounter(lastForwarded: 40)
@@ -104,8 +96,6 @@ struct ContextAuditTests {
     @Test("A scaled integer sent as a string decodes wherever it appears")
     func wireIntegersEverywhere() throws {
         // Perpl sends these as numbers while small and strings once large, per field.
-        // One market crossing that threshold used to fail the entire context decode,
-        // which is the app failing to start.
         let context = try loadContext { object in
             var markets = object["markets"] as! [[String: Any]]
             var state = markets[0]["state"] as! [String: Any]
@@ -171,8 +161,6 @@ struct ContextAuditTests {
 struct RESTAuditTests {
     @Test("A base URL with a trailing slash is refused")
     func trailingSlash() {
-        // It makes every target `//v1/…` on the wire while `/v1/…` was signed, so every
-        // signed call 401s and nothing says why.
         #expect(throws: PerplREST.Failure.baseURLHasTrailingSlash) {
             try PerplREST.Configuration(
                 baseURL: URL(string: "https://testnet.perpl.xyz/api/")!, chainID: 10143)
@@ -192,8 +180,6 @@ struct RESTAuditTests {
         await rest.adopt(.init(apiKey: APIKey("pk"), signer: PerplSigner(seed: SecureBytes(Data(repeating: 7, count: 32)))))
 
         _ = try await rest.signedData(try PerplEndpoint(method: .get, path: "/v1/a"))
-        // The gateway's own reason survives rather than being overwritten by a five
-        // minute skew measured on the previous call.
         await #expect(throws: PerplREST.Failure.unauthorized(status: 401, detail: "api key revoked")) {
             try await rest.signedData(try PerplEndpoint(method: .get, path: "/v1/b"))
         }
@@ -233,8 +219,6 @@ struct SocketAuditTests {
 
     @Test("An order cannot be sent while the socket is still unauthenticated")
     func noSendBeforeSnapshot() async throws {
-        // The gateway answers a pre-auth order by closing 3401, which the app would then
-        // report as a refused key rather than its own mistake.
         let channel = GatedChannel(frames: [snapshot])
         let perpl = socket(channel)
         let connecting = Task { try await perpl.connect(credentials: credentials()) }
@@ -267,15 +251,11 @@ struct SocketAuditTests {
         #expect(await perpl.isConnected == false)
         let settled = channel.pingCount
         try await Task.sleep(for: .milliseconds(60))
-        // The heartbeat used to survive, with no reference left to cancel it.
         #expect(channel.pingCount == settled)
     }
 
     @Test("The handshake timeout bounds when connect returns, not only when it throws")
     func timeoutActuallyReturns() async throws {
-        // Cancelling a read blocked on a live socket is only a request; the group awaits
-        // it on the way out. Measured at two seconds against a fifty millisecond timeout
-        // before the channel was closed on the way through.
         let channel = GatedChannel(frames: [snapshot], honoursCancellation: false)
         let perpl = socket(channel)
         let start = ContinuousClock.now
@@ -288,8 +268,6 @@ struct SocketAuditTests {
 
     @Test("A second frame stream is refused rather than splitting the first")
     func framesOnlyOnce() async throws {
-        // Two readers on one socket take alternate frames, so each consumer silently
-        // misses half of its own order statuses.
         let channel = GatedChannel(frames: [snapshot], open: true)
         let perpl = socket(channel, heartbeat: .seconds(60))
         _ = try await perpl.connect(credentials: credentials())
@@ -308,8 +286,6 @@ struct SocketAuditTests {
     }
 }
 
-/// A channel whose first read can be held open, so the window between opening a socket
-/// and authenticating it is observable.
 private final class GatedChannel: WebSocketChannel, @unchecked Sendable {
     private let lock = NSLock()
     private var frames: [String]
@@ -366,8 +342,6 @@ struct SessionOwnershipTests {
         try TradingKey(seed: SecureBytes(Data(repeating: 5, count: 32)))
     }
 
-    /// The product document's acceptance criterion, as a test: "Leaving Desk for more than
-    /// twenty seconds zeroes the key, provable by the next order asking for Face ID."
     @Test("Leaving Desk past the grace stops the client signing")
     func absenceStopsSigning() async throws {
         let base = ContinuousClock.now
@@ -379,13 +353,10 @@ struct SessionOwnershipTests {
 
         await session.enterBackground()
         elapsed.advance(.seconds(10))
-        // Inside the grace the client still signs: a quick app switch costs nothing.
         await #expect(throws: Never.self) {
             try await rest.signedData(try PerplEndpoint(method: .get, path: "/v1/a"))
         }
-        // Past the grace, wherever the grace is set.
         elapsed.advance(SigningSession.backgroundGrace)
-        // The client holds a function, not a key, so there is nothing left to sign with.
         await #expect(throws: SigningSession.Failure.closed) {
             try await rest.signedData(try PerplEndpoint(method: .get, path: "/v1/b"))
         }

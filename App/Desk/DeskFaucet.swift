@@ -1,8 +1,7 @@
 import DeskAuth
 import Foundation
 
-/// Desk's testnet faucet. The paying wallet's key lives only in the server's environment;
-/// the app sends an address and learns what arrived.
+/// The paying wallet's key lives only in the server's environment; the app only sends an address.
 struct DeskFaucet: Sendable {
     struct Delivery: Decodable, Sendable {
         let status: String
@@ -17,7 +16,6 @@ struct DeskFaucet: Sendable {
     }
 
     enum Failure: Error, Sendable {
-        /// The faucet is unconfigured or unreachable, so the manual route is the only one.
         case unavailable
         case tooSoon
     }
@@ -45,7 +43,6 @@ struct DeskFaucet: Sendable {
         }
     }
 
-    /// The one sentence worth showing, or nil when everything needed arrived.
     static func problem(in outcome: Outcome) -> String? {
         if outcome.mon.status == "unavailable" {
             return "Desk's MON faucet is dry right now. Use Monad's faucet instead."

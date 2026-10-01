@@ -74,12 +74,8 @@ struct WelcomeScreen: View {
                     .padding(.horizontal, contentInset)
                     .padding(.top, compact ? 20 : 24)
 
-                    // Present on a device with no account and absent once one exists.
-                    // Secondary to Face ID on purpose: a device without its own passkey
-                    // most often has one synced from another, and sign-in is the right
-                    // first attempt. Creating is behind a confirmation because it makes a
-                    // wallet — the version of this screen that reached creation by
-                    // dismissing a sheet could strand somebody's funds.
+                    // Secondary to Face ID on purpose: a device without its own passkey most often has one synced.
+                    // Creating is behind a confirmation because it makes a wallet.
                     if model.mayOfferCreate {
                         Button("New here? Create an account") { showsCreateWarning = true }
                             .font(.system(size: 14, weight: .bold, design: .rounded))
@@ -104,8 +100,6 @@ struct WelcomeScreen: View {
         }
         .ignoresSafeArea()
         .animation(.snappy, value: model.signInProblem)
-        // Offered, never forced. A pre-roll tutorial measurably makes tasks feel harder,
-        // so this is a link a curious person pulls rather than a wall everyone climbs.
         .sheet(isPresented: $showsExplainer) {
             PerpetualExplainer { showsExplainer = false }
         }
@@ -119,8 +113,6 @@ struct WelcomeScreen: View {
     }
 }
 
-/// A slow lighting pass, not moving content. Core Animation interpolates two blurred
-/// fields for the whole eighteen-second cycle, and Reduce Motion freezes them in place.
 private struct WelcomeLivingBackground: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var drifting = false
@@ -163,8 +155,6 @@ private struct WelcomeLivingBackground: View {
     }
 }
 
-/// The existing feature ticker, redesigned as a connected security sequence. One row is
-/// active at a time; the rail keeps all four feeling like one story rather than loose text.
 private struct WelcomeFeatureRail: View {
     let items: [(symbol: String, title: String)]
 

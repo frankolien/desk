@@ -2,9 +2,6 @@ import DeskPerpl
 import Foundation
 import Observation
 
-/// A position after it closed, as the venue reported it, kept on this phone. The socket
-/// only sends a close as it happens, so without this the History tab forgot everything
-/// the moment Desk was relaunched.
 struct ClosedTrade: Codable, Identifiable, Hashable, Sendable {
     let positionID: Int64
     let marketID: UInt32
@@ -62,7 +59,6 @@ final class ClosedPositionsStore {
         (byAccount[Self.key(network: network, address: address)] ?? []).sorted { $0.positionID > $1.positionID }
     }
 
-    /// Remembers what has closed. A row already known keeps the moment it was first seen.
     func record(_ positions: [PerplPosition], network: String, address: String) {
         let closed = positions.filter { !$0.isOpen }
         guard !closed.isEmpty else { return }
@@ -83,7 +79,6 @@ final class ClosedPositionsStore {
         persist()
     }
 
-    /// Signing out forgets the account's history along with everything else about it.
     func forget(address: String) {
         let suffix = ":\(address.lowercased())"
         let before = byAccount.count

@@ -1,11 +1,8 @@
 import DeskMoney
 import Foundation
 
-/// What this account was worth, sampled on the phone as Profile saw it.
-///
-/// Perpl publishes no equity history, so the line on Profile is drawn from what this
-/// device has observed: one point every ten minutes at most, kept for one year, per
-/// network and address. It starts as a single dot and becomes a line by being used.
+/// Perpl publishes no equity history, so Profile's line is sampled on this device: at most one point
+/// every ten minutes, kept for a year, per network and address.
 enum EquityLog {
     struct Point: Codable, Hashable, Sendable {
         let at: Date
@@ -14,9 +11,6 @@ enum EquityLog {
     }
 
     private static let minimumGap: TimeInterval = 600
-    // The share card may need to tell the story of the last trade even when the
-    // account has been quiet for weeks. Keep a year locally instead of erasing the
-    // only meaningful part of an inactive profile after thirty days.
     private static let keep: TimeInterval = 365 * 86_400
 
     private static func key(_ network: String, _ address: String) -> String {

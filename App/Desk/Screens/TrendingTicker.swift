@@ -2,7 +2,6 @@ import DeskUI
 import Observation
 import SwiftUI
 
-/// A day of hourly closes for the tokens on the ticker, from Desk's server.
 @MainActor
 @Observable
 final class TickerSparklines {
@@ -36,11 +35,6 @@ final class TickerSparklines {
     }
 }
 
-/// Trending coins drifting past, each with its day drawn small beside it.
-///
-/// The strip is two copies of the row end to end, moved left by the clock; when the
-/// first copy has fully passed, the offset wraps and the second is standing where the
-/// first began. With Reduce Motion on it is an ordinary strip a thumb moves.
 struct TrendingTicker: View {
     let tokens: [TrendingSpotToken]
     let sparklines: TickerSparklines
@@ -48,11 +42,8 @@ struct TrendingTicker: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var rowWidth: CGFloat = 0
-    /// Distance the strip had moved on its own when it was last stopped.
     @State private var travelled: CGFloat = 0
-    /// When it last started moving on its own; nil while a finger or a tap holds it.
     @State private var resumedAt: Date?
-    /// Distance the finger has moved it, kept so a swipe back is not undone by the clock.
     @State private var manual: CGFloat = 0
     @State private var dragging: CGFloat = 0
     @State private var resumeTask: Task<Void, Never>?
@@ -85,8 +76,6 @@ struct TrendingTicker: View {
                     .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
                     .clipped()
                     .contentShape(Rectangle())
-                    // A finger stops the strip and moves it; a tap on the gap stops or
-                    // restarts it. Either way it walks on by itself a few seconds later.
                     .gesture(
                         DragGesture(minimumDistance: 8)
                             .onChanged { value in

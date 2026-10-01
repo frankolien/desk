@@ -1,11 +1,8 @@
 import Testing
 @testable import DeskMoney
 
-/// The scaling rules from docs/04-algorithms.md.
 @Suite("Scaling")
 struct ScalingTests {
-
-    // MARK: - The trap that costs a factor of ten
 
     @Test("notional is exact when the decimals sum to six")
     func notionalWhenDecimalsSumToSix() throws {
@@ -14,7 +11,6 @@ struct ScalingTests {
 
         let notional = try #require(Money.notional(price: price, size: size, rounding: .towardZero))
 
-        // 67412.3 * 0.0148 = 997.70204
         #expect(notional.text == "997.702040")
         #expect(notional.raw == price.raw * size.raw) // the shortcut, only valid here
     }
@@ -26,7 +22,6 @@ struct ScalingTests {
 
         let notional = try #require(Money.notional(price: price, size: size, rounding: .towardZero))
 
-        // 2466.40 * 1.5 = 3699.60
         #expect(notional.text == "3699.600000")
         // And the shortcut everyone reaches for is ten times too small.
         #expect(notional.raw == price.raw * size.raw * 10)
@@ -49,8 +44,6 @@ struct ScalingTests {
         let notional = try #require(Money.notional(price: price, size: size, rounding: .towardZero))
         #expect(notional.text == "-250.000000")
     }
-
-    // MARK: - Rounding, including the floor-versus-truncate trap
 
     @Test("floor and towardZero differ below zero")
     func floorVersusTruncateOnNegatives() {
@@ -80,8 +73,6 @@ struct ScalingTests {
             #expect(DecimalText.parse("2.5", decimals: 1, rounding: mode) == 25)
         }
     }
-
-    // MARK: - Text, in both directions
 
     @Test("rendering keeps every decimal place the scale carries")
     func renderingIsExact() {
@@ -127,8 +118,6 @@ struct ScalingTests {
 
     @Test("malformed text is rejected rather than coerced to zero")
     func rejectedForms() {
-        // Hex that fails to parse must never become zero: a zero here is a number
-        // nobody agreed to. Same rule as failable hex decoding on the chain layer.
         #expect(DecimalText.parse("", decimals: 2, rounding: .towardZero) == nil)
         #expect(DecimalText.parse(".", decimals: 2, rounding: .towardZero) == nil)
         #expect(DecimalText.parse("-", decimals: 2, rounding: .towardZero) == nil)
@@ -144,21 +133,15 @@ struct ScalingTests {
     @Test("a value too large for the storage is refused, not wrapped")
     func overflowIsRefused() {
         #expect(DecimalText.parse("99999999999999999999", decimals: 6, rounding: .towardZero) == nil)
-        // Beyond the wire bound of 10^18 raw, which is a trillion AUSD.
         #expect(Money(text: "10000000000000.000000") == nil)
         #expect(Money(text: "1000000000000.000000") != nil)
     }
 
-    // MARK: - Fees
-
     @Test("a taker fee in micros")
     func takerFee() throws {
         let notional = try #require(Money(text: "1000.000000"))
-        // 1000 * 345/1_000_000 = 0.345
         #expect(try #require(notional.fee(rateInMicros: 345)).text == "0.345000")
-        // Mainnet taker 690 -> 6.9 bps
         #expect(try #require(notional.fee(rateInMicros: 690)).text == "0.690000")
-        // Testnet maker 45 -> 0.45 bps
         #expect(try #require(notional.fee(rateInMicros: 45)).text == "0.045000")
     }
 
@@ -168,8 +151,6 @@ struct ScalingTests {
         // A hair of a fee is still a fee: it rounds away from zero, not to nothing.
         #expect(try #require(dust.fee(rateInMicros: 345)).raw == 1)
     }
-
-    // MARK: - Display
 
     @Test("display groups thousands and trims to the requested places")
     func display() throws {
@@ -190,8 +171,6 @@ struct ScalingTests {
         let gain = try #require(Money(text: "42.189999"))
         #expect(gain.display(fractionDigits: 2) == "42.18")
     }
-
-    // MARK: - Scale mechanics
 
     @Test("rescaling widens exactly and narrows by the given rule")
     func rescaling() throws {

@@ -1,7 +1,3 @@
-/// Perpl's open markets as decimal numbers a page can print, and Perpl's own candles for
-/// each of them. The venue serves candle history for every listed market, so a market it
-/// adds (VVV, NEAR) has a chart the day it lists, with no second exchange to map it to.
-
 import { createPublicClient, http } from "viem";
 
 import { EXCHANGE_VIEWS } from "./_perpl-abi.mjs";
@@ -9,7 +5,6 @@ import { EXCHANGE_VIEWS } from "./_perpl-abi.mjs";
 const CONTEXT_URL = "https://app.perpl.xyz/api/v1/pub/context";
 const EXCHANGE = "0x34B6552d57a35a1D042CcAe1951BD1C370112a6F";
 const CANDLE_URL = "https://app.perpl.xyz/api/v1/market-data";
-/// The bars the public API offers, as the resolutions Perpl serves.
 export const BAR_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "1H": 3_600, "4H": 14_400, "1D": 86_400 };
 export const BARS = new Set(Object.keys(BAR_SECONDS));
 const CANDLE_COUNT = 300;
@@ -45,8 +40,6 @@ export function describeMarket(market) {
   };
 }
 
-/// Where the chain is and how fast it moves, from the two block stamps every market
-/// carries; entry blocks become times with these.
 export function describeHead(context) {
   const gas = context?.chain?.gas?.at;
   const stamps = (context?.markets ?? []).flatMap((m) => [m.config?.at, m.state?.at]).filter((at) => at?.b != null && at?.t != null);
@@ -67,7 +60,6 @@ export function createMarkets({ fetchImpl = fetch, now = Date.now, readMark = nu
   let contextCache = { at: 0, value: null };
   const candleCache = new Map();
   let client = null;
-  // One page of one position is the cheapest view that carries the mark.
   const markOf = readMark ?? (async (id) => {
     client ??= createPublicClient({ transport: http(process.env.MONAD_MAINNET_RPC || "https://rpc.monad.xyz", { timeout: 8_000, batch: true }) });
     const [, , mark, valid] = await client.readContract({ address: EXCHANGE, abi: EXCHANGE_VIEWS, functionName: "getPositionsV2", args: [BigInt(id), 0n, 1n] });
@@ -88,7 +80,6 @@ export function createMarkets({ fetchImpl = fetch, now = Date.now, readMark = nu
     return markets.find((m) => String(m.name).toUpperCase() === String(name).toUpperCase()) ?? null;
   }
 
-  /// Ascending candles in decimal prices and AUSD volume, or null for an unknown market or bar.
   async function candles(name, bar) {
     if (!BARS.has(bar)) return null;
     const market = await find(name);
@@ -116,7 +107,6 @@ export function createMarkets({ fetchImpl = fetch, now = Date.now, readMark = nu
     return value;
   }
 
-  /// Every market's mark as the contract holds it this instant, decimal.
   async function marks() {
     const { markets: rows } = await context();
     const read = await Promise.all(rows.map((m) => markOf(m.id).catch(() => null)));

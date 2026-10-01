@@ -1,13 +1,8 @@
 import DeskNet
 import Foundation
 
-/// The trading websocket: sign in, receive the wallet snapshot, send orders.
-///
-/// Everything here follows from what the live gateway does rather than from a document.
-/// It sends no error frames at all: a refused sign-in, malformed JSON and an order sent
-/// before authentication are answered identically, by closing. So the only diagnosis
-/// available is the close code, and the only way to avoid a bad one is to get the
-/// handshake right the first time.
+/// The gateway sends no error frames: a refused sign-in, malformed JSON and an order sent
+/// before authentication are all answered by closing, so the close code is the only diagnosis.
 public actor PerplSocket {
     public enum Failure: Error, Sendable, Equatable {
         case signInRefused(reason: String?)
@@ -24,11 +19,8 @@ public actor PerplSocket {
     public static let signInRefusedCode = 3401
     public static let idleTimeoutCode = 1008
 
-    /// Measured against testnet on 13 September: an unauthenticated socket is closed
-    /// after 10.2 seconds with code 1008. A Face ID prompt can outlast that, so the key
-    /// is derived before the socket is opened and the sign-in frame is the first thing
-    /// written to it. Opening first and prompting after is the bug this number exists to
-    /// forbid.
+    /// An unauthenticated socket is closed after this long (code 1008). Face ID can outlast
+    /// it, so the key is derived before opening and sign-in is the first frame written.
     public static let preSignInIdleSeconds = 10.2
 
     public typealias ChannelFactory = @Sendable (URL) throws -> any WebSocketChannel
@@ -42,8 +34,7 @@ public actor PerplSocket {
     private var heartbeat: Task<Void, Never>?
     private var isAuthenticated = false
     private var framesStarted = false
-    /// Bumped by every connect and disconnect. A handshake that finishes after its own
-    /// socket was torn down compares this and declines to revive it.
+    /// Lets a handshake that finishes after its socket was torn down decline to revive it.
     private var generation = 0
 
     public init(
@@ -76,13 +67,10 @@ public actor PerplSocket {
 
     public nonisolated var chainIdentifier: UInt64 { chainID }
 
-    /// True only after the wallet snapshot. A socket that is open but unauthenticated
-    /// will answer an order by closing 3401, which the app would then report as a
-    /// refused key rather than its own mistake.
+    /// True only after the wallet snapshot: an open but unauthenticated socket answers an
+    /// order by closing 3401, which would read as a refused key.
     public var isConnected: Bool { channel != nil && isAuthenticated }
 
-    /// Opens, signs in, and reads until the wallet snapshot. Returning one is the only
-    /// evidence the gateway accepts the key; there is no acknowledgement frame.
     @discardableResult
     public func connect(
         credentials: PerplCredentials,
@@ -108,12 +96,9 @@ public actor PerplSocket {
 
             let snapshot = try await Self.withTimeout(handshakeTimeout, closing: channel) {
                 while true {
-                    // The read's own error must escape. Wrapping it in the same `try?`
-                    // that tolerates an unparseable frame turns a closed socket into a
-                    // loop that calls `receive()` forever at full tilt.
+                    // The read's own error must escape; under the frame's `try?` a closed
+                    // socket would spin on `receive()` forever.
                     let text = try await channel.receive()
-                    // An unmodelled or unparseable frame is read past, never fatal: the
-                    // catalogue is larger than what this app has seen on the wire.
                     guard let frame = try? InboundFrame(payload: Data(text.utf8)) else { continue }
                     if frame.kind == .walletSnapshot {
                         guard let snapshot = try? frame.decode(WalletSnapshot.self) else {
@@ -123,7 +108,6 @@ public actor PerplSocket {
                     }
                 }
             }
-            // A disconnect during the handshake must not be undone by its own completion.
             guard generation == opened else {
                 channel.close()
                 throw Failure.notConnected
@@ -147,9 +131,7 @@ public actor PerplSocket {
         }
     }
 
-    /// One reader, once. A second call would start an independent reader on the same
-    /// socket and the two would take alternate frames, so each consumer would silently
-    /// miss half of its own order statuses.
+    /// One reader, once: two readers on one socket would take alternate frames.
     public func frames() throws -> AsyncThrowingStream<InboundFrame, any Error> {
         guard let channel, isAuthenticated else { throw Failure.notConnected }
         guard !framesStarted else { throw Failure.framesAlreadyStarted }
@@ -165,10 +147,6 @@ public actor PerplSocket {
                     continuation.finish()
                 } catch {
                     let mapped = Self.map(error)
-                    // A finished reader means this connection is unusable. Keeping the
-                    // dead channel installed made the next order's reconnect fail with
-                    // `alreadyConnected`, even though the UI correctly knew it was
-                    // offline. Tear it down here so the same desk can reconnect cleanly.
                     self.disconnect()
                     continuation.finish(throwing: mapped)
                 }
@@ -187,9 +165,6 @@ public actor PerplSocket {
         channel = nil
     }
 
-    /// Whether the gateway's idle timer keeps running once a socket is authenticated is
-    /// not something the unauthenticated probe could answer, so the socket is kept warm
-    /// rather than assumed safe.
     private func startHeartbeat(_ channel: any WebSocketChannel) {
         heartbeat = Task { [heartbeatInterval] in
             while !Task.isCancelled {
@@ -214,11 +189,6 @@ public actor PerplSocket {
         }
     }
 
-    /// Cancelling the losing child is only a request, and a `receive()` blocked on a
-    /// live socket does not honour it — the group then waits for it at scope exit, so
-    /// the timeout bounds when the error is *thrown* and not when the call *returns*.
-    /// Measured at two seconds against a fifty-millisecond timeout. Closing the channel
-    /// is what actually unblocks the read, so that is what the timeout does.
     private static func withTimeout<T: Sendable>(
         _ duration: Duration,
         closing channel: any WebSocketChannel,

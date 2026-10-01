@@ -9,8 +9,6 @@ struct PositionCardMetric {
     var isDimmed = false
 }
 
-/// The card every position is read on, whoever holds it: the market and the side above,
-/// then figures in pairs, left and right.
 struct PositionCard<Accessory: View>: View {
     let symbol: String
     let sideText: String
@@ -76,7 +74,6 @@ struct PositionCard<Accessory: View>: View {
     }
 }
 
-/// The round-button accessory the card carries when there is something to share.
 struct PositionCardShareButton: View {
     let action: () -> Void
 

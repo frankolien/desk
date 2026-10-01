@@ -1,11 +1,6 @@
 import DeskAuth
 import Foundation
 
-/// The name and picture this wallet shows to everyone else on Desk.
-///
-/// Saved with one wallet signature over a short message carrying the address and the
-/// time. The server checks the signature, so only the phone holding the key can set the
-/// profile, and nothing about the key leaves the phone.
 struct DeskProfile: Sendable {
     struct Saved: Decodable, Sendable {
         let name: String?
@@ -27,7 +22,6 @@ struct DeskProfile: Sendable {
         "Delete Desk profile\n\(address.checksummed.lowercased())\n\(timestamp)"
     }
 
-    /// Removes the profile from Desk's server, with one wallet signature.
     static func delete(address: EthereumAddress, sign: @Sendable (Data) async throws -> EthereumSignature) async throws {
         let timestamp = Int64(Date.now.timeIntervalSince1970 * 1000)
         let signature = try await sign(PersonalMessage.digest(deleteMessage(address: address, timestamp: timestamp)))

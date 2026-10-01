@@ -173,7 +173,6 @@ private struct HolderRow: View {
     }
 }
 
-/// One holder's position on this market, the way they would see it themselves.
 struct HolderPositionSheet: View {
     let holder: MarketHolder
     let market: MarketModel

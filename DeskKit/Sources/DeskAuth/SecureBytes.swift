@@ -1,16 +1,6 @@
 import Darwin
 import Foundation
 
-/// A byte buffer that is wiped when it goes away.
-///
-/// Write-once: there is no mutable accessor, which is what makes `@unchecked Sendable`
-/// sound rather than a suppressed warning. The contents cannot change after `init`, so
-/// there is nothing to tear.
-///
-/// The honest limit, stated where someone will read it: Swift and its crypto libraries
-/// copy bytes where they please, so this narrows the window rather than closing it. The
-/// property that actually holds is that nothing here is written to disk and nothing
-/// survives the object.
 public final class SecureBytes: @unchecked Sendable {
     public let count: Int
     private let storage: UnsafeMutableRawPointer
@@ -58,5 +48,4 @@ public final class SecureBytes: @unchecked Sendable {
 }
 
 // Deliberately absent: CustomStringConvertible, Codable, Equatable, and any mutable
-// accessor. A secret that can be interpolated into a string is a secret that reaches a
-// log.
+// accessor. A secret that can be interpolated into a string reaches a log.

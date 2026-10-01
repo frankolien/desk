@@ -30,8 +30,6 @@ public struct AssetMark: View {
                 .font(.system(size: size * 0.54, weight: .bold, design: .rounded))
                 .foregroundStyle(Color.black.opacity(0.78))
 
-            // The same top-leading light as every other surface, so the disc reads as an
-            // object in the room rather than a flat swatch.
             Circle()
                 .strokeBorder(
                     LinearGradient(

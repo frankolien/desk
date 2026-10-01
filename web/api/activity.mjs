@@ -1,8 +1,3 @@
-/// A wallet's transfers on Monad, from Etherscan's V2 API, named in Desk's terms.
-///
-/// The key stays here. Transfers to and from Perpl's exchange, Agora's faucet and Relay's
-/// depository are labelled as what they are, so a deposit reads "Deposited to Perpl"
-/// rather than "Sent to 0x1964…".
 import { redisStore } from "./_store.mjs";
 import { walletResource } from "./_wallet-resource.mjs";
 import { postMessage, readRoom } from "./_chat.mjs";
@@ -26,8 +21,6 @@ const COUNTERPARTIES = {
 const validAddress = (value) => /^0x[a-fA-F0-9]{40}$/.test(value);
 const validSolana = (value) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
 
-/// A bounded, read-only timeline from the same indexed trades used by wallet alerts.
-/// Missing ledgers are queued for indexing; a missing ledger is not an empty history.
 export async function followingFeed(store, addresses, now = Date.now()) {
   const [values, service] = await Promise.all([
     store.mget(addresses.map(ledgerKey)),
@@ -85,7 +78,6 @@ export function formatUnits(raw, decimals) {
   return fraction ? `${whole}.${fraction}` : whole;
 }
 
-/// One entry per transfer the wallet took part in, newest first.
 export function normalize({ address, native = [], tokens = [], nativeSymbol }) {
   const me = address.toLowerCase();
   const entries = [];
@@ -133,7 +125,6 @@ async function list(fetchImpl, chainId, action, address, key) {
 export function createHandler(fetchImpl = fetch, key = () => process.env.ETHERSCAN_API_KEY, { store = redisStore(), wallet = walletResource } = {}) {
   return async function handler(req, res) {
     res.setHeader("Cache-Control", "private, no-store");
-    // The market rooms live here too: reading one is a GET, posting to one is the POST.
     if (req.query.view === "chat") {
       if (!store) return res.status(503).json({ error: "Live chat is not configured." });
       try {
@@ -150,7 +141,6 @@ export function createHandler(fetchImpl = fetch, key = () => process.env.ETHERSC
       const outcome = await report(store, { kind: "message", ...(req.body ?? {}) });
       return res.status(outcome.status).json(outcome.body);
     }
-    // Moderation: the reports and the lists, and the decisions, behind the cron secret.
     if (req.query.view === "moderation") {
       if (!authorized(req)) return res.status(401).json({ error: "Unauthorized." });
       if (!store) return res.status(503).json({ error: "Moderation is not configured." });

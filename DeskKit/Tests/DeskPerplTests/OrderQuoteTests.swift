@@ -12,8 +12,6 @@ struct OrderQuoteTests {
         return try #require(context.market(id: 16))
     }
 
-    /// 0.01 BTC long at 10x, marked at 76,719.0. Every figure computed by hand against
-    /// the live market configuration and pinned here.
     private func worked() throws -> OrderQuote {
         let market = try btc()
         return try OrderQuote.forMarket(
@@ -29,7 +27,6 @@ struct OrderQuoteTests {
         let quote = try worked()
         #expect(quote.notional.text == "767.190000")
         #expect(quote.margin.text == "76.719000")
-        // 767.19 at 345 micros taker, away from zero.
         #expect(quote.fee.text == "0.264681")
         #expect(quote.total.text == "76.983681")
         #expect(quote.liquidationPrice.raw == 721_424)
@@ -39,8 +36,6 @@ struct OrderQuoteTests {
     func totalIncludesFee() throws {
         let quote = try worked()
         #expect(quote.total.raw == quote.margin.raw + quote.fee.raw)
-        // A user shown only the margin is surprised by the difference at exactly the
-        // moment they can least afford to be.
         #expect(quote.total.raw > quote.margin.raw)
     }
 
@@ -70,9 +65,8 @@ struct OrderQuoteTests {
 
     @Test("The fee is deducted from what backs the position, which understates headroom")
     func conservativeBacking() throws {
-        // Whether the venue takes the fee from position collateral or free collateral is
-        // undocumented and moves this number. Deducting it means that if we are wrong,
-        // the real liquidation is further away than shown — never nearer.
+        // Whether the venue takes the fee from position or free collateral is undocumented. Deducting it
+        // means a wrong guess puts the real liquidation further away than shown, never nearer.
         let market = try btc()
         let size = try #require(market.size(1_000))
         let price = try #require(market.price(767_190))
@@ -89,8 +83,6 @@ struct OrderQuoteTests {
         let maker = try OrderQuote.forMarket(
             market, side: .long, size: #require(market.size(1_000)),
             price: #require(market.price(767_190)), leverageHundredths: 1_000, isMaker: true)
-        // 45 micros against 345: quoting maker on an order that crosses understates the
-        // cost by nearly eight times.
         #expect(maker.fee.text == "0.034524")
         #expect(try worked().fee.raw > maker.fee.raw * 7)
     }
@@ -112,7 +104,6 @@ struct OrderQuoteTests {
         let quote = try worked()
         #expect(quote.isAffordable(freeCollateral: try #require(Money(text: "77"))))
         #expect(quote.isAffordable(freeCollateral: quote.total))
-        // Enough for the margin but not the fee.
         #expect(quote.isAffordable(freeCollateral: quote.margin) == false)
     }
 

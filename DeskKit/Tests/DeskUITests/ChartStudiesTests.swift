@@ -19,7 +19,6 @@ struct ChartStudiesTests {
         let values: [Double] = [10, 10, 10, 20]
         let average = ChartStudies.ema(values, period: 3)
         #expect(average[2] == 10)
-        // weight 0.5: (20 - 10) * 0.5 + 10
         #expect(average[3] == 15)
     }
 
@@ -27,7 +26,6 @@ struct ChartStudiesTests {
     func bollinger() {
         let values: [Double] = [2, 4, 4, 4, 5, 5, 7, 9]
         let bands = ChartStudies.bollinger(values, period: 8, width: 2)
-        // Population deviation of this classic set is exactly 2.
         #expect(bands.middle[7] == 5)
         #expect(bands.upper[7] == 9)
         #expect(bands.lower[7] == 1)

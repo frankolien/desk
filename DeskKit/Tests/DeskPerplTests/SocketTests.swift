@@ -251,8 +251,7 @@ struct SocketTrafficTests {
         #expect(statuses.count == 2)
         #expect(statuses[0].isAccepted)
         #expect(statuses[1].isAccepted == false)
-        // 34 is order forwarding still disabled on the account: an opening-sequence bug,
-        // not a trading one, and the only field that says so.
+        // 34 is order forwarding still disabled on the account, and only this field says so.
         #expect(statuses[1].subReason == 34)
         #expect(thrown as? PerplSocket.Failure == .signInRefused(reason: "unauthorized"))
         await perpl.disconnect()

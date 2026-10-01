@@ -16,7 +16,6 @@ struct NewsItem: Decodable, Identifiable, Hashable, Sendable {
     var imageURL: URL? { image.flatMap(URL.init(string:)) }
 }
 
-/// Headlines from Desk's server, refreshed every five minutes while a screen shows them.
 @MainActor
 @Observable
 final class NewsModel {
@@ -51,7 +50,6 @@ final class NewsModel {
     }
 }
 
-/// A headline, who wrote it and when, the markets it touches, and its picture.
 struct NewsRow: View {
     let item: NewsItem
     let market: MarketModel
@@ -63,7 +61,6 @@ struct NewsRow: View {
         }
     }
 
-    /// "12m ago", "3h ago", "2d ago": one unit, the way a feed reads.
     static func age(of date: Date, now: Date = .now) -> String {
         let seconds = max(0, Int(now.timeIntervalSince(date)))
         switch seconds {

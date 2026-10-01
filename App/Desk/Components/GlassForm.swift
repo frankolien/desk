@@ -1,11 +1,7 @@
 import DeskUI
 import SwiftUI
 
-/// A grouped section whose container is Liquid Glass on iOS 26 and material before it.
-///
-/// A system `Form` paints its sections as opaque grey and offers no way to swap that for
-/// glass, so this lays the same native controls out itself: rows separated by hairlines
-/// inside one glass shape, with the header and footer where Settings puts them.
+/// A system `Form` paints its sections opaque grey with no way to swap in glass, so this lays them out.
 struct GlassSection<Content: View>: View {
     var header: String?
     var footer: String?
@@ -53,7 +49,6 @@ struct GlassSection<Content: View>: View {
     }
 }
 
-/// A label on the leading edge and a native control or value on the trailing edge.
 struct GlassRow<Trailing: View>: View {
     let title: String
     var subtitle: String?
@@ -87,16 +82,12 @@ extension GlassRow where Trailing == Text {
     }
 }
 
-/// The scrolling page glass sections sit on. Glass needs something behind it to bend, so
-/// the ground is the app's lit background rather than flat black.
 struct GlassPage<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
         ScrollView {
-            // Lazy: the copy history pushes two hundred rows through here, each formatting a
-            // figure and a relative date, and a plain VStack builds every one of them before
-            // the screen appears.
+            // Lazy: the copy history pushes two hundred rows through here.
             LazyVStack(alignment: .leading, spacing: 18) {
                 content
             }

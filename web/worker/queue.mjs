@@ -1,5 +1,3 @@
-/// Keep newly followed or stale wallets ahead of the historical index backlog,
-/// without letting them starve every other wallet in the pool.
 export function selectWallets(tracked, urgent, cursor = 0, limit = 12, urgentLimit = 6) {
   const trackedSet = new Set(tracked);
   const priority = [...new Set(urgent)].filter((wallet) => trackedSet.has(wallet)).slice(0, urgentLimit);
@@ -11,8 +9,6 @@ export function selectWallets(tracked, urgent, cursor = 0, limit = 12, urgentLim
   return { wallets: [...priority, ...rotated], nextCursor: cursor + regularCount };
 }
 
-/// The trader index's wait after its nth failure in a row: a minute, doubling, capped at
-/// thirty, so a rate limit or a spent quota is not hammered.
 export function indexBackoffMs(failures, baseMs = 60_000, maxMs = 30 * 60_000) {
   return Math.min(maxMs, baseMs * 2 ** Math.max(0, failures - 1));
 }

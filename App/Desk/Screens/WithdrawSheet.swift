@@ -41,7 +41,6 @@ struct WithdrawSheet: View {
         return nil
     }
 
-    /// One transaction to the wallet, two when the funds continue to an address.
     private var transactionCount: Int { (source == .trading ? 1 : 0) + (destination == .address ? 1 : 0) }
 
     private var lacksGas: Bool {
@@ -75,7 +74,6 @@ struct WithdrawSheet: View {
         .task { if ProcessInfo.processInfo.arguments.contains("-withdraw-sent") { model.seedWithdrawalSentForReview() } }
         #endif
         .onAppear {
-            // Open on whichever balance actually holds something.
             if tradingBalance.isZero && !walletBalance.isZero { source = .wallet }
         }
         .onChange(of: source) { _, newValue in
@@ -84,8 +82,6 @@ struct WithdrawSheet: View {
             amount = ""
         }
     }
-
-    // MARK: Entry
 
     private var header: some View {
         HStack {
@@ -180,8 +176,6 @@ struct WithdrawSheet: View {
         .animation(.snappy(duration: 0.2), value: destination)
     }
 
-    /// From above, to below, the arrow between: the sentence "from my trading balance to
-    /// my wallet" drawn rather than written.
     private var route: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
@@ -276,7 +270,6 @@ struct WithdrawSheet: View {
 
     private var holdTitle: String {
         guard let requested else { return destination == .address && recipient == nil ? "Add an address" : "Enter an amount" }
-        // The destination is already drawn in the route above; the button names only the amount.
         return "Hold to send \(requested.display()) AUSD"
     }
 
@@ -332,8 +325,6 @@ struct WithdrawSheet: View {
         editingRecipient = false
     }
 
-    // MARK: Progress and done
-
     private var progress: some View {
         VStack(alignment: .leading, spacing: 16) {
             Spacer()
@@ -386,9 +377,6 @@ struct WithdrawSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer()
 
-            // The mark, lit once. A green tick is what every app shows; this is the
-            // one moment the app's own face belongs on the screen, and one ring of its
-            // own colour around it says "done" without a symbol saying so.
             ZStack {
                 Circle()
                     .stroke(DeskColor.action.color.opacity(0.28), lineWidth: 1)
@@ -436,9 +424,6 @@ struct WithdrawSheet: View {
         }
     }
 
-    /// One line per thing that happened, in the order it happened, each a link to the
-    /// explorer. Named by what it was — a withdrawal off the desk, a transfer out — so
-    /// two hashes read as two steps rather than as two of the same thing.
     private func receiptCard(_ receipt: AppModel.WithdrawalReceipt) -> some View {
         let labels: [String] = switch (receipt.transactions.count, receipt.recipient == nil) {
         case (2, _): ["Withdrawal from Perpl", "Transfer"]

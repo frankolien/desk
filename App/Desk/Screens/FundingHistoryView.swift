@@ -3,8 +3,7 @@ import DeskPerpl
 import DeskUI
 import SwiftUI
 
-/// What holding a position on this market has cost over the last week. A positive rate
-/// means longs pay shorts; a negative one, shorts pay longs.
+/// A positive funding rate means longs pay shorts; a negative one, shorts pay longs.
 struct FundingHistoryView: View {
     let market: MarketModel
     @State private var events: [MarketFunding] = []
@@ -13,8 +12,6 @@ struct FundingHistoryView: View {
 
     private var current: MarketFunding? { events.last ?? market.market?.funding }
     private var weekMicros: Int64 { events.reduce(0) { $0 + $1.rateMicros } }
-    /// The average rate per interval in each six-hour block. A raw series at one event
-    /// every few dozen minutes flips too often to read as anything but noise.
     private struct Bucket: Identifiable {
         let start: Date
         let percent: Double
@@ -31,8 +28,6 @@ struct FundingHistoryView: View {
         }
     }
 
-    /// From zero to a little past the largest block on each side that has one, so a week
-    /// that never flipped uses the whole height.
     private var domain: ClosedRange<Double> {
         let values = buckets.map(\.percent)
         let top = max((values.max() ?? 0) * 1.25, 0)
@@ -118,7 +113,6 @@ struct FundingHistoryView: View {
         }
     }
 
-    /// The week as a share of position size, from a long's side.
     private var weekLine: String {
         let share = Self.percent(abs(weekMicros), digits: 3, signed: false)
         if weekMicros == 0 { return "Over 7 days funding netted to zero." }

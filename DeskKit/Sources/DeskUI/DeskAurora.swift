@@ -1,10 +1,7 @@
 import SwiftUI
 
-/// Every vertex is already a mix of amber and violet, then taken most of the way into the ground —
-/// a field with an amber half and a violet half is two tints, not one light.
 public struct DeskAurora: View {
     private let height: CGFloat
-    /// Which edge the light sits on. It fades towards the middle from either.
     private let edge: VerticalEdge
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -23,11 +20,7 @@ public struct DeskAurora: View {
             colors: colours,
             smoothsColors: true)
             .frame(height: height)
-            // Heavy enough to melt the grid's own vertices into each other. Without it
-            // the crossings read as sixteen soft squares rather than as one field.
             .blur(radius: 58)
-            // The colour is a light, not a layer: it fades out entirely before the
-            // rows begin, so nothing below the actions sits on a tinted ground.
             .mask {
                 LinearGradient(
                     stops: [
@@ -44,8 +37,6 @@ public struct DeskAurora: View {
             .accessibilityHidden(true)
             .onAppear {
                 guard !reduceMotion else { return }
-                // Eighteen seconds a cycle. Slow enough that nobody watching the screen
-                // sees it move, fast enough that the screen is never twice the same.
                 withAnimation(.easeInOut(duration: 18).repeatForever(autoreverses: true)) {
                     phase = 1
                 }
@@ -79,8 +70,6 @@ public struct DeskAurora: View {
         ]
     }
 
-    /// Ratios rather than colours. Reading across, the amber-to-violet balance tips back
-    /// and forth instead of crossing once, so there is no line where one colour ends.
     private var colours: [Color] {
         [
             Self.deep, Self.leaning, Self.crossed, Self.deep,
@@ -94,9 +83,8 @@ public struct DeskAurora: View {
     private static let violet = Color(red: 0.51, green: 0.43, blue: 0.98)
     private static let night = DeskColor.night.color
 
-    /// Six ratios of the same two colours, each then taken most of the way down to the
-    /// ground. Mixed perceptually, so amber into violet passes through a dulled bronze
-    /// rather than through the grey that a straight RGB average would give.
+    /// Mixed perceptually, so amber into violet passes through a dulled bronze rather than
+    /// the grey a straight RGB average gives.
     private static let warm = blend(0.24, ground: 0.42)
     private static let leaning = blend(0.38, ground: 0.50)
     private static let crossed = blend(0.52, ground: 0.56)

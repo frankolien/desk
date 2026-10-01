@@ -3,7 +3,6 @@ import Foundation
 public struct HTTPResponse: Sendable, Hashable {
     public let status: Int
     public let body: Data
-    /// Lowercased names. `Date` is read for clock skew; nothing else is trusted.
     public let headers: [String: String]
 
     public init(status: Int, body: Data, headers: [String: String] = [:]) {
@@ -20,12 +19,8 @@ public protocol HTTPTransport: Sendable {
     func send(_ request: URLRequest) async throws -> HTTPResponse
 }
 
-/// Refuses every redirect by returning no follow-up request.
-///
-/// This is the one that matters. URLSession follows redirects by default and replays the
-/// original headers at the new location, so a gateway answering 302 to an attacker's
-/// host would be handed `X-API-Key` by the system, with no code of ours involved. The
-/// task instead completes with the 3xx itself, which `PerplREST` rejects.
+/// Refuses every redirect: URLSession replays the original headers at the new location, which
+/// would hand `X-API-Key` to another host. The 3xx itself reaches `PerplREST`, which rejects it.
 private final class RefuseRedirects: NSObject, URLSessionTaskDelegate, Sendable {
     func urlSession(
         _ session: URLSession,
@@ -58,16 +53,13 @@ public struct URLSessionTransport: HTTPTransport {
         session = URLSession(configuration: configuration)
     }
 
-    /// A `URLSession` retains itself until it is invalidated, so one built and dropped —
-    /// which a SwiftUI `State(initialValue:)` does on every body pass that rebuilds its
-    /// view — never goes away. This one does.
+    /// A `URLSession` retains itself until invalidated, and SwiftUI's `State(initialValue:)` builds
+    /// and drops one on every body pass, so this one invalidates itself.
     public func finish() {
         session.invalidateAndCancel()
     }
 
     public func send(_ request: URLRequest) async throws -> HTTPResponse {
-        // Per-task delegate, so no session-wide delegate has to be retained and no
-        // retain cycle exists to break.
         let (data, response) = try await session.data(for: request, delegate: RefuseRedirects())
         guard let http = response as? HTTPURLResponse else { throw Failure.notHTTP }
         var headers: [String: String] = [:]
@@ -80,7 +72,5 @@ public struct URLSessionTransport: HTTPTransport {
     }
 }
 
-// Deliberately absent: certificate pinning. Perpl's certificate is theirs to rotate and
-// a pin that outlives it bricks the app in the field with no way to ship a fix inside a
-// review cycle. Refusing redirects and requiring TLS is what is defensible here; pinning
-// belongs with a remote kill switch, which this app does not have.
+// Deliberately no certificate pinning: Perpl rotates its certificate, and a stale pin would
+// brick the app in the field with no remote kill switch to recover.

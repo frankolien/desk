@@ -17,8 +17,6 @@ const REASONS = {
 
 const evmAddress = (value) => /^0x[a-fA-F0-9]{40}$/.test(value);
 
-/// The same rule the app applies before signing, applied here too so a changed Relay
-/// response is refused at the edge instead of reaching a phone.
 export function depositTransaction(quote, user, wei) {
   if (quote?.steps?.length !== 1) return null;
   const [step] = quote.steps;
@@ -34,14 +32,8 @@ export function depositTransaction(quote, user, wei) {
   return ok ? { chainId: MONAD, to: tx.to, data: tx.data, value: String(tx.value) } : null;
 }
 
-/// The quote has to describe the route that was asked for.
-///
-/// `depositTransaction` checks what leaves the wallet — chain, depository, selector,
-/// depositor and value — and is airtight on that. It says nothing about what arrives,
-/// because the only thing binding this deposit to a destination is Relay's own request id
-/// inside the calldata. So the figures the sheet shows are checked against the route the
-/// caller asked for: a quote that pays out a different token, or on a different chain, is
-/// refused rather than displayed.
+/// `depositTransaction` checks only what leaves the wallet; nothing binds what arrives but
+/// Relay's request id, so a quote paying a different token or chain is refused here.
 export function matchesRoute(quote, chainIndex, token) {
   const out = quote?.details?.currencyOut?.currency;
   const into = quote?.details?.currencyIn?.currency;
@@ -84,7 +76,6 @@ function formatUnits(raw, decimals) {
   return fraction ? `${whole}.${fraction}` : whole;
 }
 
-/// Relay's own words, folded to the four states a buyer needs to see.
 export function phase(status) {
   switch (status) {
     case "success": return "filled";

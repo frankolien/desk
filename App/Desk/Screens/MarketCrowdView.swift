@@ -82,8 +82,6 @@ private struct MarketCrowdCard: View {
         }
     }
 
-    /// One bar, split where the money is. Long owns green and short owns red, the same
-    /// way every other direction in the app does, so the bar needs no key.
     private var bar: some View {
         GeometryReader { proxy in
             let share = crowd.longShare ?? 0
@@ -158,7 +156,6 @@ private struct MarketCrowdCard: View {
         .disabled(biggest.address == nil)
     }
 
-    /// The one place this screen can be wrong is by being short, so it says when it is.
     private var floorNote: some View {
         Text("More open than Desk could read in one pass — these are floors.")
             .font(.system(size: 11, weight: .medium, design: .rounded))

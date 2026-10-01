@@ -1,10 +1,7 @@
 import DeskAuth
 import Foundation
 
-/// Estimate, price, number, sign, send.
-///
-/// The order matters and so does what happens when a step fails: a nonce handed out for
-/// a transaction that never left has to go back, or every later send in the session is
+/// A nonce handed out for a transaction that never left must go back, or every later send is
 /// numbered one too high and sits in the mempool forever.
 public actor TransactionSender {
     public enum Failure: Error, Sendable, Equatable {
@@ -48,8 +45,6 @@ public actor TransactionSender {
             ).signed(with: key)
 
             let returned = try await rpc.sendRawTransaction(signed)
-            // The hash covers the signed bytes, so a node that answers with a different
-            // one is not talking about our transaction.
             guard returned.lowercased() == signed.hashHex.lowercased() else {
                 throw Failure.nodeReturnedADifferentHash(sent: signed.hashHex, returned: returned)
             }
@@ -60,7 +55,6 @@ public actor TransactionSender {
         }
     }
 
-    /// Monad finalises in two blocks, so this is short by Ethereum's standards on purpose.
     @discardableResult
     public func wait(
         for signed: SignedTransaction,

@@ -10,7 +10,6 @@ public struct PriceAxis: Sendable, Equatable {
         public let label: String
     }
 
-    /// Where a price sits, and whether it is outside the range entirely.
     public struct Placement: Sendable, Equatable {
         public let y: CGFloat
         public let offScale: OffScale?
@@ -26,12 +25,8 @@ public struct PriceAxis: Sendable, Equatable {
     public let topInset: CGFloat
     public let bottomInset: CGFloat
 
-    /// Builds a range that covers the candles and gives guides whatever room is left.
-    ///
-    /// `candleShare` is the fraction of the plot the candles keep. A guide further away
-    /// than the remaining budget does not widen the range: it is reported as off-scale so
-    /// the caller can pin it to the edge, which keeps the price action readable no matter
-    /// how far a liquidation sits from the market.
+    /// A guide beyond the room `candleShare` leaves does not widen the range: it is reported
+    /// off-scale so the caller pins it to the edge.
     public init(
         candleLow: Double,
         candleHigh: Double,
@@ -43,8 +38,6 @@ public struct PriceAxis: Sendable, Equatable {
     ) {
         let observedLow = min(candleLow, candleHigh)
         let observedHigh = max(candleLow, candleHigh)
-        // A market that has not moved inside the window still needs a range to draw in,
-        // so a flat series is padded either side rather than left with no height.
         let span = max(observedHigh - observedLow, max(abs(observedHigh), 1) * 0.0001)
         let padding = (span - (observedHigh - observedLow)) / 2
         let lowest = observedLow - padding
@@ -68,7 +61,6 @@ public struct PriceAxis: Sendable, Equatable {
         self.bottomInset = bottomInset
     }
 
-    /// Height available to the range itself, once the insets are taken.
     public var usableHeight: CGFloat { max(height - topInset - bottomInset, 1) }
 
     /// Unclamped: a price outside the range maps outside the plot.
@@ -79,7 +71,6 @@ public struct PriceAxis: Sendable, Equatable {
         return topInset + usableHeight * CGFloat(1 - fraction)
     }
 
-    /// Clamped to the plot, saying which edge it was pulled to.
     public func place(_ value: Double) -> Placement {
         let top = topInset
         let bottom = topInset + usableHeight
@@ -89,11 +80,6 @@ public struct PriceAxis: Sendable, Equatable {
         return Placement(y: raw, offScale: nil)
     }
 
-    /// Ticks on round numbers rather than on an even division of the range.
-    ///
-    /// An even division produces values like 77.19K and 76.15K, which carry no meaning and
-    /// land wherever the range happens to start. Round steps are both readable and far
-    /// less likely to collide with a guide, whose price is arbitrary.
     public func ticks(count: Int = 4) -> [Tick] {
         guard count >= 2, high > low else { return [] }
         let step = Self.niceStep((high - low) / Double(count - 1))
@@ -109,11 +95,6 @@ public struct PriceAxis: Sendable, Equatable {
         return values.map { Tick(value: $0, y: y($0), label: Self.label($0, step: step)) }
     }
 
-    /// Ticks with any that would crowd a guide removed.
-    ///
-    /// Guides are placed, not raw, so a guide pinned to an edge suppresses the tick beside
-    /// that edge too — which is the case where two prices a hair apart used to be printed
-    /// on top of each other.
     public func ticks(count: Int = 4, clearOf guides: [Double], within separation: CGFloat) -> [Tick] {
         let positions = guides.map { place($0).y }
         return ticks(count: count).filter { tick in
@@ -121,10 +102,6 @@ public struct PriceAxis: Sendable, Equatable {
         }
     }
 
-    /// A label whose precision comes from the axis step rather than from the value.
-    ///
-    /// Derived per value, neighbouring ticks printed at different widths: a spot token's
-    /// axis read "0.000100" above "0.0000500". One step, one precision.
     public static func label(_ value: Double, step: Double) -> String {
         if abs(value) >= 1_000 { return grouped(value) }
         guard step > 0, step.isFinite else { return label(value) }
@@ -132,23 +109,16 @@ public struct PriceAxis: Sendable, Equatable {
         return String(format: "%.\(places)f", value)
     }
 
-    /// A tick label that survives the range of things Desk charts.
-    ///
-    /// The perpetual markets print in thousands and the spot tokens in millionths. A
-    /// single fixed format cannot show both: two decimals renders a token at 0.0000761
-    /// as "0.00", and eight renders Bitcoin as a wall of zeroes.
     public static func label(_ value: Double) -> String {
         let magnitude = abs(value)
         if magnitude >= 1_000 { return grouped(value) }
         if magnitude >= 1 { return String(format: "%.2f", value) }
         if magnitude >= 0.01 { return String(format: "%.4f", value) }
         if magnitude == 0 { return "0" }
-        // Two digits past the first significant one, so neighbouring ticks differ.
         let places = min(Int(ceil(-log10(magnitude))) + 2, 12)
         return String(format: "%.\(places)f", value)
     }
 
-    /// Thousands print whole and grouped, the way a price is read aloud.
     static func grouped(_ value: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
@@ -157,7 +127,6 @@ public struct PriceAxis: Sendable, Equatable {
         return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.0f", value)
     }
 
-    /// The 1, 2, 5, 10 ladder every axis uses.
     static func niceStep(_ raw: Double) -> Double {
         guard raw > 0, raw.isFinite else { return 0 }
         let magnitude = pow(10, log10(raw).rounded(.down))

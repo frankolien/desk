@@ -1,12 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// The arithmetic behind every study the chart can draw. Pure functions over closes and
-/// candles: the view decides colour and placement, nothing here does.
-///
-/// Every series is returned aligned to its input, with `nil` where the study has not yet
-/// had enough bars to say anything. A moving average that started at zero would draw a
-/// line diving in from the corner; a `nil` leaves the first bars honestly blank.
+/// Every series is aligned to its input, `nil` (never zero) until the study has enough bars.
 public enum ChartStudies {
     public static func sma(_ values: [Double], period: Int) -> [Double?] {
         guard period > 0, values.count >= period else { return Array(repeating: nil, count: values.count) }
@@ -20,8 +15,7 @@ public enum ChartStudies {
         return result
     }
 
-    /// Seeded with the simple average of the first `period` bars, the way every terminal
-    /// does it, so the line agrees with what a trader sees elsewhere.
+    /// Seeded with the simple average of the first `period` bars, as every terminal does.
     public static func ema(_ values: [Double], period: Int) -> [Double?] {
         guard period > 0, values.count >= period else { return Array(repeating: nil, count: values.count) }
         var result = [Double?](repeating: nil, count: values.count)
@@ -64,7 +58,6 @@ public enum ChartStudies {
         return Bands(upper: upper, middle: middle, lower: lower)
     }
 
-    /// Wilder's smoothing. A market that only rose reads 100, one that only fell reads 0.
     public static func rsi(_ closes: [Double], period: Int = 14) -> [Double?] {
         guard period > 0, closes.count > period else { return Array(repeating: nil, count: closes.count) }
         var result = [Double?](repeating: nil, count: closes.count)
@@ -110,7 +103,6 @@ public enum ChartStudies {
         for index in closes.indices {
             if let quick = fastLine[index], let steady = slowLine[index] { line[index] = quick - steady }
         }
-        // The signal is an EMA of the MACD line where it exists, so it starts later still.
         let defined = line.compactMap { $0 }
         let firstDefined = line.firstIndex { $0 != nil } ?? closes.count
         let signalDefined = ema(defined, period: signalPeriod)
@@ -125,8 +117,6 @@ public enum ChartStudies {
         return MACD(line: line, signal: signal, histogram: histogram)
     }
 
-    /// Volume-weighted average price, restarting at each UTC day when the candles carry
-    /// a time. Candles without volume contribute nothing and inherit the running value.
     public static func vwap(_ candles: [ChartCandle]) -> [Double?] {
         var result = [Double?](repeating: nil, count: candles.count)
         var weighted = 0.0
@@ -146,7 +136,6 @@ public enum ChartStudies {
         return result
     }
 
-    /// Smoothed candles that show the trend rather than each bar's noise.
     public static func heikinAshi(_ candles: [ChartCandle]) -> [ChartCandle] {
         var result: [ChartCandle] = []
         result.reserveCapacity(candles.count)
@@ -164,8 +153,6 @@ public enum ChartStudies {
     }
 }
 
-/// Which candles are on screen. Pans and zooms move this rather than the data, so the
-/// series can grow at either end without the view jumping.
 public struct ChartWindow: Sendable, Equatable {
     public static let minimumVisible = 8
     public static let maximumVisible = 500
@@ -185,12 +172,10 @@ public struct ChartWindow: Sendable, Equatable {
 
     static func defaultGap(for visible: Int) -> Int { max(3, visible / 8) }
 
-    /// The empty slots allowed past the newest candle.
     public var maximumGap: Int { max(3, visible / 3) }
     public var range: Range<Int> { max(end - visible, 0)..<min(end, total) }
     public var leadingSlots: Int { max(0, visible - end) }
     public var isAtLatest: Bool { end >= total }
-    /// Slot index (0 = leftmost on screen) of the candle at `index` in the series.
     public func slot(of index: Int) -> Int { index - (end - visible) }
     public func index(atSlot slot: Int) -> Int { slot + end - visible }
 
@@ -199,7 +184,6 @@ public struct ChartWindow: Sendable, Equatable {
         clamp()
     }
 
-    /// Zooms so the candle under `anchorFraction` of the width stays under the finger.
     public mutating func zoom(by factor: Double, anchorFraction: Double) {
         guard factor > 0, factor.isFinite else { return }
         let anchorIndex = Double(end - visible) + Double(visible) * anchorFraction
@@ -210,15 +194,11 @@ public struct ChartWindow: Sendable, Equatable {
         clamp()
     }
 
-    /// Snaps back to the newest candle, keeping the current zoom.
     public mutating func jumpToLatest() {
         end = total + Self.defaultGap(for: visible)
         clamp()
     }
 
-    /// The series grew or was replaced. A window that was at the latest stays there;
-    /// one that had panned into history keeps the same candles on screen when the
-    /// growth was on the left (`prepended` older candles), and stays put otherwise.
     public mutating func update(total newTotal: Int, prepended: Int = 0) {
         let wasAtLatest = isAtLatest
         total = max(newTotal, 0)
@@ -232,7 +212,6 @@ public struct ChartWindow: Sendable, Equatable {
     }
 }
 
-/// A vertical scale that can be linear or logarithmic and knows how to label itself.
 public struct ChartScale: Sendable, Equatable {
     public struct Tick: Sendable, Equatable {
         public let value: Double
@@ -278,8 +257,6 @@ public struct ChartScale: Sendable, Equatable {
         return inverse(lo + (hi - lo) * fraction)
     }
 
-    /// Round-number ticks on a linear scale; evenly spaced ticks on a log one, since
-    /// round numbers bunch up at the bottom of a log axis.
     public func ticks(count: Int = 5) -> [Tick] {
         guard count >= 2, high > low else { return [] }
         if logarithmic {
@@ -301,7 +278,6 @@ public struct ChartScale: Sendable, Equatable {
     }
 }
 
-/// What a ruler dragged between two candles reads.
 public struct ChartMeasure: Sendable, Equatable {
     public let fromPrice: Double
     public let toPrice: Double

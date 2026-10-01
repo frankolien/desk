@@ -1,12 +1,7 @@
 import Foundation
 
-/// One REST call, reduced to the two things that are signed: the target and the body.
-///
-/// `target` is built once, here, and both signed and sent. The gateway rebuilds the
-/// canonical string from the request line it received, so any layer that re-encodes the
-/// query between signing and sending produces a signature the gateway cannot reproduce.
-/// Every character is therefore committed at construction and never handed to
-/// `URLComponents`, which normalises.
+/// `target` is built once and both signed and sent: the gateway signs the request line it
+/// received, so it is never handed to `URLComponents`, which re-encodes.
 public struct PerplEndpoint: Sendable, Hashable {
     public enum Method: String, Sendable, Hashable {
         case get = "GET"
@@ -47,8 +42,7 @@ public struct PerplEndpoint: Sendable, Hashable {
         }
     }
 
-    /// RFC 3986 unreserved, applied to UTF-8 bytes rather than `Character`s: a grapheme
-    /// cluster is not a byte, and encoding per cluster mangles anything outside ASCII.
+    /// RFC 3986 unreserved, applied to UTF-8 bytes: encoding per `Character` mangles non-ASCII.
     static func percentEncoded(_ text: String) -> String {
         var encoded = ""
         encoded.reserveCapacity(text.utf8.count)

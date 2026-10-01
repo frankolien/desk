@@ -1,7 +1,6 @@
 import Foundation
 import P256K
 
-/// BIP-32 over secp256k1, for the EVM account at m/44'/60'/0'/0/{index}.
 enum BIP32 {
     struct ExtendedKey {
         var key: Data
@@ -24,9 +23,8 @@ enum BIP32 {
         return ExtendedKey(key: key, chainCode: Data(digest.suffix(32)))
     }
 
-    /// BIP-32 says to proceed with the next index when the tweak lands on zero mod n.
-    /// This throws instead: the odds are 2^-127, and returning a key from a path the
-    /// caller did not ask for is the worse failure.
+    /// BIP-32 says to proceed with the next index when the tweak lands on zero mod n. This throws: the odds
+    /// are 2^-127, and a key from a path the caller did not ask for is the worse failure.
     static func child(of parent: ExtendedKey, index: UInt32) throws -> ExtendedKey {
         var message = Data()
         if index >= hardenedOffset {
@@ -42,7 +40,6 @@ enum BIP32 {
         ])
 
         let digest = Hashing.hmacSHA512(key: parent.chainCode, message: message)
-        // (IL + kpar) mod n, via libsecp256k1 rather than hand-rolled field arithmetic.
         guard let parentKey = try? P256K.Signing.PrivateKey(dataRepresentation: parent.key),
               let tweaked = try? parentKey.add([UInt8](digest.prefix(32)))
         else { throw Failure.invalidChildKey(index: index) }

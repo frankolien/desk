@@ -48,7 +48,6 @@ async function dexCandles(identity, bar) {
 
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
-  // Headlines share this function: same market vocabulary, and the function ceiling holds.
   if (req.query.view === "news") {
     try {
       const items = filter(await headlines({ store: redisStore() }), req.query.symbols);

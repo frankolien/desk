@@ -4,11 +4,6 @@ import DeskMoney
 import DeskUI
 import SwiftUI
 
-/// MON in the wallet becomes AUSD, on Monad mainnet, without leaving Desk.
-///
-/// A person who withdrew MON from an exchange lands here with the one token the venue
-/// does not take. The sheet quotes through Desk's server, checks the route by running it
-/// unsigned, then asks for Face ID once.
 struct SwapSheet: View {
     let model: AppModel
     let onClose: () -> Void
@@ -72,8 +67,6 @@ struct SwapSheet: View {
             .accessibilityLabel("Close")
         }
     }
-
-    // MARK: Entry
 
     private var entry: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -174,8 +167,6 @@ struct SwapSheet: View {
         amount = (NativeAmount(raw: hundredths) ?? .zero).display(fractionDigits: 2, grouping: "")
         if amount.hasSuffix(".00") { amount.removeLast(3) }
     }
-
-    // MARK: Progress and done
 
     private var progress: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -314,7 +305,6 @@ struct SwapSheet: View {
 
     private static func ausd(_ text: String) -> String { Money(text: text).map { $0.display() } ?? text }
     private static func mon(_ text: String) -> String { NativeAmount(decimalText: text).map { $0.display(fractionDigits: 3) } ?? text }
-    /// Whole MON when it is whole, two places otherwise: "500", not "500.00".
     private static func mon(_ amount: NativeAmount) -> String {
         let text = amount.display(fractionDigits: 2)
         return text.hasSuffix(".00") ? String(text.dropLast(3)) : text
@@ -393,8 +383,7 @@ final class SwapModel {
 
     func swap(typed: NativeAmount, amount: String, model: AppModel) async {
         guard let wallet = model.address, !phase.isActive else { return }
-        // A 0x quote holds for about thirty seconds; an older one is refreshed rather
-        // than run at a rate that has already moved.
+        // A 0x quote holds for about thirty seconds; an older one is refreshed before it runs.
         if Date.now.timeIntervalSince(quotedAt) > 20 {
             await quote(amount: amount, user: wallet, debounce: false)
         }

@@ -2,37 +2,23 @@ import DeskMoney
 import DeskPerpl
 import Foundation
 
-/// Live copies send orders. Shadow copies send nothing: they fill at the live mainnet
-/// price with the venue's fee, so a trader can be tried before any money follows them.
 public enum CopyMode: String, Codable, Sendable, Hashable, CaseIterable { case shadow, live }
 
-/// Follow takes the trader's side. Fade takes the other one, for traders who are
-/// reliably wrong.
 public enum CopyDirection: String, Codable, Sendable, Hashable, CaseIterable { case follow, fade }
 
-/// Fixed commits the same margin every time. Conviction scales it by how much of their
-/// own account the trader put behind the trade.
 public enum CopySizing: String, Codable, Sendable, Hashable, CaseIterable { case fixed, conviction }
 
-/// How one followed trader is copied. Every limit is the copier's, not the trader's: their
-/// size is sized to their account, so only their market, side and leverage carry over.
 public struct CopyRules: Codable, Sendable, Hashable {
     public var mode: CopyMode
     public var direction: CopyDirection
     public var sizing: CopySizing
-    /// Collateral committed to each copied trade, in whole AUSD, before conviction scaling.
     public var marginPerTrade: Int
-    /// The trader's leverage is followed up to this and never past it.
     public var maxLeverage: Int
-    /// Loss on the trade's margin, in percent, at which the copy is closed. Live copies
-    /// send it as a Perpl trigger order, so it holds while Desk is closed.
     public var stopLossPercent: Int?
     public var takeProfitPercent: Int?
-    /// Close the copy when the trader closes.
     public var closeWithTrader: Bool
-    /// How far the market may have moved against the copy's side since the trader's
-    /// entry, in basis points. Also the price bound the order is sent with, so a fill can
-    /// never land further from their entry than this.
+    /// Chase allowance in basis points since the trader's entry; also the price bound the
+    /// order is sent with, so a fill never lands further from their entry than this.
     public var maxChaseBps: Int
 
     public init(
@@ -66,13 +52,9 @@ public struct CopyRules: Codable, Sendable, Hashable {
     }
 }
 
-/// Limits across every trader being copied.
 public struct CopyGuards: Codable, Sendable, Hashable {
     public var maxOpenCopies: Int
-    /// Realised copy losses today, in whole AUSD, after which copying pauses itself.
     public var dailyLossLimit: Int
-    /// Notional, in whole AUSD, that copies may hold on one side of one market. Two traders
-    /// long BTC should not quietly double the copier's BTC risk.
     public var maxMarketExposure: Int
 
     public init(maxOpenCopies: Int = 3, dailyLossLimit: Int = 50, maxMarketExposure: Int = 250) {
@@ -89,7 +71,6 @@ public struct CopyGuards: Codable, Sendable, Hashable {
     }
 }
 
-/// A followed trader's position as read from mainnet, by market symbol.
 public struct ObservedPosition: Sendable, Hashable {
     public let symbol: String
     public let side: Side
@@ -113,12 +94,10 @@ public struct ObservedPosition: Sendable, Hashable {
 
 public enum TraderMove: Sendable, Hashable {
     case opened(ObservedPosition)
-    /// Closed one side and opened the other in the same market between two readings.
     case flipped(ObservedPosition)
     case closed(ObservedPosition)
 }
 
-/// A copy already held, as far as the exposure guard needs to know.
 public struct CopyExposure: Sendable, Hashable {
     public let symbol: String
     public let side: Side
@@ -139,27 +118,21 @@ public enum CopySkip: Error, Sendable, Hashable {
     case insufficientBalance
     case chased(bps: Int)
     case tooSmall
-    /// A copy on the other side of this market is open; taking both would pay fees to hold nothing.
     case offsetsOpenCopy
     case exposureLimit(Int)
 }
 
-/// Everything decided about one copy before it is sent or simulated.
 public struct CopyPlan: Sendable, Hashable {
     public let side: Side
     public let leverage: Int
-    /// Whole-cent AUSD margin after conviction scaling and the exposure guard.
     public let margin: Double
     public let draft: OrderDesk.Draft
-    /// Where the venue would take the copy, from the same quote the ticket shows.
     public var liquidationPrice: Price? = nil
 
     public var notional: Double { margin * Double(leverage) }
 }
 
 public enum CopyPlanner {
-    /// What changed between two readings of a trader's book. Adds and trims are not moves
-    /// a copier follows: sizing is the copier's own, so only entries and exits carry over.
     public static func moves(
         before: [String: ObservedPosition], after: [String: ObservedPosition]
     ) -> [TraderMove] {
@@ -178,7 +151,6 @@ public enum CopyPlanner {
         return moves
     }
 
-    /// The side a copy takes: theirs, or the opposite when fading.
     public static func side(for position: ObservedPosition, rules: CopyRules) -> Side {
         switch rules.direction {
         case .follow: position.side
@@ -186,20 +158,16 @@ public enum CopyPlanner {
         }
     }
 
-    /// The leverage a copy is sent at: the trader's, rounded, within both caps.
     public static func leverage(for position: ObservedPosition, rules: CopyRules, market: Market) -> Int {
         let theirs = Int((position.leverage ?? 1).rounded())
         return max(1, min(theirs, rules.maxLeverage, market.config.maxLeverage))
     }
 
-    /// Margin scaled by conviction: a trade holding a tenth of the trader's account is a
-    /// normal trade; half their account doubles the copy, a sliver halves it.
     public static func conviction(collateral: Double, portfolio: Double?) -> Double {
         guard let portfolio, portfolio > 0, collateral > 0 else { return 1 }
         return min(2, max(0.5, (collateral / portfolio) / 0.10))
     }
 
-    /// The order for copying `position`, or the reason it is not copied.
     public static func plan(
         copying position: ObservedPosition,
         traderPortfolio: Double? = nil,
@@ -222,10 +190,8 @@ public enum CopyPlanner {
         let sameMarket = openCopies.filter { $0.symbol == symbol }
         guard !sameMarket.contains(where: { $0.side != side }) else { return .failure(.offsetsOpenCopy) }
 
-        // Against the trader's own venue. `mark` is the price this copy will be sized and
-        // filled at, which on testnet is a different market from the one they entered on:
-        // comparing the two measured the gap between two venues rather than the move since
-        // their entry, and passed or refused every copy on that basis.
+        // Against the trader's own venue: on testnet `mark` is a different market from the one
+        // they entered on, so comparing the two would measure the gap between venues.
         let chase = chaseBps(entry: position.entry, mark: position.mark, side: side)
         if chase > rules.maxChaseBps { return .failure(.chased(bps: chase)) }
 
@@ -242,9 +208,7 @@ public enum CopyPlanner {
         margin = (margin * 100).rounded(.down) / 100
         let marginRaw = Int64((margin * 1_000_000).rounded(.down))
         guard marginRaw > 0 else { return .failure(.tooSmall) }
-        // What leaves the balance is margin plus the venue's fee on the notional. Checking
-        // the margin alone sent copies the venue then refused, which reached the person as a
-        // rejection rather than as "not enough AUSD".
+        // What leaves the balance is margin plus the venue's fee on the notional.
         let notionalRaw = Int128(marginRaw) * Int128(lev)
         let feeRaw = Int64(clamping: (notionalRaw * Int128(market.config.takerFeeMicros) + 999_999) / 1_000_000)
         guard let free, free.raw >= marginRaw + feeRaw else { return .failure(.insufficientBalance) }
@@ -256,8 +220,6 @@ public enum CopyPlanner {
             return .failure(.tooSmall)
         }
 
-        // The same quote the ticket prices with, so a copy affords what the ticket would
-        // say it costs and knows where it would be liquidated.
         guard let quote = try? OrderQuote.quote(
             side: side, size: size, price: mark, leverageHundredths: lev * 100,
             feeMicros: market.config.takerFeeMicros,
@@ -267,8 +229,6 @@ public enum CopyPlanner {
         }
         guard free.raw >= quote.total.raw else { return .failure(.insufficientBalance) }
 
-        // The venue bounds a market order's slippage against the mark. What is left of the
-        // chase allowance becomes that bound, so no fill lands further from their entry.
         let slippage = max(5, min(rules.maxChaseBps - max(0, chase), 50, market.maxMarketSlippageBps))
         let protection = OrderDesk.Draft.Protection(
             stopLoss: rules.stopLossPercent.flatMap { trigger(mark: mark, side: side, percent: -$0, leverage: lev) },
@@ -282,25 +242,19 @@ public enum CopyPlanner {
         return .success(CopyPlan(side: side, leverage: lev, margin: margin, draft: draft, liquidationPrice: quote.liquidationPrice))
     }
 
-    /// How far the market has moved against `side` since `entry`, in basis points.
-    /// Negative when it has moved in the copy's favour.
-    /// Figures arrive from a server and a chain, so this cannot assume they are sane. A
-    /// denormal entry price makes the ratio exceed every integer type, and converting that
-    /// with `Int(_:)` traps — a crash on data the app does not control.
+    /// Basis points moved against `side` since `entry`, negative when in the copy's favour.
+    /// Clamps rather than traps: a denormal entry from the server overflows every integer type.
     public static func chaseBps(entry: Double, mark: Double, side: Side) -> Int {
         guard entry > 0, entry.isFinite, mark.isFinite else { return 0 }
         let run = (mark - entry) / entry * 10_000
         return clampedInt((side == .long ? run : -run).rounded())
     }
 
-    /// The nearest `Int`, or the nearest bound. Never traps, never returns a wrong sign.
     public static func clampedInt(_ value: Double) -> Int {
         guard !value.isNaN else { return 0 }
         return Int(exactly: value.rounded()) ?? (value < 0 ? Int.min : Int.max)
     }
 
-    /// The price at which the position has gained (positive) or lost (negative) `percent`
-    /// of its margin. At 5× a 25% loss of margin is a 5% move against the side.
     public static func trigger(mark: Price, side: Side, percent: Int, leverage: Int) -> Price? {
         guard leverage > 0, percent != 0 else { return nil }
         let denominator = Int128(100 * leverage)
@@ -316,9 +270,6 @@ public enum CopyPlanner {
     }
 }
 
-/// A copy simulated rather than sent: the fill, the fees and the exits a live copy would
-/// have had, priced from the mainnet mark.
-/// Why a simulated copy ended.
 public enum ShadowExit: String, Sendable, Hashable, Codable {
     case stop, take, liquidation
 }
@@ -332,12 +283,10 @@ public struct ShadowFill: Sendable, Hashable, Codable {
     public let stop: Double?
     public let take: Double?
     public let fees: Double
-    /// The price at which the venue would have taken the collateral. A simulation without
-    /// one cannot be compared to a live copy: it floors at the margin and then *recovers*,
-    /// which is a profit the real position could never have made.
+    /// Without a liquidation price a simulation floors at the margin and then recovers,
+    /// a profit the real position could never have made.
     public var liquidation: Double?
 
-    /// Slippage assumed on a simulated market fill, in basis points against the copy.
     public static let slippageBps = 3.0
 
     public init(entry: Double, units: Double, margin: Double, leverage: Int, isLong: Bool,
@@ -367,22 +316,14 @@ public struct ShadowFill: Sendable, Hashable, Codable {
         self.stop = rules.stopLossPercent.map { entry * (1 + (isLong ? -1 : 1) * move($0)) }
         self.take = rules.takeProfitPercent.map { entry * (1 + (isLong ? 1 : -1) * move($0)) }
         self.fees = notional * Double(takerFeeMicros) / 1_000_000
-        // The same distance the venue would liquidate a live copy at: 1/leverage, less the
-        // maintenance margin it keeps.
         self.liquidation = Margin
             .liquidationDistanceMicros(leverageHundredths: plan.leverage * 100,
                                        maintenanceMarginFraction: maintenanceMarginFraction)
             .map { entry * (1 + (isLong ? -1 : 1) * Double($0) / 1_000_000) }
     }
 
-    /// Profit at `mark` if closed there.
-    ///
-    /// Both fees are charged. Until 23 September 2026 Perpl took nothing on the way out and
-    /// this charged only the opening fee; contract 1.7.5 takes the taker rate on closes and
-    /// reductions too, so leaving it out overstated every simulated round trip.
+    /// Both fees are charged: since contract 1.7.5 Perpl takes the taker rate on closes too.
     public func pnl(at mark: Double, takerFeeMicros: Int64) -> Double {
-        // Past its liquidation price the collateral is the venue's, whatever the arithmetic
-        // of the close would have said.
         if let liquidation, isLong ? mark <= liquidation : mark >= liquidation { return -margin }
         let exit = mark * (1 + (isLong ? -1 : 1) * Self.slippageBps / 10_000)
         let gross = (exit - entry) * units * (isLong ? 1 : -1)
@@ -390,12 +331,8 @@ public struct ShadowFill: Sendable, Hashable, Codable {
         return max(gross - fees - exitFee, -margin)
     }
 
-    /// What would have ended this copy at `mark`, and the price it would have ended at.
-    ///
-    /// Liquidation is tested first, because a move that reaches it has already passed
-    /// anything beyond. A stop fills at the mark that broke it rather than at the stop
-    /// itself, since a gap through a stop costs the difference; a take-profit keeps its own
-    /// price, which is the conservative reading of an overshoot.
+    /// Liquidation is tested first. A stop fills at the mark that broke it, since a gap costs
+    /// the difference; a take-profit keeps its own price, the conservative reading of an overshoot.
     public func triggered(at mark: Double) -> (exit: ShadowExit, price: Double)? {
         if let liquidation, isLong ? mark <= liquidation : mark >= liquidation {
             return (.liquidation, liquidation)

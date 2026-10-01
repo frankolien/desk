@@ -3,16 +3,13 @@ import DeskUI
 import SwiftUI
 import WidgetKit
 
-/// `-widget-gallery`, or `-widget-gallery portfolio-medium` for one tile on a grey ground to crop.
 struct WidgetGallery: View {
-    /// `-widget-gallery watchlist` shows one section, so each fits a single capture.
     private var section: String {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: "-widget-gallery"), index + 1 < arguments.count else { return "" }
         return arguments[index + 1]
     }
 
-    /// One tile on a flat grey ground, for cropping: `-widget-gallery portfolio-medium`.
     private var single: (String, WidgetFamily)? {
         let parts = section.split(separator: "-")
         guard parts.count == 2 else { return nil }
@@ -74,7 +71,6 @@ struct WidgetGallery: View {
             .foregroundStyle(DeskColor.nightMuted.color)
     }
 
-    /// The 6.1-inch sizes, with WidgetKit's sixteen-point content margin.
     private func tile<Content: View>(_ family: WidgetFamily, @ViewBuilder content: () -> Content) -> some View {
         let size: CGSize = switch family {
         case .systemSmall: CGSize(width: 158, height: 158)

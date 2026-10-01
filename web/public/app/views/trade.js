@@ -123,8 +123,6 @@ export default async function mount(el, params) {
 
   return () => { stops.forEach((stop) => stop()); state.chart?.remove(); };
 
-  // ── Painting ─────────────────────────────────────────
-
   function paint() {
     const m = state.market;
     root.innerHTML = `
@@ -244,8 +242,6 @@ export default async function mount(el, params) {
     paintQuote();
   }
 
-  // ── Ticket ───────────────────────────────────────────
-
   function paintTicket() {
     const m = state.market;
     state.leverage = Math.min(state.leverage, m.maxLeverage);
@@ -348,8 +344,6 @@ export default async function mount(el, params) {
     line.textContent = sentence();
   }
 
-  // ── Cards on the right ───────────────────────────────
-
   function paintMarketCard() {
     const m = state.market;
     $("#td-market", root).innerHTML = `<h3 style="margin-bottom:12px">Market</h3><div class="td-kv">
@@ -390,8 +384,6 @@ export default async function mount(el, params) {
     if (state.tab === "top") paintTab();
     buildFaces();
   }
-
-  // ── Tabs under the chart ─────────────────────────────
 
   function paintTab() {
     const pane = $("#td-tabpane", root); if (!pane) return;
@@ -456,8 +448,6 @@ export default async function mount(el, params) {
       }).catch(() => { pane.innerHTML = `<div class="empty">The tape could not be read right now.</div>`; });
     }
   }
-
-  // ── Chart ────────────────────────────────────────────
 
   function buildChart() {
     const host = $("#td-lw", root);
@@ -542,8 +532,6 @@ export default async function mount(el, params) {
     svg.innerHTML = `<path class="fill" d="${d} L${lx.toFixed(1)},${h} L3,${h} Z" fill="${color}"/><path d="${d}" stroke="${color}"/><circle class="halo" cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="4" fill="${color}" opacity=".45"/><circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="2.4" fill="${color}"/>`;
   }
 
-  // ── Faces on the chart: where the top traders got in ────
-
   function buildFaces() {
     const m = state.market;
     const h = head();
@@ -594,8 +582,6 @@ export default async function mount(el, params) {
     }
   }
 }
-
-// ── Small helpers ──────────────────────────────────────
 
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 // Every long on an orderbook has a short against it, so value splits 50/50 by construction; the lean is in who sits on each side.

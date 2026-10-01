@@ -2,9 +2,6 @@ import DeskMoney
 import DeskUI
 import SwiftUI
 
-/// Every way money gets into Desk, as a list of choices. The same sheet before a desk
-/// exists and after: before, the last row opens the desk once the wallet holds Perpl's
-/// minimum; after, it moves wallet AUSD to trading.
 struct AddFundsSheet: View {
     let model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -79,7 +76,6 @@ struct AddFundsSheet: View {
         .task { await model.refreshBalances() }
         .onDisappear { model.clearDeposit() }
         .onChange(of: model.hasTradingAccount) { _, ready in
-            // The desk just opened from here; a beat so the last step sentence is read.
             guard ready else { return }
             Task { try? await Task.sleep(for: .milliseconds(700)); dismiss() }
         }
@@ -97,7 +93,6 @@ struct AddFundsSheet: View {
         return parts.joined(separator: " · ")
     }
 
-    /// Opens the desk, or moves AUSD into it, or says what is still missing.
     @ViewBuilder private var primary: some View {
         if model.hasTradingAccount {
             action(model.deposit.isBusy ? "Moving AUSD…" : "Move \(wallet.display()) AUSD to trading",

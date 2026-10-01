@@ -4,7 +4,6 @@ import DeskPerpl
 import DeskUI
 import SwiftUI
 
-/// A trade someone wants to mirror: whose it is, and its market, side and leverage.
 struct CopyIntent: Identifiable, Hashable {
     let trader: String
     let market: String
@@ -16,8 +15,6 @@ struct CopyIntent: Identifiable, Hashable {
     var id: String { "\(trader)-\(market)-\(side.rawValue)-\(leverage)" }
 }
 
-/// Their trade, then yours underneath it: same market, same side, their leverage as a
-/// starting point, your own amount. One hold signs it.
 struct CopyTradeSheet: View {
     let intent: CopyIntent
     let name: String
@@ -49,13 +46,11 @@ struct CopyTradeSheet: View {
         _leverage = State(initialValue: max(1, intent.leverage))
     }
 
-    /// The trader's market only. If the selection moves elsewhere, the sheet stops pricing
-    /// rather than copy on a market its labels don't name.
+    /// The trader's market only: if the selection moves elsewhere, the sheet stops pricing.
     private var listed: Market? { market.market.flatMap { $0.symbol == intent.market ? $0 : nil } }
     private var maxLeverage: Int { max(1, Int(listed?.config.maxLeverage ?? 1)) }
     private var tint: DeskRGB { intent.side.color }
     private var free: Money? { session.account.value?.free }
-    /// The most margin that, with its taker fee at this leverage, fits in free collateral.
     private var maxMargin: String? {
         guard let free, free.raw > 0, let listed else { return nil }
         let rate = 1 + Double(leverage) * Double(listed.config.takerFeeMicros) / 1_000_000
@@ -134,9 +129,7 @@ struct CopyTradeSheet: View {
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(busyHere)
         .onAppear {
-            // An earlier order's outcome is not this copy's.
             if !session.isBusy { session.clear() }
-            // The amount last copied with, so a repeat copy is already filled in.
             if amount.isEmpty { amount = lastCopyAmount }
             withAnimation(.spring(duration: 0.6, bounce: 0.28).delay(0.18)) { revealed = true }
         }
@@ -150,8 +143,6 @@ struct CopyTradeSheet: View {
             }
         }
     }
-
-    // MARK: Cards
 
     private var theirs: some View {
         HStack(spacing: 12) {
@@ -178,7 +169,6 @@ struct CopyTradeSheet: View {
         .deskGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    /// Three chevrons that light up one after another, top to bottom: the trade being handed down.
     private var link: some View {
         VStack(spacing: -4) {
             ForEach(0..<3, id: \.self) { index in
@@ -256,8 +246,6 @@ struct CopyTradeSheet: View {
         .deskGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .transition(.scale(scale: 0.96).combined(with: .opacity))
     }
-
-    // MARK: Pieces
 
     private func sideChip(_ text: String) -> some View {
         Text(text)
@@ -338,8 +326,6 @@ struct CopyTradeSheet: View {
         if let free, amount.isEmpty { return "\(free.display()) AUSD free to trade." }
         return nil
     }
-
-    // MARK: Order
 
     private static func size(for notional: Money, mark: Price, market: Market) -> Size? {
         let exponent = Int(market.config.sizeDecimals) + Int(market.config.priceDecimals)

@@ -1,12 +1,8 @@
 import Testing
 @testable import DeskMoney
 
-/// One test per finding from the adversarial audit of 13 September 2026. The original
-/// suite passed 19 of 19 while every case below was broken.
 @Suite("Audit regressions")
 struct AuditRegressionTests {
-
-    // MARK: S1 — a crash reachable from the iOS emoji keyboard
 
     @Test("digits carrying combining scalars are rejected, not crashed on")
     func graphemeClustersAreRejected() {
@@ -24,8 +20,6 @@ struct AuditRegressionTests {
         }
     }
 
-    // MARK: S2 — notional overflow on the mainnet-ETH shape
-
     @Test("a notional too large to represent declines instead of trapping")
     func notionalOverflowDeclines() throws {
         let price = try #require(Price(raw: Price.maxRaw, decimals: 2))
@@ -39,8 +33,6 @@ struct AuditRegressionTests {
         #expect(Size(raw: 1, decimals: 19) == nil)
         #expect(Price(raw: 1, decimals: 18) != nil)
     }
-
-    // MARK: S3 — Int64.min and Int64.max reaching arithmetic
 
     @Test("wire values outside the safe range are refused")
     func extremeWireValuesRefused() {
@@ -69,8 +61,6 @@ struct AuditRegressionTests {
         _ = -price
     }
 
-    // MARK: S4 — rescaling overflow
-
     @Test("widening that cannot fit declines instead of trapping")
     func rescaleWideningDeclines() throws {
         let small = try #require(Price(raw: 2, decimals: 0))
@@ -93,8 +83,6 @@ struct AuditRegressionTests {
         #expect(big.rescaled(to: 0, rounding: .towardZero) != nil)
     }
 
-    // MARK: S5 — a fabricated fee
-
     @Test("a fee rate outside nought to one hundred percent is refused")
     func nonsenseFeeRateRefused() throws {
         let notional = try #require(Money(text: "1000.000000"))
@@ -104,15 +92,12 @@ struct AuditRegressionTests {
         #expect(notional.fee(rateInMicros: 0)?.isZero == true)
     }
 
-    // MARK: S6 — a real balance displayed as zero
-
     @Test("display never renders a real balance as zero")
     func displayNeverFabricatesZero() throws {
         let million = try #require(Money(text: "1000000.000000"))
         #expect(million.display(fractionDigits: 13).hasPrefix("1,000,000."))
         #expect(million.display(fractionDigits: 18).hasPrefix("1,000,000."))
 
-        // The live case: a Scaled with small decimals, a large raw, default precision.
         let price = try #require(Price(raw: Price.maxRaw, decimals: 0))
         #expect(price.display(fractionDigits: 2) == "1,000,000,000,000,000,000.00")
     }
@@ -124,8 +109,6 @@ struct AuditRegressionTests {
         let whole = try #require(Size(raw: 7, decimals: 0))
         #expect(whole.display(fractionDigits: 3) == "7.000")
     }
-
-    // MARK: S7 — a fee that flattered the short
 
     @Test("a short and a long pay the same fee on the same notional")
     func feeIsSymmetricAcrossSides() throws {
@@ -147,8 +130,6 @@ struct AuditRegressionTests {
         #expect(longFee.text == "2.557830")
     }
 
-    // MARK: S8 — the rule belongs to the operation
-
     @Test("a typed size can only round toward zero")
     func typedSizeTruncates() throws {
         let long = try #require(Size(typed: "0.0150009", decimals: 5))
@@ -162,8 +143,6 @@ struct AuditRegressionTests {
         #expect(try #require(Price(buying: "67412.37", decimals: 1)).text == "67412.3")
         #expect(try #require(Price(selling: "67412.31", decimals: 1)).text == "67412.4")
     }
-
-    // MARK: S9 — leading zeros consuming the width budget
 
     @Test("a zero-padded field is parsed by its value, not its width")
     func leadingZerosDoNotConsumeTheBudget() {

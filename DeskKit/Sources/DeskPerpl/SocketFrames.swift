@@ -11,8 +11,7 @@ public enum PerplMessage: Int, Sendable, Hashable {
     case signIn = 29
 }
 
-/// Message type 29. The first thing sent on a new socket and, given the ten-second
-/// pre-authentication idle timeout, the only thing that may come before anything slow.
+/// Message type 29, sent first: the gateway allows ten idle seconds before authentication.
 struct SignInFrame: Encodable {
     let messageType = PerplMessage.signIn.rawValue
     let chainID: UInt64
@@ -29,11 +28,6 @@ struct SignInFrame: Encodable {
     }
 }
 
-/// An inbound frame, kept as its bytes.
-///
-/// Only `mt` is read eagerly. Perpl's frame catalogue is larger than what this app has
-/// seen on the wire, and a decoder that rejects an unmodelled frame would break the
-/// session over a field nobody needed.
 public struct InboundFrame: Sendable, Hashable {
     public let messageType: Int
     public let payload: Data
@@ -51,14 +45,11 @@ public struct InboundFrame: Sendable, Hashable {
     }
 }
 
-/// Message type 19. Arriving at all is what proves the sign-in was accepted.
 public struct WalletSnapshot: Decodable, Sendable, Hashable {
     public let accounts: [Account]
 
     private enum CodingKeys: String, CodingKey {
-        // `accounts` was the original API-key snapshot. Perpl's version-235 gateway
-        // compacted the same collection to `as`; accepting both keeps old captures and
-        // the live protocol readable during the rollout.
+        // Perpl's version-235 gateway compacted `accounts` to `as`; both are accepted.
         case accounts
         case compactAccounts = "as"
     }
@@ -74,14 +65,9 @@ public struct WalletSnapshot: Decodable, Sendable, Hashable {
 
     public struct Account: Decodable, Sendable, Hashable {
         public let id: UInt32
-        /// Exchange instance. Present in compact snapshots as `in`; optional for the
-        /// original verbose snapshot, where API-key accounts were already scoped.
         public let instanceID: UInt32?
-        /// The greatest request id the gateway has forwarded for this account.
-        /// Perpl calls this `lfr`; the next order's `rq` must be greater than it.
+        /// Perpl's `lfr`, the greatest request id forwarded; the next order's `rq` must exceed it.
         public let lastForwarded: Int64?
-        /// The authenticated wallet snapshot is Perpl's initial account state. Waiting
-        /// only for a later mt:21 update leaves balances blank on quiet accounts.
         public let balanceRaw: Int64?
         public let lockedRaw: Int64?
         public let isFrozen: Bool
@@ -147,15 +133,12 @@ public struct WalletSnapshot: Decodable, Sendable, Hashable {
 
     public func account(for instanceID: UInt32) -> Account? {
         accounts.first { $0.instanceID == instanceID }
-            // Older verbose snapshots were already scoped and did not carry `in`.
             ?? accounts.first { $0.instanceID == nil }
     }
 }
 
-/// Message type 3.
-///
-/// `code` zero means the gateway took the order, not that it filled. `sr` is the reason
-/// behind a rejection and is the only field that says which of several causes it was.
+/// Message type 3. `code` zero means the gateway took the order, not that it filled; `sr` says why
+/// a rejection happened.
 public struct OrderStatus: Decodable, Sendable, Hashable {
     public let frameID: Int64?
     public let code: Int

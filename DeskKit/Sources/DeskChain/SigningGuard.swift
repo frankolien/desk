@@ -1,26 +1,14 @@
 import Foundation
 
 extension EIP712 {
-    /// What must hold of a server-supplied payload before the wallet key signs it.
-    ///
-    /// The enrolment payload is chosen by Perpl and hashed by us, and the wallet key
-    /// signs the result. Nothing in the hashing can tell an enrolment from an ERC-2612
-    /// `Permit` — both are valid typed data — so a gateway that answered
-    /// `/api-key/payload` with a permit naming an attacker as spender and `2^256-1` as
-    /// value would be handed a signed unlimited allowance over the user's AUSD, with
-    /// every line of the hashing behaving correctly.
-    ///
-    /// `encodedType` is the load-bearing check. It is the canonical type string, so
-    /// pinning it fixes the primary type and every field name and field type in one
-    /// comparison, and no substituted struct can match it.
+    /// A hostile gateway could answer `/api-key/payload` with an ERC-2612 `Permit` that hashes just
+    /// as validly. Pinning `encodedType` fixes the primary type and every field in one comparison.
     public struct Expectation: Sendable, Hashable {
         public let encodedType: String
         public let domainEncodedType: String
         public let domainName: String
         public let domainVersion: String
         public let allowedChainIDs: Set<UInt64>
-        /// The message field that must name our own address, binding the payload to the
-        /// key about to sign it.
         public let signerField: String
         public let signer: String
         public let statementField: String?
@@ -84,7 +72,6 @@ extension EIP712 {
         case messageHasUndeclaredFields([String])
     }
 
-    /// The only way to a signable digest.
     public static func digest(_ typedData: TypedData, expecting expectation: Expectation) throws -> Data {
         let encoded = try encodeType(typedData.primaryType, types: typedData.types)
         guard encoded == expectation.encodedType else {

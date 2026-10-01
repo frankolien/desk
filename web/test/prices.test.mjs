@@ -1,4 +1,3 @@
-// node --test web/test/prices.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -68,7 +67,6 @@ test("every market's last mark lives in one key, and a market missing from a sca
   assert.deepEqual(Object.keys(JSON.parse(await store.get(MARKS_KEY))), ["BTC", "MON"]);
   await priceDeliveries({ store, quotes: [{ name: "BTC", mark: 84_950, prev: 84_000 }], subscribers, now: 2 });
   const back = await priceDeliveries({ store, quotes: [{ name: "MON", mark: 0.0251, prev: 0.024 }], subscribers, now: 3 });
-  // MON's mark from the first scan is still the baseline, so the level it crossed is told.
   assert.equal(back.events, 1);
   assert.equal(JSON.parse(await store.get(MARKS_KEY)).BTC.mark, 84_950);
   const weekLater = await priceDeliveries({ store, quotes: [{ name: "BTC", mark: 90_000, prev: 84_000 }], subscribers, now: 8 * 86_400_000 });
@@ -109,7 +107,6 @@ test("a price target is told once when the mark crosses it, then dropped from th
   assert.equal(targeted[0].payload.aps.alert.body, "Bitcoin crossed $85,000 🟢 · now $85,020");
   assert.equal(targeted[0].collapseId, "tgt-BTC-85000");
   assert.deepEqual(hit.changed.map(([id, record]) => [id, record.targets]), [["a", [{ market: "BTC", price: 80_000, direction: "below" }]]]);
-  // The subscriber list handed in is not mutated; the caller saves `changed`.
   assert.equal(subscribers[0].record.targets.length, 2);
 });
 

@@ -1,4 +1,3 @@
-// node --test web/test/swap.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -25,16 +24,12 @@ test("a live 0x answer selling exactly the typed MON to the holder is accepted",
 });
 
 test("anything that is not that one call is refused", () => {
-  // Another contract, including Relay's depository and the settler itself.
   assert.equal(swapTransaction(zeroX({}, { to: "0x4cd00e387622c35bddb9b4c962c136462338bc31" }), WEI), null);
   assert.equal(swapTransaction(zeroX({}, { to: "0x2e73afeb01595831a67e9e1a56e193b93331b8c7" }), WEI), null);
-  // A value other than the typed amount, on either side of the answer.
   assert.equal(swapTransaction(zeroX({}, { value: "500000000000000000001" }), WEI), null);
   assert.equal(swapTransaction(zeroX({ sellAmount: "1" }), WEI), null);
-  // A different token in or out.
   assert.equal(swapTransaction(zeroX({ buyToken: "0x1111111111111111111111111111111111111111" }), WEI), null);
   assert.equal(swapTransaction(zeroX({ sellToken: AUSD }), WEI), null);
-  // No liquidity, nothing bought, or no floor to check against.
   assert.equal(swapTransaction(zeroX({ liquidityAvailable: false }), WEI), null);
   assert.equal(swapTransaction(zeroX({ buyAmount: "0" }), WEI), null);
   assert.equal(swapTransaction(zeroX({ minBuyAmount: undefined }), WEI), null);

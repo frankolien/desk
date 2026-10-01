@@ -3,7 +3,6 @@ import Foundation
 import Network
 import Observation
 
-
 actor ResponseCache {
     static let shared = ResponseCache()
 
@@ -16,7 +15,6 @@ actor ResponseCache {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
-    /// What was last stored for this URL, if it is younger than `maxAge`.
     func cached(_ url: URL, maxAge: TimeInterval = 86_400) -> Data? {
         let key = Self.key(url)
         if let (data, at) = memory[key] {
@@ -38,9 +36,6 @@ actor ResponseCache {
         try? data.write(to: directory.appending(path: key), options: .atomic)
     }
 
-    /// Fetches, stores on success, and on failure returns what was last stored — so a
-    /// screen that has ever loaded keeps showing something while the network is away.
-    /// The flag says which it was, for callers that show "as of" when it matters.
     func data(from url: URL, maxStale: TimeInterval = 86_400) async throws -> (Data, isStale: Bool) {
         do {
             let data = try await Self.fetch(url)

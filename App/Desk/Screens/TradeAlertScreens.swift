@@ -1,8 +1,6 @@
 import DeskUI
 import SwiftUI
 
-/// Shown before iOS asks for notification permission, so the system prompt arrives with a
-/// reason attached. The preview is drawn from the trader's real book when they have one.
 struct AlertsPrimerSheet: View {
     let trader: TraderSnapshot
     let name: String

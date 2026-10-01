@@ -3,12 +3,6 @@ import DeskMoney
 import DeskUI
 import SwiftUI
 
-/// The Home tab: what the room is doing, then every market, then who is doing it.
-///
-/// Ordered by what a person opening the app wants first: the markets traders are
-/// crowding into, the full list, and the traders worth following. Their own positions
-/// live on Profile. All of it is read from Perpl through Desk's server; nothing here is
-/// a table of invented figures.
 struct MarketScreen: View {
     private enum Shelf: String, CaseIterable, Identifiable {
         case perps = "Perps", trending = "Trending", watchlist = "Watchlist"
@@ -42,9 +36,8 @@ struct MarketScreen: View {
                 Color.black.ignoresSafeArea()
                 DeskAurora().ignoresSafeArea()
 
-                // Each section pads itself so the hot-markets strip can run edge to edge
-                // without widening the page — a negative padding did, and the whole
-                // screen could then be dragged sideways.
+                // Each section pads itself so the hot-markets strip can run edge to edge;
+                // a negative padding would widen the page and let it drag sideways.
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 10) {
                         header.padding(.horizontal, 16)
@@ -131,7 +124,6 @@ struct MarketScreen: View {
         }
     }
 
-    /// `-trade-traders` and `-trade-news` show a lower section first, so it can be captured without a scroll.
     private static var tradersOnly: Bool {
         #if DEBUG
         ProcessInfo.processInfo.arguments.contains("-trade-traders") || newsOnly
@@ -148,15 +140,10 @@ struct MarketScreen: View {
         #endif
     }
 
-    // MARK: Header
-
-    /// The mark, then the one figure a trader checks before every order.
     private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
             DeskBrandMark(size: 28)
                 .frame(height: 36, alignment: .leading)
-            // Top-aligned with the button as tall as the figure's row, so the button sits
-            // level with the number rather than with the middle of the two lines.
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     if model.hasTradingAccount {
@@ -195,7 +182,6 @@ struct MarketScreen: View {
         }
     }
 
-    /// Wallet AUSD is not tradable until a desk exists; the line says how far off that is.
     private var walletCaption: String {
         if model.hasDesk.value == true { return "In wallet · reconnect your desk to trade" }
         if let short = model.ausdShortfall {
@@ -206,9 +192,6 @@ struct MarketScreen: View {
         return "In wallet · ready to open your desk"
     }
 
-    // MARK: Hot markets
-
-    /// Markets ranked by the money traders have open in them, with the lean of the crowd.
     private var hotCrowd: [MarketCrowd] {
         directory.crowd
             .filter { crowd in market.allMarkets.contains { $0.symbol == crowd.market } }
@@ -249,8 +232,6 @@ struct MarketScreen: View {
             .fill(Color.white.opacity(0.05))
             .frame(width: 262, height: 108)
     }
-
-    // MARK: Explore
 
     private var savedMarketIDs: Set<UInt32> { Set(savedIDs.split(separator: ",").compactMap { UInt32($0) }) }
 
@@ -344,9 +325,6 @@ struct MarketScreen: View {
         }
     }
 
-    // MARK: Traders
-
-    /// Each top trader's largest open position, in leaderboard order.
     private var liveRows: [(trader: TraderSnapshot, position: TraderPosition)] {
         directory.top.compactMap { trader in
             trader.positions.max { (Double($0.value) ?? 0) < (Double($1.value) ?? 0) }.map { (trader, $0) }
@@ -402,8 +380,6 @@ struct MarketScreen: View {
         }
     }
 
-    // MARK: News
-
     private var newsSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             sectionTitle("News")
@@ -421,8 +397,6 @@ struct MarketScreen: View {
             }
         }
     }
-
-    // MARK: Pieces
 
     private func sectionTitle(_ text: String) -> some View {
         Text(text)
@@ -457,7 +431,6 @@ struct MarketScreen: View {
     }
 }
 
-/// One market the crowd is in: what it costs, how many are in, which way they lean.
 private struct HotMarketCard: View {
     let crowd: MarketCrowd
     let market: Market
@@ -511,7 +484,6 @@ private struct HotMarketCard: View {
     }
 }
 
-/// A perp in the list: leverage and the day's volume on the left, price and change on the right.
 private struct PerpMarketRow: View {
     let market: Market
     let model: MarketModel
@@ -558,7 +530,6 @@ private struct PerpMarketRow: View {
     }
 }
 
-/// A top trader's largest position, with their record when history has one.
 private struct LiveTradeRow: View {
     let trader: TraderSnapshot
     let position: TraderPosition
@@ -631,7 +602,6 @@ private struct TopTraderRow: View {
         return parts.joined(separator: " · ")
     }
 
-    /// Open PnL against what the trader has at stake.
     private var returnText: String? {
         guard let pnl = trader.pnl.flatMap(Double.init), let portfolio = trader.portfolio, portfolio - pnl > 0 else { return nil }
         return String(format: "%+.0f%%", pnl / (portfolio - pnl) * 100)
@@ -746,8 +716,6 @@ struct PerpDetailScreen: View {
             }
             .refreshable { await market.refreshNow(); await holders.load(symbol: market.symbol) }
             .scrollPosition($scrollPosition)
-            // Once the big header has scrolled away, a compact one holds the market and
-            // its price at the top for as long as the list goes on.
             .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y > 150 }) { _, past in
                 withAnimation(.snappy(duration: 0.22)) { scrolledPastHeader = past }
             }
@@ -766,14 +734,11 @@ struct PerpDetailScreen: View {
         .task { await directory.refreshFollowing() }
         .task {
             #if DEBUG
-            // The ticket sits behind a floating bar that UI automation cannot hit, so it
-            // gets the same way in that `-stage` gives every other screen.
             if ProcessInfo.processInfo.arguments.contains("-open-ticket") { ticket = .up }
             if ProcessInfo.processInfo.arguments.contains("-open-chat") { showsChat = true }
             if ProcessInfo.processInfo.arguments.contains("-open-studio") { showsStudio = true }
             if ProcessInfo.processInfo.arguments.contains("-detail-scrolled") { scrolledPastHeader = true }
             if ProcessInfo.processInfo.arguments.contains("-detail-about") { tab = .about }
-            // `-detail-bottom` scrolls to the tabs once the book has loaded, for a screenshot.
             if ProcessInfo.processInfo.arguments.contains("-detail-bottom") {
                 try? await Task.sleep(for: .seconds(7))
                 withAnimation { scrollPosition.scrollTo(edge: .bottom) }
@@ -841,7 +806,6 @@ struct PerpDetailScreen: View {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
-    /// What stays when the header has scrolled away: the market and its price.
     private var compactHeader: some View {
         HStack(spacing: 10) {
             Button { dismiss() } label: {
@@ -895,8 +859,6 @@ struct PerpDetailScreen: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5) }
     }
 
-    /// The order buttons as the screen's bottom edge; rows fade into it rather than
-    /// showing through the glass.
     private var tradeBar: some View {
         HStack(spacing: 10) {
             tradeButton(.down, title: "Short")
@@ -966,7 +928,6 @@ struct PerpDetailScreen: View {
         }
     }
 
-    /// The day's move in money and in percent, against the venue's previous mark.
     private var change: (text: String, up: Bool)? {
         guard let listed = market.market, let mark = market.mark.value else { return nil }
         let scale = pow(10.0, Double(listed.config.priceDecimals))
@@ -1136,7 +1097,6 @@ private extension View {
 }
 
 extension MarketScreen {
-    /// A market named by a push: wait for the list if it is still loading, then open it.
     fileprivate func openRequestedMarket() async {
         guard let symbol = MarketOpenRequest.shared.take() else { return }
         for _ in 0..<40 where market.allMarkets.isEmpty { try? await Task.sleep(for: .milliseconds(250)) }

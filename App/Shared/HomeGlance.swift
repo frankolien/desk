@@ -8,7 +8,6 @@ struct PortfolioGlance: Codable, Hashable, Sendable {
         let symbol: String
         let isLong: Bool
         let leverage: Int
-        /// Unrealised, in AUSD. The sign picks the colour; the text is what is read.
         let pnl: Double
         let pnlText: String
         let returnOnMarginMicros: Int
@@ -31,7 +30,6 @@ struct PortfolioGlance: Codable, Hashable, Sendable {
         DeskGroup.defaults.set(try? JSONEncoder().encode(self), forKey: Self.key)
     }
 
-    /// Signing out. The next account's Home Screen must not open on this one's book.
     static func forget() {
         DeskGroup.defaults.removeObject(forKey: key)
     }
@@ -49,7 +47,6 @@ struct PortfolioGlance: Codable, Hashable, Sendable {
         updatedAt: .now)
 }
 
-/// The saved markets with the marks Desk last saw for them.
 struct WatchlistGlance: Codable, Hashable, Sendable {
     struct Row: Codable, Hashable, Sendable, Identifiable {
         let id: UInt32
@@ -83,8 +80,6 @@ struct WatchlistGlance: Codable, Hashable, Sendable {
         updatedAt: .now)
 }
 
-/// One way of writing a percentage, shared by the screen and the widget so the two
-/// never round the same figure differently.
 enum Percent {
     /// Micros to a percentage, truncated. A gain is never rounded up into one it is not.
     static func micros(_ micros: Int, signed: Bool = true) -> String {

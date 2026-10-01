@@ -7,12 +7,6 @@ import { nadfunToken } from "./_risk.mjs";
 import { redisStore } from "./_store.mjs";
 import { metaReader } from "./_wallet.mjs";
 
-/// Who got into a Monad token first, from the token's own Transfer log: snipers in the
-/// first seconds, bundles of wallets filled in one block by one sender, and the creator
-/// with everyone the creator handed tokens to.
-///
-///   GET /api/token-details?view=early&chainIndex=143&address=0x…
-
 const MONAD = "143";
 const ZERO = "0x0000000000000000000000000000000000000000";
 export const SNIPER_BLOCKS = 200;
@@ -42,10 +36,6 @@ function empty(chainIndex, address, status) {
   };
 }
 
-/// Transfer logs of one token, in chain order, to the lists a page shows. Shares are
-/// fractions of the supply minted in the window, or of the largest balance seen when
-/// nothing was minted in it. Addresses in `contracts` (pools, curves, lockers) are never
-/// listed as recipients; the creator is listed whatever it is.
 export function classifyEarly({ logs = [], blocks = [], creator = null, decimals = 18, contracts = new Set(), limit = MAX_SNIPERS } = {}) {
   const timestamps = new Map(blocks.map((block) => [Number(block.number), Number(block.timestamp)]));
   const time = (block) => (timestamps.get(block) ?? 0) * 1000;
@@ -124,8 +114,7 @@ export function classifyEarly({ logs = [], blocks = [], creator = null, decimals
   };
 }
 
-/// Every Transfer of the token from its first block through the scan window, page by
-/// page. HyperSync indexes by address, so starting at block 0 costs nothing extra.
+/// HyperSync indexes by address, so starting at block 0 costs nothing extra.
 export async function fetchEarlyLogs(hypersync, token) {
   const address = lower(token);
   const tip = await hypersync.height();
@@ -160,7 +149,6 @@ export async function fetchEarlyLogs(hypersync, token) {
   return { logs, blocks, launchBlock, blocksScanned: Math.max(0, covered) };
 }
 
-/// Balances and bytecode from the RPC, one batched request per call.
 export function chainReader({ url = rpcEndpoint(MONAD) } = {}) {
   const client = createPublicClient({ transport: http(url, { batch: true }) });
   return {

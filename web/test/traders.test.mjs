@@ -1,4 +1,3 @@
-// node --test web/test/traders.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -40,7 +39,6 @@ test("the position bitmap names every perp across banks", () => {
 });
 
 test("a position reads as side, leverage, value and PnL at its market's decimals", () => {
-  // A live ETH long: 5 ETH from 1,847.99 on 2,309.98 AUSD, marked at 2,447.22.
   const described = describePosition(row(), 244_722n, ETH);
   assert.equal(described.side, "long");
   assert.equal(described.entry, "1847.99");
@@ -48,7 +46,6 @@ test("a position reads as side, leverage, value and PnL at its market's decimals
   assert.equal(described.leverage, 4);
   assert.equal(described.pnlPercent, 131.94);
   assert.equal(describePosition(row({ positionType: 1 }), 244_722n, ETH).side, "short");
-  // BTC carries six decimals of price and size combined, matching collateral exactly.
   const btc = describePosition(row({ pricePNS: 697_422n, lotLNS: 179n, depositCNS: 41_612_829n }), 765_337n, BTC);
   assert.equal(btc.size, "0.00179");
   assert.equal(btc.leverage, 3);
@@ -133,9 +130,7 @@ test("a trader whose book could not be read is marked unreadable, never flat", a
   const result = await createHandler({ chain, fetchImpl: context })(
     { method: "GET", query: { view: "following", addresses: `${ALICE},${other}` } }, recorder());
   assert.equal(result.status, 200);
-  // The account read failed outright.
   assert.equal(result.body.traders[0].unreadable, true);
-  // The account read, but its positions did not.
   assert.equal(result.body.traders[1].unreadable, true);
 });
 
@@ -153,11 +148,8 @@ test("bad input and outages are refused plainly", async () => {
 
 test("a market's crowd is every open position on it, split by side", () => {
   const entries = [
-    // 5 ETH at 2,447.22 → 12,236.10 long.
     { row: row(), mark: 244_722n },
-    // 2 ETH short at the same mark → 4,894.44.
     { row: row({ accountId: 77n, positionType: 1, lotLNS: 2n }), mark: 244_722n },
-    // 1 ETH long → 2,447.22, so longs are 14,683.32 of 19,577.76: 75%.
     { row: row({ accountId: 91n, lotLNS: 1n }), mark: 244_722n },
   ];
   const crowd = aggregateMarket(entries, ETH);
@@ -189,7 +181,6 @@ test("a book that outran the page budget says so", async () => {
   };
   const result = await createHandler({ chain, fetchImpl: context })({ method: "GET", query: { view: "crowd" } }, recorder());
   assert.equal(result.status, 200);
-  // The market with nothing open is left out rather than drawn as an empty bar.
   assert.equal(result.body.markets.length, 1);
   assert.equal(result.body.markets[0].market, "ETH");
   assert.equal(result.body.markets[0].complete, false);

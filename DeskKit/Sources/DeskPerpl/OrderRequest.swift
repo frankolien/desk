@@ -11,8 +11,6 @@ public enum OrderType: Int, Sendable, Hashable {
     case change = 7
 }
 
-/// The venue compares trigger prices against either the last trade or mark price. Desk
-/// uses mark price for protection because one stray trade must not close a position.
 public enum TriggerPriceCondition: Int, Sendable, Hashable {
     case greaterThanOrEqualLast = 1
     case lessThanOrEqualLast = 2
@@ -31,11 +29,6 @@ public struct OrderFlags: OptionSet, Sendable, Hashable {
     public static let immediateOrCancel = OrderFlags(rawValue: 4)
 }
 
-/// Message type 22.
-///
-/// There is no market order type and no reduce-only flag; everything composes from the
-/// type, the flags and the price. A market order is a marketable limit at price zero
-/// with immediate-or-cancel and a slippage bound.
 public struct OrderRequest: Encodable, Sendable, Hashable {
     public let messageType = 22
     public let frameID: Int64
@@ -110,7 +103,6 @@ public enum OrderBuilder {
         case deadlineOverflow(headBlock: Int64, ttl: UInt32)
     }
 
-    /// A market order: price zero, immediate-or-cancel, bounded by slippage.
     public static func market(
         side: Side,
         market config: Market,
@@ -159,9 +151,8 @@ public enum OrderBuilder {
     ) throws -> OrderRequest {
         try validate(size: size, market: config, leverageHundredths: leverageHundredths, frameID: frameID)
         guard price.decimals == config.config.priceDecimals else { throw Failure.priceScaleMismatch }
-        // Price zero is how this venue spells "marketable". A limit order carrying it is
-        // a market order with good-till-cancelled and no slippage bound at all — the
-        // exact construction `market` exists to prevent.
+        // Price zero is how this venue spells "marketable": a limit at zero would be a
+        // good-till-cancelled market order with no slippage bound.
         guard price.raw > 0 else { throw Failure.priceMustBePositive }
         return OrderRequest(
             frameID: frameID,
@@ -180,11 +171,8 @@ public enum OrderBuilder {
             linkedRequestID: nil, linkedPositionID: nil)
     }
 
-    /// Closing uses its own types, never an opposing open.
-    ///
-    /// An opposing open inverts the position and pays taker on the way; the close types
-    /// are free and are exempt from the initial-margin check, which is what lets an
-    /// underwater position always be closed.
+    /// Closing uses its own types, never an opposing open: they are exempt from the
+    /// initial-margin check, so an underwater position can always be closed.
     public static func close(
         side: Side,
         market config: Market,
@@ -197,8 +185,6 @@ public enum OrderBuilder {
     ) throws -> OrderRequest {
         guard frameID != 0 else { throw Failure.frameIDMustBeNonZero }
         guard size.raw > 0 else { throw Failure.sizeMustBePositive }
-        // Without this a size at the wrong scale closes a hundredth of what was asked
-        // for and leaves the position open, with nothing on screen to say so.
         guard size.decimals == config.config.sizeDecimals else { throw Failure.sizeScaleMismatch }
         guard slippageBps > 0, slippageBps <= config.maxMarketSlippageBps else {
             throw Failure.slippageOutOfRange(slippageBps, max: config.maxMarketSlippageBps)
@@ -220,9 +206,6 @@ public enum OrderBuilder {
             linkedRequestID: nil, linkedPositionID: nil)
     }
 
-    /// A venue-hosted protective close. Linking it to the opening request means it only
-    /// becomes active if that request trades, and the venue cancels it when the linked
-    /// position closes. It therefore remains protective while Desk is suspended or shut.
     public static func protectiveClose(
         side: Side,
         market config: Market,
@@ -268,7 +251,6 @@ public enum OrderBuilder {
             linkedPositionID: linkedPositionID)
     }
 
-    /// Cancel is message 22 with type 5, not a message of its own.
     public static func cancel(
         market config: Market,
         account: UInt32,
@@ -303,9 +285,7 @@ public enum OrderBuilder {
         guard frameID != 0 else { throw Failure.frameIDMustBeNonZero }
         guard size.raw > 0 else { throw Failure.sizeMustBePositive }
         guard size.decimals == config.config.sizeDecimals else { throw Failure.sizeScaleMismatch }
-        // Against the fraction itself, not `maxLeverage * 100`: that round trip through
-        // integer division turns a 12.5x market into a 12x one and refuses leverage the
-        // venue allows.
+        // Against the fraction itself: `maxLeverage * 100` truncates a 12.5x market to 12x.
         let maximum = config.config.initialMarginFraction
         guard leverageHundredths >= 100, leverageHundredths <= maximum else {
             throw Failure.leverageOutOfRange(leverageHundredths, max: maximum)
@@ -329,8 +309,6 @@ public actor RequestCounter {
         next = max(next, Self.after(lastForwarded))
     }
 
-    /// Saturates. The seed arrives from the wallet snapshot on every connect, so a
-    /// maximal value is a server's to send and `+ 1` on it kills the app.
     private static func after(_ value: Int64) -> Int64 {
         value == .max ? .max : value + 1
     }

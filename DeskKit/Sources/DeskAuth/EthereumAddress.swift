@@ -8,8 +8,6 @@ public struct EthereumAddress: Hashable, Sendable, CustomStringConvertible {
         self.bytes = bytes
     }
 
-    /// EIP-55: a hex digit is uppercased when the matching nibble of the keccak of the
-    /// lowercase hex is 8 or more.
     public var checksummed: String {
         let lowercase = bytes.map { String(format: "%02x", $0) }.joined()
         let hash = Hashing.keccak256(Data(lowercase.utf8))
@@ -23,9 +21,8 @@ public struct EthereumAddress: Hashable, Sendable, CustomStringConvertible {
 
     public var description: String { checksummed }
 
-    /// An address someone typed or pasted. All-lowercase and all-uppercase are accepted as
-    /// unchecksummed; mixed case must be a correct EIP-55 checksum, because a mixed-case
-    /// address with one wrong letter is a typo that would otherwise send funds nowhere.
+    /// Mixed case must be a correct EIP-55 checksum: a mixed-case address with one wrong letter
+    /// is a typo that would otherwise send funds nowhere.
     public init?(text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count == 42, trimmed.hasPrefix("0x") else { return nil }

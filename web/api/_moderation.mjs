@@ -1,13 +1,5 @@
-/// Reports, hides and blocks for what people write and show in Desk: room messages and
-/// the name and picture on a Desk profile.
-///
-/// A report names a phone (the alerts' install secret, hashed) rather than a wallet, so
-/// one person cannot report as many people. Three distinct phones reporting the same
-/// message hide it; three hidden messages from one poster in a day block that poster
-/// from the rooms. Three phones reporting a profile hide its Desk name and picture, and
-/// the wallet falls back to whatever nad, ENS or Farcaster say about it. Every automatic
-/// action can be undone, and any action taken, through the moderation route with the
-/// cron secret.
+/// A report names a phone (the alerts' install secret, hashed), not a wallet, so one person cannot
+/// report as many. Three phones hide a message or a profile; three hidden messages in a day block the poster.
 import crypto from "node:crypto";
 
 export const REPORT_CAP = 500;
@@ -35,7 +27,6 @@ const validMarket = (value) => /^[A-Z0-9]{2,10}$/.test(String(value ?? ""));
 const validID = (value) => /^[a-z0-9]{1,12}-[a-f0-9]{8}$/.test(String(value ?? ""));
 const validWho = (value) => /^[a-f0-9]{16}$/.test(String(value ?? ""));
 
-/// Who reported, as a hash the reports list can carry without the secret.
 export const reporter = (install) => crypto.createHash("sha256").update(`report:${install}`).digest("hex").slice(0, 16);
 
 export function cleanReason(value) {
@@ -43,8 +34,7 @@ export function cleanReason(value) {
   return text.length > MAX_REASON ? text.slice(0, MAX_REASON).trim() : text;
 }
 
-/// The three sets change rarely and are read on every room poll, so an instance keeps
-/// them for a minute. A decision taken through this instance drops its copy at once.
+/// Read on every room poll, so an instance caches the sets for a minute; its own decisions drop the copy.
 const SETS_TTL_MS = 60_000;
 const cachedSets = new Map();
 
@@ -71,7 +61,6 @@ export async function isProfileHidden(store, address) {
   return (await hiddenProfiles(store)).has(String(address).toLowerCase());
 }
 
-/// One report in. `kind` is "message" (market + id + who) or "profile" (address).
 export async function report(store, { kind, install, market, id, who, address, reason }, now = Date.now()) {
   if (!store) return { status: 503, body: { error: "Reporting is not configured." } };
   if (!validInstall(install)) return { status: 401, body: { error: "This install is not recognised." } };
@@ -121,7 +110,6 @@ export async function report(store, { kind, install, market, id, who, address, r
   return { status: 200, body: { reported: true, reports: distinct, hidden, blocked } };
 }
 
-/// Everything a moderator needs to see in one answer.
 export async function overview(store) {
   const [raw, whos, messages, profiles] = await Promise.all([
     store.lrange(KEYS.reports, 0, REPORT_CAP - 1), blockedWhos(store), hiddenMessageIDs(store), hiddenProfiles(store),
@@ -130,7 +118,6 @@ export async function overview(store) {
   return { reports, blockedWhos: [...whos], hiddenMessages: [...messages], hiddenProfiles: [...profiles] };
 }
 
-/// A moderator's decision. Each action is idempotent.
 export async function act(store, { action, who, id, address }) {
   forgetSets();
   switch (action) {
@@ -145,7 +132,6 @@ export async function act(store, { action, who, id, address }) {
   return { status: 400, body: { error: "The target is malformed." } };
 }
 
-/// Bearer check shared by the moderation routes, constant time.
 export function authorized(req, secret = process.env.CRON_SECRET) {
   if (!secret) return false;
   const given = Buffer.from(String(req.headers?.authorization ?? ""));

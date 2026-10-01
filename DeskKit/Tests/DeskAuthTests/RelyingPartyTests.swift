@@ -16,8 +16,6 @@ struct RelyingPartyTests {
 
     @Test("A URL is not a relying party")
     func rejectsURLShapes() {
-        // Each of these fails the ceremony on a device rather than at build time, which
-        // is why they are caught here.
         #expect(throws: RelyingParty.Failure.containsScheme("https://desk.trade")) {
             try RelyingParty("https://desk.trade")
         }
@@ -34,8 +32,6 @@ struct RelyingPartyTests {
 
     @Test("A bare label has no registrable domain, so localhost is out")
     func rejectsBareLabels() {
-        // No association file can be served for a bare label, so there is no local
-        // shortcut and no temptation to ship one.
         #expect(throws: RelyingParty.Failure.notADomain("localhost")) { try RelyingParty("localhost") }
         #expect(throws: RelyingParty.Failure.notADomain("desk")) { try RelyingParty("desk") }
         #expect(throws: RelyingParty.Failure.notADomain("desk.trade.")) { try RelyingParty("desk.trade.") }
@@ -78,15 +74,12 @@ struct PasskeyFailureTests {
         for failure in cases {
             #expect(!failure.sentence.isEmpty)
             #expect(failure.sentence.first?.isUppercase == true)
-            // No error codes, no domains, no "an error occurred".
             #expect(!failure.sentence.lowercased().contains("error"))
         }
     }
 
     @Test("No failure may fall back to a stored key")
     func noFallback() throws {
-        // The product's first principle: there is no key at rest to fall back to, and a
-        // case that implied otherwise would be a lie in a type.
         let cases: [PasskeyFailure] = [
             .prfUnsupported, .prfReturnedNothing, .cancelledByUser, .noCredentialFound,
             .relyingPartyNotAssociated(try RelyingParty("desk.trade")), .platformRefused("x"),
@@ -96,7 +89,6 @@ struct PasskeyFailureTests {
 
     @Test("An authenticator with no PRF is told so plainly")
     func prfSentence() {
-        // The product document's acceptance criterion for sign-in.
         let sentence = PasskeyFailure.prfUnsupported.sentence
         #expect(sentence.contains("passkey"))
         #expect(!sentence.contains("PRF"))

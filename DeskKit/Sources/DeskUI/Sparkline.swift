@@ -39,8 +39,7 @@ public struct Sparkline: View {
         guard values.count >= 2 else { return [] }
         let low = values.min() ?? 0
         let high = values.max() ?? 1
-        // A flat series would divide by zero and, drawn at the top of the box, would also
-        // look like a rally. It sits on the midline instead.
+        // A flat series sits on the midline rather than dividing by zero.
         let span = high - low
         let step = size.width / CGFloat(values.count - 1)
         return values.enumerated().map { index, value in

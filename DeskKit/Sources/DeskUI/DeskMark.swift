@@ -20,7 +20,6 @@ public struct DeskMark: View {
                     startRadius: 0,
                     endRadius: size * 0.82))
 
-            // The rim, lit from the same direction as the face.
             Circle()
                 .strokeBorder(
                     LinearGradient(
@@ -32,7 +31,6 @@ public struct DeskMark: View {
                 .strokeBorder(Color.black.opacity(0.14), lineWidth: size * 0.03)
                 .padding(size * 0.13)
 
-            // The face: the same walk the hero draws, cut small.
             Path { path in
                 let inset = size * 0.28
                 let width = size - inset * 2
@@ -46,7 +44,6 @@ public struct DeskMark: View {
             .stroke(Color(red: 0.34, green: 0.21, blue: 0.02).opacity(0.85),
                     style: StrokeStyle(lineWidth: size * 0.075, lineCap: .round, lineJoin: .round))
 
-            // One specular, off the top left, clipped to the disc.
             Ellipse()
                 .fill(LinearGradient(
                     colors: [.white.opacity(0.42), .clear],
@@ -98,15 +95,10 @@ public struct FeatureTicker: View {
                 Image(systemName: item.symbol)
                     .font(.system(size: 25, weight: .bold, design: .rounded))
                     .foregroundStyle(DeskColor.nightText.color)
-                    // Moving and fading is one arrival. Scaling as well was a third thing
-                    // happening to a label that only changed which row it was on.
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
             Text(item.title)
                 .font(.system(size: isActive ? 26 : 22, weight: .bold, design: .rounded))
-                // The unlit rows were at 13%, which is not dim but nearly gone: the list
-                // read as one phrase with some artefacts under it. At 30% it reads as
-                // four things the app does, one of which is currently lit.
                 .foregroundStyle(isActive ? DeskColor.nightText.color : DeskColor.nightText.color.opacity(0.30))
         }
         .padding(.horizontal, isActive ? 22 : 0)

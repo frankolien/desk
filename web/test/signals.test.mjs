@@ -1,4 +1,3 @@
-// node --test web/test/signals.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -63,7 +62,6 @@ test("per token: distinct buyers, net inflow, first-buy share, freshness and con
   assert.equal(grizzle.firstBuyShare, 0.5);
   assert.equal(grizzle.ageMs, 2 * H);
   assert.equal(grizzle.concentration, 0.75);
-  // Buys under $100 are not buys; a token with none has no buyers and infinite age.
   const dust = rows.find((row) => row.token === DUST);
   assert.deepEqual([dust.buyers, dust.ageMs], [[], Infinity]);
   assert.equal(isBot(ledger(wallet(9), Array.from({ length: 201 }, (_, i) => trade(NOW - i * 60_000, DUST, "DUST", "buy", 1))), NOW), true);
@@ -87,14 +85,11 @@ async function seed(store) {
   await store.set(`wl:${wallet(2)}`, JSON.stringify(ledger(wallet(2), [
     trade(fresh, GRIZZLE, "GRIZZLE", "buy", 1_500), trade(fresh, WMON, "WMON", "buy", 5_000), trade(fresh, DUST, "DUST", "buy", 500),
   ])));
-  // Row three has no address; wallet three's ledger must be ignored even though it exists.
   await store.set(`wl:${wallet(3)}`, JSON.stringify(ledger(wallet(3), [trade(fresh, DUST, "DUST", "buy", 5_000)])));
   await store.set(`wl:${wallet(4)}`, JSON.stringify(ledger(wallet(4), [trade(fresh, GRIZZLE, "GRIZZLE", "buy", 1_200), trade(fresh, CHOG, "CHOG", "buy", 60)])));
-  // Tracked by nobody: qualifies only on its own record.
   const proven = Array.from({ length: 19 }, (_, i) => trade(NOW - 5 * 24 * H - i * H, DUST, "DUST", "sell", 100, 1));
   await store.set(`wl:${wallet(5)}`, JSON.stringify(ledger(wallet(5), [...proven, trade(fresh, GRIZZLE, "GRIZZLE", "buy", 800)], { wins: 11, losses: 9 })));
   await store.set(`wl:${wallet(6)}`, JSON.stringify(ledger(wallet(6), [...proven, trade(fresh, GRIZZLE, "GRIZZLE", "buy", 800)], { wins: 9, losses: 11 })));
-  // A bot: hundreds of trades today.
   const churn = Array.from({ length: 250 }, (_, i) => trade(NOW - i * 60_000, CHOG, "CHOG", "buy", 900));
   await store.set(`wl:${wallet(7)}`, JSON.stringify(ledger(wallet(7), churn, { wins: 100, losses: 10 })));
 }
@@ -108,7 +103,6 @@ test("signals come from leaders, tracked wallets and proven records, never from 
   assert.equal(result.observedAt, NOW);
   assert.deepEqual(result.signals.map((row) => row.symbol), ["GRIZZLE"]);
   const [grizzle] = result.signals;
-  // Wallets 1, 2, 4 and 5: the leaders, the one someone tracks, and the proven one.
   assert.equal(grizzle.distinct, 4);
   assert.deepEqual(grizzle.buyers, [{ address: wallet(1) }, { address: wallet(2) }, { address: wallet(4) }]);
   assert.equal(grizzle.netUsd, 5_500);
@@ -126,7 +120,6 @@ test("one buyer, or a low score, is not a signal; a lopsided one carries a warni
   const store = memoryStore();
   const fresh = NOW - 60_000;
   await store.set("hist:leaders", JSON.stringify([1, 2, 3, 4].map((n) => ({ account: String(n), address: wallet(n) }))));
-  // One whale and three small buyers: shown, but said to be mostly one wallet. CHOG has one buyer.
   await store.set(`wl:${wallet(1)}`, JSON.stringify(ledger(wallet(1), [trade(fresh, GRIZZLE, "GRIZZLE", "buy", 100_000), trade(fresh, CHOG, "CHOG", "buy", 50_000)])));
   for (const n of [2, 3, 4]) await store.set(`wl:${wallet(n)}`, JSON.stringify(ledger(wallet(n), [trade(fresh, GRIZZLE, "GRIZZLE", "buy", 1_000)])));
   const result = await computeSignals({ store, now: NOW, window: "6h", prices: async () => new Map() });
@@ -134,7 +127,6 @@ test("one buyer, or a low score, is not a signal; a lopsided one carries a warni
   assert.equal(result.signals[0].score, Math.round(40 + 25 + 15 + 20 * Math.exp(-60_000 / (3 * H)) - 30));
   assert.equal(result.signals[0].strong, false);
 
-  // Two small, stale buys: 20 + 0 + 15 + 20·e^(−5/3) is under fifty.
   for (const n of [1, 2]) await store.set(`wl:${wallet(n)}`, JSON.stringify(ledger(wallet(n), [trade(NOW - 5 * H, GRIZZLE, "GRIZZLE", "buy", 100)])));
   for (const n of [3, 4]) await store.del(`wl:${wallet(n)}`);
   const stale = await computeSignals({ store, now: NOW, window: "6h", prices: async () => new Map() });

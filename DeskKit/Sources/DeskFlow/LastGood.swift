@@ -1,20 +1,11 @@
 import DeskPerpl
 import Foundation
 
-/// A value that survives a bad network.
-///
-/// The product's fourth principle: a failed poll shows the last good figure with a note
-/// on its age, never a zero and never an empty screen. A trading app that shows a zero
-/// position during a reconnect is a trading app that causes a panic sell, so the type
-/// makes that impossible — `recordFailure` cannot reach the value, and there is no way
-/// to clear one except by replacing it with a better one.
+/// A failed poll shows the last good figure with its age, never a zero: a zero position during
+/// a reconnect causes a panic sell, so `recordFailure` cannot reach the value.
 public struct LastGood<Value: Sendable>: Sendable {
     public private(set) var observation: Observed<Value>?
-    /// Reset by any success. Drives the backoff and decides when a problem is worth
-    /// saying out loud.
     public private(set) var consecutiveFailures = 0
-    /// The last thing that went wrong, kept for the sentence on screen. Never a reason
-    /// to hide the value it failed to replace.
     public private(set) var lastFailure: String?
 
     public init() {}
@@ -33,15 +24,12 @@ public struct LastGood<Value: Sendable>: Sendable {
         lastFailure = nil
     }
 
-    /// Deliberately cannot touch `observation`. That is the whole type.
-    /// A value from a second source, such as a live stream beside a polled endpoint. It
-    /// refreshes the value and its age but leaves the polled source's failures alone, so
-    /// that source's backoff keeps growing while it is down.
+    /// A value from a second source (a live stream beside a polled endpoint). Leaves the polled
+    /// source's failures alone, so its backoff keeps growing while it is down.
     public mutating func restamp(_ value: Value, at instant: ContinuousClock.Instant = ContinuousClock.now) {
         observation = Observed(value, receivedAt: instant, serverTimestampMilliseconds: nil)
     }
 
-    /// The polled source answered, but a second source holds a newer value.
     public mutating func noteSuccess() {
         consecutiveFailures = 0
         lastFailure = nil
@@ -66,16 +54,9 @@ public struct LastGood<Value: Sendable>: Sendable {
     }
 }
 
-/// How long to wait before trying again, and when to admit to the user that we are.
-///
-/// Retry is silent at first and becomes visible only once it has failed enough to be
-/// worth a sentence. A spinner over a number that is still correct is worse than no
-/// spinner at all.
 public struct Backoff: Sendable, Hashable {
     public let base: Duration
     public let cap: Duration
-    /// Below this many consecutive failures nothing is said on screen. One dropped frame
-    /// on a train is not news.
     public let visibleAfterFailures: Int
 
     public init(
@@ -90,9 +71,7 @@ public struct Backoff: Sendable, Hashable {
 
     public static let `default` = Backoff()
 
-    /// Doubling, capped. No jitter: jitter exists to stop a fleet of clients retrying in
-    /// lockstep, and one phone reconnecting stampedes nothing — so it would only make
-    /// the behaviour untestable.
+    /// Doubling, capped. No jitter: one phone reconnecting stampedes nothing.
     public func delay(afterFailures failures: Int) -> Duration {
         guard failures > 0 else { return .zero }
         var delay = base
@@ -113,8 +92,6 @@ extension LastGood {
         backoff.delay(afterFailures: consecutiveFailures)
     }
 
-    /// Whether the screen should say something is wrong, as opposed to quietly showing a
-    /// slightly older number.
     public func shouldReportProblem(_ backoff: Backoff = .default) -> Bool {
         backoff.isWorthMentioning(afterFailures: consecutiveFailures)
     }

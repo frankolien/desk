@@ -3,7 +3,6 @@ import Testing
 
 @testable import DeskAuth
 
-/// A clock the test moves by hand.
 private final class Ticker: @unchecked Sendable {
     private let lock = NSLock()
     private let base = ContinuousClock.now
@@ -30,8 +29,6 @@ struct SigningSessionTests {
         }
     }
 
-    /// The change this suite exists to hold. A fifteen-minute window used to sign a person
-    /// out mid-trade — including between them and closing a losing position.
     @Test("An open session does not count down while Desk is open")
     func noTimerInForeground() async throws {
         let ticker = Ticker()
@@ -72,8 +69,6 @@ struct SigningSessionTests {
 
     @Test("Winding the clock backwards does not extend a session")
     func monotonic() async throws {
-        // A wall clock can be moved from Settings. A session that could be extended that
-        // way is not a session, which is why every instant is monotonic.
         let ticker = Ticker()
         let session = SigningSession(lifetime: .seconds(60), now: { ticker.instant })
         try await session.open(tradingKey())
@@ -128,8 +123,6 @@ struct SigningSessionTests {
         }
     }
 
-    /// The background task failing: iOS suspended Desk before the wipe ran, so nothing
-    /// wiped the key while it was away. It must still be unusable on the way back in.
     @Test("Coming back after the grace finds the key gone even if nothing wiped it")
     func returnAfterGrace() async throws {
         let ticker = Ticker()
@@ -143,8 +136,7 @@ struct SigningSessionTests {
         #expect(await session.isOpen == false)
     }
 
-    /// iOS can report the transition to the background more than once. Restarting the
-    /// clock on each report would let the key outlive the grace.
+    /// iOS can report going to the background more than once; the grace must not restart.
     @Test("A second background event does not restart the grace")
     func graceStartsOnce() async throws {
         let ticker = Ticker()
@@ -184,10 +176,6 @@ struct SigningSessionTests {
         }
     }
 
-    /// The grace used to have to fit iOS's thirty-second background window, because the
-    /// wipe was scheduled inside it. It no longer is: the absence is measured on return
-    /// against a monotonic clock, so the grace can be the one a person would choose, and
-    /// the test above this one is what guarantees a late return still finds the key gone.
     @Test("The grace is long enough that a trip to another app costs nothing")
     func graceIsHuman() {
         #expect(SigningSession.backgroundGrace >= .seconds(60))

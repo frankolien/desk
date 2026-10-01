@@ -2,14 +2,7 @@ import CryptoKit
 import Foundation
 import P256K
 
-/// Mera's derivation rule, followed exactly. Changing any line here changes every
-/// address the app has ever shown.
-///
-///     PRF salt      sha256("mera.prf.salt.v1")
-///     PRF output    32 bytes, used as BIP-39 entropy
-///     Seed          BIP-39 seed, empty passphrase, PBKDF2 2048 rounds
-///     Wallet key    BIP-32, m/44'/60'/0'/0/{index}, secp256k1
-///     Trading key   SLIP-0010, m/44'/501'/{index}'/0', ed25519, all hardened
+/// Mera's derivation rule, followed exactly: any change moves every address the app has ever shown.
 public enum PasskeyAccounts {
     public enum Failure: Error, Equatable, Sendable {
         case prfOutputMustBe32Bytes(Int)
@@ -37,8 +30,6 @@ public enum PasskeyAccounts {
                           publicKey: signer.publicKey.rawRepresentation)
     }
 
-    /// The secp256k1 key that signs contract calls. Derived for one signature and let
-    /// go; nothing should hold the returned value past the call it was made for.
     public static func deriveWalletKey(prfOutput: Data, index: UInt32 = 0) throws -> WalletKey {
         var seed = try bip39Seed(prfOutput: prfOutput, index: index)
         defer { seed.resetBytes(in: 0..<seed.count) }
@@ -52,8 +43,6 @@ public enum PasskeyAccounts {
                          address: try address(forPrivateKey: wallet.key))
     }
 
-    /// The address alone, with the key wiped before returning. What the address guard
-    /// and the Fund screen need.
     public static func deriveAddress(prfOutput: Data, index: UInt32 = 0) throws -> EthereumAddress {
         var seed = try bip39Seed(prfOutput: prfOutput, index: index)
         defer { seed.resetBytes(in: 0..<seed.count) }
@@ -81,7 +70,6 @@ public enum PasskeyAccounts {
             dataRepresentation: key, format: .uncompressed)
         else { throw Failure.evmDerivationFailed }
 
-        // keccak of the 64-byte public point, without its 0x04 prefix; last 20 bytes.
         let publicKey = Data(signing.publicKey.dataRepresentation.dropFirst())
         guard let address = EthereumAddress(bytes: Data(Hashing.keccak256(publicKey).suffix(20)))
         else { throw Failure.addressDerivationFailed }
@@ -89,8 +77,6 @@ public enum PasskeyAccounts {
     }
 }
 
-/// No mnemonic anywhere. The phrase is an intermediate that never leaves derivation, so
-/// there is nothing for a screen to render even by accident and nothing to export.
 public struct TradingKey: Sendable {
     public let seed: SecureBytes
     public let publicKey: Data
@@ -100,9 +86,6 @@ public struct TradingKey: Sendable {
         self.publicKey = publicKey
     }
 
-    /// Derives the public key rather than accepting one, for the same reason `WalletKey`
-    /// derives its address: a pair that can disagree will eventually disagree, and here
-    /// that means enrolling one key and signing with another.
     public init(seed: SecureBytes) throws {
         self.seed = seed
         self.publicKey = try seed.withUnsafeBytes { bytes in
@@ -123,9 +106,6 @@ public struct WalletKey: Sendable {
         self.address = address
     }
 
-    /// Derives the address rather than accepting one. A memberwise initialiser would let
-    /// the two disagree, and a key that signs as one address while the screen shows
-    /// another is a withdrawal sent nowhere.
     public init(privateKey: SecureBytes) throws {
         self.privateKey = privateKey
         self.address = try privateKey.withUnsafeBytes {

@@ -154,7 +154,6 @@ test("with a quiet window, a run that found nothing skips the write until the st
   tip += 30;
   const quiet = await run(60_000);
   assert.deepEqual([quiet.written, quiet.complete, writes], [false, true, 1]);
-  // The stored cursor is behind, but the range it re-reads holds nothing new.
   assert.equal(JSON.parse(await store.get(`wl:${ME}`)).cursor, 1_000_000);
 
   assert.equal((await run(130_000)).written, true);
@@ -162,7 +161,6 @@ test("with a quiet window, a run that found nothing skips the write until the st
   assert.equal(JSON.parse(await store.get(`wl:${ME}`)).cursor, 1_000_030);
   assert.equal(JSON.parse(await store.get(`wl:${ME}`)).positions[FROGE].holding, 100_000);
 
-  // Without the option every run writes, as the rotation and the API expect.
   await indexWallet(ME, { store, hypersync, price, meta, backfillBlocks: 1_000_000, now: () => 131_000 });
   assert.equal(writes, 3);
 });

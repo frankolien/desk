@@ -14,23 +14,11 @@ import {
 import { isSolanaAddress } from "./_chains.mjs";
 import { chainReader, describePosition, openMarkets, perpIdsFromBitmap } from "./traders.mjs";
 
-/// Trade alerts for followed traders.
-///
-/// The phone registers which traders it wants to hear about and where to deliver; a
-/// scheduler calls the scan, which reads those traders' open positions on Perpl mainnet,
-/// compares them with the last reading and pushes what changed. Nothing here can trade:
-/// copying still happens on the phone, with the person's own key and Face ID.
-///
-/// A subscription is keyed by a hash of a secret only the phone holds, so nobody who
-/// learns a device token or a followed address can read or rewrite someone's alerts.
-
 export const MAX_TRADERS = 20;
-/// People waiting for the TestFlight invite. Read with `?job=waitlist` and the scheduler's secret.
 export const WAITLIST_KEY = "waitlist:emails";
 export const MAX_SUBSCRIPTIONS = 5_000;
 const MAX_SCANNED = 300;
-/// Background wakes a phone may get in an hour. iOS throttles silent pushes hard, so a
-/// flood of them costs the useful ones; the alert push, if any, still stands.
+/// Background wakes per phone per hour: iOS throttles silent pushes, so a flood costs the useful ones.
 export const WAKE_CAP = 12;
 export const wakeCountKey = (id, hour) => `alerts:wakes:${id}:${hour}`;
 const MAX_EVENTS_PER_TRADER = 4;
@@ -48,7 +36,6 @@ export const subscriptionId = (install) => createHash("sha256").update(`desk-ale
 
 const validAddress = (value) => typeof value === "string" && /^0x[a-fA-F0-9]{40}$/.test(value);
 
-/// The subscription as stored, or the sentence explaining why it was refused.
 export function parseSubscription(body) {
   if (!body || typeof body !== "object") return { error: "A JSON body is required." };
   const { install, token, environment, traders, names, copying, wallets, prices, priceMarkets, targets } = body;
@@ -92,7 +79,6 @@ export function parseSubscription(body) {
   };
 }
 
-/// The markets a phone has on its watchlist, or null when the list is malformed.
 function parseMarkets(markets) {
   if (!Array.isArray(markets) || markets.length > 20) return null;
   const out = [];
@@ -104,15 +90,12 @@ function parseMarkets(markets) {
   return out;
 }
 
-/// The tracked wallets as stored, or null when any entry is malformed.
 function parseWallets(wallets) {
   if (!Array.isArray(wallets) || wallets.length > MAX_WALLETS) return null;
   const out = [];
   const seen = new Set();
   for (const entry of wallets) {
     if (!entry || typeof entry !== "object") return null;
-    // A Solana wallet from an older build is dropped rather than refused, so the rest of
-    // the subscription still saves; Desk no longer follows Solana.
     if (isSolanaAddress(entry.address)) continue;
     if (!validAddress(entry.address)) return null;
     const { name, minUsd, firstBuysOnly } = entry;
@@ -132,8 +115,6 @@ function parseWallets(wallets) {
   return out;
 }
 
-/// Wakes the app in the background so the copy loop can take the copy itself. Nothing
-/// visible: the alert, if this address is also followed, is a separate push.
 export function wakePayload(address, event) {
   const { position } = event;
   return {
@@ -142,8 +123,6 @@ export function wakePayload(address, event) {
   };
 }
 
-/// What a trader did between two readings of their book. Trims are left out: a follower
-/// wants to hear about new risk and about exits, not every partial take-profit.
 export function tradeEvents(before, after) {
   const events = [];
   for (const [id, now] of Object.entries(after)) {
@@ -178,16 +157,13 @@ export function priceText(text) {
 const leverageText = (value) => (value == null ? "" : `${Number.isInteger(value) ? value : value.toFixed(1)}×`);
 const shortAddress = (address) => `${address.slice(0, 6)}…${address.slice(-4)}`;
 
-/// The notification a follower reads, and the fields the app needs to open the copy.
 const lockToken = () => randomBytes(16).toString("hex");
 
-/// Releases a lock only if this run still holds it. A run that overran its lease used to
-/// delete the next run's lock on its way out, which let a third run in alongside it.
+/// Releases a lock only if this run still holds it, so an overrun cannot delete the next run's lock.
 async function release(store, key, token) {
   try {
     if (await store.get(key) === token) await store.del(key);
   } catch {
-    // A lock nobody released expires on its own.
   }
 }
 
@@ -220,7 +196,6 @@ export function alertPayload(address, name, event) {
       alert: { title, body },
       sound: "default",
       "thread-id": `trader-${address}`,
-      // The app registers Copy, View and Mute buttons under these; a close offers no Copy.
       category: event.kind === "closed" ? "desk.trade.closed" : "desk.trade",
       "relevance-score": event.kind === "closed" ? 0.4 : 0.8,
     },
@@ -264,8 +239,6 @@ export async function readBook(chain, markets, address) {
   return book;
 }
 
-/// Each subscription's first address, then each one's second, and so on until the budget is
-/// spent. Every subscriber is served before anyone is served twice.
 export function shareBudget(followers, budget) {
   const queues = new Map();
   for (const [address, watchers] of followers) {
@@ -304,7 +277,6 @@ export async function withinWakeBudget(store, id, now = Date.now()) {
   return count <= WAKE_CAP;
 }
 
-/// Pushes for tracked wallets' new trades, and the seen markers to write before sending.
 async function walletDeliveries({ store, watchers, now }) {
   const addresses = [...watchers.keys()];
   if (addresses.length === 0) return { deliveries: [], markers: [], events: 0 };
@@ -321,7 +293,6 @@ async function walletDeliveries({ store, watchers, now }) {
     const ledger = JSON.parse(ledgers[index]);
     const marker = JSON.stringify(newestMarker(ledger));
     if (marker !== seen[index]) markers.push([seenKey(address), marker]);
-    // The first reading is the baseline, as with trader books.
     if (seen[index] == null) return;
     const previous = JSON.parse(seen[index]);
     for (const { id, record, wallet } of watchers.get(address)) {
@@ -374,12 +345,8 @@ export async function scan({ store, chain, apns, markets, quotes = [], now = Dat
     }
   });
   await store.srem(SUBSCRIPTIONS, ...expired);
-  // The worker's fast lane reads this: wallets someone wants pushes for, kept at the tip.
   await store.set(WATCHED_KEY, JSON.stringify([...watchers.keys()]), { ex: 900 }).catch(() => {});
 
-  // Round-robin across subscriptions rather than a flat slice: a flat one let fifteen junk
-  // subscriptions, twenty addresses each, fill the whole budget and silently stop every real
-  // follower's alerts.
   const addresses = shareBudget(followers, MAX_SCANNED);
   const previous = await store.mget(addresses.map(snapshotKey));
   const books = await inBatches(addresses, 20, (address) => readBook(chain, markets, address).catch(() => null));
@@ -391,7 +358,6 @@ export async function scan({ store, chain, apns, markets, quotes = [], now = Dat
     const book = books[index];
     if (!book) return;
     snapshots.push([snapshotKey(address), JSON.stringify(book)]);
-    // The first reading is the baseline; everything already open is old news.
     if (previous[index] == null) return;
     const events = tradeEvents(JSON.parse(previous[index]), book).slice(0, MAX_EVENTS_PER_TRADER);
     for (const { id, record } of followers.get(address)) {
@@ -400,7 +366,6 @@ export async function scan({ store, chain, apns, markets, quotes = [], now = Dat
           deliveries.push({ id, record, payload: alertPayload(address, record.names?.[address], event),
             collapseId: `${address.slice(2, 14)}-${event.position.marketId}-${event.kind}` });
         }
-        // The loop copies opens, flips and closes; an add would wake the phone for nothing.
         if (record.copying?.includes(address) && event.kind !== "added") {
           wakes.push({ id, record, payload: wakePayload(address, event),
             collapseId: `wake-${address.slice(2, 14)}`, background: true });
@@ -477,7 +442,6 @@ export function createHandler(resolve) {
     if (req.query?.job === "index") {
       if (!authorized(req, deps.secret)) return res.status(401).json({ error: "Unauthorized." });
       if (!deps.store || !deps.hypersync) return res.status(503).json({ error: "History indexing isn't configured on this server." });
-      // The Railway worker runs the index; this stays for a manual run when it is down.
       try {
         const report = await indexWithLock({
           store: deps.store, hypersync: deps.hypersync, markets: await deps.markets(), budgetMs: 40_000, lockSeconds: 58,
@@ -493,7 +457,6 @@ export function createHandler(resolve) {
 
     if (req.query?.job === "scan") {
       if (!authorized(req, deps.secret)) return res.status(401).json({ error: "Unauthorized." });
-      // Schedulers overlap when a scan runs long; only one may read and deliver at a time.
       const scanToken = lockToken();
       if (!await store.set("alerts:lock", scanToken, { ex: 90, nx: true })) return res.status(202).json({ skipped: true });
       const rounds = Math.min(MAX_ROUNDS, Math.max(1, Number(req.query.rounds ?? MAX_ROUNDS) || 1));
@@ -505,7 +468,6 @@ export function createHandler(resolve) {
           const quotes = deps.quotes ? await deps.quotes().catch(() => []) : [];
           const report = await scan({ store, chain: deps.chain, apns, markets, quotes });
           reports.push(report);
-          // Nobody to alert: later rounds would only spend commands.
           if (report.subscriptions === 0) break;
         }
         await store.set("alerts:lastScan", new Date().toISOString(), { ex: 7 * 86400 }).catch(() => {});
@@ -532,7 +494,6 @@ export function createHandler(resolve) {
       if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
         return res.status(400).json({ error: "That doesn't look like an email address." });
       }
-      // One address a minute per phone or browser is plenty for a form; more is a script.
       const ip = clientIp(req.headers);
       const attempts = await store.incr(`waitlist:ip:${ip}`);
       if (attempts === 1) await store.expire(`waitlist:ip:${ip}`, 3600);
@@ -556,7 +517,6 @@ export function createHandler(resolve) {
     if (parsed.error) return res.status(400).json({ error: parsed.error });
     const { id, record, wantsPrices } = parsed;
 
-    // Nothing to follow, copy, track or watch for is a request to be forgotten.
     if (record.traders.length === 0 && record.copying.length === 0 && record.wallets.length === 0 && record.targets.length === 0 && !wantsPrices) {
       await store.del(subscriptionKey(id));
       await store.srem(SUBSCRIPTIONS, id);
@@ -567,10 +527,8 @@ export function createHandler(resolve) {
       return res.status(503).json({ error: "Trade alerts are full right now." });
     }
 
-    // A subscription nobody can deliver to is not a subscription, it is a seat taken from
-    // someone who can. A first registration is only written once Apple has accepted a push
-    // for that token, which costs an attacker a real device and a real token per seat.
-    // The confirmation the person sees is the same push, so this proves the whole path.
+    // A first registration is only written once Apple has accepted a push for that token,
+    // so each seat costs an attacker a real device.
     let confirmed = false;
     let environment = record.environment;
     const announcing = !known || body.confirm === true;
@@ -606,8 +564,6 @@ export function createHandler(resolve) {
         return res.status(400).json({ error: "This iPhone couldn't be reached by Apple, so alerts weren't saved." });
       }
     } else if (!known) {
-      // A repeat registration inside the confirmation window, before the first one was
-      // written. Nothing is stored on this path either.
       return res.status(429).json({ error: "Trade alerts are still being set up. Try again in a moment." });
     }
 

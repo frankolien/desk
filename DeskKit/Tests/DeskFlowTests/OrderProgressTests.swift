@@ -6,10 +6,6 @@ import Testing
 
 @Suite("Following one order")
 struct OrderProgressTests {
-    /// The bug this type was extracted for, at the layer where it was found. `place`
-    /// tracks and sends, the gateway answers while the send call is still unwinding, and
-    /// the update arrives before there is any id to compare it against. Discarded, the
-    /// screen waits forever on an order that already filled.
     @Test("An update that arrives before the id is not lost")
     func updateBeforeAssociation() {
         var progress = OrderProgress()
@@ -50,8 +46,6 @@ struct OrderProgressTests {
         #expect(progress.outcome == .settled)
     }
 
-    /// Held updates belong to whichever order they name. A frame id from a previous order
-    /// must not settle this one.
     @Test("A held update for another order is discarded on association")
     func heldUpdateForAnotherOrder() {
         var progress = OrderProgress()
@@ -61,9 +55,6 @@ struct OrderProgressTests {
         #expect(progress.outcome == .sending)
     }
 
-    /// Replay and the live watcher can deliver the same phases in either order. Without
-    /// this rule a buffered `sent` applied after a real fill puts the screen back on
-    /// "sending", which is the same broken spinner by another route.
     @Test("A terminal outcome never walks backwards")
     func terminalIsFinal() {
         var progress = OrderProgress()
@@ -75,8 +66,6 @@ struct OrderProgressTests {
         #expect(progress.outcome == .settled)
     }
 
-    /// `mt: 3` with `code: 0` means the gateway took the order, not that it filled. The
-    /// two must stay distinguishable or a screen claims a position that may not exist.
     @Test("Forwarded is its own outcome and is not terminal")
     func forwardedIsNotSettled() {
         var progress = OrderProgress()
@@ -97,8 +86,6 @@ struct OrderProgressTests {
         #expect(progress.outcome == .rejected(code: 4, subReason: 32))
     }
 
-    /// A dropped socket while an order is in flight is not a rejection — nobody knows what
-    /// happened to it, and the user has to be told that rather than told it failed.
     @Test("A lost connection abandons an order still in flight")
     
     func connectionLostWhileBusy() {
@@ -110,8 +97,6 @@ struct OrderProgressTests {
         #expect(progress.outcome == .abandoned)
     }
 
-    /// But a connection closing after a fill has settled changes nothing. Sockets close
-    /// all the time; an order that already filled is not in doubt.
     @Test("A lost connection after settlement changes nothing")
     func connectionLostAfterSettlement() {
         var progress = OrderProgress()
@@ -129,7 +114,6 @@ struct OrderProgressTests {
         #expect(progress.outcome == nil)
     }
 
-    /// A second order must not inherit the first one's answer, nor its held updates.
     @Test("Beginning again forgets everything about the last order")
     func beginClearsPreviousOrder() {
         var progress = OrderProgress()
@@ -156,8 +140,6 @@ struct OrderProgressTests {
         #expect(progress.outcome == nil)
     }
 
-    /// Expiry is terminal too: an order past its deadline block is not coming back, and
-    /// leaving it busy is the spinner that never ends.
     @Test("Expiry is terminal", arguments: [
         OrderPhase.expired,
         OrderPhase.settled,
@@ -224,7 +206,6 @@ struct OrderProgressLateFillTests {
         progress.apply(id: 1, phase: .settled, fill: fill)
         #expect(progress.outcome == .settled)
         #expect(progress.fill == fill)
-        // And a later read never replaces the fill that decided it.
         progress.apply(id: 1, phase: .settled, fill: OrderFill(status: 4, originalRaw: 12, filledRaw: 12, priceRaw: 3, feeRaw: 1))
         #expect(progress.fill == fill)
     }

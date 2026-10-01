@@ -15,8 +15,6 @@ struct FundingTests {
         #expect(abs(understatement - 0.284) < 0.001)
     }
 
-    /// Every market carrying funding in the live testnet context, checked against the
-    /// derived encoding. This is what establishes that `rate` is in micros.
     @Test(
         "The premium relation holds on live market data",
         arguments: [
@@ -50,7 +48,6 @@ struct FundingTests {
 
     @Test("A rate annualises by the interval count")
     func annualises() {
-        // BTC at 30 micros an interval: 0.003% each, about 36.7% a year.
         #expect(Funding.annualisedMicros(perIntervalMicros: 30) == 366_690)
         #expect(Funding.annualisedMicros(perIntervalMicros: 0) == 0)
         #expect(Funding.annualisedMicros(perIntervalMicros: -30) == -366_690)

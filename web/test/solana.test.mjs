@@ -1,4 +1,3 @@
-// node --test web/test/solana.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -12,8 +11,6 @@ const BONK = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const OTHER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 
-/// A transaction the way the RPC returns it with jsonParsed: the wallet's own token
-/// accounts before and after, lamports before and after, and the fee it paid.
 function transaction({ slot = 383_000_000, blockTime = 1_789_990_473, fee = 5005, lamports = [1_000_000_000n, 1_000_000_000n - 5005n], pre = [], post = [], signer = true, err = null } = {}) {
   const balance = (mint, amount, decimals, owner = WALLET) => ({ mint, owner, uiTokenAmount: { amount: String(amount), decimals } });
   return {

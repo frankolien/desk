@@ -1,20 +1,6 @@
-/// A wallet's trade ledger on Monad, built from the chain and kept in Redis.
-///
-/// Every ERC-20 Transfer that touches the wallet is read through HyperSync and grouped
-/// by transaction. A transaction the wallet sent in which tokens both left and arrived
-/// is a swap; one it sent in which tokens only arrived is a buy paid in MON; one it sent
-/// in which tokens only left, to something other than the token contract itself, is a
-/// sell for MON. Tokens that arrived in someone else's transaction were transferred in,
-/// and carry no cost basis — they are held but excluded from PnL, as Codex and Zerion do.
-///
-/// Each leg is priced at the minute it happened. Cost basis is the weighted average of
-/// what was paid; a sell realises the difference against it. The ledger keeps a block
-/// cursor so the next read only appends.
 
 export const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const ERC20_TRANSFER_SELECTOR = "0xa9059cbb";
-/// Contracts a wallet moves money to and from without trading: Perpl's exchange and its
-/// deposit router, Agora's faucet, Relay's depository. A deposit is not a sell.
 export const CUSTODY = new Set([
   "0x34b6552d57a35a1d042ccae1951bd1c370112a6f",
   "0x1964c32f0be608e7d29302aff5e61268e72080cc",
@@ -23,13 +9,11 @@ export const CUSTODY = new Set([
 ]);
 export const NATIVE = "native";
 export const LEDGER_VERSION = 1;
-/// Money, not positions: paying with one of these is not selling it.
 export const QUOTE_SYMBOLS = new Set(["MON", "WMON", "USDC", "USDT", "AUSD", "USDE", "SUSDE", "SOL", "WSOL"]);
 // EVM is case-insensitive; Solana base58 is not. Never merge distinct Solana wallets.
 export const ledgerKey = (address) => `wl:${address.startsWith("0x") ? address.toLowerCase() : address}`;
 export const TRACKED_KEY = "wl:tracked";
 export const URGENT_KEY = "wl:urgent";
-/// Wallets someone has pushes for, written by every alert scan; the worker keeps these at the tip first.
 export const WATCHED_KEY = "wl:watched";
 export const HEARTBEAT_KEY = "wl:heartbeat";
 const KEEP_TRADES = 300;
@@ -54,8 +38,6 @@ export function decodeTransfer(log) {
   };
 }
 
-/// Transfers and transactions from one HyperSync page, grouped into the wallet's
-/// movements per transaction: what came in, what went out, and who sent the transaction.
 export function groupMovements(wallet, { logs = [], transactions = [], blocks = [] }) {
   const me = lower(wallet);
   const timestamps = new Map(blocks.map((block) => [Number(block.number), Number(block.timestamp)]));
@@ -107,8 +89,6 @@ const units = (raw, decimals) => {
   return Number(raw / scale) + Number(raw % scale) / Number(scale);
 };
 
-/// Applies one movement to the ledger. `price(token, time)` answers in USD per whole
-/// token, or null when unknown; `meta(token)` answers `{ symbol, decimals }`.
 export async function applyMovement(ledger, movement, { price, meta }) {
   const legs = [];
   for (const { token, raw } of movement.in) legs.push({ token, raw, side: "in" });
@@ -133,8 +113,6 @@ export async function applyMovement(ledger, movement, { price, meta }) {
         position.bought += amount * unit;
       }
     } else {
-      // Tokens without a cost basis leave first; they never touch PnL. The sale is
-      // still a sale: it is recorded with its value and no gain.
       const fromUnpriced = Math.min(position.unpriced, amount);
       position.unpriced -= fromUnpriced;
       const priced = Math.min(position.holding, amount - fromUnpriced);
@@ -165,7 +143,6 @@ export async function applyMovement(ledger, movement, { price, meta }) {
   return ledger;
 }
 
-/// The figures a page shows, with unrealised PnL marked against today's prices.
 export function summarize(ledger, currentPrice, { now = Date.now() } = {}) {
   const tokens = [];
   let unrealized = 0;
@@ -225,9 +202,6 @@ export async function fetchPage(hypersync, { wallet, from, to }) {
   });
 }
 
-/// Brings one wallet's ledger up to the chain tip, within a deadline. Returns the
-/// ledger and whether it reached the tip. With `quietMs`, a run that found nothing new
-/// skips the write while the stored ledger is younger than that.
 export async function indexWallet(address, { store, hypersync, price, meta, backfillBlocks, finalityLag = 20, now = Date.now, deadline = Infinity, quietMs = 0 }) {
   const key = ledgerKey(address);
   const stored = await store.get(key);
@@ -256,7 +230,6 @@ export async function indexWallet(address, { store, hypersync, price, meta, back
     if (!(page.nextBlock > cursor)) break;
     cursor = page.nextBlock;
   }
-  // Nothing was applied, so the stored cursor still leads to this same ledger.
   const quiet = applied === 0 && !stopped && writtenAt > 0 && now() - writtenAt < quietMs;
   ledger.cursor = cursor;
   ledger.indexedAt = now();

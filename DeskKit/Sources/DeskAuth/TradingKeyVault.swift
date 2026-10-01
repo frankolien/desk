@@ -7,17 +7,13 @@ import Security
 public enum TradingKeyVault {
     public enum Outcome: Sendable {
         case opened(TradingKey)
-        /// Face ID was refused or dismissed. The person said no; do not ask again another way.
         case cancelled
-        /// Nothing sealed for this account on this device, or the enrolment changed.
         case missing
-        /// The keychain could not be used at all.
         case unavailable
     }
 
     private static let service = "trade.desk.trading-key"
 
-    /// Seals the key. Returns false when this device cannot, which is not an error to show.
     @discardableResult
     public static func seal(_ key: TradingKey, address: EthereumAddress, network: String) -> Bool {
         var error: Unmanaged<CFError>?
@@ -33,8 +29,6 @@ public enum TradingKeyVault {
         return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
     }
 
-    /// Opens the key with one Face ID prompt. Blocks on the prompt, so it runs off the
-    /// main actor and the caller awaits it.
     public static func open(address: EthereumAddress, network: String, reason: String) async -> Outcome {
         let account = account(address, network)
         return await Task.detached(priority: .userInitiated) { () -> Outcome in

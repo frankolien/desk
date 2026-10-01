@@ -1,13 +1,8 @@
 import Foundation
 
-/// SLIP-0010 over ed25519, for the account at m/44'/501'/{index}'/0'.
-///
-/// Every step is hardened; ed25519 has no public parent derivation. The path says
-/// Solana because that is the path Mera assigns its ed25519 account, and following Mera
-/// exactly is worth more than a tidier path.
+/// m/44'/501'/{index}'/0', all hardened: Solana's path, because Mera uses it for its ed25519 account.
 enum SLIP10 {
-    /// `path` carries unhardened indices; every step is hardened here. Passing an
-    /// already-hardened index is a programming error rather than a no-op: `|` is
+    /// `path` carries unhardened indices. An already-hardened one is an error, not a no-op: `|` is
     /// idempotent, so it would silently collapse two accounts onto one key.
     static func ed25519Seed(seed: Data, path: [UInt32]) -> Data {
         var digest = Hashing.hmacSHA512(key: Data("ed25519 seed".utf8), message: seed)

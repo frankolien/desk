@@ -17,18 +17,15 @@ struct PositionScreen: View {
     @State private var showsShare = false
     @State private var showsStudio = false
     @State private var tab: PositionTab = .positions
-    /// Which position the screen is showing. Starts at the one that was tapped.
     @State private var focusedID: Int64?
     @State private var focusedLong: Bool?
 
     private var activeID: Int64 { focusedID ?? position.positionID }
 
-    /// The live position, so a partial close shows the size that is left.
     private var active: PerplPosition {
         model.openPositions.first { $0.positionID == activeID } ?? position
     }
 
-    /// Gone from a book that has been read: closed, by the person or by Perpl.
     private var isClosed: Bool {
         model.trading.positions.value != nil && !model.openPositions.contains { $0.positionID == activeID }
     }
@@ -52,7 +49,6 @@ struct PositionScreen: View {
                 Color.black.ignoresSafeArea()
                 if isClosed { closedView } else if let figures { content(figures) } else { unavailable }
             }
-            // Dismissal lives in the heading instead.
             .toolbar(.hidden, for: .navigationBar)
             .onChange(of: isClosed) { _, closed in
                 guard closed else { return }
@@ -109,8 +105,6 @@ struct PositionScreen: View {
         }
     }
 
-    /// Actions stay pinned: closing is what a person opens a held position to do, and the
-    /// figures alone are taller than the screen.
     private func content(_ figures: PositionFigures) -> some View {
         ZStack(alignment: .bottom) {
             ScrollView(showsIndicators: false) {
@@ -134,7 +128,6 @@ struct PositionScreen: View {
                 .padding(.bottom, tab == .positions ? 104 : 28)
             }
 
-            // A close button has nothing to act on outside the positions tab.
             if tab == .positions { actionBar }
         }
     }
@@ -176,8 +169,6 @@ struct PositionScreen: View {
         }
     }
 
-    /// The focused position in full, then the rest of the account's. The tab counts them
-    /// all, so it has to show them all.
     private func positions(_ figures: PositionFigures) -> some View {
         VStack(spacing: 12) {
             card(figures)
@@ -199,11 +190,8 @@ struct PositionScreen: View {
         }
     }
 
-    // MARK: Open orders
-
-    /// Desk has no resting-order feed: order frames are read only to correlate an order
-    /// with its outcome, and triggers are held by the venue. An empty table would claim
-    /// the account has none, which Desk cannot know.
+    /// Desk has no resting-order feed, so an empty table would claim the account has none,
+    /// which Desk cannot know.
     private var orders: some View {
         VStack(spacing: 12) {
             if let status = session.statusText, session.isBusy {
@@ -239,8 +227,6 @@ struct PositionScreen: View {
         }
         .deskGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
-
-    // MARK: History
 
     private var history: some View {
         VStack(spacing: 0) {
@@ -286,9 +272,6 @@ struct PositionScreen: View {
         .padding(.top, 20)
         .padding(.bottom, 12)
         .background {
-            // The card passes under this bar as it scrolls. Without a fade its figures
-            // show through the glass and read as colliding with the buttons rather than
-            // sitting behind them.
             LinearGradient(
                 colors: [.black.opacity(0), .black.opacity(0.9), .black],
                 startPoint: .top, endPoint: .bottom)
@@ -296,8 +279,6 @@ struct PositionScreen: View {
                 .allowsHitTesting(false)
         }
     }
-
-    // MARK: Heading
 
     private var heading: some View {
         HStack(spacing: 11) {
@@ -346,10 +327,7 @@ struct PositionScreen: View {
         .opacity(stale ? 0.7 : 1)
     }
 
-    // MARK: Chart
-
-    /// Amber under five percent of room, red under two: the same thresholds the position
-    /// rows use, so a line and a row never disagree about how close it is.
+    /// The same thresholds as the position rows, so a line and a row never disagree.
     private func liquidationTint(_ figures: PositionFigures) -> DeskRGB {
         guard let distance = figures.liquidationDistanceMicros else { return DeskColor.nightMuted }
         switch distance {
@@ -395,10 +373,7 @@ struct PositionScreen: View {
         }
     }
 
-    // MARK: Figures
-
-    /// What closing the whole position at the mark would cost at the taker rate. Perpl has
-    /// charged closes since contract 1.7.5; this is an estimate, not a quote.
+    /// An estimate at the taker rate, not a quote: Perpl has charged closes since contract 1.7.5.
     private func exitFee(_ figures: PositionFigures) -> Money? {
         guard let taker = market.market?.config.takerFeeMicros, taker > 0,
               let notional = Money.notional(price: figures.mark, size: figures.size, rounding: .towardZero)
@@ -406,8 +381,6 @@ struct PositionScreen: View {
         return Money(raw: Int64((Int128(notional.raw) * Int128(taker) / 1_000_000)))
     }
 
-    /// What the position is worth at the current mark. Not the collateral, and not the
-    /// size: the number a person means when they ask how big the position is.
     private func value(_ figures: PositionFigures) -> Money? {
         Money.notional(price: figures.mark, size: figures.size, rounding: .towardZero)
     }
@@ -506,8 +479,7 @@ enum PositionTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-/// One closed position. The realised figure is the venue's own `dpnl`, never recomputed:
-/// once closed there is no mark to derive it from.
+/// The realised figure is the venue's own `dpnl`: once closed there is no mark to derive it from.
 private struct ClosedPositionRow: View {
     let position: ClosedTrade
     let symbol: String
@@ -610,8 +582,6 @@ private struct MarketCloseSheet: View {
         return "Only \(held.display(fractionDigits: held.decimals)) of \(closeSize.display(fractionDigits: closeSize.decimals)) \(market.symbol) would close within \(limit). The rest stays open."
     }
 
-    /// What closing this part returns, in AUSD: its share of the collateral plus the PnL
-    /// at the estimated exit, less the taker fee.
     private var estimate: (back: Money?, pnl: Money?, fee: Money?, exit: String)? {
         guard let closeSize, let exitRaw, let fillingRaw else { return nil }
         let priceScale = pow(10, Double(figures.mark.decimals))
@@ -796,16 +766,10 @@ private struct PositionProtectionSheet: View {
     }
 }
 
-/// A position is identified by the venue's own position id, so a sheet can be presented
-/// from the value itself rather than from a flag beside it.
 extension PerplPosition: @retroactive Identifiable {
     public var id: Int64 { positionID }
 }
 
-// MARK: - Position sharing
-
-/// A small editor rather than an immediate system sheet: the trade stays factual while
-/// the owner chooses whether it sits on Desk's house artwork or one of their photographs.
 private struct TradeShareSheet: View {
     let symbol: String
     let figures: PositionFigures
@@ -886,7 +850,6 @@ private struct TradeShareSheet: View {
         }
         #if DEBUG
         .task {
-            // A portrait image, shaped like a phone photo, to check the card keeps its layout.
             if ProcessInfo.processInfo.arguments.contains("-share-photo") {
                 photo = UIGraphicsImageRenderer(size: CGSize(width: 300, height: 700)).image { context in
                     UIColor.systemTeal.setFill(); context.fill(CGRect(x: 0, y: 0, width: 300, height: 700))
@@ -964,8 +927,6 @@ private struct TradeShareSheet: View {
     }
 }
 
-/// Preview the exact export canvas instead of asking its large typography to reflow at
-/// phone width. Scaling the finished composition keeps every edge and baseline visible.
 private struct ShareCardPreview: View {
     let symbol: String
     let figures: PositionFigures
@@ -1011,8 +972,6 @@ private struct SharePhotoTile: View {
     }
 }
 
-/// The exported image. All numbers are native text layered at render time; the bitmap
-/// underneath is decoration only, so stale examples can never leak into a real share.
 private struct TradeShareCard: View {
     let symbol: String
     let figures: PositionFigures
@@ -1095,9 +1054,8 @@ private struct TradeShareCard: View {
             .padding(58)
             .foregroundStyle(.white)
         }
-        // The card's size is fixed and the background fills it from behind. As a sibling in
-        // the ZStack, a photo shaped unlike the card set the stack's size instead, and every
-        // figure moved with it.
+        // The card's size is fixed and the background fills it from behind; as a ZStack sibling
+        // a photo shaped unlike the card would set the stack's size and move every figure.
         .frame(width: Self.size.width, height: Self.size.height)
         .background {
             if let photo {
@@ -1128,7 +1086,6 @@ private struct TradeShareCard: View {
     }
 }
 
-/// Writes to the photo library and reports back on the main actor.
 @MainActor
 private final class PhotoSaver: NSObject {
     private var completion: ((Bool) -> Void)?

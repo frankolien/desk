@@ -10,8 +10,7 @@ struct AUSDSwapTests {
     let fiveHundred = NativeAmount(decimalText: "500")!
     let minimum = Money(text: "12.157366")!
     let holder = "0x0000000000001ff3684f28c67538d4d072c22734"
-    // The head of a live 0x quote, 500 MON to AUSD on Monad, 24 September 2026: `exec`
-    // naming the settler, the native token, the amount, then an opaque route.
+    // The head of a live 0x quote, 500 MON to AUSD on Monad, 24 September 2026.
     let quotedData = "0x2213bc0b"
         + "0000000000000000000000002e73afeb01595831a67e9e1a56e193b93331b8c7"
         + "0000000000000000000000000000000000000000000000000000000000000000"

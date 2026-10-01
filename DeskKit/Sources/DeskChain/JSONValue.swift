@@ -1,12 +1,8 @@
 import Foundation
 
-/// Just enough of a JSON tree to hash typed data whose shape the venue decides.
 public enum JSONValue: Decodable, Sendable, Hashable {
     case string(String)
     case integer(Int64)
-    /// A JSON number that does not fit an `Int64`, kept as the literal it arrived as.
-    /// Legal JSON, and a venue may send a `uint256` amount or a nonce this way; forcing
-    /// every number through `Int64` made one oversized field break the whole payload.
     case number(String)
     case bool(Bool)
     case array([JSONValue])
@@ -21,8 +17,7 @@ public enum JSONValue: Decodable, Sendable, Hashable {
         if let value = try? box.decode(String.self) { self = .string(value); return }
         if let value = try? box.decode(Decimal.self) {
             let text = "\(value)"
-            // `Decimal` carries thirty-eight significant digits, and JSONDecoder offers
-            // no way at the raw token. A longer literal would arrive rounded, and a
+            // `Decimal` holds thirty-eight digits; a longer literal would arrive rounded, and a
             // rounded number inside a signed digest is worse than a refused payload.
             guard text.filter(\.isNumber).count <= 38 else {
                 throw DecodingError.dataCorruptedError(

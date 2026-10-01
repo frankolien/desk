@@ -35,7 +35,6 @@ struct TraderSnapshot: Decodable, Hashable, Identifiable, Sendable {
     var isProfit: Bool { !(pnl ?? "").hasPrefix("-") }
     var shortAddress: String { TraderSnapshot.short(address) }
 
-    /// Free balance plus what every open position is worth to its owner: collateral and PnL.
     var portfolio: Double? {
         guard let balance = balance.flatMap(Double.init) else { return nil }
         return positions.reduce(balance) { $0 + (Double($1.collateral) ?? 0) + (Double($1.pnl) ?? 0) }
@@ -66,8 +65,6 @@ struct MarketCrowd: Decodable, Identifiable, Hashable {
     let shortTraders: Int
     let longValue: String
     let shortValue: String
-    /// `nil` when nothing is open: a market with no positions has no side to report, and
-    /// drawing it as an even split would be a claim about a book that is not there.
     let longShareBps: Int?
     let biggest: Biggest?
 
@@ -80,8 +77,6 @@ struct MarketCrowd: Decodable, Identifiable, Hashable {
     }
 }
 
-/// Traders on Perpl mainnet, read live from the exchange contract through Desk's server.
-/// Who you follow stays on this phone; the server only ever sees the addresses asked about.
 @MainActor
 @Observable
 final class TraderDirectory {
@@ -89,7 +84,6 @@ final class TraderDirectory {
     private(set) var topProblem: String?
     private(set) var following: [TraderSnapshot] = []
     private(set) var followed: [String]
-    /// Names given on this phone. Perpl accounts have no public profile to read one from.
     private(set) var nicknames: [String: String]
 
     private static let storageKey = "desk.followedTraders"
@@ -118,8 +112,6 @@ final class TraderDirectory {
         followed.contains { $0.caseInsensitiveCompare(address) == .orderedSame }
     }
 
-    /// Following is one idea: a followed trader's wallet is tracked as well, so their
-    /// Monad swaps arrive alongside their perps.
     func toggle(_ address: String) {
         if isFollowing(address) {
             followed.removeAll { $0.caseInsensitiveCompare(address) == .orderedSame }
@@ -132,8 +124,6 @@ final class TraderDirectory {
             followed.append(address)
             if let known = top.first(where: { $0.id == address.lowercased() }) { following.append(known) }
             TrackedWallets.shared.track(address, name: nicknames[address.lowercased()] ?? "")
-            // Following a Perpl trader includes their position movements. Wallet tracking
-            // above covers spot swaps; this opt-in covers opened, changed and closed perps.
             Task {
                 if await TradeAlerts.shared.turnOn(for: address), !isFollowing(address) {
                     TradeAlerts.shared.turnOff(for: address)
@@ -145,7 +135,6 @@ final class TraderDirectory {
     }
 
     func run() async {
-        // The board as it was last seen, before the first read comes back.
         if top.isEmpty, let url = Self.url(["view": "top"]),
            let cached = await ResponseCache.shared.cached(url),
            let body = try? JSONDecoder().decode(TradersResponse.self, from: cached) {
@@ -173,7 +162,6 @@ final class TraderDirectory {
     }
 
     func refreshFollowing() async {
-        // Another screen may have followed someone through its own directory.
         followed = UserDefaults.standard.stringArray(forKey: Self.storageKey) ?? followed
         guard !followed.isEmpty else { following = []; return }
         guard let traders = await fetch(["view": "following", "addresses": followed.joined(separator: ",")]) else { return }
@@ -185,11 +173,6 @@ final class TraderDirectory {
         await fetch(["view": "trader", "address": address])?.first
     }
 
-    /// Every open position on Perpl, added up per market.
-    ///
-    /// Read on its own clock rather than with the leaderboard: it costs the server the
-    /// same full sweep of the contract, and the room's positioning does not turn over
-    /// fast enough to be worth asking three times a minute.
     private(set) var crowd: [MarketCrowd] = []
     private var crowdFetchedAt: Date?
 
@@ -208,8 +191,6 @@ final class TraderDirectory {
     private struct CrowdResponse: Decodable { let markets: [MarketCrowd] }
 
     #if DEBUG
-    /// The book as it looked on mainnet on 19 September, so the screen can be reviewed
-    /// and recorded without waiting for a market to be interesting. Debug only.
     func seedCrowdForReview() {
         crowd = [
             MarketCrowd(market: "BTC", marketId: 1, complete: true, traders: 19, longTraders: 13,
@@ -237,7 +218,6 @@ final class TraderDirectory {
     }
     #endif
 
-    /// Scores from indexed history, by lowercased address.
     private(set) var scores: [String: Int] = [:]
     private(set) var records: [String: TraderRecord] = [:]
     private var scoresFetchedAt: Date?
@@ -325,7 +305,6 @@ enum TraderFormat {
         return formatter.string(from: NSNumber(value: value)) ?? text
     }
 
-    /// $14.9K, $326K, $1.2M: the compact form for headline figures.
     static func compact(_ value: Double?, signed: Bool = false) -> String {
         guard let value else { return Unavailable.text }
         return DisplayCurrency.shared.format(value, signed: signed, compact: true)
@@ -353,18 +332,10 @@ enum TraderFormat {
     }
 }
 
-/// A blocky mark drawn from the address, the convention wallets already use, so a trader is
-/// recognisable without a picture or a name anyone invented.
 struct TraderAvatar: View {
     let address: String
     var size: CGFloat = 42
 
-    /// Built once per draw rather than per cell.
-    ///
-    /// This was a computed property read by `filled` three times per cell and by `tint`
-    /// inside the innermost loop — around a hundred and forty rebuilds and several thousand
-    /// single-character Strings for one avatar, on a screen that draws twenty of them and
-    /// replaces them every twenty seconds.
     private static func seed(of address: String) -> [UInt8] {
         if !address.hasPrefix("0x") { return Array(address.utf8) }
         var out: [UInt8] = []
@@ -376,8 +347,6 @@ struct TraderAvatar: View {
         return out
     }
 
-    /// One bit per cell from the address's own nibbles, so the pattern is as varied as the
-    /// address and never repeats a row.
     private func filled(_ seed: [UInt8], row: Int, column: Int) -> Bool {
         guard !seed.isEmpty else { return false }
         let bit = row * 4 + column
@@ -453,7 +422,6 @@ struct TradersFeed: View {
 
     private var trackedOnly: [TrackedWallet] { TrackedWallets.shared.list.filter { !directory.isFollowing($0.address) } }
 
-    /// Traders without a record sort last on every measure but open PnL, which every row has.
     private var sortedTop: [TraderSnapshot] {
         let top = directory.top
         let key: (TraderSnapshot) -> Double? = { trader in
@@ -649,8 +617,6 @@ private struct FollowedCard: View {
     }
 }
 
-/// A wallet followed for its Monad swaps rather than its perps: same card, its alert
-/// floor where the trader card shows open PnL.
 private struct TrackedCard: View {
     let wallet: TrackedWallet
     let onTap: () -> Void
@@ -701,7 +667,6 @@ private struct LeaderRow: View {
     let rank: Int
     let name: String
     var score: Int? = nil
-    /// Beside every score: a score from a handful of trades means little.
     var trades: Int? = nil
     var metric: String? = nil
     var isFollowed = false
@@ -1075,16 +1040,6 @@ struct TraderProfileScreen: View {
                 emptyState(snapshot == nil ? "Loading positions…" : "Nothing open right now.",
                            detail: snapshot == nil ? nil : "Positions appear here the moment this trader opens one.")
             } else {
-                // Plain rows, the first version. Kept to compare against the cards below.
-                // LazyVStack(spacing: 0) {
-                //     ForEach(Array(trader.positions.enumerated()), id: \.element.id) { index, position in
-                //         Button { pendingCopy = position } label: {
-                //             ProfilePositionRow(position: position, isLast: index == trader.positions.count - 1)
-                //         }
-                //         .buttonStyle(.plain)
-                //     }
-                // }
-                // .padding(.top, 6)
                 LazyVStack(spacing: 10) {
                     ForEach(trader.positions) { position in
                         ProfilePositionCard(position: position) { onCopy(position) }
@@ -1156,8 +1111,6 @@ private struct ProfilePositionRow: View {
     }
 }
 
-/// A position with everything a copier weighs: side and leverage, PnL, what it is worth,
-/// the size and collateral behind it, and where it was entered against where it is now.
 private struct ProfilePositionCard: View {
     let position: TraderPosition
     let onCopy: () -> Void

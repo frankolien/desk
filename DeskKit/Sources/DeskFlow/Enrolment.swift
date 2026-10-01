@@ -4,11 +4,6 @@ import DeskChain
 import DeskPerpl
 import Foundation
 
-/// The two signatures enrolment needs, injected rather than reached for.
-///
-/// The wallet key signs an EIP-712 digest; the Ed25519 key signs the same digest to
-/// prove it holds the key it is registering. Keeping them as closures means this type
-/// never holds key material and a test never needs a real one.
 public struct EnrolmentSigners: Sendable {
     public let ed25519PublicKeyHex: @Sendable () throws -> String
     public let signWalletDigest: @Sendable (Data) throws -> EthereumSignature
@@ -37,11 +32,6 @@ public struct EnrolmentSigners: Sendable {
     }
 }
 
-/// Registers an Ed25519 key against the wallet, and comes back with the API token.
-///
-/// Two unsigned calls: `/api-key/payload` returns typed data and a mac over it, and
-/// `/api-key/enroll` takes both back with the two signatures. There is nothing to sign
-/// the requests with yet — the key being registered is the one that would sign them.
 public struct Enrolment: Sendable {
     public enum Failure: Error, Sendable, Equatable {
         case scopeOutOfRange(Int)
@@ -50,12 +40,8 @@ public struct Enrolment: Sendable {
         case noCandidateKeys
     }
 
-    /// Enrols the first trading key in `indices` that Perpl has not registered.
-    ///
-    /// Perpl answers 409 for a public key it has seen and never issues that key's token
-    /// again, so a wallet whose token was lost can only recover with a different key.
-    /// Keys are derived, so the next one is always to hand, and every other failure is
-    /// raised as itself rather than walked past.
+    /// Perpl answers 409 for a key it has seen and never reissues its token, so a lost token
+    /// is recovered with the next derived key.
     public func enrolFirstUnregistered(
         address: EthereumAddress,
         label: String,
@@ -72,7 +58,6 @@ public struct Enrolment: Sendable {
         throw Failure.noCandidateKeys
     }
 
-    /// Read and trade. The mask Perpl's own client sends.
     public static let defaultScopeMask = 3
     public static let maximumLabelLength = 64
 
@@ -109,8 +94,7 @@ public struct Enrolment: Sendable {
         let typedDataRaw = try JSONSpan.value(of: "typed_data", in: payload)
         let typedData = try JSONDecoder().decode(EIP712.TypedData.self, from: typedDataRaw)
 
-        // The wallet key signs only what this asserts. Without it the gateway chooses
-        // what the user's wallet puts its name to.
+        // The wallet signs only what this asserts, never whatever the gateway chose.
         let digest = try EIP712.digest(
             typedData,
             expecting: .perplEnrolment(signer: address.checksummed, chainID: chainID))
@@ -157,7 +141,6 @@ public struct Enrolment: Sendable {
         return APIKey(key)
     }
 
-    /// Composed textually so `typed_data` and `mac` go back exactly as they arrived.
     static func enrolRequest(
         chainID: UInt64,
         address: EthereumAddress,

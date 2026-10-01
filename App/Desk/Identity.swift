@@ -39,9 +39,6 @@ struct Identity: Codable, Hashable, Sendable {
     var xURL: URL? { x.flatMap { URL(string: "https://x.com/\($0)") } }
 }
 
-/// Names for wallets, resolved once a day through the server and kept on disk, so a
-/// holder list or leaderboard shows the same faces it showed last time before the
-/// network answers.
 @MainActor
 @Observable
 final class IdentityDirectory {
@@ -94,8 +91,6 @@ final class IdentityDirectory {
         return identity
     }
 
-    /// Forgets what is held for one address and asks the server for a fresh answer,
-    /// past its own cache: what a person just changed about themselves should show now.
     func refresh(_ address: String) async {
         let key = key(for: address)
         fetchedAt[key] = nil
@@ -181,7 +176,6 @@ final class IdentityDirectory {
         }
     }
 
-    /// A typed blockchain name may resolve to either an EVM or Solana address.
     func lookup(_ query: String) async -> NameResult {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 3 else { return .notFound }
@@ -189,8 +183,6 @@ final class IdentityDirectory {
         if TrackedWallets.isEVM(trimmed) {
             return .wallet(address: trimmed.lowercased(), identity: identity(for: trimmed))
         }
-        // SNS names resolve independently of the EVM identity API. Keep this
-        // working even while an older Desk server deployment is still live.
         let lower = trimmed.lowercased()
         if lower.hasSuffix(".sol") || lower.hasSuffix(".solana") || lower.hasSuffix(".sns") {
             return await lookupSNS(trimmed)
@@ -215,7 +207,6 @@ final class IdentityDirectory {
         return .wallet(address: address, identity: body.identity)
     }
 
-    /// Names already on this phone that contain the text, for instant matches.
     func matches(_ query: String, limit: Int = 3) -> [Identity] {
         let wanted = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard wanted.count >= 2 else { return [] }

@@ -2,7 +2,6 @@ import DeskAuth
 import DeskNet
 import Foundation
 
-/// JSON-RPC against a Monad node.
 public actor MonadRPC {
     public struct Configuration: Sendable {
         public let url: URL
@@ -20,7 +19,6 @@ public actor MonadRPC {
             try Configuration(url: URL(string: "https://testnet-rpc.monad.xyz")!, chainID: 10143)
         }
 
-        /// Real funds.
         public static func mainnet() throws -> Configuration {
             try Configuration(url: URL(string: "https://rpc.monad.xyz")!, chainID: 143)
         }
@@ -30,7 +28,6 @@ public actor MonadRPC {
         case endpointMustBeHTTPS(scheme: String?)
         case transport(status: Int)
         case malformedResponse(String)
-        /// The node answered, and said no. `data` carries the revert, when there is one.
         case rejected(code: Int, message: String, data: Data?)
         case chainMismatch(expected: UInt64, got: UInt64)
     }
@@ -46,11 +43,6 @@ public actor MonadRPC {
 
     public var chainID: UInt64 { configuration.chainID }
 
-    // MARK: - Calls
-
-    /// Worth doing once before anything is signed. A node quietly pointed at another
-    /// network would take transactions signed for this one and reject them, or worse,
-    /// take them.
     public func verifyChain() async throws {
         let reported = try await quantity("eth_chainId", [])
         guard reported == configuration.chainID else {
@@ -69,8 +61,7 @@ public actor MonadRPC {
         }
     }
 
-    /// Monad's `pending` equals `latest`, so this never counts what is in flight. That is
-    /// what `NonceRegistry` is for.
+    /// Monad's `pending` equals `latest`, so in-flight transactions are not counted; see `NonceRegistry`.
     public func transactionCount(of address: EthereumAddress) async throws -> UInt64 {
         try await quantity("eth_getTransactionCount", [.string(address.checksummed), .string("latest")])
     }
@@ -131,11 +122,6 @@ public actor MonadRPC {
         }
     }
 
-    /// One block of calls run against the latest state, none of them signed or sent.
-    ///
-    /// This is how a transaction someone else composed is checked before the wallet key
-    /// touches it: the call runs, and a balance read in the same block says what it would
-    /// have left behind. `eth_simulateV1` is served by Monad's public node.
     public func simulate(_ calls: [SimulatedCall]) async throws -> [SimulatedResult] {
         let encoded: [JSONValue] = calls.map { call in
             var fields: [String: JSONValue] = [
@@ -146,9 +132,7 @@ public actor MonadRPC {
             if call.value.contains(where: { $0 != 0 }) { fields["value"] = .string(Quantity.encode(call.value)) }
             return .object(fields)
         }
-        // Validation is left at the node's default. Monad's mainnet node refuses
-        // `"validation": false` outright, and the caller has the balance a validated
-        // simulation checks for anyway.
+        // Left at the node's default: Monad's mainnet node refuses `"validation": false` outright.
         let request: JSONValue = .object([
             "blockStateCalls": .array([.object(["calls": .array(encoded)])]),
             "traceTransfers": .bool(false),
@@ -167,8 +151,6 @@ public actor MonadRPC {
             }
         }
     }
-
-    // MARK: - Machinery
 
     private func quantity(_ method: String, _ parameters: [JSONValue]) async throws -> UInt64 {
         try await call(method, parameters) { value in
@@ -210,10 +192,8 @@ public actor MonadRPC {
         return try decode(envelope.result)
     }
 
-    /// `"result": null` and no `result` key at all are different answers: the first is
-    /// how a node says a transaction is not mined yet, and an optional property collapses
-    /// both to `nil`. Polling a receipt is the common case, so the difference is load
-    /// bearing.
+    /// `"result": null` (not mined yet) and a missing `result` key are different answers, which an
+    /// optional property would collapse to `nil`.
     private struct Envelope: Decodable {
         let hasResult: Bool
         let result: JSONValue
@@ -235,7 +215,6 @@ public actor MonadRPC {
         }
     }
 
-    /// `JSONValue` back to what `JSONSerialization` will write.
     private static func plain(_ value: JSONValue) -> Any {
         switch value {
         case .string(let text): text

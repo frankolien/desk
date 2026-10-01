@@ -3,8 +3,6 @@ import Testing
 
 @testable import DeskUI
 
-/// The rail's arithmetic, which decides how much leverage an order carries and was
-/// previously done inline inside a drag handler with nothing asserting it.
 @Suite("Leverage scale")
 struct LeverageScaleTests {
     @Test("The ends of the rail are the ends of the range")
@@ -22,8 +20,6 @@ struct LeverageScaleTests {
         #expect(scale.value(atFraction: 0.5) == 3)
     }
 
-    /// A thumb dragged past either end must clamp rather than produce leverage the venue
-    /// would refuse, or none at all.
     @Test("A drag beyond the rail clamps", arguments: [-3.0, -0.2, 1.4, 12.0])
     func clampsOutsideTheRail(fraction: Double) {
         let scale = LeverageScale(maximum: 10)
@@ -31,7 +27,6 @@ struct LeverageScaleTests {
         #expect(value >= 1 && value <= 10)
     }
 
-    /// A market capped at one times still has to draw and still has to answer.
     @Test("A single-step rail does not divide by zero")
     func degenerateRange() {
         let scale = LeverageScale(maximum: 1)
@@ -50,8 +45,6 @@ struct LeverageScaleTests {
         }
     }
 
-    /// Tick density is fixed, so a five times market and a fifty times market draw the
-    /// same rail rather than five marks against fifty.
     @Test("Tick density does not follow the leverage range")
     func densityIsIndependent() {
         #expect(LeverageScale(maximum: 5).tickCount == LeverageScale(maximum: 50).tickCount)

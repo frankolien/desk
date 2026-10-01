@@ -1,4 +1,3 @@
-/// Marks what a `Scaled` value is, so the compiler refuses to mix them.
 public protocol ScaleTag: Sendable, Hashable {
     static var label: String { get }
 }
@@ -9,10 +8,6 @@ public enum SizeTag: ScaleTag { public static let label = "size" }
 public typealias Price = Scaled<PriceTag>
 public typealias Size = Scaled<SizeTag>
 
-/// An exact decimal quantity: an integer and the power of ten it is scaled by.
-///
-/// Decimals travel with the value because they are market data, not constants —
-/// `price_decimals + size_decimals` is 6 on testnet BTC and 5 on mainnet ETH.
 public struct Scaled<Tag: ScaleTag>: Sendable, Hashable {
     /// `Int64.min` is representable in the i64 fields a venue sends, and negating it
     /// traps. Bounding the boundary here is what makes the arithmetic below total.
@@ -28,7 +23,6 @@ public struct Scaled<Tag: ScaleTag>: Sendable, Hashable {
         self.decimals = decimals
     }
 
-    /// Results of arithmetic between checked values; bounded by `2 * maxRaw`.
     init(unchecked raw: Int64, decimals: UInt8) {
         self.raw = raw
         self.decimals = decimals
@@ -38,8 +32,6 @@ public struct Scaled<Tag: ScaleTag>: Sendable, Hashable {
     public var isZero: Bool { raw == 0 }
     public var isNegative: Bool { raw < 0 }
 }
-
-// MARK: - Comparison and arithmetic at a fixed scale
 
 extension Scaled: Comparable {
     public static func < (lhs: Self, rhs: Self) -> Bool {
@@ -85,8 +77,6 @@ extension Scaled {
     }
 }
 
-// MARK: - Text, with the rounding rule chosen by the operation
-
 extension Scaled {
     public var text: String { DecimalText.render(raw: raw, decimals: decimals) }
 
@@ -109,20 +99,17 @@ extension Scaled {
 }
 
 extension Scaled where Tag == SizeTag {
-    /// No rounding parameter: rounding a size up can demand margin that is not there,
-    /// and `floor` grows a short. docs/04-algorithms.md section 9.
+    /// No rounding parameter: rounding a size up can demand margin that is not there (docs §9).
     public init?(typed text: String, decimals: UInt8) {
         self.init(text: text, decimals: decimals, rounding: .towardZero)
     }
 }
 
 extension Scaled where Tag == PriceTag {
-    /// Never pays more than intended.
     public init?(buying text: String, decimals: UInt8) {
         self.init(text: text, decimals: decimals, rounding: .floor)
     }
 
-    /// Never accepts less than intended.
     public init?(selling text: String, decimals: UInt8) {
         self.init(text: text, decimals: decimals, rounding: .ceiling)
     }

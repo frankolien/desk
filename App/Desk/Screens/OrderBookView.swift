@@ -2,8 +2,6 @@ import DeskPerpl
 import DeskUI
 import SwiftUI
 
-/// The selected market's book, bids beside asks, with each row's bar showing the size
-/// resting up to that price.
 struct OrderBookView: View {
     let market: MarketModel
     var depth = 10
@@ -86,7 +84,6 @@ struct OrderBookView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// Bids read size then price, toward the spread; asks read price then size, away from it.
     private func row(size: String, price: String, share: Double, side: OrderBook.Side) -> some View {
         let tint = (side == .bid ? DeskColor.rise : DeskColor.fall).color
         return HStack {

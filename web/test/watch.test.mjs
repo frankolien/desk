@@ -1,4 +1,3 @@
-// node --test web/test/watch.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -50,7 +49,6 @@ test("a buy that opens a position is a first buy, a sell that empties one is a c
   assert.deepEqual(kinds(walletEvents(null, open, { minUsd: 0 })), ["first", "buy", "sell", "sell"]);
   const flat = ledger(history(), { [GRIZZLE]: { holding: 0 } });
   assert.deepEqual(kinds(walletEvents(null, flat, { minUsd: 0 })), ["first", "buy", "sell", "close"]);
-  // Only the newest sell may read the position; the earlier one cannot know what was left.
   assert.equal(walletEvents(null, flat, { minUsd: 0 })[2].kind, "sell");
 });
 
@@ -186,7 +184,6 @@ test("the first scan sets a baseline, the next one pushes the new trade, and the
   const quiet = await scan(scanArgs);
   assert.deepEqual(quiet.wallets, { watched: 1, events: 0, sent: 0 });
   assert.equal(apns.sent.length, 1);
-  // An unchanged marker is not written again: one command saved per wallet per scan.
   assert.deepEqual(written.filter((key) => key.startsWith("alerts:seen:")), []);
 });
 

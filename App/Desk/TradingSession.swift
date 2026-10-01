@@ -8,15 +8,10 @@ import Observation
 @MainActor
 @Observable
 final class TradingSession {
-    /// The order's state machine lives in `DeskFlow` and is tested there. This type
-    /// turns its outcomes into sentences and nothing else — the association window, the
-    /// replay and the terminal rule are not re-implemented here, because they were once
-    /// and that is how the race got in.
     private(set) var order = OrderProgress()
     private(set) var account = LastGood<PerplAccount>()
     private(set) var positions = LastGood<[PerplPosition]>()
 
-    /// The sentence the ticket shows, or nothing while there is no order.
     var statusText: String? {
         if retryingUntil != nil { return "Perpl is retrying this order…" }
         return switch order.outcome {
@@ -52,14 +47,9 @@ final class TradingSession {
     private(set) var retryingUntil: Int64?
     private var retryBackstop: Task<Void, Never>?
     private var retryStartedAt = ContinuousClock.now
-    /// Monad's slowest recent block time, for turning a block window into a wait.
     static let blockTime = Duration.milliseconds(400)
-    /// The socket went away during the retry wait, so Perpl's retry could have filled
-    /// unheard.
     private var retryUnheard = false
 
-    /// Which screen sent the order in flight or last sent by hand. A sheet reacts only to
-    /// its own order, never to one another screen sent.
     enum OrderOrigin: Equatable {
         case ticket(market: UInt32, side: Side)
         case copySheet(market: UInt32)
@@ -67,17 +57,10 @@ final class TradingSession {
     }
     private(set) var orderOrigin: OrderOrigin?
 
-    /// Changes whenever the trading socket goes away, so a wait can tell whether it was
-    /// listening the whole time.
     @ObservationIgnored private(set) var connectionEpoch = 0
 
-    /// Hand orders per market that may still fill, by frame id and send time. Kept apart
-    /// from the screen's progress, which any sheet may clear.
     @ObservationIgnored private var unresolvedHand: [UInt32: [Int64: ContinuousClock.Instant]] = [:]
 
-    /// Whether a hand order on this market may still fill. Perpl decides an order with a
-    /// fill, a cancel or a rejection; a failure stands once its retry window is long past;
-    /// an order never answered is let go after ten minutes.
     func handOrderUnresolved(on marketID: UInt32) async -> Bool {
         guard var pending = unresolvedHand[marketID], !pending.isEmpty else { return false }
         for (id, sentAt) in pending {
@@ -93,28 +76,17 @@ final class TradingSession {
         return !pending.isEmpty
     }
 
-    /// Why saving a stop or take profit failed, for the sheet that asked.
     private(set) var protectionProblem: String?
 
-    /// A new protection sheet starts without the last one's failure.
     func clearProtectionProblem() { protectionProblem = nil }
 
-    /// Orders the person sent by hand, per market. Copy trading reads it to tell a
-    /// position the person opened from one its own unanswered order opened.
     @ObservationIgnored private(set) var handOrders: [UInt32: Int] = [:]
 
-    /// The market the desk is signing for.
     private(set) var market: Market?
-    /// The market the current order was sent on, so its fill is read at its own scales
-    /// even after the person has moved to another market.
     private var orderMarket: Market?
 
-    /// The last fill in words, kept past `clear()` so the toast after a ticket closes can
-    /// say what filled rather than only that something did.
     var lastFillSentence: String?
 
-    /// "Filled 0.012 BTC at 83,120.5 · fee 0.35 AUSD", or the partial version of it. Falls
-    /// back to one word when the venue's update carried no sizes.
     private var filledSentence: String {
         guard let fill = order.fill, fill.filledRaw > 0, let market = orderMarket ?? market,
               let filled = market.size(fill.filledRaw) else { return "Filled" }
@@ -130,45 +102,29 @@ final class TradingSession {
             + "The rest was cancelled at your slippage limit."
     }
 
-    /// A failure raised before the order ever reached the desk — no enrolled key, no
-    /// connection — which has no venue code behind it and needs its own sentence.
     private var localProblem: String?
 
-    /// The block the venue most recently reported. An order's deadline is computed
-    /// against it, so a stale one produces an order that expires on arrival.
     private(set) var headBlock: Int64 = 0
 
     private var desk: OrderDesk?
     private var credentials: PerplCredentials?
     private var watching: Task<Void, Never>?
-    /// One handshake at a time. Main-actor isolation prevents data races, but an `await`
-    /// makes this object re-entrant: market selection and an order tap could previously
-    /// open two sockets, with either path closing the other while it authenticated.
+    /// One handshake at a time: an `await` makes this object re-entrant, so two callers
+    /// could otherwise open two sockets.
     private var connecting: Task<Void, any Error>?
     private var frameID: Int64?
     private(set) var isConnected = false
     var onAccount: ((PerplAccount) -> Void)?
     var onPositions: (([PerplPosition]) -> Void)?
-    /// Asked when connecting fails. Answers true once Desk has been unlocked, in which
-    /// case the connection is tried once more; false leaves the original failure standing.
     var onNeedsUnlock: (@MainActor () async -> Bool)?
     private var connectionID = UUID()
-    /// Updates that arrived before the order they belong to had a frame id here.
-    ///
-    /// The window is real: `desk.place` tracks the order and sends it, and the gateway can
-    /// answer while that call is still unwinding — so `observe` can yield a forwarded or
-    /// even settled update before `place` has returned the id to compare against. Without
-    /// somewhere to put those, the answer is dropped and the ticket waits forever on an
-    /// order that already filled.
+    /// Updates that arrived before `desk.place` returned their frame id; the gateway can
+    /// answer first, and dropping them would leave the ticket waiting on a filled order.
     private var unassociated: [(id: Int64, phase: OrderPhase)] = []
 
-    /// Called once a desk has been opened and enrolled. Until then there is nothing to
-    /// connect with, which is a state rather than a fault.
-    /// Set before a desk is adopted; every socket this session opens belongs to it.
     var network: DeskNetwork = .testnet
 
     func adopt(apiKey: APIKey, session: SigningSession, market: Market) async {
-        // A desk being replaced is closed first, so a connect can't join its handshake.
         if desk != nil {
             await close()
             await retireDesk()
@@ -189,21 +145,16 @@ final class TradingSession {
         await desk.close()
     }
 
-    /// The desk following the current order is going away, so no answer can reach it.
     private func orphanOrder() {
         if retryingUntil != nil { retryUnheard = true }
         endRetrying()
         order.connectionLost()
     }
 
-    /// Forgets the enrolled key along with the socket, for a switch to another network
-    /// whose exchange has never seen that key.
     func abandon() async {
         await close()
         await retireDesk()
         orphanOrder()
-        // The book and the orders belonged to that desk's account. Kept, they read as the
-        // next account's until its own snapshot lands, and copies were reconciled against them.
         positions = LastGood()
         account = LastGood()
         order.reset()
@@ -214,13 +165,9 @@ final class TradingSession {
         protectionProblem = nil
         credentials = nil
         desk = nil
-        // Block numbers belong to a chain; another network's are tens of millions apart.
         headBlock = 0
     }
 
-    /// Points the order desk at the instrument the person selected. Within one exchange
-    /// instance the desk keeps its socket and every order it follows, so a copy or a
-    /// retry in flight still hears its answer; another instance needs a new desk.
     func selectMarket(_ market: Market) async {
         guard credentials != nil else { return }
         if let desk, await desk.retarget(market) {
@@ -239,8 +186,6 @@ final class TradingSession {
         try? await connect()
     }
 
-    /// A finished order belongs to the market it was sent on; the next screen starts
-    /// clean. One Perpl may still retry is not finished.
     private func startClean() {
         guard order.outcome?.isTerminal == true, retryingUntil == nil else { return }
         order.reset()
@@ -248,13 +193,10 @@ final class TradingSession {
     }
 
     func noteHeadBlock(_ block: Int64) {
-        // Monotonic. The context and the heartbeat stream can report out of order, and
-        // an order deadline computed from an older block than one already seen would be
-        // shorter than intended.
+        // Monotonic: the two streams can report out of order, and an older block would
+        // shorten an order's deadline.
         headBlock = max(headBlock, block)
         let current = headBlock
-        // A head that was stale when the failure came can jump past the window at once,
-        // so the wait also runs its length in time.
         if let until = retryingUntil, current > until,
            ContinuousClock.now - retryStartedAt >= Self.blockTime * Int(orderMarket?.orderWaitBlocks ?? 22) {
             endRetrying()
@@ -268,7 +210,6 @@ final class TradingSession {
         }
     }
 
-    /// Connects, and begins the single read of the socket.
     func connect() async throws {
         if let connecting {
             try await connecting.value
@@ -294,15 +235,11 @@ final class TradingSession {
                     guard let self else { return }
                     await record(update)
                 }
-                // The stream finishing means the socket went away. An order still in
-                // flight has no answer coming, and saying so beats a spinner forever.
                 await self?.socketEnded(id: id)
             }
         }
         connecting = attempt
-        // Only if it is still ours: a cancelled attempt that cleared this slot unconditionally
-        // let a later `connect()` start a second `desk.open`, and the loser of that race left
-        // an authenticated socket with nobody reading its frames.
+        // Only if it is still ours, or a later `connect()` could start a second `desk.open`.
         defer { if connectionID == id { connecting = nil } }
         do {
             try await attempt.value
@@ -314,9 +251,6 @@ final class TradingSession {
 
     var isConnecting: Bool { connecting != nil }
 
-    /// After a failed or dropped connection, tries again with backoff while there is a desk
-    /// to connect. Nothing else reconnects on its own, so without this the book stayed
-    /// unread and copies couldn't close until the person happened to trade. A lock stops it.
     private func keepTrying() {
         guard reconnecting == nil else { return }
         reconnecting = Task { [weak self] in
@@ -355,12 +289,6 @@ final class TradingSession {
         isConnected = false
     }
 
-    /// Sends the order, or explains why it cannot be sent.
-    ///
-    /// The association window is closed in both directions: anything the watcher held
-    /// while the id was unknown is replayed by `associate`, and the tracker — which is the
-    /// authority and never walks a terminal phase backwards — is asked directly in case an
-    /// update landed with no watcher tick left to carry it.
     /// `market` is the one the draft was priced on, never the desk's default: the desk
     /// may point elsewhere by the time the send goes out.
     func place(_ draft: OrderDesk.Draft, in market: Market, origin: OrderOrigin) async {
@@ -373,17 +301,9 @@ final class TradingSession {
         do {
             guard let desk else { throw OrderDesk.Failure.notEnrolled }
             if !isConnected {
-                // Mobile sockets are routinely suspended between opening the ticket and
-                // confirming it. Reconnect at the point of intent instead of making the
-                // user leave the sheet and sign in again.
                 do {
                     try await connect()
                 } catch {
-                    // Signing in needs the trading key, and Desk may be locked — the key
-                    // is wiped after a spell in the background or when the phone locks.
-                    // One Face ID prompt, then the order carries on. This is a closing
-                    // order as often as an opening one, and it must not be turned away
-                    // for want of a key the person can restore with a glance.
                     guard let unlock = onNeedsUnlock, await unlock() else { throw error }
                     if !isConnected { try await connect() }
                 }
@@ -434,8 +354,7 @@ final class TradingSession {
         }
     }
 
-    /// Sends a copied trade on any market without touching the ticket's own progress,
-    /// and never asks for Face ID: an automatic order that finds Desk locked is skipped,
+    /// Never asks for Face ID: an automatic order that finds Desk locked is skipped,
     /// not prompted for.
     func placeCopy(_ draft: OrderDesk.Draft, in market: Market) async throws -> Int64 {
         guard let desk else { throw OrderDesk.Failure.notEnrolled }
@@ -459,8 +378,6 @@ final class TradingSession {
         await desk?.fill(of: frameID)
     }
 
-    /// Whether Desk's own wait for this order is over: the head block has passed the
-    /// deadline it was tracked with. True for an order the desk no longer knows.
     func isPastDeadline(_ frameID: Int64) async -> Bool {
         guard let deadline = await desk?.deadline(of: frameID) else { return true }
         return headBlock > deadline
@@ -492,8 +409,6 @@ final class TradingSession {
         }
     }
 
-    /// Clears a finished order from the screen. An order still in flight or retrying is
-    /// not this caller's to erase.
     func clear() {
         guard !isBusy else { return }
         order.reset()
@@ -523,9 +438,6 @@ final class TradingSession {
         }
     }
 
-    /// Perpl retries an order for its retry window after a first failure, and a later
-    /// success still decides it. The failure is said once that window has passed, or
-    /// after twenty seconds if the head block stops arriving.
     private func beginRetrying() {
         guard retryingUntil == nil else { return }
         retryStartedAt = .now
@@ -537,8 +449,6 @@ final class TradingSession {
         }
     }
 
-    /// Desk's deadline runs on the head block, which stops if the market feed does. A
-    /// minute without an answer is called unconfirmed so no screen waits for ever.
     private func awaitAnswer(_ id: Int64) {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(60))
@@ -575,9 +485,6 @@ final class TradingSession {
         }
     }
 
-    /// Position updates are deltas, not miniature snapshots. The folding lives in
-    /// `PositionBook`, inside the package, where it can be tested — it was here, in the
-    /// app target, which has no tests at all.
     static func merging(
         existing: [PerplPosition], updates: [PerplPosition]
     ) -> [PerplPosition] {
@@ -595,13 +502,8 @@ final class TradingSession {
         order.connectionLost()
     }
 
-    /// The venue's sub-reason codes, as sentences.
-    ///
-    /// `32` is the one worth naming: it means the request id was at or below the last
-    /// forwarded one, which is this app's bug rather than the user's, and a generic
-    /// "rejected" would send them hunting for a problem with their account.
-    /// A venue refusal (`mt: 24`, `st: 7`) in words. `fr` says why and is the better
-    /// sentence when present; `sr` says where, and covers the refusals that carry no `fr`.
+    /// A venue refusal (`mt: 24`, `st: 7`): `fr` says why and wins when present; `sr` says
+    /// where, and covers the refusals that carry no `fr`.
     static func failure(reason: Int, failure: Int?) -> String {
         switch failure {
         case 1: return "Not enough free collateral for this order and its fee. Nothing was filled."

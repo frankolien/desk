@@ -1,10 +1,5 @@
-/// One live room per Perpl market.
-///
-/// Messages are a capped list per market and presence is a sorted set of recent
-/// readers, both in the same store the alerts use. A poster is identified by the
-/// install secret the alerts already hold, hashed, so the same phone keeps the same
-/// avatar without anything about the person leaving the phone. The address and name
-/// beside a message are what the app said they were; the app marks them as such.
+/// A poster is identified by the hashed install secret. The address and name beside a
+/// message are only what the app claimed, and the app marks them as such.
 import crypto from "node:crypto";
 import { blockedWhos, hiddenMessageIDs } from "./_moderation.mjs";
 
@@ -12,7 +7,6 @@ export const ROOM_CAP = 200;
 export const PAGE = 80;
 export const MAX_TEXT = 240;
 export const MAX_NAME = 24;
-/// Readers count as present for this long after their last poll.
 export const PRESENT_MS = 120_000;
 const RATE_WINDOW_SECONDS = 10;
 const RATE_LIMIT = 3;
@@ -23,7 +17,6 @@ const validInstall = (value) => /^[a-f0-9]{64}$/.test(value);
 
 export const who = (install) => crypto.createHash("sha256").update(`chat:${install}`).digest("hex").slice(0, 16);
 
-/// Text a room will carry: trimmed, single spaces, no control characters, capped.
 export function cleanText(value) {
   const text = String(value ?? "").replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u202e]/g, " ").replace(/\s+/g, " ").trim();
   return text.length > MAX_TEXT ? text.slice(0, MAX_TEXT).trim() : text;
@@ -37,14 +30,12 @@ export function cleanName(value) {
 const messagesKey = (market) => `chat:room:${market}`;
 const presenceKey = (market) => `chat:here:${market}`;
 
-/// The room as a reader sees it: oldest first, and how many others are looking now.
 export async function readRoom(store, { market, install }, now = Date.now()) {
   const symbol = String(market ?? "").toUpperCase();
   if (!validMarket(symbol)) return { status: 400, body: { error: "A market is required." } };
   if (validInstall(String(install ?? ""))) {
     await store.zadd(presenceKey(symbol), now, who(install));
   }
-  // Stale readers are swept on about one read in eight; the count below ignores them anyway.
   if (Math.random() < 0.125) await store.zremrangebyscore(presenceKey(symbol), "-inf", now - PRESENT_MS);
   const [raw, here, hidden, blocked] = await Promise.all([
     store.lrange(messagesKey(symbol), 0, PAGE - 1),

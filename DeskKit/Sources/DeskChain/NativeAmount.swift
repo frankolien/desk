@@ -1,24 +1,12 @@
 import Foundation
 
-/// An amount of the chain's own token — MON, for gas.
-///
-/// Deliberately not `Money`. AUSD is six decimals and MON is eighteen, and the two
-/// differ by a factor of a trillion: a MON balance put through `Money` would render a
-/// gas balance of 0.19 as 190,000,000,000. Separate types make that mistake fail to
-/// compile rather than fail on screen.
-///
-/// `Int128` rather than `Int64` because eighteen decimals outgrows a `UInt64` at about
-/// eighteen whole units — a wallet holding twenty MON would overflow. `Quantity.uint64`
-/// throws for exactly this reason, which is why this reads the bytes itself.
+/// Deliberately not `Money`: AUSD is six decimals and MON eighteen. `Int128` because eighteen
+/// decimals outgrow a `UInt64` at about eighteen MON.
 public struct NativeAmount: Sendable, Hashable, Comparable {
     public static let decimals: UInt8 = 18
 
-    /// Monad's total supply is on the order of 1e29 at this scale, comfortably inside
-    /// `Int128`. The ceiling exists so a malformed word cannot produce a negative or
-    /// wrapped balance.
-    /// Written as digits rather than as `Int128(1e30)`: that spelling goes through a
-    /// `Double`, whose 53-bit mantissa cannot hold 10^30 exactly, so the ceiling would be
-    /// a rounded number nobody chose.
+    /// Guards against a malformed word. Written as digits: `Int128(1e30)` goes through a `Double`,
+    /// which cannot hold 10^30 exactly.
     public static let maxRaw: Int128 = 1_000_000_000_000_000_000_000_000_000_000
 
     public let raw: Int128
@@ -34,8 +22,6 @@ public struct NativeAmount: Sendable, Hashable, Comparable {
 
     public var isZero: Bool { raw == 0 }
 
-    /// A typed amount such as `1.5`. Nil for anything that is not plain digits with at
-    /// most eighteen places, rather than a rounded guess at what was meant.
     public init?(decimalText text: String) {
         let parts = text.split(separator: ".", omittingEmptySubsequences: false)
         guard (1...2).contains(parts.count),
@@ -55,10 +41,8 @@ public struct NativeAmount: Sendable, Hashable, Comparable {
         self.init(unchecked: value)
     }
 
-    /// Wei as a decimal string, the form quote APIs and JSON carry without precision loss.
     public var weiText: String { String(describing: raw) }
 
-    /// Big-endian with leading zeros stripped, the shape a transaction's value takes.
     public var bigEndianBytes: Data {
         var bytes: [UInt8] = []
         var rest = raw
@@ -71,12 +55,7 @@ public struct NativeAmount: Sendable, Hashable, Comparable {
 
     public static func < (lhs: NativeAmount, rhs: NativeAmount) -> Bool { lhs.raw < rhs.raw }
 
-    /// What `eth_getBalance` returns: a big-endian quantity, already stripped of leading
-    /// zeros by the transport.
-    ///
-    /// A value too large for the type is clamped rather than wrapped. Wrapping would turn
-    /// an absurd balance into a plausible small one, and a plausible wrong number is worse
-    /// than an obviously wrong one — the user would act on it.
+    /// Clamped rather than wrapped: wrapping would turn an absurd balance into a plausible small one.
     public init(bigEndian bytes: Data) {
         guard !bytes.isEmpty else { self = .zero; return }
         var value: Int128 = 0
@@ -93,8 +72,7 @@ public struct NativeAmount: Sendable, Hashable, Comparable {
         self = NativeAmount(unchecked: value)
     }
 
-    /// Truncates toward zero, never rounds up. A gas balance rounded up to the amount a
-    /// transaction needs is a transaction that fails after the user was told it would not.
+    /// Truncates toward zero: rounding a gas balance up would promise a transaction it cannot pay for.
     public func display(fractionDigits: UInt8 = 4, grouping: String = ",", point: String = ".") -> String {
         let scale = NativeAmount.power(10, Int(NativeAmount.decimals))
         let whole = raw / scale
@@ -102,7 +80,6 @@ public struct NativeAmount: Sendable, Hashable, Comparable {
 
         var digits = ""
         if fractionDigits > 0 {
-            // Take the leading `fractionDigits` of the eighteen, by dividing the rest away.
             let drop = Int(NativeAmount.decimals) - Int(fractionDigits)
             fraction /= NativeAmount.power(10, drop)
             digits = String(describing: fraction)
@@ -122,7 +99,6 @@ public struct NativeAmount: Sendable, Hashable, Comparable {
     }
 }
 
-/// Digit grouping, kept here rather than reaching into `DeskMoney`'s internals.
 enum DecimalGrouping {
     static func group(_ digits: String, every stride: Int, with separator: String) -> String {
         guard digits.count > stride, !separator.isEmpty else { return digits }

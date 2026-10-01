@@ -55,7 +55,6 @@ async function mgetChunked(store, keys) {
   return out;
 }
 
-/// Ledgers of every wallet worth listening to, keyed by address.
 export async function qualifiedLedgers({ store, now }) {
   const [leadersRaw, subscriptionIds, trackedList] = await Promise.all([
     store.get("hist:leaders"), store.smembers("alerts:subs"), store.smembers(TRACKED_KEY),
@@ -86,7 +85,6 @@ export async function qualifiedLedgers({ store, now }) {
   return qualified;
 }
 
-/// Per-token flows from the qualified ledgers inside the window.
 export function aggregateTokens(ledgers, { now, windowMs }) {
   const since = now - windowMs;
   const tokens = new Map();
@@ -126,8 +124,6 @@ export function aggregateTokens(ledgers, { now, windowMs }) {
   });
 }
 
-
-
 export async function computeSignals({ store, now = Date.now(), window = DEFAULT_WINDOW, prices = currentPrices }) {
   const windowMs = WINDOWS[window] ?? WINDOWS[DEFAULT_WINDOW];
   const ledgers = await qualifiedLedgers({ store, now });
@@ -161,7 +157,6 @@ export async function computeSignals({ store, now = Date.now(), window = DEFAULT
 
 }
 
-
 export async function cachedSignals({ store, window = DEFAULT_WINDOW, now = Date.now(), prices }) {
   const key = signalsKey(window);
   const cached = await store.get(key).catch(() => null);
@@ -170,4 +165,3 @@ export async function cachedSignals({ store, window = DEFAULT_WINDOW, now = Date
   await store.set(key, JSON.stringify(result), { ex: CACHE_S }).catch(() => {});
   return result;
 }
-

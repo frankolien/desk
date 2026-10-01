@@ -11,14 +11,11 @@ import { redisStore } from "./_store.mjs";
 export const AUSD = "0xa9012a055bd4e0eDfF8Ce09f960291C09D5322dC";
 export const AGORA_FAUCET = "0xd236c18D274E54FAccC3dd9DDA4b27965a73ee6C";
 
-/// Matches the app's `hasSetupGas`, so a wallet the app calls unfunded is always dripped.
 export const MON_THRESHOLD = 50_000_000_000_000_000n;
 export const MON_DRIP = 100_000_000_000_000_000n;
 /// Left in the faucet wallet so it can still pay for the AUSD claim it makes.
 export const MON_RESERVE = 50_000_000_000_000_000n;
 export const AUSD_MINIMUM = 100_000_000n;
-/// What Desk's own wallet hands out when Agora's faucet cannot: enough to open a desk
-/// and trade, not the ten thousand Agora gives, because Desk's stash is finite.
 export const AUSD_FALLBACK = 1_000_000_000n;
 
 const MIN_FEE_WEI = 100_000_000_000n;
@@ -41,7 +38,6 @@ const REVERTS = {
   "0x20e5bc67": "cooldown",
   "0x0949dab9": "already-funded",
   "0x5274afe7": "faucet-empty",
-  // InsufficientFunds(): the faucet holds less than it hands out.
   "0x356680b7": "faucet-empty",
 };
 
@@ -50,8 +46,6 @@ export function validRecipient(value) {
     && !/^0x0{40}$/.test(value);
 }
 
-/// What a wallet should receive, decided from balances alone so it is testable without
-/// a chain.
 export function plan({ recipientMON, recipientAUSD, faucetMON }) {
   const needsMON = recipientMON < MON_THRESHOLD;
   return {
@@ -106,7 +100,6 @@ export function chainDependencies(privateKey, rpcURL = monadTestnet.rpcUrls.defa
       return { recipientMON, recipientAUSD, faucetMON, faucetAUSD };
     },
 
-    /// What the faucet itself holds, and what Agora's holds, for the health view.
     async reserves() {
       const [mon, ausd, agoraAUSD] = await Promise.all([
         reader.getBalance({ address: account.address }),
@@ -153,13 +146,8 @@ export function chainDependencies(privateKey, rpcURL = monadTestnet.rpcUrls.defa
   };
 }
 
-/// One wallet per minute per instance. Kept as the fallback for a deployment with no Redis;
-/// on its own it is per-instance, which on Vercel is not a limit at all.
 const recent = new Map();
 
-/// The shared limits, which is what actually bounds a drain: one claim per address per day,
-/// and a cap per caller per hour. Balance gating gives away nothing to a wallet that already
-/// holds funds, but nothing stopped a script from bringing fresh addresses.
 const ADDRESS_WINDOW_SECONDS = 24 * 3600;
 const CALLER_WINDOW_SECONDS = 3600;
 const CALLER_LIMIT = 10;
@@ -170,8 +158,6 @@ export function callerKey(headers = {}) {
   return address ? `faucet:ip:${createHash("sha256").update(address).digest("hex").slice(0, 32)}` : null;
 }
 
-/// Nothing is dripped until both limits agree. A store that is down refuses rather than
-/// waving everyone through: a faucet is the one place where failing open costs real money.
 export async function limited(store, recipient, headers) {
   if (!store) return null;
   try {
@@ -251,8 +237,6 @@ export function createHandler(resolveDependencies, memory = recent, resolveStore
         const simulation = await chain.simulateClaim(recipient);
         if (simulation.ok) claimGas = simulation.gas;
         else result.ausd = { status: simulation.reason === "already-funded" ? "enough" : "unavailable", reason: simulation.reason };
-        // Agora's faucet runs dry. Desk's own wallet covers the gap while it has a stash,
-        // so a first run never ends on an empty desk because a third party is empty.
         if (!simulation.ok && simulation.reason !== "already-funded" && simulation.reason !== "cooldown"
             && typeof chain.sendAUSD === "function" && (balances.faucetAUSD ?? 0n) >= AUSD_FALLBACK) {
           fromDesk = true;
@@ -290,9 +274,6 @@ export function createHandler(resolveDependencies, memory = recent, resolveStore
           result[asset] = { status: "unavailable", reason: "faucet-empty" };
         }
       }
-      // Anything undelivered may be asked for again straight away: Agora's cooldown is
-      // shared by every caller, so the wallet should not also wait out Desk's, and the
-      // day's limit is for wallets that were funded, not wallets that were refused.
       if (result.mon.status === "unavailable" || result.ausd.status === "unavailable") {
         memory.delete(recipient.toLowerCase());
         await resolveStore()?.del(`faucet:addr2:${recipient.toLowerCase()}`).catch(() => {});

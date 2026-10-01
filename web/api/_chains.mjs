@@ -1,23 +1,11 @@
-// What Desk can quote on, in one place.
-//
-// This table used to be three disagreeing constants inside swap-quote: a native-symbol
-// map, a separate 0x allowlist, and a `Chain ${n}` fallback in discovery. A token trending
-// on a chain missing from any of them was rejected as malformed input, which is how every
-// Arc and Robinhood token came to fail with "Valid quote parameters required".
-//
-// Names, native currencies and RPC endpoints are taken from the chain registry at
-// chainid.network; the supported set is 0x's own published list. Both are facts that can
-// be rechecked, not assumptions.
 
-/// Chains the 0x Swap API v2 can price. Solana is quoted through OKX instead.
 export const ZEROX_CHAINS = new Set([
   "1", "10", "56", "130", "137", "143", "146", "480", "999", "2741", "4217",
   "4663", "5000", "8453", "9745", "42161", "43114", "57073", "59144", "80094", "534352",
 ]);
 
-/// Chain 999 is deliberately absent. 0x lists it as HyperEVM while the public registry
-/// still answers with Wanchain Testnet, and a wrong RPC is worse than no RPC: quotes
-/// still work there, only the native symbol and on-chain decimal lookup are unavailable.
+/// Chain 999 has no symbol or RPC on purpose: 0x calls it HyperEVM while the registry
+/// still says Wanchain Testnet, and a wrong RPC is worse than none.
 export const CHAINS = {
   "1": { name: "Ethereum", symbol: "ETH", rpc: "https://ethereum-rpc.publicnode.com" },
   "10": { name: "OP Mainnet", symbol: "ETH", rpc: "https://mainnet.optimism.io" },
@@ -46,9 +34,8 @@ export const CHAINS = {
   "534352": { name: "Scroll", symbol: "ETH", rpc: "https://rpc.scroll.io" },
 };
 
-/// Every chain in this file's supported set is an 18-decimal native. Arc is the reminder
-/// that this is not a law — its gas token is USDC — which is why an unlisted chain is
-/// reported as unsupported rather than assumed to look like Ethereum.
+/// Every supported chain has an 18-decimal native, but that is not a law (Arc's gas token
+/// is USDC), so an unlisted chain is unsupported rather than assumed to be like Ethereum.
 export const EVM_NATIVE_ADDRESS = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 export const EVM_NATIVE_DECIMALS = 18;
 
@@ -62,12 +49,10 @@ export function chainName(chainIndex) {
   return CHAINS[chainIndex]?.name || `Chain ${chainIndex}`;
 }
 
-/// Whether any configured provider can price this chain at all.
 export function isQuotable(chainIndex) {
   return chainIndex === "501" || ZEROX_CHAINS.has(chainIndex);
 }
 
-/// The token paid with when buying, or received when selling.
 export function nativeToken(chainIndex) {
   if (chainIndex === "501") return SOLANA_NATIVE;
   if (!ZEROX_CHAINS.has(chainIndex)) return null;
@@ -78,9 +63,8 @@ export function nativeToken(chainIndex) {
   };
 }
 
-/// EVM chains Relay fills to, from its /chains endpoint on 17 September 2026. Monad
-/// itself is excluded: a same-chain swap goes through Relay's router with free-form
-/// calldata the app cannot verify, where a cross-chain buy is one checkable deposit.
+/// Monad itself is excluded: a same-chain swap goes through Relay's router with calldata
+/// the app cannot verify, where a cross-chain buy is one checkable deposit.
 export const RELAY_DESTINATIONS = new Set([
   "1", "10", "25", "56", "100", "130", "137", "146", "169", "196", "288", "324", "360",
   "480", "747", "988", "999", "1088", "1135", "1868", "2020", "2741", "2818", "4217",
@@ -89,7 +73,6 @@ export const RELAY_DESTINATIONS = new Set([
   "81457", "97477", "98866", "534352", "685689", "747474", "5064014", "7777777",
 ]);
 
-/// Whether a token can be bought with MON on Monad mainnet, as opposed to only quoted.
 export function isBuyable(chainIndex) {
   return RELAY_DESTINATIONS.has(chainIndex);
 }

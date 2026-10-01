@@ -1,8 +1,6 @@
 import SwiftUI
 import UIKit
 
-/// One copy of every picture for the whole app. A load that fails is tried again with a
-/// growing pause, and a CDN that says the picture is gone is believed.
 actor ImageStore {
     static let shared = ImageStore()
     private let images = NSCache<NSURL, UIImage>()
@@ -84,7 +82,6 @@ struct RemoteImage<Placeholder: View>: View {
             withAnimation(.easeOut(duration: 0.2)) { image = found }
             return
         }
-        // Still on screen and still without a picture: another round in a while.
         guard round < rounds else { return }
         try? await Task.sleep(for: .seconds(15 * (round + 1)))
         if !Task.isCancelled, image == nil, loadedURL == url { round += 1 }

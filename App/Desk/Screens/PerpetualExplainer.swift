@@ -48,9 +48,6 @@ struct PerpetualExplainer: View {
                     }
                     .padding(.top, 28)
 
-                    // The honest footer. Someone reading an explainer because they did not
-                    // know the word is exactly the person who should be told this plainly,
-                    // and burying it would be the trick this app is supposed to not play.
                     Text("Most people who trade with leverage lose money. Testnet funds aren't real; mainnet funds are.")
                         .font(.system(size: 13, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)

@@ -1,6 +1,4 @@
-// Serves public/ on 8790 with /api/* proxied to production, so the live ticker,
-// figures and trader slider render locally without the functions' env.
-//   node web/tools/serve.mjs
+// Serves public/ on 8790 with /api/* proxied to production: node web/tools/serve.mjs
 import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { dirname, extname, join, normalize } from "node:path";

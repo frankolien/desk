@@ -1,6 +1,3 @@
-/// Headlines from a few crypto newsrooms' RSS feeds, tagged with the Perpl markets they
-/// mention. No keys, no third-party news API: the feeds are public and the parsing is
-/// a page of regular expressions, because RSS items are flat.
 export const FEEDS = [
   { source: "CoinDesk", url: "https://www.coindesk.com/arc/outboundfeeds/rss/" },
   { source: "Cointelegraph", url: "https://cointelegraph.com/rss" },
@@ -8,7 +5,6 @@ export const FEEDS = [
   { source: "The Block", url: "https://www.theblock.co/rss.xml" },
 ];
 
-/// What a headline has to say to be about a market. Whole words, case-insensitive.
 export const MENTIONS = {
   BTC: ["bitcoin", "btc"],
   ETH: ["ethereum", "ether", "eth"],
@@ -45,7 +41,6 @@ export function mentions(text) {
     .map(([symbol]) => symbol);
 }
 
-/// The items in one feed, newest first; anything without a title, link and date is skipped.
 export function parseFeed(xml, source) {
   const items = [];
   for (const match of String(xml ?? "").matchAll(/<item>([\s\S]*?)<\/item>/gi)) {
@@ -87,7 +82,6 @@ async function fetchFeed(feed, fetchImpl) {
   }
 }
 
-/// The merged headlines, from the store when they are fresh and from the feeds when not.
 export async function headlines({ store, fetchImpl = fetch, feeds = FEEDS, now = Date.now() } = {}) {
   if (store) {
     const cached = await store.get(NEWS_KEY).catch(() => null);
@@ -98,7 +92,6 @@ export async function headlines({ store, fetchImpl = fetch, feeds = FEEDS, now =
   return items;
 }
 
-/// Only the headlines that mention one of the asked-for markets, or all of them.
 export function filter(items, symbols) {
   const wanted = String(symbols ?? "").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
   if (!wanted.length) return items;

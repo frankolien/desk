@@ -6,16 +6,6 @@ import { metaReader, priceReader } from "../api/_wallet.mjs";
 import { openMarkets } from "../api/traders.mjs";
 import { indexBackoffMs, selectWallets } from "./queue.mjs";
 
-/// The person at the back, running four loops on Railway with Vercel's env names:
-/// - the fast lane keeps every wallet someone has pushes for at the chain tip, every
-///   few seconds, so a tracked wallet's buy is known within a block or two;
-/// - the rotation brings every other opened wallet up in bounded rounds, newly followed
-///   ones first, without starving the rest;
-/// - the scan calls the alert endpoint, which reads followed traders' books, marks and
-///   ledgers and sends what changed;
-/// - the trader index folds Perpl's position events into the records behind scores and
-///   trader histories. Nothing waits for an outside scheduler.
-
 const ROUND_PAUSE_MS = Number(process.env.WORKER_PAUSE_MS || 90_000);
 const FAST_PAUSE_MS = Number(process.env.WORKER_FAST_MS || 12_000);
 const SCAN_PAUSE_MS = Number(process.env.WORKER_SCAN_MS || 60_000);
@@ -23,15 +13,11 @@ const INDEX_PAUSE_MS = Number(process.env.WORKER_INDEX_MS || 15 * 60_000);
 const PER_WALLET_BUDGET_MS = 20_000;
 const FAST_BUDGET_MS = 8_000;
 const BACKFILL_BLOCKS = 45 * 216_000;
-/// A wallet brought to the tip this recently is left alone by the rotation; HyperSync's
-/// free tier rate-limits when asked too often.
+/// The rotation skips a wallet brought to the tip this recently; HyperSync's free tier rate-limits.
 const FRESH_MS = 5 * 60_000;
-/// The fast lane writes a ledger that found nothing new only this often.
 const FAST_QUIET_MS = 2 * 60_000;
-/// The scan rewrites the watched list about once a minute, so reading it more often is waste.
 const WATCHED_REFRESH_MS = 60_000;
 const BACKOFF_MS = 60_000;
-/// A run that ends this many blocks short of the tip (about ten minutes) goes again soon.
 const INDEX_CATCHUP_BLOCKS = 1_500;
 const INDEX_CATCHUP_MS = 15_000;
 const INDEX_LOCK_S = 120;
@@ -48,8 +34,6 @@ const ownIndexToken = Boolean(process.env.HYPERSYNC_INDEX_TOKEN);
 const indexHypersync = ownIndexToken ? hypersyncClient({ token: process.env.HYPERSYNC_INDEX_TOKEN }) : hypersync;
 if (!process.env.CRON_SECRET) console.error("worker: CRON_SECRET is missing, so alerts will not be scanned");
 
-/// Candles come through Desk's own API rather than OKX directly, so the OKX key lives in
-/// one place. The shared price cache in Redis means most lookups never leave this box.
 const DESK_API = process.env.DESK_API || "https://web-lovat-nine-49.vercel.app";
 const bearer = { authorization: `Bearer ${process.env.CRON_SECRET ?? ""}` };
 async function fetchCandles(path, params) {
@@ -128,7 +112,6 @@ async function rotation() {
     }
   }
   console.log(`worker: ${indexed}/${wallets.length} selected of ${allWallets.length} wallets, ${behind} still behind`);
-  // The health endpoint reads this to say whether the indexer is alive.
   await store.set(HEARTBEAT_KEY, JSON.stringify({ at: Date.now(), wallets: allWallets.length, indexed, behind }), { ex: 3600 }).catch(() => {});
 }
 
@@ -170,8 +153,6 @@ async function scanAlerts() {
 
 let indexFailures = 0;
 const INDEX_CATCHUP_RETRY_MS = 60_000;
-/// Returns how long to wait before the next run: soon while catching up, longer and longer
-/// while HyperSync or Redis keeps refusing.
 async function traderIndex() {
   // Sharing the wallets' token means sharing their turn and their backoff too.
   if (!ownIndexToken && Date.now() < backoffUntil) return BACKOFF_MS;
@@ -181,7 +162,6 @@ async function traderIndex() {
     const run = () => indexWithLock({ store, hypersync: indexHypersync, markets, budgetMs: ownIndexToken ? 50_000 : 20_000, lockSeconds: INDEX_LOCK_S });
     const report = await (ownIndexToken ? run() : exclusive(run));
     indexFailures = 0;
-    // Someone else holds the lock, perhaps a run cut short by a redeploy; it expires soon.
     if (report.skipped) return INDEX_LOCK_S * 1000;
     console.log(`worker: trader index ${report.events} events, ${report.accounts} accounts, ${report.behind} blocks behind`);
     return report.behind > INDEX_CATCHUP_BLOCKS ? INDEX_CATCHUP_MS : INDEX_PAUSE_MS;
@@ -197,7 +177,6 @@ async function traderIndex() {
   }
 }
 
-/// Runs `work` every `pauseMs`, or waits as long as `work` asks when it returns a number.
 async function loop(name, work, pauseMs) {
   while (!stopping) {
     const started = Date.now();

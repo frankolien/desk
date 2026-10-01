@@ -7,17 +7,13 @@ import Testing
 
 @testable import DeskFlow
 
-/// A channel that can be made to answer an order before `send` has returned.
-///
-/// That is the whole point of one of these tests: the gateway is fast enough that a
-/// status frame can arrive while the send call is still unwinding, so an implementation
-/// which tracks the order afterwards drops the answer.
+/// A channel that can answer an order before `send` has returned, as the real gateway
+/// can; an order tracked only after `send` would drop that answer.
 private final class ScriptedChannel: WebSocketChannel, @unchecked Sendable {
     private let lock = NSLock()
     private var inbound: [String]
     private var outbound: [String] = []
     private var closed = false
-    /// Runs inside `send`, before it returns.
     var duringSend: (@Sendable () -> Void)?
     var sendFails: (any Error)?
 
@@ -138,16 +134,12 @@ struct OrderDeskTests {
         }
     }
 
-    /// The trap this exists for. The gateway can answer before `send` returns, and a
-    /// status frame for an untracked id is dropped — which the user experiences as an
-    /// order that vanished rather than one that failed.
     @Test("The order is tracked before it is sent, not after")
     func trackedBeforeSend() async throws {
         let channel = ScriptedChannel(inbound: [snapshot])
         let subject = try desk(channel)
         try await subject.open(credentials: credentials())
 
-        // Asked while `send` is still on the stack: the order must already be known.
         let seen = LockedBox<OrderPhase?>(nil)
         channel.duringSend = { [seen] in
             let waiter = DispatchSemaphore(value: 0)
@@ -159,8 +151,6 @@ struct OrderDeskTests {
         #expect(seen.value == .sent)
     }
 
-    /// A send that throws must leave nothing behind, or the next `expire` sweep reports
-    /// an order the venue never received.
     @Test("A failed send forgets the order it could not send")
     func failedSendForgets() async throws {
         let channel = ScriptedChannel(inbound: [snapshot])
@@ -174,8 +164,6 @@ struct OrderDeskTests {
         #expect(await subject.phase(of: 1) == nil)
     }
 
-    /// `rq` must strictly increase per account; a value at or below the last forwarded one
-    /// rejects with `sr: 32`. Two orders placed back to back must not share one.
     @Test("Request ids strictly increase across orders")
     func requestIdsIncrease() async throws {
         let channel = ScriptedChannel(inbound: [snapshot(lastForwarded: 41)])
@@ -270,9 +258,6 @@ struct OrderDeskTests {
         #expect(orders.allSatisfy { $0["t"] as? Int == 3 })
     }
 
-    /// The venue refuses forwarded orders until `fw` is set, which the opening sequence
-    /// does. It gets its own case because the sentence a user needs is "finish opening
-    /// your desk" rather than "the order failed".
     @Test("Forwarding not yet allowed is its own answer")
     func forwardingRefused() async throws {
         let channel = ScriptedChannel(inbound: [snapshot])
@@ -313,8 +298,6 @@ struct OrderDeskTests {
         #expect(await subject.phase(of: frameID)?.hasReachedTheBook == true)
     }
 
-    /// An order whose deadline block has passed is expired rather than pending forever —
-    /// the difference between a sentence and a spinner that never ends.
     @Test("An order past its deadline block expires, after Perpl's retry window as well as its lifetime")
     func expiry() async throws {
         let channel = ScriptedChannel(inbound: [snapshot])
@@ -353,8 +336,6 @@ struct OrderDeskTests {
         #expect(try await subject.place(try draft(), headBlock: 1_000) == 40)
     }
 
-    /// Reconnecting reseeds from the venue's counter rather than carrying ours across,
-    /// because the venue is the authority on what it last forwarded.
     @Test("Reconnecting reseeds the request counter upward")
     func reseedOnReconnect() async throws {
         let channel = ScriptedChannel(inbound: [snapshot])
@@ -374,7 +355,6 @@ struct OrderDeskTests {
     }
 }
 
-/// A tiny box so a synchronous callback can hand a value back out.
 private final class LockedBox<Value>: @unchecked Sendable {
     private let lock = NSLock()
     private var stored: Value

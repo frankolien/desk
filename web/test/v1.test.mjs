@@ -1,4 +1,3 @@
-// node --test web/test/v1.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -128,7 +127,6 @@ test("stats are counters only: requests per day, tracked wallets, alert subscrip
   const handler = api({ store });
   await call(handler, "traders/top");
   await call(handler, "");
-  // The stats request is the third one counted.
   const stats = await call(handler, "stats");
   assert.deepEqual(stats.body.data, { day: "2026-09-21", requestsToday: 3, trackedWallets: 1, alertSubscriptions: 2 });
   assert.equal(JSON.stringify(stats.body).includes(ALICE), false);
@@ -175,7 +173,6 @@ test("over the limit, the API answers 429 with Retry-After and a problem body", 
   assert.equal(blocked.headers["X-RateLimit-Remaining"], "0");
   assert.equal(blocked.headers["Content-Type"], "application/problem+json");
   assert.equal(blocked.body.code, "rate_limited");
-  // A different address on the default tier is still served.
   const ok = await call(handler, "traders/top", { headers });
   assert.equal(ok.status, 200);
 });
@@ -231,14 +228,12 @@ test("health says how long ago the trader index last moved forward, and only war
 
   const late = (await createHealth({ store: null, probes: probes({ traderIndex: async () => ({ at: T - 50 * 60_000, block: 1, behind: 9 }) }), now: () => T })()).report;
   assert.equal(late.checks["trader-index:lastAdvanceAge"][0].status, "warn");
-  // Not critical: a stuck index fails its own row but only degrades the whole.
   const frozen = (await createHealth({ store: null, probes: probes({ traderIndex: async () => ({ at: T - 14 * 86_400_000 }) }), now: () => T })()).report;
   assert.equal(frozen.checks["trader-index:lastAdvanceAge"][0].status, "fail");
   assert.equal(frozen.status, "warn");
   const never = (await createHealth({ store: null, probes: probes({ traderIndex: async () => null }), now: () => T })()).report;
   assert.equal(never.checks["trader-index:lastAdvanceAge"][0].status, "unknown");
 
-  // The default probe reads what the index writes.
   const store = memoryStore();
   await store.set("hist:advanced", JSON.stringify({ at: T - 90_000, block: 7, behind: 3 }));
   const read = (await createHealth({ store, probes: defaultProbes({ store, fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ result: "0x1" }) }) }), now: () => T })()).report;

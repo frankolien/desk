@@ -46,7 +46,6 @@ struct AutoCopyWidgetView: View {
 
     @Environment(\.widgetFamily) private var family
 
-    /// A glance written on an earlier day says nothing about today.
     private var today: Double {
         guard let glance = entry.glance, Calendar.current.isDateInToday(glance.updatedAt) else { return 0 }
         return glance.today

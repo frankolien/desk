@@ -2,16 +2,6 @@ import { createPublicClient, http } from "viem";
 import { deskProfiles } from "./_profile.mjs";
 import { mainnet } from "viem/chains";
 
-/// Who a wallet is, from every place a Monad wallet can carry a public name: a .nad
-/// primary name, a nad.fun profile, an ENS name, a Farcaster account. The first source
-/// with a name wins the name; an avatar, bio or X handle it lacks is borrowed from the
-/// others. A wallet with none of them resolves to nulls and the app shows the address.
-///
-///   GET /api/traders?view=identity&addresses=0x…,0x…   (up to 50)
-///
-/// A view on traders rather than a function of its own: the Hobby plan allows twelve
-/// functions per deployment.
-
 export const MAX_ADDRESSES = 50;
 export class NameLookupUnavailable extends Error {}
 const MONAD_CHAIN_ID = "143";
@@ -39,7 +29,7 @@ async function snsPrimary(addresses, fetchImpl) {
         const domain = text(body?.[address]);
         if (domain) found.set(address, { name: domain.endsWith(".sol") ? domain : `${domain}.sol` });
       }
-    } catch { /* a missing SNS profile must not hide other identities */ }
+    } catch {}
   }
   return found;
 }
@@ -68,12 +58,12 @@ async function nadNames(addresses, fetchImpl) {
       const name = text(row?.primaryName);
       if (name && row?.addr) found.set(row.addr.toLowerCase(), { name, avatar: text(row.avatar) });
     }
-  } catch { /* the name service is one source of several */ }
+  } catch {}
   return found;
 }
 
-/// nad.fun answers for every address; a wallet that never set a profile echoes its
-/// address as the nickname and a numbered default picture, and that is not a profile.
+/// nad.fun answers for every address; one that never set a profile echoes its address as
+/// the nickname with a numbered default picture, and that is not a profile.
 async function nadFun(address, fetchImpl) {
   try {
     const response = await fetchImpl(`${NADFUN_URL}${address}`);
@@ -90,10 +80,8 @@ async function nadFun(address, fetchImpl) {
   }
 }
 
-/// An address can belong to several Farcaster accounts (custody of one, verified on
-/// another, or a throwaway). A name beginning with "!" is a placeholder for an account
-/// that never registered one. The account that verified this address wins, then the
-/// most followed.
+/// An address can belong to several Farcaster accounts; a name starting with "!" is an
+/// unregistered placeholder. The account that verified this address wins, then the most followed.
 export function pickFarcasterUser(address, users) {
   const lower = address.toLowerCase();
   const solana = solanaAddress(address);
@@ -123,13 +111,12 @@ async function farcaster(addresses, fetchImpl, key) {
         bio: text(user.profile?.bio?.text),
       });
     }
-  } catch { /* optional source */ }
+  } catch {}
   return found;
 }
 
 export function describeIdentity(address, { desk = null, nad = null, fun = null, ens = null, sns = null, cast = null, perpl = null } = {}) {
   const sources = [
-    // What the wallet said about itself comes first; the chains' records fill the gaps.
     desk && { source: "desk", name: desk.name ?? null, avatar: desk.avatar ?? null },
     nad && { source: "nad", name: nad.name, avatar: nad.avatar ?? null },
     fun && { source: "nadfun", name: fun.name, avatar: fun.avatar ?? null, bio: fun.bio ?? null },
@@ -197,16 +184,12 @@ export async function resolveIdentities(addresses, { fetchImpl = fetch, chain = 
   return identities;
 }
 
-/// A name to an address: .nad on Monad, .eth on Ethereum, .sol/.sns on
-/// Solana, or an @handle on Farcaster. Keep the chain with the result: a
-/// Solana public key must never be treated as a Perpl/EVM trader address.
+/// Keeps the chain with the result: a Solana public key must never be treated as a Perpl/EVM address.
 export async function lookupName(query, { fetchImpl = fetch, ensAddress = null, neynarKey = process.env.NEYNAR_API_KEY } = {}) {
   const text = String(query ?? "").trim();
   if (/^0x[a-fA-F0-9]{40}$/.test(text)) return { address: text.toLowerCase(), source: "address" };
   const lower = text.toLowerCase();
   if (/\.(sol|sns|solana)$/.test(lower)) {
-    // .solana is a common spelling mistake, not an SNS TLD. Resolve its .sol
-    // equivalent, and return the canonical name so the UI does not endorse it.
     const name = lower.endsWith(".solana") ? `${lower.slice(0, -7)}.sol` : lower;
     if (!/^(?:[a-z0-9-]+\.){1,2}(?:sol|sns)$/.test(name)) return null;
     try {
@@ -227,7 +210,7 @@ export async function lookupName(query, { fetchImpl = fetch, ensAddress = null, 
       const body = response.ok ? await response.json() : null;
       const address = String(body?.resolvedAddress ?? "");
       if (/^0x[a-fA-F0-9]{40}$/.test(address)) return { address: address.toLowerCase(), source: "nad" };
-    } catch { /* not found */ }
+    } catch {}
     return null;
   }
   if (lower.endsWith(".eth") && ensAddress) {
@@ -244,7 +227,7 @@ export async function lookupName(query, { fetchImpl = fetch, ensAddress = null, 
       const user = response.ok ? (await response.json())?.user : null;
       const address = (user?.verified_addresses?.eth_addresses ?? [])[0] ?? user?.custody_address;
       if (/^0x[a-fA-F0-9]{40}$/.test(String(address ?? ""))) return { address: String(address).toLowerCase(), source: "farcaster" };
-    } catch { /* not found */ }
+    } catch {}
   }
   return null;
 }

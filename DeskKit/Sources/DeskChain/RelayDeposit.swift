@@ -1,12 +1,8 @@
 import DeskAuth
 import Foundation
 
-/// A Relay deposit the wallet is about to sign, checked against what the user asked for.
-///
-/// The transaction arrives from a quote service, so every field is someone else's claim.
-/// Signing is allowed only for `depositNative(depositor, id)` on Relay's depository, on
-/// Monad mainnet, crediting this wallet, for exactly the typed amount. Anything else is a
-/// different transaction wearing a quote's numbers.
+/// Every field comes from a quote service, so signing is allowed only for `depositNative` on
+/// Relay's depository, on Monad mainnet, crediting this wallet, for exactly the typed amount.
 public struct RelayDeposit: Sendable, Hashable {
     public enum Failure: Error, Sendable, Equatable {
         case wrongChain(UInt64)
@@ -18,9 +14,6 @@ public struct RelayDeposit: Sendable, Hashable {
     }
 
     public static let chainID: UInt64 = 143
-    /// RelayDepository's CREATE2 address, identical on every chain Relay deploys to. Listed as
-    /// RelayDepository by L2Beat and in LI.FI's contract config, and bytecode is present on
-    /// Monad mainnet.
     public static let depository = "4cd00e387622c35bddb9b4c962c136462338bc31"
     /// `depositNative(address,bytes32)`.
     public static let depositNativeSelector = "49290c1c"

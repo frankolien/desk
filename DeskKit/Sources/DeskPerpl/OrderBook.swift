@@ -1,8 +1,7 @@
 import Foundation
 
-/// A market's L2 book, from `order-book@<market_id>`: an `mt: 15` snapshot replaces it
-/// and `mt: 16` updates patch it, where a level with `o: 0` is a removal. Prices and
-/// sizes stay raw, at the market's scales.
+/// From `order-book@<market_id>`: `mt: 15` snapshots replace, `mt: 16` updates patch, and a
+/// level with `o: 0` is a removal. Prices and sizes stay raw, at the market's scales.
 public struct OrderBook: Sendable, Equatable {
     public struct Level: Sendable, Equatable, Identifiable {
         public let priceRaw: Int64
@@ -21,12 +20,10 @@ public struct OrderBook: Sendable, Equatable {
 
     private var bidLevels: [Int64: Level] = [:]
     private var askLevels: [Int64: Level] = [:]
-    /// Whether a snapshot has arrived; updates before one are ignored.
     public private(set) var isReady = false
 
     public init() {}
 
-    /// Best first: bids highest to lowest, asks lowest to highest.
     public func levels(_ side: Side, depth: Int) -> [Level] {
         switch side {
         case .bid: Array(bidLevels.values.sorted { $0.priceRaw > $1.priceRaw }.prefix(depth))
@@ -37,19 +34,13 @@ public struct OrderBook: Sendable, Equatable {
     public var bestBid: Int64? { bidLevels.keys.max() }
     public var bestAsk: Int64? { askLevels.keys.min() }
 
-    /// Ask minus bid, raw; nil while either side is empty.
     public var spreadRaw: Int64? {
         guard let bid = bestBid, let ask = bestAsk else { return nil }
         return ask - bid
     }
 
-    /// What a market order of `sizeRaw` would take from the book, walking from the best
-    /// level outward and stopping at `limitRaw` — the slippage bound an IOC order carries.
-    /// A buy walks the asks, a sell the bids.
     public struct FillEstimate: Sendable, Equatable {
-        /// Size the book holds within the limit, capped at the order's size.
         public let filledRaw: Int64
-        /// Size-weighted average price of that size, in raw price units; nil if none fills.
         public let averagePriceRaw: Double?
         public let isComplete: Bool
     }
@@ -82,7 +73,6 @@ public struct OrderBook: Sendable, Equatable {
         isReady = false
     }
 
-    /// Applies one decoded frame. Returns false for anything that is not a book frame.
     @discardableResult
     public mutating func apply(_ frame: Frame) -> Bool {
         switch frame.kind {
@@ -106,7 +96,6 @@ public struct OrderBook: Sendable, Equatable {
         }
     }
 
-    /// One `mt: 15` or `mt: 16` frame.
     public struct Frame: Sendable, Equatable {
         public enum Kind: Sendable { case snapshot, update }
         public let kind: Kind
@@ -114,7 +103,7 @@ public struct OrderBook: Sendable, Equatable {
         public let bids: [Level]
         public let asks: [Level]
 
-        /// Nil for anything that is not a book frame. Numbers may arrive as strings.
+        /// Numbers may arrive as strings.
         public init?(json: [String: Any]) {
             guard let mt = (json["mt"] as? NSNumber)?.intValue, mt == 15 || mt == 16 else { return nil }
             kind = mt == 15 ? .snapshot : .update

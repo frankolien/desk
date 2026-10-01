@@ -8,8 +8,7 @@ const HOSTS = {
 
 const base64url = (value) => Buffer.from(value).toString("base64url");
 
-/// Apple's provider token: ES256 over the team and key id. Apple refuses a token refreshed
-/// more than once every twenty minutes and one older than an hour, so it is reused for forty.
+/// Apple refuses a token refreshed more than every 20 minutes or older than an hour; reused for 40.
 export function providerToken({ keyId, teamId, privateKey }, now = Date.now()) {
   const header = base64url(JSON.stringify({ alg: "ES256", kid: keyId }));
   const claims = base64url(JSON.stringify({ iss: teamId, iat: Math.floor(now / 1000) }));
@@ -17,8 +16,6 @@ export function providerToken({ keyId, teamId, privateKey }, now = Date.now()) {
   return `${header}.${claims}.${signature.toString("base64url")}`;
 }
 
-/// A .p8 pasted into an environment variable arrives with its newlines escaped, or as
-/// base64 when a dashboard would not take newlines at all.
 export function readPrivateKey(value) {
   if (!value) return null;
   const text = value.includes("BEGIN") ? value : Buffer.from(value, "base64").toString("utf8");
@@ -53,8 +50,7 @@ export function apnsClient({
 
   function post(environment, deviceToken, payload, { collapseId, background = false } = {}) {
     return new Promise((resolve) => {
-      // A background push wakes the app without showing anything. Apple requires the
-      // type to say so and the priority to be 5; a 10 is rejected outright.
+      // Apple requires a background push to declare itself with priority 5; a 10 is rejected outright.
       const headers = {
         ":method": "POST",
         ":path": `/3/device/${deviceToken}`,
@@ -82,16 +78,13 @@ export function apnsClient({
         resolve({ status, reason });
       });
       request.on("error", () => resolve({ status: 0, reason: "Unreachable" }));
-      // A stream closed by the timeout ends without "end"; it must still answer.
       request.on("close", () => resolve({ status, reason: status ? null : "Timeout" }));
       request.end(JSON.stringify(payload));
     });
   }
 
   return {
-    /// A debug build's token only works against the sandbox and a TestFlight build's only
-    /// against production. The app says which it is, and a token refused as the wrong kind
-    /// is tried once against the other, so a guess never silently drops an alert.
+    /// A token refused as the wrong environment (sandbox vs production) is retried once against the other.
     async send({ token, environment }, payload, options) {
       const first = environment === "production" ? "production" : "sandbox";
       const result = await post(first, token, payload, options);
@@ -107,6 +100,5 @@ export function apnsClient({
   };
 }
 
-/// Apple has said this token will never deliver again.
 export const isDeadToken = ({ status, reason }) =>
   status === 410 || (status === 400 && (reason === "BadDeviceToken" || reason === "DeviceTokenNotForTopic"));

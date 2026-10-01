@@ -2,7 +2,6 @@ import DeskPerpl
 import Foundation
 import WidgetKit
 
-
 @MainActor
 final class HomeGlancePublisher {
     private var lastPortfolio: PortfolioGlance?
@@ -33,7 +32,6 @@ final class HomeGlancePublisher {
     /// balance would put "--" on the Home Screen as if it were the figure.
     private static func portfolio(model: AppModel, market: MarketModel) -> PortfolioGlance? {
         guard model.address != nil, let collateral = model.collateral.value else { return nil }
-        // The same derivation Home uses, so the two never disagree on a figure.
         let positions = model.openPositions.compactMap { held -> PortfolioGlance.Position? in
             guard let item = market.market(id: held.marketID),
                   let mark = market.price(for: item),
@@ -56,8 +54,6 @@ final class HomeGlancePublisher {
             updatedAt: .now)
     }
 
-    /// Nil until the venue's market list has arrived. An empty saved list is a real
-    /// state and is written as one, so the widget can say so.
     private static func watchlist(market: MarketModel) -> WatchlistGlance? {
         guard !market.allMarkets.isEmpty else { return nil }
         let saved = Set((UserDefaults.standard.string(forKey: "desk.watchlist") ?? "")

@@ -36,7 +36,6 @@ export function gradeAge(age, { warn, fail }) {
   return "pass";
 }
 
-/// pass/warn/fail across the checks: critical failures fail the whole, everything else warns.
 export function overall(checks, critical) {
   const rows = Object.entries(checks).map(([name, [row]]) => ({ name, status: row.status }));
   if (rows.some((row) => row.status === "fail" && critical.includes(row.name))) return "fail";
@@ -110,7 +109,6 @@ export function createHealth({
       "cron:lastRunAge": [{
         status: gradeAge(scanAge, { warn: 15 * 60, fail: 2 * 3600 }), observedValue: scanAge, observedUnit: "s", time,
       }],
-      // The worker runs it every 15 minutes; three missed runs is late, three hours is stuck.
       "trader-index:lastAdvanceAge": [{
         status: gradeAge(indexAge, { warn: 45 * 60, fail: 3 * 3600 }), observedValue: indexAge, observedUnit: "s", time,
         ...(traderIndex.ok && traderIndex.value ? { block: traderIndex.value.block ?? null, behind: traderIndex.value.behind ?? null } : {}),

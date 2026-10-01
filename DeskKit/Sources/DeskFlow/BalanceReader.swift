@@ -3,20 +3,9 @@ import DeskChain
 import DeskMoney
 import Foundation
 
-/// One read of everything the account screens show.
-///
-/// The rule this type exists to enforce: **one balance failing must never blank the
-/// others.** Three independent RPC calls go out; each lands in its own slot with its own
-/// outcome, so a hiccup on the AUSD read leaves the gas balance and the desk status
-/// exactly as they were. The alternative — a single throwing call that returns a whole
-/// snapshot or nothing — turns any one flaky read into an empty screen, which a person
-/// reads as "my money is gone" rather than as "the network is slow".
-///
-/// Nothing here is cached or held. The caller owns freshness, through `LastGood`.
+/// One balance failing must never blank the others: each read lands in its own slot with
+/// its own outcome.
 public struct BalanceReader: Sendable {
-    /// A value that is either present or explained. Never an optional, because a `nil`
-    /// balance and a zero balance are different facts and the screen renders them
-    /// differently — `--` against `0.00`.
     public enum Read<Value: Sendable & Hashable>: Sendable, Hashable {
         case ok(Value)
         case failed(String)
@@ -33,15 +22,10 @@ public struct BalanceReader: Sendable {
     }
 
     public struct Snapshot: Sendable, Hashable {
-        /// AUSD sitting in the wallet, not at the exchange.
         public let walletAUSD: Read<Money>
-        /// MON, for gas.
         public let gas: Read<NativeAmount>
-        /// Whether a Perpl account exists for this address.
         public let hasDesk: Read<Bool>
 
-        /// True when every read failed, which is the signal that the network is down
-        /// rather than that one call was unlucky.
         public var isTotalFailure: Bool {
             walletAUSD.problem != nil && gas.problem != nil && hasDesk.problem != nil
         }
@@ -57,8 +41,6 @@ public struct BalanceReader: Sendable {
         self.exchange = addresses.exchange
     }
 
-    /// The three reads, concurrently. They are independent, and running them in series
-    /// would make the screen wait for the slowest three times over.
     public func read(for address: EthereumAddress) async -> Snapshot {
         async let ausd = walletAUSD(of: address)
         async let gas = gasBalance(of: address)
@@ -99,8 +81,7 @@ public struct BalanceReader: Sendable {
         }
     }
 
-    /// A sentence a person can act on, and never the underlying error's own text — a
-    /// transport error can carry a URL, and a URL can carry a key.
+    /// Never the underlying error's text: a transport error can carry a URL, and a URL a key.
     static func sentence(for error: any Error, reading subject: String) -> String {
         if let failure = error as? MonadRPC.Failure, case .rejected = failure {
             return "The network refused the request for \(subject)."
@@ -109,11 +90,8 @@ public struct BalanceReader: Sendable {
     }
 }
 
-/// A uint256 word at AUSD's scale.
-///
-/// Shared with `OpeningSequence`, which needs the identical clamp: a number this app
-/// cannot hold is clamped rather than wrapped, because an allowance is routinely the
-/// uint256 maximum and wrapping that shows a tiny number.
+/// A uint256 word at AUSD's scale, clamped rather than wrapped: an allowance is routinely
+/// the uint256 maximum, and wrapping it shows a tiny number.
 public enum ABIMoney {
     public static func decode(_ word: Data) -> Money {
         guard !word.isEmpty else { return .zero }

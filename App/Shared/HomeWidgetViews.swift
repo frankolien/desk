@@ -139,7 +139,6 @@ private struct PositionRow: View {
     }
 }
 
-/// The saved markets with their last marks, in the order the Watchlist tab lists them.
 struct WatchlistWidgetView: View {
     let glance: WatchlistGlance?
     let family: WidgetFamily
@@ -188,8 +187,6 @@ private struct WatchRow: View {
     }
 }
 
-/// A percentage in a tinted capsule. Green and red on a dark ground at full strength
-/// shout; at eighteen percent behind a coloured label they read.
 struct ChangeChip: View {
     let text: String
     let isUp: Bool

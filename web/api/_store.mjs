@@ -1,5 +1,3 @@
-/// Upstash Redis over its REST API, so the functions need no client library. Either the
-/// Vercel marketplace names or Upstash's own are accepted.
 export function redisStore({
   url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL,
   token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN,
@@ -15,7 +13,6 @@ export function redisStore({
       body: JSON.stringify(body),
     });
     if (!response.ok) {
-      // The status alone hid the one answer that matters: a quota, not a fault.
       const reason = await response.text().catch(() => "");
       throw new Error(`redis ${response.status}${reason ? `: ${reason.slice(0, 120)}` : ""}`);
     }
@@ -58,7 +55,6 @@ export function redisStore({
   };
 }
 
-/// The same surface in memory, for tests.
 export function memoryStore() {
   const values = new Map();
   const sets = new Map();

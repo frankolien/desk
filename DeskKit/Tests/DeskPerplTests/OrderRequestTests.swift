@@ -77,12 +77,11 @@ struct OrderRequestTests {
             leverageHundredths: 100, postOnly: true,
             headBlock: 1, requestID: 1, frameID: 1)
         let json = try encoded(order)
-        #expect(json["p"] as? Int == 674123)   // floored to the grid
+        #expect(json["p"] as? Int == 674123)
         #expect(json["fl"] as? Int == 1)
         #expect(json["ms"] == nil)
     }
 
-    // Closing by opening an opposing position inverts it and pays taker on the way.
     @Test("closing uses the close types, not an opposing open")
     func closeUsesCloseTypes() throws {
         let long = try OrderBuilder.close(
@@ -139,8 +138,6 @@ struct OrderRequestTests {
         #expect(json["oid"] as? Int == 99)
     }
 
-    // A zero frame id is omitted from the status response, so the order cannot be
-    // matched to its outcome.
     @Test("a zero frame id is refused")
     func zeroFrameIDRefused() throws {
         #expect(throws: OrderBuilder.Failure.frameIDMustBeNonZero) {
@@ -184,7 +181,7 @@ struct OrderRequestTests {
 
     @Test("a size from another market's scale is refused")
     func wrongScaleRefused() throws {
-        let ethSize = try #require(Size(typed: "1.500", decimals: 3))  // ETH's scale
+        let ethSize = try #require(Size(typed: "1.500", decimals: 3))
         #expect(throws: OrderBuilder.Failure.sizeScaleMismatch) {
             try OrderBuilder.market(side: .long, market: btc, account: 7, size: ethSize,
                                     leverageHundredths: 100, slippageBps: 50,
@@ -212,10 +209,8 @@ struct OrderRequestTests {
         let counter = RequestCounter(lastForwarded: 40)
         #expect(await counter.take() == 41)
         #expect(await counter.take() == 42)
-        // A reconnect reports an older value; the counter must not go backwards.
         await counter.reseed(lastForwarded: 10)
         #expect(await counter.take() == 43)
-        // A reconnect reporting a newer value jumps forward.
         await counter.reseed(lastForwarded: 100)
         #expect(await counter.take() == 101)
     }

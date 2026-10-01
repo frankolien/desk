@@ -47,13 +47,9 @@ struct TokenLogo: View {
     }
 }
 
-/// The hosts token artwork may be loaded from.
 enum TokenArtwork {
-    /// Matched on the registrable suffix, so a subdomain of a known CDN is allowed and a
-    /// host that merely ends in the same letters is not.
-    /// Checked against what the feed actually serves — the trending list's artwork comes
-    /// from static.oklink.com, and an allow-list written from the API's name alone would
-    /// have quietly removed every logo on the screen.
+    /// Matched on the registrable suffix, so a subdomain of a known CDN passes and a host that merely
+    /// ends in the same letters does not.
     private static let hosts = ["coingecko.com", "oklink.com", "okx.com", "coinall.ltd", "nadapp.net", "raw.githubusercontent.com"]
 
     static func url(_ text: String?) -> URL? {
@@ -64,7 +60,6 @@ enum TokenArtwork {
     }
 }
 
-/// A stable, clearly non-official mark when a token has no usable artwork.
 struct TokenSymbolBadge: View {
     let symbol: String
     let seed: String
@@ -106,8 +101,6 @@ struct MarketTokenLogo: View {
 
     var body: some View {
         Group {
-            // Perpl's markets are in the catalog or have fixed artwork above; a market
-            // Perpl lists before either is added shows its symbol badge.
             if remoteURL == nil, UIImage(named: symbol.uppercased()) != nil {
                 Image(symbol.uppercased()).resizable().scaledToFit()
             } else {
@@ -122,9 +115,6 @@ struct MarketTokenLogo: View {
     }
 }
 
-/// A restrained card wash derived from the token artwork itself. This mirrors the
-/// one-pixel palette extraction used by Gathr's `CoverPalette`, while keeping text
-/// contrast anchored to the system background.
 struct TokenAdaptiveCardBackground: View {
     let symbol: String
     var cornerRadius: CGFloat = 20
@@ -214,7 +204,6 @@ struct TokenAdaptiveCardBackground: View {
         Color(red: sample.red, green: sample.green, blue: sample.blue)
     }
 }
-
 
 private extension View {
     @ViewBuilder

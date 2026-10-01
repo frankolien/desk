@@ -1,8 +1,6 @@
 import SafariServices
 import SwiftUI
 
-/// Apple's in-app Safari: native privacy controls, cookies and dismissal behavior,
-/// while keeping the user inside Desk's setup flow.
 struct InAppSafari: UIViewControllerRepresentable {
     let url: URL
 

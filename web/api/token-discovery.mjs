@@ -38,8 +38,6 @@ function normalize(row) {
     id: `${chainIndex}:${contract}`,
     chainIndex,
     chainName: chainName(chainIndex),
-    // Said here so the app can retire Buy and Sell before someone types an amount and
-    // waits on a quote that was never going to arrive.
     quotable: isQuotable(chainIndex),
     buyable: isBuyable(chainIndex),
     nativeSymbol: nativeToken(chainIndex)?.symbol ?? null,
@@ -61,9 +59,7 @@ function normalize(row) {
   };
 }
 
-// Every chain Desk can show, so a Monad or BNB contract pasted into search is found.
-// OKX's search refuses a call naming a chain it does not index, and says which; those
-// are dropped and the call retried, and the surviving list is kept for the process.
+// OKX refuses a call naming a chain it does not index; those are dropped and the call retried.
 // Solana is left out on purpose: Desk's wallet cannot hold what it would buy there.
 const SOLANA = "501";
 const MONAD = "143";
@@ -84,8 +80,6 @@ export async function searchTokens(query, { search = okxGet } = {}) {
   throw new Error("Token search is unavailable.");
 }
 
-/// What was typed comes first: an exact symbol, then a symbol or name that starts
-/// with it, then everything else by market cap.
 export function rankSearch(rows, query) {
   const wanted = String(query).trim().toLowerCase();
   const tier = (row) => {
@@ -102,7 +96,6 @@ export function rankSearch(rows, query) {
     .map(({ row }) => row);
 }
 
-/// Monad's own tokens lead; the rest keep their order. Solana never appears.
 export function homeFirst(tokens) {
   return tokens
     .filter((token) => token.chainIndex !== SOLANA)

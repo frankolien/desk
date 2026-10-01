@@ -9,14 +9,12 @@ struct SpotPurchase: Codable, Hashable, Identifiable, Sendable {
     let symbol: String
     let name: String
     let logoURL: String
-    /// What the purchase was worth in dollars at the quote, when the quote said.
     let paidUSD: Double?
     let boughtAt: Date
 
     var id: String { "\(chainIndex):\(contract.lowercased())" }
 }
 
-/// The purchases this wallet has made, kept on the device under the wallet's address.
 enum SpotPurchases {
     private static func key(_ address: EthereumAddress) -> String {
         "desk.spotPurchases." + address.checksummed.lowercased()
@@ -27,8 +25,6 @@ enum SpotPurchases {
         return (try? JSONDecoder().decode([SpotPurchase].self, from: data)) ?? []
     }
 
-    /// One row per token. Buying the same token twice updates the cost rather than
-    /// listing it twice: the chain reports one balance, so the app shows one holding.
     static func record(_ purchase: SpotPurchase, for address: EthereumAddress) {
         var list = load(for: address)
         if let index = list.firstIndex(where: { $0.id == purchase.id }) {
@@ -51,16 +47,13 @@ enum SpotPurchases {
     }
 }
 
-/// A purchase with what the chain says about it now.
 struct SpotHolding: Identifiable, Sendable {
     let purchase: SpotPurchase
-    /// Nil when the chain could not be read; never a zero standing in for unknown.
     let balance: String?
     let value: Double?
     let price: Double?
     var id: String { purchase.id }
 
-    /// Change since the purchase, as a fraction of what was paid. Nil without both sides.
     var changeSincePaid: Double? {
         guard let value, let paid = purchase.paidUSD, paid > 0 else { return nil }
         return (value - paid) / paid
@@ -119,7 +112,6 @@ final class SpotHoldingsModel {
               (response as? HTTPURLResponse)?.statusCode == 200,
               let body = try? JSONDecoder().decode(Response.self, from: data)
         else {
-            // Keep what was last read rather than blanking the rows on one failed read.
             if holdings.isEmpty {
                 holdings = purchases.map { SpotHolding(purchase: $0, balance: nil, value: nil, price: nil) }
             }
@@ -139,7 +131,6 @@ final class SpotHoldingsModel {
 
 #if DEBUG
 extension SpotHoldingsModel {
-    /// Two holdings for the review screens, with figures a real read could return.
     static let review: [SpotHolding] = [
         SpotHolding(
             purchase: SpotPurchase(chainIndex: "4663", chainName: "Robinhood Chain", contract: "0x1", symbol: "WORM",

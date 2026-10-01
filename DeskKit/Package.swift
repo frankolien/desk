@@ -1,9 +1,8 @@
 // swift-tools-version: 6.2
 import PackageDescription
 
-// DeskKit: everything that is not a screen. Module boundaries are load-bearing —
-// DeskMoney has no dependencies and therefore cannot reach the network, and nothing
-// outside it does arithmetic on a price or a size.
+// Module boundaries are load-bearing: DeskMoney has no dependencies, so it cannot reach the
+// network, and nothing outside it does arithmetic on a price or a size.
 let package = Package(
     name: "DeskKit",
     platforms: [.iOS(.v18), .macOS(.v15)],
@@ -91,9 +90,6 @@ let package = Package(
         .testTarget(
             name: "DeskFlowTests",
             dependencies: ["DeskFlow", "DeskNet"],
-            // The venue context is shared with DeskPerplTests rather than hand-built:
-            // an order is validated against the real market's decimals and margin
-            // fractions, and a market invented for a test proves nothing about those.
             resources: [.process("EnrolmentPayload.json"), .process("Context-testnet.json")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

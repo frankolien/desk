@@ -1,4 +1,3 @@
-// node --test web/test/relay.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -48,10 +47,8 @@ test("a quote that pays out a different token or chain is refused", () => {
   assert.equal(matchesRoute(routed(want, native), "8453", want.address), true);
   // Case is not identity: the same token in a different spelling still matches.
   assert.equal(matchesRoute(routed(want, native), "8453", want.address.toLowerCase()), true);
-  // A different token on the right chain, and the right token on a different chain.
   assert.equal(matchesRoute(routed({ ...want, address: "0x9999999999999999999999999999999999999999" }, native), "8453", want.address), false);
   assert.equal(matchesRoute(routed({ ...want, chainId: 1 }, native), "8453", want.address), false);
-  // Paying with something other than MON on Monad.
   assert.equal(matchesRoute(routed(want, { chainId: 1, address: native.address }), "8453", want.address), false);
   assert.equal(matchesRoute({ details: {} }, "8453", want.address), false);
 });
@@ -121,7 +118,6 @@ test("status folds Relay's words into four phases", async () => {
   const handler = createHandler(respond(200, { status: "success", txHashes: ["0xaa", "0xbb"] }));
   const result = await handler({ method: "GET", query: { view: "status", requestId: `0x${"12".repeat(32)}` } }, recorder());
   assert.deepEqual(result.body, { phase: "filled", destinationTx: "0xbb" });
-  // The old path still lands on the status branch even without the rewrite's query.
   const byPath = await handler({ method: "GET", url: `/api/relay-status?requestId=0x${"12".repeat(32)}`, query: { requestId: `0x${"12".repeat(32)}` } }, recorder());
   assert.deepEqual(byPath.body, { phase: "filled", destinationTx: "0xbb" });
   const bad = await handler({ method: "GET", query: { view: "status", requestId: "0x12" } }, recorder());

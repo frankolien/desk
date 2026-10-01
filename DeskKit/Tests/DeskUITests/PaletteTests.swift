@@ -3,8 +3,6 @@ import Testing
 
 @testable import DeskUI
 
-/// The palette's accessibility rules, asserted rather than intended. A design system a
-/// judge can see is one whose rules are checked on every run.
 @Suite("The palette")
 struct PaletteTests {
     private let ground = DeskColor.night
@@ -17,17 +15,12 @@ struct PaletteTests {
 
     @Test("Every figure colour clears 4.5 on the ground")
     func figureContrast() {
-        // This is the rule the ported accent failed. Deep pine reaches 2.75 here, which
-        // is why it is a fill and never a figure.
         for colour in [DeskColor.rise, DeskColor.fall, DeskColor.impactAmber, DeskColor.impactOrange] {
             #expect(colour.contrastRatio(against: ground) >= 4.5)
         }
         #expect(DeskColor.ledger.contrastRatio(against: ground) < 3.0)
     }
 
-    /// The Face ID button is the one blue thing in the app, so nothing checks it except
-    /// this: a label must be legible on it, and it must not be mistakable for a direction
-    /// or for the action colour.
     @Test("Identity blue is legible and is nobody else's colour")
     func identityIsItsOwnColour() {
         let ground = DeskColor.night
@@ -36,8 +29,6 @@ struct PaletteTests {
         #expect(DeskColor.identity != DeskColor.action)
         #expect(DeskColor.identity != DeskColor.rise)
         #expect(DeskColor.identity != DeskColor.fall)
-        // A fill this close to the ground would vanish; the sign-in button is the only
-        // thing on that screen and must read as a solid object.
         #expect(DeskColor.identity.contrastRatio(against: ground) >= 3.0)
     }
 
@@ -57,8 +48,6 @@ struct PaletteTests {
 
     @Test("Action is not a direction, and direction is not an action")
     func actionIsItsOwnColour() {
-        // Green already means profit. A green confirm button and a green PnL figure make
-        // the same statement, which on a trading screen is a real ambiguity.
         #expect(DeskColor.action != DeskColor.rise)
         #expect(DeskColor.action != DeskColor.fall)
         #expect(DeskColor.action.contrastRatio(against: ground) >= 4.5)
@@ -66,7 +55,6 @@ struct PaletteTests {
 
     @Test("Up and down are separated by luminance, not only hue")
     func grayscaleSeparation() {
-        // Apple's own grayscale test. Two colours of equal luminance become one colour.
         let separation = DeskColor.rise.contrastRatio(against: DeskColor.fall)
         #expect(separation >= 1.5)
         #expect(DeskColor.rise.relativeLuminance > DeskColor.fall.relativeLuminance)
@@ -74,7 +62,6 @@ struct PaletteTests {
 
     @Test("Chips sit above the ground without becoming containers")
     func chipIsSubtle() {
-        // Dark means flat. A chip is a hint that something is tappable, not a card.
         let lift = DeskColor.nightChip.contrastRatio(against: ground)
         #expect(lift > 1.0)
         #expect(lift < 1.5)
@@ -107,7 +94,6 @@ struct PaletteTests {
 struct DirectionTests {
     @Test("The sign is a real minus, not a hyphen")
     func trueMinus() {
-        // A hyphen is narrower than a digit and makes a column of figures ripple.
         #expect(Direction.minus == "\u{2212}")
         #expect(Direction.signed("-12.50") == "\u{2212}12.50")
         #expect(Direction.signed("12.50") == "12.50")

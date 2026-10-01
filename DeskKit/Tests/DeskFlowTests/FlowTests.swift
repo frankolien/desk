@@ -8,14 +8,10 @@ import Testing
 
 @testable import DeskFlow
 
-/// Routes by URL path, because a flow talks to the Perpl gateway and a Monad node in the
-/// same breath.
 final class RoutingTransport: HTTPTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var routes: [String: [HTTPResponse]]
     private var seen: [(path: String, body: Data)] = []
-    /// When set, an unrouted `eth_sendRawTransaction` answers with the hash of what was
-    /// sent, the way a node does, so a flow can send for real and wait on its receipt.
     private let echoesSentTransactions: Bool
 
     init(_ routes: [String: [String]]) {
@@ -38,7 +34,6 @@ final class RoutingTransport: HTTPTransport, @unchecked Sendable {
         lock.withLock {
             let path = request.url?.path ?? ""
             seen.append((path, request.httpBody ?? Data()))
-            // A Monad node is one endpoint for every method, so route JSON-RPC by method.
             let key: String
             if path == "/" || path.isEmpty,
                let body = request.httpBody,
@@ -71,7 +66,6 @@ private func payloadJSON() throws -> Data {
     return try Data(contentsOf: url)
 }
 
-/// The recorded payload, asking `signer` to sign instead of the wallet it was captured for.
 private func payloadJSON(for signer: EthereumAddress) throws -> Data {
     let recorded = String(decoding: try payloadJSON(), as: UTF8.self)
     return Data(recorded.replacingOccurrences(
@@ -135,7 +129,6 @@ struct JSONSpanTests {
     func realPayload() throws {
         let document = try payloadJSON()
         let span = try JSONSpan.value(of: "typed_data", in: document)
-        // Parses as the same object, and is a byte-for-byte slice of what arrived.
         _ = try JSONDecoder().decode(EIP712.TypedData.self, from: span)
         #expect(document.range(of: span) != nil)
     }
@@ -251,7 +244,6 @@ struct EnrolmentTests {
         #expect(sent["pop_signature"] as? String == "0x" + String(repeating: "cc", count: 64))
     }
 
-    /// The guard, reached through the flow rather than in isolation.
     @Test("A gateway that answers with a permit gets no signature")
     func permitIsRefused() async throws {
         let permit = """
@@ -273,7 +265,6 @@ struct EnrolmentTests {
             try await Enrolment(rest: try rest(transport), chainID: 10143)
                 .enrol(address: signerAddress, label: "desk", signers: fakeSigners())
         }
-        // And nothing was sent onward.
         #expect(transport.bodies(for: "/api/v1/api-key/enroll").isEmpty)
     }
 
@@ -307,7 +298,6 @@ struct EnrolmentTests {
 @Suite("Opening a desk")
 struct OpeningSequenceTests {
     private func context() throws -> PerplContext {
-        // The flow reads both addresses out of pub/context rather than holding them.
         let json = """
         {"chain":{"chain_id":10143,"name":"Monad Testnet","block_explorer_urls":[]},
          "instances":[{"id":12,"address":"0x1964c32f0be608e7d29302aff5e61268e72080cc",
@@ -351,7 +341,6 @@ struct OpeningSequenceTests {
 
     @Test("A venue naming a contract this build does not pin is refused before anything is signed")
     func pinnedAddresses() throws {
-        // The fixture is testnet's own context, so testnet's pins match and mainnet's do not.
         #expect(throws: Never.self) { try ExchangeAddresses(context: try context(), pinnedTo: .testnet) }
         #expect(throws: ExchangeAddresses.Failure.self) {
             try ExchangeAddresses(context: try context(), pinnedTo: .mainnet)
@@ -425,7 +414,6 @@ struct OpeningSequenceTests {
 
         #expect(opened.index == 3)
         #expect(opened.apiKey.withValue { $0 } == "pk_new_phone")
-        // One account read, no balance or allowance read, and forwarding is the only send.
         #expect(methods(transport).filter { $0 == "eth_call" }.count == 1)
         #expect(methods(transport).filter { $0 == "eth_sendRawTransaction" }.count == 1)
         let estimated = try #require(transport.requests.compactMap {
@@ -466,8 +454,6 @@ struct OpeningSequenceTests {
 
     @Test("An unlimited allowance is clamped, never wrapped")
     func unlimitedAllowance() {
-        // ERC-20 approvals are routinely set to the uint256 maximum. Wrapping that would
-        // show a tiny number and send an approval the user did not need.
         let maximum = Data(repeating: 0xff, count: 32)
         #expect(OpeningSequence.money(maximum).raw == Money.maxRaw)
         #expect(OpeningSequence.money(Data()) == .zero)

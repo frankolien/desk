@@ -5,7 +5,6 @@ import DeskUI
 import PhotosUI
 import SwiftUI
 
-/// A wallet's .nad identity: the names it holds, one to find, and the records on each.
 struct NadNameSheet: View {
     let model: AppModel
     let onClose: () -> Void
@@ -125,9 +124,6 @@ struct NadNameSheet: View {
     }
 }
 
-/// Type a label, see at once whether it is free and what it costs.
-/// The name flow as the first screen after a new sign-in: the same three steps, each
-/// with Skip in the corner, ending on Home either way.
 struct NadOnboardingScreen: View {
     let model: AppModel
     let onFinish: () -> Void
@@ -146,7 +142,6 @@ struct NadFindNameView: View {
     let model: AppModel
     let names: NadNamesModel
     var initial = ""
-    /// Set when the flow is onboarding: Skip leaves for Home from any step.
     var onSkip: (() -> Void)? = nil
 
     @State private var typed = ""
@@ -195,7 +190,6 @@ struct NadFindNameView: View {
                 .background(Color.white.opacity(0.06), in: Capsule())
                 .overlay(TravellingBorder(tint: tint))
                 .background {
-                    // A soft pool of the same light behind the field, so the page is not flat black.
                     Capsule().fill(tint.opacity(0.22)).blur(radius: 46).padding(-14)
                 }
                 .padding(.top, 34)
@@ -288,7 +282,6 @@ struct NadFindNameView: View {
     }
 }
 
-/// Optional profile on the new name: the picture Desk already has, a line, an X handle, a site.
 struct NadProfileStep: View {
     let status: NadNameStatus
     let model: AppModel
@@ -322,8 +315,6 @@ struct NadProfileStep: View {
         return out
     }
 
-    /// A chosen photo is hosted through the Desk profile first, so the record can point
-    /// at a URL. One Face ID; the same picture then shows on Desk too.
     private func continueToConfirm() async {
         if let image, hostedAvatar == nil {
             isUploading = true
@@ -461,7 +452,6 @@ struct NadProfileStep: View {
     }
 }
 
-/// Name, cost, payment, what it sets. Then one Face ID.
 struct NadConfirmView: View {
     let status: NadNameStatus
     let records: [String: String]
@@ -628,7 +618,6 @@ struct NadConfirmView: View {
     }
 }
 
-/// A name the wallet already holds: its records, and making it the primary.
 struct NadNameDetail: View {
     let name: NadName
     let model: AppModel
@@ -794,7 +783,6 @@ struct NadNameDetail: View {
         defer { working = nil }
         do {
             var records = changed
-            // A new photo is hosted through the Desk profile first, then the record points at it.
             if let image {
                 let identity = IdentityDirectory.shared.identity(for: owner)
                 guard let hosted = try await model.saveProfile(
@@ -833,9 +821,6 @@ struct NadNameDetail: View {
     }
 }
 
-
-/// A point of light circling the capsule's edge over a faint rim, the way a search field
-/// says it is alive. Still with Reduce Motion: the rim alone, in the same tint.
 private struct TravellingBorder: View {
     let tint: Color
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

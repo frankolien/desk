@@ -1,4 +1,3 @@
-// node --test web/test/history.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -60,8 +59,6 @@ test("scores need trades and real money behind them, and liquidations cost", () 
   assert.equal(score({ ...steady, liq: 2 }), score(steady) - 10);
   assert.equal(score(emptyRecord()), null);
 
-  // A perfect record on one market, with little notional behind it, is the cheap shape to
-  // manufacture. It must not outrank a real one.
   const thin = { ...emptyRecord(), n: 20, w: 20, l: 0, gp: 300, gl: 0, dd: 0, vol: 1_200,
     markets: { BTC: [300, 20] } };
   assert.ok(score(thin) < score(steady));
@@ -77,7 +74,6 @@ test("a short record cannot outscore a long one with the same edge, and fifty tr
   assert.equal(score(edge(50)), score(edge(947)));
   assert.ok(score(edge(49)) < score(edge(50)));
 
-  // The leaderboard carries the count beside the score, so a reader can see what backs it.
   const rows = leaders([{ 1: edge(18), 2: edge(947) }]);
   assert.deepEqual(rows.map((row) => [row.account, row.trades]), [["2", 947], ["1", 18]]);
   assert.equal(statistics(edge(18)).trades, 18);
@@ -95,13 +91,10 @@ test("a replayed block range does not count twice", () => {
   const twice = emptyRecord();
   applyEvent(twice, open, market);
   applyEvent(twice, close, market);
-  // The pipeline that writes the shards and the cursor is not a transaction, so the same
-  // range can be read again after a partial write.
   applyEvent(twice, open, market);
   applyEvent(twice, close, market);
 
   assert.equal(twice.n, once.n);
-  // Two real events in the same block are still two events.
   const sameBlock = emptyRecord();
   applyEvent(sameBlock, { ...open, block: 20, logIndex: 1 }, market);
   applyEvent(sameBlock, { ...close, block: 20, logIndex: 2 }, market);
@@ -161,7 +154,6 @@ test("the index records when it last moved forward, and only when it did", async
   await indexHistory({ store, hypersync, markets, now: () => 5_000, deadline: 10_000 });
   assert.deepEqual(JSON.parse(await store.get(INDEX_STATUS_KEY)), { at: 5_000, block: 280, behind: 0 });
 
-  // Already at the tip: nothing moved, so the time stays where it was.
   await indexHistory({ store, hypersync: { ...hypersync, height: async () => 290 }, markets, now: () => 9_000, deadline: 10_000 });
   assert.equal(JSON.parse(await store.get(INDEX_STATUS_KEY)).at, 5_000);
 });
@@ -181,7 +173,6 @@ test("a page refused partway keeps the pages already read, then reports the refu
   assert.equal(await store.get("hist:cursor"), "110");
   assert.equal(JSON.parse(await store.get(shardKey(shardOf("5201"))))["5201"].longs, 1);
 
-  // Refused on the first page: nothing to keep, nothing written.
   const untouched = memoryStore();
   await untouched.set("hist:cursor", "90");
   await assert.rejects(indexHistory({ store: untouched, hypersync, markets, deadline: Date.now() + 5_000 }), /429/);

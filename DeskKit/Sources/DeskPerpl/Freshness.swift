@@ -1,11 +1,7 @@
 import Foundation
 
-/// A value and when *we* received it.
-///
-/// The age is measured against a local monotonic clock, never against the server's
-/// timestamp. A device whose wall clock is five minutes out would otherwise show every
-/// live price as long stale, and a device set five minutes early would show a stale one
-/// as live. The server timestamp is carried alongside for display and correlation only.
+/// Age is measured on a local monotonic clock, never the server's timestamp, so a device
+/// whose wall clock is off can't show a stale price as live.
 public struct Observed<Value: Sendable>: Sendable {
     public let value: Value
     public let receivedAt: ContinuousClock.Instant
@@ -26,25 +22,16 @@ public struct Observed<Value: Sendable>: Sendable {
     }
 }
 
-/// How much a number on screen can be trusted.
-///
-/// A mark price is not a ten-hertz stream: Perpl writes mark on chain only when it moves
-/// more than 0.05%, so quiet is normal and quiet is not the same as broken. The states
-/// exist because a socket can be connected and stalled, and a trading app that shows a
-/// stale number as a live one is lying.
 public enum Freshness: String, Sendable, Hashable, CaseIterable {
     case live
     case settling
     case stale
     case disconnected
 
-    /// Only the last of these stops a trade. A stale price is re-priced on submit rather
-    /// than blocking the user, because refusing to trade on a quiet market would be the
-    /// wrong call far more often than the right one.
+    /// Only the last of these stops a trade; a stale price is re-priced on submit, since a
+    /// quiet market is normal.
     public var allowsConfirm: Bool { self != .disconnected }
 
-    /// Never blank, never a dash, never a zero, never a spinner over a number. Even
-    /// disconnected renders the last known good value, dimmed.
     public var showsLastKnownValue: Bool { true }
 
     public var freezesDigits: Bool { self == .stale || self == .disconnected }
@@ -69,9 +56,6 @@ public struct FreshnessPolicy: Sendable, Hashable {
 
     public static let `default` = FreshnessPolicy()
 
-    /// A closed socket is disconnected at once, whatever the age says. Waiting fifteen
-    /// seconds to admit something we already know would leave the confirm button live
-    /// over a price that cannot be refreshed.
     public func state(age: Duration, socketIsConnected: Bool = true) -> Freshness {
         guard socketIsConnected else { return .disconnected }
         if age >= disconnectedAfter { return .disconnected }

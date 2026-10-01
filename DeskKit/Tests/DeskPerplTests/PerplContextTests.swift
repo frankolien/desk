@@ -3,7 +3,6 @@ import Foundation
 import Testing
 @testable import DeskPerpl
 
-/// Pinned to a payload captured from https://testnet.perpl.xyz on 13 September 2026.
 @Suite("Perpl context")
 struct PerplContextTests {
     let context: PerplContext
@@ -98,7 +97,6 @@ struct PerplContextTests {
     func invertedMarginsRefused() throws {
         let url = try #require(Bundle.module.url(forResource: "Context-testnet", withExtension: "json"))
         var json = try String(contentsOf: url, encoding: .utf8)
-        // Swap BTC's two margin numbers, which is what the percentage misreading implies.
         json = json.replacingOccurrences(
             of: "\"initial_margin\": 1500, \"maintenance_margin\": 2500",
             with: "\"initial_margin\": 2500, \"maintenance_margin\": 1500")
@@ -177,7 +175,6 @@ struct LiveContextTests {
     }
 }
 
-/// Pinned to a payload captured from https://app.perpl.xyz on 17 September 2026.
 @Suite("Perpl mainnet context")
 struct PerplMainnetContextTests {
     let context: PerplContext

@@ -9,8 +9,6 @@ public struct Transaction: Sendable, Hashable {
     public let maxFeePerGas: UInt64
     public let gasLimit: UInt64
     public let to: EthereumAddress?
-    /// Big-endian wei. Held as bytes rather than a `UInt64` because a balance in a
-    /// token with eighteen decimals outgrows one at about eighteen units.
     public let value: Data
     public let data: Data
 
@@ -36,8 +34,7 @@ public struct Transaction: Sendable, Hashable {
 
     public static let type: UInt8 = 0x02
 
-    /// The nine fields that are signed. The access list is present and empty — omitting
-    /// it shortens the list and changes the digest.
+    /// The access list is present and empty: omitting it changes the digest.
     private var unsignedFields: [RLP.Item] {
         [
             RLP.quantity(chainID),
@@ -75,7 +72,6 @@ public struct Transaction: Sendable, Hashable {
 
 public struct SignedTransaction: Sendable, Hashable {
     public let raw: Data
-    /// The hash the chain will know it by, available before it is sent.
     public let hash: Data
     public let transaction: Transaction
 

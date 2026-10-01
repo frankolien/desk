@@ -2,7 +2,6 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-/// Auto-copy's switch in Control Center, on the Lock Screen and on the Action button.
 struct AutoCopyToggle: ControlWidget {
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: AutoCopyControl.controlKind, provider: Provider()) { running in

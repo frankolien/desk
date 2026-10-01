@@ -1,4 +1,3 @@
-// node --test web/test/chat.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -48,7 +47,6 @@ test("a message is posted, read back oldest first, and the poster counts as pres
   assert.equal(room.body.messages[1].address, null);
   assert.equal(room.body.here, 3);
 
-  // Two minutes on, the early posters have left; the reader is still there.
   const later = await readRoom(store, { market: "BTC", install: "c".repeat(64) }, 3_000 + 121_000);
   assert.equal(later.body.here, 1);
 });

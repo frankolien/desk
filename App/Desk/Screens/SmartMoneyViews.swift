@@ -180,7 +180,6 @@ private struct SignalRow: View {
 }
 
 struct TrackWalletSheet: View {
-    /// Nil starts a new one.
     let existing: TrackedWallet?
     @Environment(\.dismiss) private var dismiss
     @State private var address = ""

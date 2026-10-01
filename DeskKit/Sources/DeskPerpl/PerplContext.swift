@@ -1,18 +1,11 @@
 import DeskMoney
 import Foundation
 
-/// `GET /api/v1/pub/context`, decoded.
-///
-/// The source of truth for every per-market number the app computes with. Nothing here
-/// is hardcoded anywhere else: decimals, fees and margin fractions differ between
-/// testnet and mainnet for the same asset.
 public struct PerplContext: Decodable, Sendable {
     public let chain: ChainInfo
     public let instances: [Instance]
     public let tokens: [Token]
     public let markets: [Market]
-    /// Perpl blocks these at its own gateway. Notably the United States and the United
-    /// Kingdom, which is a fact about where the demo can be recorded, not a detail.
     public let geoBlock: [String]
     public let features: [String: String]
 
@@ -21,9 +14,6 @@ public struct PerplContext: Decodable, Sendable {
         case geoBlock = "geo_block"
     }
 
-    /// Perpl can turn enrolment off for everyone. When it is off the app has no way in
-    /// at all, so this is checked at sign-in and said out loud rather than surfacing as
-    /// an enrolment that fails for no stated reason.
     public var apiKeysEnabled: Bool { features["apiKeysEnabled"] == "on" }
 
     public func market(id: UInt32) -> Market? { markets.first { $0.id == id } }
@@ -43,11 +33,6 @@ public struct ChainInfo: Decodable, Sendable {
     }
 }
 
-/// Monad's fee market, as Perpl already observes it.
-///
-/// Worth taking from here rather than from a separate RPC call: it arrives with the
-/// context the app already fetches, and it carries the head block that an order's
-/// `lb` deadline is measured from.
 public struct GasSnapshot: Decodable, Sendable {
     public let observedAt: BlockStamp
     public let headBlock: Int64
@@ -135,7 +120,6 @@ public struct Market: Decodable, Sendable {
     public let sizeUnits: String
     public let fundingIntervalSeconds: Int
     public let orderTTLBlocks: UInt32
-    /// How long Perpl keeps retrying an order that failed to post, in blocks.
     public let orderRetryBlocks: UInt32
     public let maxMarketSlippageBps: Int
     public let maxNegativePnLCollateralBps: Int
@@ -176,8 +160,6 @@ public struct Market: Decodable, Sendable {
         funding = try box.decodeIfPresent(MarketFunding.self, forKey: .funding)
     }
 
-    /// How long Desk waits for the venue's answer to an order. A first failure can still
-    /// be overturned while Perpl retries, so the wait covers the retry window too.
     public var orderWaitBlocks: UInt32 { max(orderTTLBlocks, orderRetryBlocks) }
 
     public func price(_ raw: Int64) -> Price? { Price(raw: raw, decimals: config.priceDecimals) }
@@ -188,7 +170,6 @@ public struct MarketConfig: Decodable, Sendable {
     public let isOpen: Bool
     public let priceDecimals: UInt8
     public let sizeDecimals: UInt8
-    /// Divisors in hundredths, not percentages. See `maxLeverage`.
     public let initialMarginFraction: Int
     public let maintenanceMarginFraction: Int
     public let makerFeeMicros: Int64
@@ -196,12 +177,10 @@ public struct MarketConfig: Decodable, Sendable {
     public let makerFeeTiersMicros: [Int64]
     public let takerFeeTiersMicros: [Int64]
 
-    /// `initial_margin: 1500` is 15x, not 15%. The maintenance number being larger means
-    /// a *smaller* rate, and the two readings coincide at exactly 1000 — so a market
-    /// configured there passes either way and the misreading survives casual testing.
+    /// `initial_margin: 1500` is 15x, not 15%; a larger maintenance number is a smaller rate.
+    /// Both readings agree at exactly 1000, so a market configured there hides the misreading.
     public var maxLeverage: Int { initialMarginFraction / 100 }
 
-    /// Maintenance margin as a percentage, for display only. Compute with the fractions.
     public var maintenanceMarginPercent: Double { 100.0 / Double(maintenanceMarginFraction) * 100 }
 
     enum CodingKeys: String, CodingKey {
@@ -227,7 +206,6 @@ public struct MarketState: Decodable, Sendable {
     public let askRaw: Int64
     public let previousRaw: Int64
     public let openInterestRaw: Int64
-    /// The day's traded notional in collateral units. Absent on older payloads, so zero.
     public let dailyVolumeRaw: Int64
 
     enum CodingKeys: String, CodingKey {
@@ -243,9 +221,6 @@ public struct MarketState: Decodable, Sendable {
         case dailyVolumeRaw = "dva"
     }
 
-    // Perpl sends a scaled integer as a number while it is small and as a string once it
-    // is large, per field and without warning. One market crossing that threshold used to
-    // fail the whole context decode, which is the app failing to start.
     public init(from decoder: any Decoder) throws {
         let box = try decoder.container(keyedBy: CodingKeys.self)
         observedAt = try box.decode(BlockStamp.self, forKey: .observedAt)
@@ -261,8 +236,6 @@ public struct MarketState: Decodable, Sendable {
     }
 }
 
-/// `GET /v1/market-data/:market_id/funding/:from-:to`: one event per funding interval,
-/// oldest first. The newest event's time may be an estimate for up to a minute.
 public struct FundingSeries: Decodable, Sendable {
     public let events: [MarketFunding]
     enum CodingKeys: String, CodingKey { case events = "d" }
@@ -300,11 +273,8 @@ public struct MarketFunding: Decodable, Sendable {
     }
 }
 
-/// A block and the wall-clock time it was observed at — Perpl's `at` on every snapshot.
-///
-/// Named `BlockStamp` rather than the obvious `Observation`, which would shadow Swift's
-/// own `Observation` module for every file that imports this one and break the
-/// `@Observable` macro with an error that names neither this type nor that module.
+/// A block and when it was observed, Perpl's `at`. Not named `Observation`: that would
+/// shadow Swift's module and break `@Observable` with an unrelated-looking error.
 public struct BlockStamp: Decodable, Sendable {
     public let block: Int64
     public let timestampMilliseconds: Int64
@@ -346,15 +316,10 @@ extension PerplContext {
         case headBlockUnusable(Int64)
     }
 
-    /// Blocks arrive at roughly two a second, so this is some hundreds of millions of
-    /// years away and anything past it is a bad answer rather than a distant one.
     public static let implausibleBlock: Int64 = 1 << 52
 
-    /// Checks what the app assumes before it computes anything with this.
-    ///
-    /// The margin check is the valuable one: `maintenance > initial` holds only under
-    /// the divisor reading. Read as percentages a fresh long's liquidation price lands
-    /// *above* its entry, and no other assertion catches it.
+    /// `maintenance > initial` holds only under the divisor reading; read as percentages, a
+    /// fresh long's liquidation price lands above its entry and nothing else catches it.
     @discardableResult
     public func validated() throws -> Self {
         guard let collateral = collateralToken else { throw Invariant.collateralTokenMissing }
@@ -366,8 +331,6 @@ extension PerplContext {
             guard head > 0, head < Self.implausibleBlock else { throw Invariant.headBlockUnusable(head) }
         }
         for market in markets {
-            // A divisor at or below 100 is not leverage, and a maintenance divisor of
-            // zero makes the displayed margin percentage infinite.
             guard market.config.initialMarginFraction >= 100,
                   market.config.maintenanceMarginFraction > 0
             else {
@@ -376,8 +339,6 @@ extension PerplContext {
                     initial: market.config.initialMarginFraction,
                     maintenance: market.config.maintenanceMarginFraction)
             }
-            // A zero cap would refuse every close, which is a server locking a user out
-            // of their own position.
             guard market.maxMarketSlippageBps > 0 else {
                 throw Invariant.slippageCapUnusable(market: market.id, bps: market.maxMarketSlippageBps)
             }

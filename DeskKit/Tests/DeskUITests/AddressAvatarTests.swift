@@ -1,15 +1,10 @@
 import Testing
 @testable import DeskUI
 
-/// The avatar is an identity check the user performs without reading. That only works if
-/// the mark is stable for an account and different between accounts, so both properties
-/// are tested rather than assumed.
 @Suite("Address avatar")
 struct AddressAvatarTests {
-    /// The bug this exists to catch: `hashValue` is seeded per process in Swift, so a
-    /// mark derived from it would be a different colour on every launch — and an avatar
-    /// that changes on relaunch teaches the user to ignore it, which is worse than not
-    /// having one.
+    /// `hashValue` is seeded per process in Swift, so a mark derived from it would change
+    /// colour on every launch.
     @Test("The same address always derives the same mark")
     func stableForOneAddress() {
         let address = "0xb63b4C97aE9F1B0f8c7c8e33dA51b9E4f2c1A4c97"
@@ -20,8 +15,6 @@ struct AddressAvatarTests {
         }
     }
 
-    /// Checksum casing is presentation, not identity: the same account rendered from a
-    /// lowercase string and a checksummed one is one account and must wear one face.
     @Test("Casing does not change the mark")
     func caseInsensitive() {
         let lower = AddressAvatar.seed(for: "0xabcdef0123456789abcdef0123456789abcdef01")
@@ -36,8 +29,6 @@ struct AddressAvatarTests {
         #expect(upper != lower)
     }
 
-    /// An address differing in one nibble must not land on the same hue, or the second
-    /// device in the recovery demo looks identical to the first while holding nothing.
     @Test("Addresses one character apart get different hues", arguments: [
         ("0x0000000000000000000000000000000000000000",
          "0x0000000000000000000000000000000000000001"),
@@ -62,8 +53,6 @@ struct AddressAvatarTests {
         }
     }
 
-    /// Not a strict requirement, but a mark that collapses many accounts onto one colour
-    /// is not an identity check. Sampling the space guards the mixing function.
     @Test("The hue space is actually used")
     func spread() {
         let hues = Set((0..<256).map { Int(AddressAvatar.seed(for: "0xaccount\($0)").primary) })

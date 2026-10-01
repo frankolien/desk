@@ -13,7 +13,6 @@ struct LastGoodTests {
         #expect(held.value == nil)
         #expect(held.hasValue == false)
         #expect(held.age() == nil)
-        // Nothing to show is disconnected, not live-with-a-zero.
         #expect(held.freshness() == .disconnected)
     }
 
@@ -44,8 +43,6 @@ struct LastGoodTests {
 
     @Test("A failure cannot reach the value it failed to replace")
     func failureKeepsValue() {
-        // A trading app that shows a zero position during a reconnect is a trading app
-        // that causes a panic sell.
         var held = LastGood<Money>()
         held.record(Money(text: "1250.50")!)
         for index in 1...20 {
@@ -86,7 +83,6 @@ struct LastGoodTests {
         var held = LastGood<Money>()
         held.record(Money(text: "10")!, at: base)
         #expect(held.freshness(at: base, socketIsConnected: false) == .disconnected)
-        // And the value is still there to render, dimmed.
         #expect(held.value != nil)
     }
 
@@ -124,13 +120,11 @@ struct BackoffTests {
 
     @Test("A huge failure count cannot overflow the delay")
     func noOverflow() {
-        // `base * 2^n` with an unbounded n is a trap waiting for a long disconnection.
         #expect(Backoff.default.delay(afterFailures: .max) == Backoff.default.cap)
     }
 
     @Test("Retry is silent until it has failed enough to be worth saying")
     func silentAtFirst() {
-        // A spinner over a number that is still correct is worse than no spinner.
         var held = LastGood<Money>()
         held.record(Money(text: "10")!)
         #expect(held.shouldReportProblem() == false)

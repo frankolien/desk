@@ -3,11 +3,9 @@ import DeskUI
 import Observation
 import SwiftUI
 
-/// One message in a market's room.
 struct ChatMessage: Decodable, Identifiable, Hashable, Sendable {
     let id: String
     let at: Int64
-    /// A stable hash of the phone that posted. It draws the avatar when no address was given.
     let who: String
     let address: String?
     let name: String?
@@ -16,7 +14,6 @@ struct ChatMessage: Decodable, Identifiable, Hashable, Sendable {
     var date: Date { Date(timeIntervalSince1970: Double(at) / 1000) }
 }
 
-/// The room for one market, polled while it is on screen.
 @MainActor
 @Observable
 final class MarketChatModel {
@@ -70,7 +67,6 @@ final class MarketChatModel {
         messages = (room.messages + pending).filter { !Moderation.blockedWhos.contains($0.who) }
     }
 
-    /// Reports go to the server; a block is this phone's alone and takes effect now.
     func report(_ message: ChatMessage) async {
         let sent = await Moderation.reportMessage(message, market: symbol)
         problem = sent ? "Reported. Thanks." : "Couldn't send the report. Try again."
@@ -82,7 +78,6 @@ final class MarketChatModel {
         problem = "Blocked. You won't see their messages."
     }
 
-    /// Sends, and shows the message at once; the next poll confirms it or the failure says why.
     func send(_ text: String, address: String?, name: String?) async {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, !isSending, let install = InstallSecret.value() else { return }
@@ -116,7 +111,6 @@ final class MarketChatModel {
     }
 }
 
-/// The room, full screen: who is here, what they are saying, and a line to say something.
 struct MarketChatSheet: View {
     let chat: MarketChatModel
     let market: MarketModel
@@ -260,8 +254,6 @@ struct MarketChatSheet: View {
         Task { await chat.send(text, address: model.address?.checksummed, name: ownName) }
     }
 
-    /// The poster's own position in this market, when the holders list has one for the
-    /// address they gave. Unverified, like the address, and shown as a plain chip.
     private func position(for message: ChatMessage) -> MarketHolder? {
         guard let address = message.address else { return nil }
         return holders.holders.first { $0.address?.caseInsensitiveCompare(address) == .orderedSame }
@@ -323,7 +315,6 @@ private struct ChatMessageRow: View {
     }
 }
 
-/// The room's door on the market screen: who is in and the last thing said.
 struct MarketChatPreview: View {
     let chat: MarketChatModel
     let onOpen: () -> Void

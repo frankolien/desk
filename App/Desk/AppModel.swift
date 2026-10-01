@@ -9,8 +9,6 @@ import Observation
 import WidgetKit
 import UIKit
 
-/// Where the app is. Not a router: the state decides the screen, so there is no way to
-/// be on Fund with no address or on Market with no desk.
 @MainActor
 @Observable
 final class AppModel {
@@ -26,35 +24,17 @@ final class AppModel {
     private(set) var isWorking = false
     private(set) var isSwitchingNetwork = false
 
-    /// Collateral held at the exchange, backing positions.
-    ///
-    /// Unlike the two below, this does not come from the chain. It arrives on the
-    /// authenticated socket with the account snapshot, so it stays unavailable — `--`,
-    /// not `0.00` — until a real session exists. Showing a zero here would tell a funded
-    /// user their collateral is gone.
+    /// From the authenticated socket, not the chain: it stays unavailable (`--`, not `0.00`)
+    /// until a session exists, because a zero would tell a funded user their collateral is gone.
     private(set) var collateral = LastGood<Money>()
-    /// AUSD in the wallet: what can still be deposited. Read from the chain.
     private(set) var walletAUSD = LastGood<Money>()
     /// MON, for gas. Eighteen decimals, so deliberately not `Money`.
     private(set) var walletMON = LastGood<NativeAmount>()
-    /// Whether a Perpl account exists for this address, read from the chain rather than
-    /// assumed from having signed in.
     private(set) var hasDesk = LastGood<Bool>()
-    /// The open position, exactly as the venue reports it.
-    ///
-    /// Kept raw rather than as derived figures, because the figures need a mark and the
-    /// mark belongs to the market model. Deriving them at the point of display means
-    /// every figure on the screen descends from the one tick that was current when it was
-    /// drawn, rather than from two ticks a frame apart.
-    ///
-    /// It arrives on the authenticated socket as `mt: 26` then `mt: 27`, so it stays nil
-    /// until a real session exists. Nil is rendered as "no position", which is correct
-    /// while there is no way to have one.
+    /// Kept raw and derived at display, so every figure comes from the same mark tick.
+    /// Arrives on the authenticated socket as `mt: 26` then `mt: 27`; nil until a session exists.
     private(set) var openPosition: PerplPosition?
     private(set) var openPositions: [PerplPosition] = []
-    /// Positions the venue has already closed, newest first. They arrive on the same
-    /// `mt: 26`/`mt: 27` stream and carry the exit price and the realised PnL.
-    /// What this account has closed on this network, remembered on the phone.
     var closedTrades: [ClosedTrade] {
         if let stagedClosedTrades { return stagedClosedTrades }
         guard let address else { return [] }
@@ -62,47 +42,27 @@ final class AppModel {
     }
     private var stagedClosedTrades: [ClosedTrade]?
 
-    /// Whether the trading key is in memory right now.
-    ///
-    /// There is no countdown. The key stays while Desk is open, is wiped twenty seconds
-    /// after Desk leaves the foreground or the moment the phone locks, and comes back with
-    /// one Face ID prompt. Locked is not signed out: the address, balances and positions
-    /// stay on screen, because none of them needs the key to be read.
+    /// The key is wiped when the phone locks, or on return after five minutes away.
+    /// Locked is not signed out: address, balances and positions stay on screen.
     private(set) var isKeyUnlocked = false
-    /// Why the last unlock did not finish, if it did not.
     private(set) var unlockProblem: String?
     private var isUnlocking = false
-    /// Why the last attempt to open a desk stopped, if it did.
     private(set) var openingProblem: String?
-    /// A setup failure that happened before the exchange-opening sequence.
     private(set) var fundingProblem: String?
-    /// Set when Desk's faucet cannot help, so setup offers Monad's own instead.
     private(set) var needsManualFaucet = false
-    /// What the faucet is waiting on, while it waits.
     private(set) var fundingStatus: String?
     private let faucet = DeskFaucet()
-    /// Which of the four steps is running, for the Fund screen to render.
     private(set) var openingStep: OpeningSequence.Progress?
-    /// Handed the enrolled key the moment one exists.
     let trading = TradingSession()
-    /// Whether this network's Perpl account is open and its key is in the session.
-    /// Separate from `stage`: an account missing on one network is a card on Home, not a
-    /// trip back through onboarding.
     private(set) var hasTradingAccount = false
-    /// Which derived trading key the signing session holds. Each network's Perpl token
-    /// belongs to one index, so a switch to a network whose token uses another index has to
-    /// drop the key and derive the right one at the next Face ID prompt.
+    /// Each network's Perpl token belongs to one derived key index, so switching to a network
+    /// whose token uses another index drops the key and derives the right one at the next Face ID.
     private var sessionTradingIndex: UInt32?
 
-    /// True once a desk has been opened on any network. After that, onboarding never
-    /// returns; a network without an account is set up from inside the app.
     private func hasOnboarded(_ address: EthereumAddress) -> Bool {
         DeskNetwork.allCases.contains { APIKeyStore.forNetwork($0).load(for: address) != nil }
     }
 
-    /// The .nad name flow shown once, straight after a sign-in that created or first
-    /// reached this account on the device. Funding is no longer a gate: Home shows the
-    /// setup card and Add funds opens it.
     private(set) var showsNameOnboarding = false
 
     private static func nameOnboardingKey(_ address: EthereumAddress) -> String { "desk.onboarding.name.\(address.checksummed)" }
@@ -115,32 +75,22 @@ final class AppModel {
         if let address { UserDefaults.standard.set(true, forKey: Self.nameOnboardingKey(address)) }
         showsNameOnboarding = false
     }
-    /// Shown once, ever, the first time leverage is reached.
     var hasSeenLeverageExplainer = UserDefaults.standard.bool(forKey: "desk.leverageExplainerSeen") {
         didSet { UserDefaults.standard.set(hasSeenLeverageExplainer, forKey: "desk.leverageExplainerSeen") }
     }
     private let session = SigningSession()
     private let passkey: any PasskeyService
     private var apiKeys: APIKeyStore { APIKeyStore.forNetwork(network) }
-    /// Testnet until the person chooses otherwise. Remembered, because waking up on a
-    /// different network than the one left is exactly the confusion the switch exists to
-    /// prevent.
     private(set) var network: DeskNetwork = DeskNetwork(
         rawValue: UserDefaults.standard.string(forKey: "desk.network") ?? "") ?? .testnet
     private var balancePoller: Task<Void, Never>?
-    /// Built once, on the first refresh: it needs the venue's context to learn which
-    /// contracts to read, and that is one network call rather than a constant.
     private var balances: BalanceReader?
-    /// MON on Monad mainnet: real funds, spent only on spot purchases.
     private(set) var mainnetMON = LastGood<NativeAmount>()
-    /// One sender for mainnet, so its nonces stay in order across purchases.
     private var mainnetSender: TransactionSender?
 
     init(passkey: any PasskeyService) {
         self.passkey = passkey
         #if DEBUG
-        // `-network mainnet` puts a staged launch on the other network without touching
-        // what the phone remembers.
         if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-network"),
            index + 1 < ProcessInfo.processInfo.arguments.count,
            let chosen = DeskNetwork(rawValue: ProcessInfo.processInfo.arguments[index + 1]) {
@@ -160,17 +110,12 @@ final class AppModel {
                 ClosedPositionsStore.shared.record(positions, network: network.rawValue, address: address.checksummed)
             }
         }
-        // An order that finds Desk locked asks for Face ID once and carries on. Only a
-        // locked key qualifies: a connection that failed for any other reason is reported
-        // as itself, not answered with a prompt that would not fix it.
+        // Only a locked key asks for Face ID; any other connection failure is reported as itself.
         trading.onNeedsUnlock = { [weak self] in
             guard let self, await session.isOpen == false else { return false }
             return await unlock()
         }
         #if DEBUG
-        // `-stage fund|market` jumps straight to a screen, so each one can be captured
-        // and reviewed without walking the flow. Debug only, and never a way into a
-        // signed-in state on a real build.
         if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-stage"),
            index + 1 < ProcessInfo.processInfo.arguments.count {
             let name = ProcessInfo.processInfo.arguments[index + 1]
@@ -179,9 +124,6 @@ final class AppModel {
             case "fund", "fund-empty": .needsDesk
             default: .welcome
             }
-            // `empty` is the state a real first run is actually in: signed in, funded by
-            // nothing. It is the screen most likely to be wrong and the least likely to
-            // be looked at, so it gets its own way in.
             if name == "name" { showsNameOnboarding = true }
             if name == "empty" || name == "fund-empty" {
                 // Its own seed: the shared review wallet holds real testnet funds.
@@ -204,10 +146,7 @@ final class AppModel {
                 openPositions = Self.reviewPosition.map { [$0] } ?? []
                 stagedClosedTrades = Self.reviewClosedPositions.map { ClosedTrade(position: $0) }
                 isKeyUnlocked = true
-                // `home-setup` is a signed-in person on a network with no account yet.
                 hasTradingAccount = name != "home-setup"
-                // On mainnet the staged person has just received MON from an exchange and
-                // nothing else, which is the state the swap exists for.
                 if network.holdsRealFunds, name == "home-setup" || name == "fund" {
                     walletMON.record(NativeAmount(decimalText: "812.4") ?? .zero)
                     walletAUSD.record(.zero)
@@ -223,14 +162,6 @@ final class AppModel {
     }
 
     #if DEBUG
-    /// A position shaped exactly as `mt: 26` sends one, so the position UI can be drawn
-    /// and reviewed before the authenticated socket exists. Decoded from JSON rather than
-    /// built field by field, because a fixture that skips the decoder proves nothing
-    /// about the decoder.
-    ///
-    /// A long of 1.00000 BTC entered at 77,000.0 against 5,000 AUSD, which is roughly 15x
-    /// — near the ceiling, so the liquidation figure on screen is a real one and close
-    /// enough to matter.
     static let reviewPosition: PerplPosition? = {
         let body = Data(#"""
         {"mkt":16,"acc":42,"pid":"7","sd":1,"c":"5000000000","ep":770000,"epr":21845,
@@ -239,10 +170,6 @@ final class AppModel {
         return try? JSONDecoder().decode(PerplPosition.self, from: body)
     }()
 
-    /// Two positions the venue has already closed, so History can be drawn and reviewed
-    /// before an account with a real trading past exists. The same `mt: 26` shape as the
-    /// open one, with the exit price and realised PnL a closed position carries: a short
-    /// that made 325 AUSD and a long that lost 67.50.
     static let reviewClosedPositions: [PerplPosition] = {
         let body = Data(#"""
         [{"mkt":16,"acc":42,"pid":"5","sd":2,"c":"1200000000","ep":768000,"s":50000,
@@ -271,16 +198,11 @@ final class AppModel {
 
     func advance(to stage: Stage) { self.stage = stage }
 
-    /// The checksummed address, not the shortened one — a truncated address pasted into a
-    /// block explorer is a support ticket.
     func copyAddress() {
         guard let address else { return }
         UIPasteboard.general.string = address.checksummed
     }
 
-    /// Signs and sends a checked call to one of nad's two pinned contracts on Monad
-    /// mainnet, with one Face ID prompt, and returns the hash once it is mined. Nad
-    /// lives on mainnet only, so this uses the mainnet sender whatever Desk trades on.
     func sendNadCall(_ call: NadCall, value: NativeAmount) async throws -> String {
         let checked = try call.checked(expectingValue: value)
         let sender: TransactionSender
@@ -299,8 +221,6 @@ final class AppModel {
         return signed.hashHex
     }
 
-    /// The wallet's own name and picture, signed once with Face ID and shown to everyone.
-    /// Returns the hosted picture's URL, which a name record can point at.
     @discardableResult
     func saveProfile(name: String, image: Data?) async throws -> String? {
         guard let address else { return nil }
@@ -312,39 +232,22 @@ final class AppModel {
         return saved.avatar
     }
 
-    /// Whether the welcome screen should offer to create a passkey.
-    ///
-    /// True exactly when this device has never derived an address. It cannot be inferred
-    /// from a failed sign-in: iOS reports a dismissed sheet and "no credential matched"
-    /// with the same `.canceled` code, so waiting for a distinguishable failure would
-    /// leave a genuinely new user with no way in at all.
-    ///
-    /// So the offer is present from the start on a fresh device and absent once an
-    /// account exists here — which is the case that matters, because creating a second
-    /// passkey makes a second wallet and strands the first. Sign-in stays the primary
-    /// action, since a passkey synced from another device is the commoner reason for a
-    /// device to have none of its own.
+    /// True only when this device has never derived an address: iOS reports a dismissed sheet and
+    /// "no credential matched" both as `.canceled`, and a second passkey strands the first wallet.
     var mayOfferCreate: Bool { passkey.lastSeenAddress == nil }
 
-    /// This device has signed in before. Nothing about the key is stored — only the
-    /// address it derived last time — but that is enough to know the onboarding has
-    /// been read, and that the next thing this person wants is Face ID, not a pitch.
     var isReturning: Bool { passkey.lastSeenAddress != nil }
 
     func signIn() async {
         await authenticate(creating: false)
     }
 
-    /// Reached only from an explicit "create a new account" choice.
     func createAccount() async {
         await authenticate(creating: true)
     }
 
     enum Resumption: Equatable { case arrived, cancelled, unavailable }
 
-    /// The returning path: the sealed trading key, opened with one Face ID, and the
-    /// account it belongs to brought back. No passkey ceremony. Nothing here can create
-    /// a wallet or change which one is on screen — the address is the one last seen.
     func resume() async -> Resumption {
         guard let last = passkey.lastSeenAddress else { return .unavailable }
         switch await TradingKeyVault.open(address: last, network: network.rawValue, reason: "Unlock Desk") {
@@ -358,8 +261,6 @@ final class AppModel {
             do {
                 try await arrive(at: last)
             } catch {
-                // The venue did not answer. The account is still this person's; the
-                // trading screens report the connection themselves.
                 considerNameOnboarding(last)
                 stage = .trading
             }
@@ -371,13 +272,6 @@ final class AppModel {
         }
     }
 
-    /// With the key open, brings the account up and picks the screen.
-    ///
-    /// `hasDesk` is an on-chain fact. Passkey derivation deliberately cannot answer it, so
-    /// checking a derived flag here always sent returning users back to setup. The account
-    /// is read before the destination is chosen, and the authenticated socket is rebuilt
-    /// before the first order can be opened — a returning user who jumped straight to the
-    /// trading UI once found a ticket that could only answer "not connected".
     private func arrive(at address: EthereumAddress) async throws {
         await refreshBalances()
         startPollingBalances()
@@ -398,16 +292,14 @@ final class AppModel {
         defer { isWorking = false }
         do {
             let store = apiKeys
-            // Read before deriving. `derive` records the address it just derived, so asking
-            // afterwards compares a value against itself and the guard can never fire — which
-            // is exactly the case it exists for.
+            // Read before deriving: `derive` records the address it derived, so reading after
+            // would compare it against itself and the guard could never fire.
             let lastSeen = passkey.lastSeenAddress
             let keys = creating
                 ? try await passkey.createAccounts(tradingIndex: { store.tradingIndex(for: $0) })
                 : try await passkey.deriveAccounts(tradingIndex: { store.tradingIndex(for: $0) })
-            // The address guard runs before any balance is shown: Apple's synced-passkey
-            // bug derives a different address on a second device, and rendering that
-            // account's zero would read as theft.
+            // The address guard runs before any balance is shown: a synced passkey can derive another
+            // address on a second device, and showing that account's zero would read as theft.
             let verdict = AddressGuard.check(derived: keys.address, against: lastSeen)
             guard verdict.mayShowBalance else {
                 signInProblem = "This passkey derived a different address than last time. "
@@ -421,8 +313,7 @@ final class AppModel {
             TradingKeyVault.seal(keys.trading, address: keys.address, network: network.rawValue)
             try await arrive(at: keys.address)
         } catch PasskeyFailure.cancelledByUser {
-            // A dismissed sheet is not a failure and not a reason to offer anything. It
-            // used to run a registration, which is how a mis-tap became a second wallet.
+            // A dismissed sheet is not a failure; registering here would turn a mis-tap into a second wallet.
             signInProblem = nil
         } catch let failure as PasskeyFailure {
             signInProblem = failure.sentence
@@ -431,27 +322,16 @@ final class AppModel {
         }
     }
 
-    /// Opens the desk for real: approve, create the account, allow forwarding, enrol.
-    ///
-    /// The whole sequence runs inside one borrowed wallet key, so it is one Face ID
-    /// prompt rather than four. The key is scoped to the closure and never returned,
-    /// which is the only reason it is safe to hold a secp256k1 key across four
-    /// transactions at all.
-    ///
-    /// Resumable by construction: each step checks whether it is already satisfied before
-    /// spending anything, so a sequence interrupted after the approval picks up at the
-    /// account rather than paying for the approval twice.
+    /// One wallet key, scoped to the closure and never returned, signs all four steps under one
+    /// Face ID. Resumable: each step checks whether it is already done before spending anything.
     func openDesk() async {
         isWorking = true
         openingProblem = nil
         openingStep = nil
         defer { isWorking = false }
         do {
-            // Never trust the figure a view happened to render. Funding can arrive while
-            // this screen is open, and opening with a stale cached zero produced the
-            // contradictory “10,000 ready / deposit 0.00” state this guard replaces.
+            // Never trust the figure a view rendered: funding can arrive while this screen is open.
             await refreshBalances()
-            // A desk that already exists deposits nothing, so a failed wallet read cannot block a new key.
             guard let deposit = walletAUSD.value ?? (hasDesk.value == true ? .zero : nil) else {
                 openingProblem = walletAUSD.lastFailure
                     ?? "Your AUSD balance is still loading. Try again in a moment."
@@ -479,9 +359,8 @@ final class AppModel {
                 // Another passkey picked at the prompt is another wallet. Opening its desk
                 // here would file its key under this account.
                 if let expected, wallet.address != expected { throw OpeningMismatch.differentWallet }
-                // A token lost to a reinstall or a wiped keychain can never be reissued for
-                // the same key, so enrolment moves on to the next derived key inside this
-                // one prompt. The on-chain steps before it check themselves first.
+                // A lost token can never be reissued for the same key, so enrolment moves on to the
+                // next derived key inside this one prompt.
                 let opened = try await sequence.open(
                     wallet: wallet,
                     tradingKeys: { try tradingKeys.key(at: $0) },
@@ -502,8 +381,6 @@ final class AppModel {
             sessionTradingIndex = enrolled.tradingIndex
             isKeyUnlocked = true
 
-            // The key exists only now. Handing it to the session is what turns the
-            // ticket's confirm button from a sentence into an order.
             await enterTrading(enrolled, context: context)
         } catch {
             openingProblem = Self.openingSentence(for: error)
@@ -514,8 +391,6 @@ final class AppModel {
     private func enterTrading(_ stored: APIKeyStore.Stored, context: PerplContext) async {
         guard let market = context.market(id: network.defaultMarketID) ?? context.markets.first else { return }
         if sessionTradingIndex != stored.tradingIndex {
-            // The key in the session is not the one this token was issued for. Signing
-            // with it would be refused, so it goes, and connecting asks for Face ID once.
             await session.end()
             sessionTradingIndex = nil
             isKeyUnlocked = false
@@ -523,17 +398,11 @@ final class AppModel {
         await trading.adopt(apiKey: stored.apiKey, session: session, market: market)
         hasTradingAccount = true
         if let head = context.chain.gas?.headBlock { trading.noteHeadBlock(head) }
-        // The account and API key already exist at this point. A live-stream outage is
-        // a connectivity state, not a reason to send the user back through onboarding.
         stage = .trading
         await refreshBalances()
         try? await trading.connect()
     }
 
-    /// Moves the whole app to another network: balances, account, positions, sockets and
-    /// the enrolled key all belong to one exchange, so none of them is carried across.
-    /// The address is the same on both, so no new passkey is involved.
-    /// False when nothing switched: the same network, or Desk busy with another step.
     @discardableResult
     func switchNetwork(to next: DeskNetwork) async -> Bool {
         guard next != network, !isWorking else { return false }
@@ -564,12 +433,8 @@ final class AppModel {
             await enterTrading(stored, context: context)
         }
         return true
-        // A switch never moves the screen. Without an account on this network, Home and
-        // Perps offer to open one where the person already is.
     }
 
-    /// Asks Desk's faucet for whatever this wallet lacks: MON for gas and test AUSD to
-    /// trade. Neither needs the wallet to hold anything first, and neither needs Face ID.
     func fundWallet() async {
         guard let address, !isWorking, network.hasFaucet else { return }
         isWorking = true
@@ -622,9 +487,6 @@ final class AppModel {
         }
     }
 
-    /// Signs and sends a checked Relay deposit on Monad mainnet with one Face ID prompt,
-    /// and returns once the deposit is mined. Filling it on the other chain is Relay's
-    /// part, tracked by the caller.
     func buy(_ deposit: RelayDeposit) async throws {
         let sender: TransactionSender
         if let mainnetSender {
@@ -641,12 +503,9 @@ final class AppModel {
         await refreshMainnetMON()
     }
 
-    /// MON kept back from a swap so the setup and trading that follow can pay their gas.
     static let gasReserve = NativeAmount(decimalText: "0.5") ?? .zero
 
-    /// MON this wallet could swap for AUSD right now, or nil when there is none to spare.
-    /// Perpl's `min_account_open_amount`: 100 AUSD on testnet, 10 on mainnet, read from
-    /// each context on 17 September.
+    /// Perpl's `min_account_open_amount`: 100 AUSD on testnet, 10 on mainnet.
     var minimumToOpenDesk: Money {
         liveMinimumToOpen[network] ?? Money(text: network.hasFaucet ? "100" : "10") ?? .zero
     }
@@ -664,9 +523,7 @@ final class AppModel {
         noteMinimumToOpen(context)
     }
 
-    /// How much more AUSD the wallet needs before a desk can open; nil once it has enough.
     var ausdShortfall: Money? {
-        // An account that already exists on Perpl needs a new key, not a deposit.
         guard hasDesk.value != true else { return nil }
         let held = walletAUSD.value ?? .zero
         guard held < minimumToOpenDesk, let short = Money(raw: minimumToOpenDesk.raw - held.raw) else { return nil }
@@ -684,22 +541,17 @@ final class AppModel {
 
     struct SwapReceipt: Equatable, Sendable {
         let hash: String
-        /// AUSD the wallet actually gained, read from the chain after the swap mined.
         let received: Money
     }
 
     enum SwapFailure: Error, Equatable, Sendable {
         case wrongNetwork
-        /// The route, run against the latest state, would leave less AUSD than promised.
         case underdelivers(Money)
         case routeReverts
     }
 
-    /// Swaps MON in the wallet for AUSD on Monad mainnet, with one Face ID prompt.
-    ///
-    /// The transaction is run first, unsigned, in a simulated block with an AUSD balance
-    /// read either side of it. Only a route that leaves at least the quoted minimum is
-    /// then signed, so what the screen promised is what the chain was seen to do.
+    /// Simulated unsigned first, with AUSD read either side; only a route that leaves at least
+    /// the quoted minimum is then signed.
     func swapMON(_ swap: AUSDSwap, progress: @MainActor @escaping (SwapStep) -> Void) async throws -> SwapReceipt {
         guard network.holdsRealFunds, let address else { throw SwapFailure.wrongNetwork }
         progress(.checking)
@@ -738,7 +590,6 @@ final class AppModel {
         return SwapReceipt(hash: signed.hashHex, received: received.raw > 0 ? received : gain)
     }
 
-    /// A mined receipt can reach the faucet before the balance view does.
     private func refreshUntilChanged() async {
         let before = (walletMON.value?.raw, walletAUSD.value)
         for _ in 0..<6 {
@@ -748,9 +599,6 @@ final class AppModel {
         }
     }
 
-    /// Claims the real test collateral from Agora's Monad-testnet faucet.
-    /// The wallet signs the faucet call because the caller pays its gas; the faucet pays
-    /// the derived address supplied in calldata.
     func claimTestAUSD() async {
         guard let address, network.hasFaucet else { return }
         guard hasSetupGas else {
@@ -771,7 +619,6 @@ final class AppModel {
                     from: wallet)
             }
             _ = try await sender.wait(for: signed)
-            // Monad's balance view can trail a mined receipt briefly.
             try? await Task.sleep(for: .milliseconds(1400))
             await refreshBalances()
         } catch let failure as MonadRPC.Failure {
@@ -847,12 +694,9 @@ final class AppModel {
         }
     }
 
-    // MARK: - Withdrawing
-
     private(set) var withdrawal: Withdrawal = .idle
 
     #if DEBUG
-    /// The sent screen, for review: two hashes, an outside recipient.
     func seedWithdrawalSentForReview() {
         withdrawal = .sent(WithdrawalReceipt(
             amount: Money(text: "107783.80") ?? .zero,
@@ -875,10 +719,6 @@ final class AppModel {
         var isBusy: Bool { self == .approving || self == .depositing }
     }
 
-    /// Moves AUSD from the wallet into the existing Perpl account. Receiving AUSD and
-    /// depositing collateral are intentionally separate operations on-chain; the old
-    /// sheet exposed only the former and made a funded wallet look trade-ready when it
-    /// was not.
     func depositAUSD(_ amount: Money) async {
         guard !deposit.isBusy, amount.raw > 0 else { return }
         deposit = .approving
@@ -933,15 +773,12 @@ final class AppModel {
     func clearDeposit() { deposit = .idle }
 
     enum WithdrawalSource: Equatable, Sendable {
-        /// Collateral held at the exchange.
         case trading
-        /// AUSD already sitting in the wallet.
         case wallet
     }
 
     struct WithdrawalReceipt: Equatable, Sendable {
         let amount: Money
-        /// Nil when the funds stopped in this wallet.
         let recipient: EthereumAddress?
         let transactions: [String]
     }
@@ -957,13 +794,7 @@ final class AppModel {
         var isBusy: Bool { self == .confirming || self == .withdrawing || self == .sending }
     }
 
-    /// Moves AUSD out: from the exchange to this wallet, from the exchange on to another
-    /// address, or from the wallet to another address.
-    ///
-    /// Signed by the wallet key and never by the API key — the trading key exists so that
-    /// a trading session cannot move money, and a withdrawal that the session could sign
-    /// would delete that distinction. So this is a fresh Face ID prompt, and both
-    /// transactions of a withdrawal to another address sit inside that one prompt.
+    /// Signed by the wallet key, never the API key: a trading session must not be able to move money.
     func withdraw(_ amount: Money, from source: WithdrawalSource, to recipient: EthereumAddress?) async {
         guard !withdrawal.isBusy else { return }
         let destination = recipient == address ? nil : recipient
@@ -1013,8 +844,6 @@ final class AppModel {
         }
     }
 
-    /// Which half failed matters: after the exchange step the AUSD is safe in this wallet,
-    /// and saying "nothing moved" then would be wrong.
     static func withdrawSentence(for error: any Error, stage: Withdrawal = .confirming) -> String {
         if let failure = error as? PasskeyFailure { return failure.sentence }
         switch stage {
@@ -1027,11 +856,6 @@ final class AppModel {
 
     func clearWithdrawal() { withdrawal = .idle }
 
-    /// Signs out: the key, the connection and the account on screen all go.
-    /// Removes what Desk keeps for this account: the public profile on its server (one
-    /// Face ID signature), the alert subscription and this iPhone's keys, then signs out.
-    /// The wallet and the Perpl account are on-chain and stay; the passkey still opens
-    /// them. Returns why it stopped, or nil once everything is gone.
     func deleteAccount() async -> String? {
         guard let address else { return nil }
         let passkey = passkey
@@ -1057,7 +881,6 @@ final class AppModel {
             TradingKeyVault.forget(address: address, network: network.rawValue)
             ClosedPositionsStore.shared.forget(address: address.checksummed)
         }
-        // The next account adopts its own desk; this one's order can no longer be heard.
         await trading.abandon()
         await session.end()
         isKeyUnlocked = false
@@ -1066,9 +889,6 @@ final class AppModel {
         address = nil
         balancePoller?.cancel()
         balancePoller = nil
-        // Everything the last account put on screen goes with it. Leaving the balances and
-        // the positions behind meant the next person to sign in read someone else's book as
-        // their own until a socket snapshot replaced it — which needs their Face ID first.
         balances = nil
         collateral = LastGood()
         walletAUSD = LastGood()
@@ -1082,8 +902,6 @@ final class AppModel {
         fundingProblem = nil
         openingProblem = nil
         needsManualFaucet = false
-        // And everything Desk told other people about them: the server's copy of the
-        // subscription, the follow list, the nicknames, and the glance the widget draws.
         await TradeAlerts.shared.signOut()
         UserDefaults.standard.removeObject(forKey: "desk.followedTraders")
         // The next account on this phone inherits none of this one's copying or tracking.
@@ -1097,35 +915,20 @@ final class AppModel {
         WidgetCenter.shared.reloadTimelines(ofKind: PortfolioGlance.widgetKind)
     }
 
-    // MARK: - The trading key
-
-    /// Desk left the foreground. The key survives a short trip to another app; the scene
-    /// holds a background task open for the grace and calls `expireIfAway` at the end of
-    /// it, so the wipe runs while Desk can still execute.
     func enterBackground() async {
         await session.allowAway(AutoCopyAway.isOn)
         await session.enterBackground()
     }
 
-    /// The end of the background grace.
     func expireIfAway() async {
         await session.expireIfOverdue()
         if await session.isOpen == false, address != nil { await lock() }
     }
 
-    /// Back in the foreground.
-    ///
-    /// If the key did not survive the absence, Face ID is asked for once, now — before the
-    /// person reaches for an order — rather than at the moment they try to send one. Only
-    /// on the trading screens: setup signs every transaction with a fresh ceremony anyway,
-    /// so an unlock there would be a prompt for nothing.
     func enterForeground() async {
         let absence = await session.absence
         await session.enterForeground()
         if await session.isOpen == false, isKeyUnlocked { await lock() }
-        // Away copying keeps the key alive through a long absence for the loop's sake,
-        // not for whoever is holding the phone now: past the ordinary grace, the person
-        // confirms it is them before the screens show, and a refusal wipes the key.
         if isKeyUnlocked, let absence, absence >= SigningSession.backgroundGrace,
            await LocalAuth.confirm("Unlock Desk") == false {
             await lock()
@@ -1134,22 +937,16 @@ final class AppModel {
         await unlock()
     }
 
-    /// Wipes the key without signing out. The phone locking, iOS ending Desk's background
-    /// time early, and the person choosing to lock all come here.
     func lock() async {
         await session.end()
         isKeyUnlocked = false
-        // An authenticated socket keeps accepting orders with no key behind it, so a lock
-        // that left it open would not be a lock. Closed, the next order has to sign in
-        // again — and signing in is what asks for Face ID.
+        // An authenticated socket keeps accepting orders with no key behind it, so locking closes
+        // it; the next order must sign in again, which asks for Face ID.
         await trading.close()
     }
 
-    /// Brings the trading key back with one Face ID prompt, without signing out.
-    ///
-    /// Assertion only, so it can never create a passkey. And the derived address must be
-    /// the one already on screen: a different address is a different wallet, and adopting
-    /// it quietly would swap the account out from under the balances being looked at.
+    /// Assertion only, so it can never create a passkey. The derived address must match the one
+    /// on screen: a different address is a different wallet.
     @discardableResult
     func unlock() async -> Bool {
         if await session.isOpen {
@@ -1197,16 +994,6 @@ final class AppModel {
         }
     }
 
-    // MARK: - Balances
-
-    /// Polls the chain for what this address holds.
-    ///
-    /// Deliberately not tied to a screen. Home, Fund and Account all read these figures,
-    /// and a poller owned by a view restarts on every navigation — which is both wasteful
-    /// and visible, because the balance flickers back to unavailable each time.
-    ///
-    /// Backoff comes from `LastGood.retryDelay()`, so a node that is down is retried
-    /// slower rather than hammered, and a recovered node is picked up on the next tick.
     private func startPollingBalances() {
         balancePoller?.cancel()
         balancePoller = Task { [weak self] in
@@ -1222,16 +1009,12 @@ final class AppModel {
     func refreshBalances() async {
         guard let address else { return }
         #if DEBUG
-        // A staged mainnet launch keeps its seeded balances: the review wallet holds nothing real.
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("-stage"), arguments.contains("-network") { return }
         #endif
         do {
             let reader = try await balanceReader()
             let snapshot = await reader.read(for: address)
-            // Each field lands on its own. A failed AUSD read must not disturb a good MON
-            // one, which is the whole reason the snapshot carries three outcomes rather
-            // than throwing once.
             record(snapshot.walletAUSD, into: &walletAUSD)
             record(snapshot.gas, into: &walletMON)
             record(snapshot.hasDesk, into: &hasDesk)
@@ -1244,17 +1027,12 @@ final class AppModel {
         }
     }
 
-    /// A desk the first read missed, found by a later one: trading picks up without a
-    /// second sign-in.
     private func resumeTradingIfFound(_ address: EthereumAddress) async {
         guard hasDesk.value == true, !hasTradingAccount, !isWorking,
               stage == .trading, let stored = apiKeys.load(for: address) else { return }
         let network = network
         guard let configuration = try? network.perpl(),
               let context = try? await PerplREST(configuration: configuration).context() else { return }
-        // The fetch can take a while; only a resume still wanted, on the same account and
-        // network, goes on. Held like every other way into trading, but only from here, so
-        // a slow fetch never blocks Open desk or a network switch.
         guard self.network == network, self.address == address, !hasTradingAccount, !isWorking else { return }
         isWorking = true
         defer { isWorking = false }
@@ -1269,9 +1047,6 @@ final class AppModel {
         }
     }
 
-    /// The venue says which contracts back it, so the addresses are fetched rather than
-    /// compiled in. Built once and kept: the answer does not change within a session, and
-    /// a context call before every balance poll would triple the traffic.
     private func balanceReader() async throws -> BalanceReader {
         if let balances { return balances }
         let rest = PerplREST(configuration: try network.perpl())
@@ -1283,8 +1058,6 @@ final class AppModel {
     }
 }
 
-/// One system prompt, no key involved: the phone's own "is this you" for a screen that
-/// is about to show a balance.
 enum LocalAuth {
     static func confirm(_ reason: String) async -> Bool {
         let context = LAContext()

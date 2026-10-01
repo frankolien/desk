@@ -230,7 +230,6 @@ function bubbleFill(change) {
   return [`rgba(${rgb},${a.toFixed(2)})`, `rgba(${rgb},${Math.min(1, a + 0.25).toFixed(2)})`];
 }
 
-/// Largest first at the centre, then each next circle walks a spiral out until it touches nothing.
 function pack(items, W, H) {
   const nodes = items.filter((n) => n.size > 0).sort((a, b) => b.size - a.size);
   if (!nodes.length) return [];
@@ -332,8 +331,6 @@ export default async function mount(el, params) {
   const liveEl = (id) => body.querySelector(`[data-live="${CSS.escape(id)}"]`);
   const cell = (row, c) => row?.querySelector(`[data-c="${c}"]`);
 
-  // ── Tabs, view, period ─────────────────────────────────
-
   $("#mk-tabs", el).addEventListener("click", (event) => {
     const button = event.target.closest("[data-tab]");
     if (!button || button.dataset.tab === tab) return;
@@ -374,8 +371,6 @@ export default async function mount(el, params) {
     }
   }
 
-  // ── Search ─────────────────────────────────────────────
-
   let localTimer = null;
   let remoteTimer = null;
   let searchSeq = 0;
@@ -399,8 +394,6 @@ export default async function mount(el, params) {
     remote = { q, rows: out?.tokens ?? [], loading: false };
     paint();
   }
-
-  // ── Filters ────────────────────────────────────────────
 
   filtersBtn.addEventListener("click", () => togglePop(pop.hidden));
   pop.addEventListener("click", (event) => {
@@ -468,8 +461,6 @@ export default async function mount(el, params) {
     if (filters.risk === "nohigh" && riskLevel(t) === "high") return false;
     return true;
   }
-
-  // ── Rows ───────────────────────────────────────────────
 
   body.addEventListener("click", (event) => {
     if (event.target.closest("a, button")) return;
@@ -540,8 +531,6 @@ export default async function mount(el, params) {
     return (out?.candles ?? []).map((c) => Number(c.close)).slice(-30);
   }
 
-  // ── Bubbles ────────────────────────────────────────────
-
   function bubbleItems(rows) {
     if (tab === "perps") return rows.map((m) => ({ key: m.name, href: `/app/trade/${m.name}`, size: m.openInterest || m.volume24h || 0, change: m.change ?? 0, label: m.name, name: `${m.name}-PERP`, logo: MARKET_LOGOS[m.name], price: fmtPrice(m.mark, m.priceDecimals), cap: fmtUsd(m.openInterest, { compact: true }), capLabel: "Open interest", chgLabel: "24h" }));
     return rows.map((t) => ({ key: t.id, href: `/app/token/${t.chainIndex}/${t.contract}`, size: t.marketCap || t.volume24H || 0, change: frac(changeOf(t, period)) ?? 0, label: t.symbol ?? "?", name: t.name ?? "", logo: t.logoURL, price: fmtUsd(t.price), cap: fmtUsd(t.marketCap, { compact: true }), capLabel: "MCap", chgLabel: period }));
@@ -605,8 +594,6 @@ export default async function mount(el, params) {
   const onResize = () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (view === "bubbles") paint(); }, 150); };
   window.addEventListener("resize", onResize);
 
-  // ── Footer ─────────────────────────────────────────────
-
   function paintFoot() {
     const lean = $("#mk-lean", el);
     const long = crowdRows.reduce((s, m) => s + (m.longTraders ?? 0), 0);
@@ -628,8 +615,6 @@ export default async function mount(el, params) {
       stats.innerHTML = `24h Vol <b>${fmtUsd(vol, { compact: true })}</b> · Tokens <b>${rows.length}</b>`;
     }
   }
-
-  // ── Polls ──────────────────────────────────────────────
 
   function updatePerps(rows) {
     const previous = new Map((perps ?? []).map((m) => [m.name, m.mark]));

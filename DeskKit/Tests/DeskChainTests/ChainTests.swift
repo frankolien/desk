@@ -9,7 +9,6 @@ struct CalldataTests {
     let exchange = EthereumAddress(bytes: Data(hex: "1964c32f0be608e7d29302aff5e61268e72080cc"))!
     let wallet = EthereumAddress(bytes: Data(hex: "50b240678777451befd67b7e8c3b4366482ba8f9"))!
 
-    // Cross-checked against `cast sig` on 13 September 2026.
     @Test("selectors match the signatures they claim")
     func selectors() throws {
         let expected = [
@@ -35,12 +34,11 @@ struct CalldataTests {
         #expect(data.count == 4 + 32 + 32)
         #expect(data.hex == "095ea7b3"
             + "0000000000000000000000001964c32f0be608e7d29302aff5e61268e72080cc"
-            + "0000000000000000000000000000000000000000000000000000000005f5e100")  // 100_000_000
+            + "0000000000000000000000000000000000000000000000000000000005f5e100")
     }
 
     @Test("createAccount carries the collateral at six decimals")
     func createAccount() throws {
-        // Testnet's minimum is 100 AUSD, which is 100_000_000 raw.
         let data = try Calldata.createAccount(amount: #require(Money(text: "100.0")))
         #expect(data.hex.hasPrefix("cab13915"))
         #expect(data.suffix(32).hex.hasSuffix("05f5e100"))
@@ -78,7 +76,6 @@ struct GasPolicyTests {
         #expect(try GasPolicy.gasLimit(estimate: 71_099) == 76_432)
         #expect(try GasPolicy.gasLimit(estimate: 130_407) == 140_188)
         #expect(try GasPolicy.gasLimit(estimate: 100_000) == 107_500)
-        // What the same estimate would cost under a doubling multiplier.
         #expect(try GasPolicy.gasLimit(estimate: 71_099) * 100 / (71_099 * 2) == 53)
     }
 
@@ -94,8 +91,7 @@ struct GasPolicyTests {
         #expect(GasPolicy.plainTransferGas == 21_000)
     }
 
-    // Below 100 gwei a transaction is dropped as FeeTooLow; Monad's own docs still
-    // show 50 gwei.
+    // Below 100 gwei a transaction is dropped as FeeTooLow; Monad's own docs still show 50.
     @Test("the fee cap always clears the mempool floor")
     func feeFloor() {
         #expect(GasPolicy.maxFeePerGas(baseFeeWei: 100_000_000_000) == 202_000_000_000)
@@ -113,8 +109,6 @@ struct NonceRegistryTests {
     let wallet = EthereumAddress(bytes: Data(hex: "50b240678777451befd67b7e8c3b4366482ba8f9"))!
     let other = EthereumAddress(bytes: Data(hex: "0000000000000000000000000000000000000001"))!
 
-    // Monad's `pending` equals `latest`, so an in-flight transaction does not bump the
-    // chain's count. The opening sequence sends three back to back.
     @Test("three back-to-back sends get three distinct nonces")
     func openingSequence() async throws {
         let registry = NonceRegistry()

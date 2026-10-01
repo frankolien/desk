@@ -1,6 +1,5 @@
 import Foundation
 
-/// Thirty-two byte words, big-endian, as EIP-712 and the ABI encode them.
 enum ABIWord {
     enum Failure: Error, Equatable, Sendable {
         case notAnInteger(String)
@@ -11,12 +10,8 @@ enum ABIWord {
         case outOfRange(String, type: String)
     }
 
-    /// Strict: `0x` required, even length, every character a hex digit.
-    ///
-    /// Odd length is refused rather than truncated. Dropping the trailing nibble made
-    /// `0xabc` and `0xab` hash alike, which is two different payloads under one
-    /// signature; left-padding instead would match viem but silently reinterpret a
-    /// typo, and a venue that means `0x0abc` can say so.
+    /// Strict: `0x` required, even length, every character a hex digit. Odd length is
+    /// refused, not truncated or padded, so two payloads can never share a signature.
     static func hexBytes(_ text: String) throws -> Data {
         let characters = Array(text.utf8)
         guard characters.count >= 2, characters[0] == UInt8(ascii: "0"),
@@ -39,9 +34,8 @@ enum ABIWord {
         return bytes
     }
 
-    /// A hex digit's value, by byte. `UInt8(_:radix:)` cannot be used for this: it
-    /// honours a sign prefix, so `"+f"` parses as 15 and a forty-character run of
-    /// `+1+2+3…` becomes a perfectly valid-looking address inside a signed digest.
+    /// Not `UInt8(_:radix:)`: it honours a sign prefix, so `"+f"` parses as 15 and could
+    /// slip into a signed digest.
     private static func nibble(_ byte: UInt8) -> UInt8? {
         switch byte {
         case UInt8(ascii: "0")...UInt8(ascii: "9"): byte - UInt8(ascii: "0")
@@ -51,12 +45,8 @@ enum ABIWord {
         }
     }
 
-    /// Accepts decimal or 0x-hex, range-checked against the declared width.
-    ///
-    /// Perpl sends `chainId` as `"0x279f"` and `time` as `"0x1a09a29c91c"`, both typed
-    /// as integers. Hashing either as its characters rather than its value produces a
-    /// digest the gateway rejects — and viem does exactly that silently rather than
-    /// throwing, which is what makes this worth its own function.
+    /// Perpl sends integer fields such as `chainId` as hex strings (`"0x279f"`); they must
+    /// be hashed by value, not as characters, or the gateway rejects the digest.
     static func uint(_ text: String, bits: Int = 256) throws -> Data {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { throw Failure.notAnInteger(text) }
@@ -74,7 +64,6 @@ enum ABIWord {
         return word
     }
 
-    /// Two's complement, sign-extended across the whole word, as the ABI requires.
     static func int(_ text: String, bits: Int = 256) throws -> Data {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard trimmed.first == "-" else {
@@ -86,8 +75,6 @@ enum ABIWord {
         }
 
         let magnitude = try uint(String(trimmed.dropFirst()), bits: 256)
-        // The negative end reaches one further than the positive one, so the bound is
-        // checked on the magnitude before it is negated, not on the result.
         guard fits(magnitude, bits: bits - 1, signed: false) || isExactly(magnitude, bit: bits - 1)
         else { throw Failure.outOfRange(text, type: "int\(bits)") }
         return negated(magnitude)
@@ -101,8 +88,6 @@ enum ABIWord {
         return word
     }
 
-    /// `bytesN` is right-padded, the opposite of an integer. Routing it through `uint`
-    /// left-pads and produces a word that is wrong rather than an error.
     static func bytesN(_ text: String, count: Int) throws -> Data {
         let bytes = try hexBytes(text)
         guard bytes.count == count else {
@@ -121,13 +106,9 @@ enum ABIWord {
         return word
     }
 
-    // MARK: - Parsing
-
     private static func fromHex(_ trimmed: String, original: String) throws -> Data {
         var digits = Array(trimmed.utf8.dropFirst(2))
         guard !digits.isEmpty else { throw Failure.notAnInteger(original) }
-        // Leading zeros are padding, not width. Counting them made a zero-padded field
-        // that fits perfectly well look oversized.
         while digits.count > 1, digits[0] == UInt8(ascii: "0") { digits.removeFirst() }
         guard digits.count <= 64 else { throw Failure.doesNotFitIn32Bytes(original) }
 
@@ -146,10 +127,8 @@ enum ABIWord {
         return word
     }
 
-    /// Repeated multiply-accumulate over the word itself, so a full uint256 needs no
-    /// big-integer type. Iterates UTF-8 bytes rather than `Character`s: `wholeNumberValue`
-    /// answers for Arabic-Indic digits, fullwidth digits and superscripts alike, so `"١٠٠"`
-    /// parses as a hundred and `"1²"` as twelve.
+    /// UTF-8 bytes, not `Character`s: `wholeNumberValue` accepts Arabic-Indic, fullwidth
+    /// and superscript digits, so `"1²"` would parse as twelve.
     private static func fromDecimal(_ trimmed: String, original: String) throws -> Data {
         var word = Data(repeating: 0, count: 32)
         for byte in trimmed.utf8 {
@@ -167,8 +146,6 @@ enum ABIWord {
         return word
     }
 
-    // MARK: - Width
-
     private static func fits(_ word: Data, bits: Int, signed: Bool) -> Bool {
         guard bits < 256 else { return true }
         guard bits > 0 else { return word.allSatisfy { $0 == 0 } }
@@ -180,7 +157,6 @@ enum ABIWord {
         return true
     }
 
-    /// Exactly 2^bit, which is the one magnitude a signed type accepts only when negative.
     private static func isExactly(_ word: Data, bit: Int) -> Bool {
         guard bit < 256 else { return false }
         let index = 31 - bit / 8

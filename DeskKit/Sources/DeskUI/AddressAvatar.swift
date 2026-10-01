@@ -9,12 +9,7 @@ public struct AddressAvatar: View {
         self.size = size
     }
 
-    /// Two hues and a tilt, derived from the address.
-    ///
-    /// Separated from the view so it can be tested: the same address must always produce
-    /// the same mark, and two addresses that differ anywhere must not collapse onto one.
-    /// FNV-1a rather than `hashValue`, because Swift's hashing is seeded per process and
-    /// would give the same account a different face on every launch.
+    /// FNV-1a rather than `hashValue`: Swift's hashing is seeded per process, so a face would change every launch.
     public static func seed(for address: String) -> (primary: Double, secondary: Double, tilt: Double) {
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325
         let canonical = address.hasPrefix("0x") ? address.lowercased() : address
@@ -41,8 +36,6 @@ public struct AddressAvatar: View {
                     center: .center,
                     angle: .degrees(seed.tilt)))
             .overlay(
-                // One highlight, lit from the same top-leading direction as every other
-                // surface in the app, so the mark sits in the room rather than on it.
                 Ellipse()
                     .fill(Color.white.opacity(0.34))
                     .frame(width: size * 0.52, height: size * 0.3)

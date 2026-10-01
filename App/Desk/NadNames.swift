@@ -3,7 +3,6 @@ import DeskChain
 import Foundation
 import Observation
 
-/// One .nad name a wallet holds, with the records it carries.
 struct NadName: Decodable, Identifiable, Hashable, Sendable {
     let name: String
     let label: String
@@ -12,7 +11,6 @@ struct NadName: Decodable, Identifiable, Hashable, Sendable {
     var id: String { label }
 }
 
-/// Whether a label can be had, and what it costs. Prices are one-time.
 struct NadNameStatus: Decodable, Hashable, Sendable {
     let name: String
     let label: String
@@ -22,7 +20,6 @@ struct NadNameStatus: Decodable, Hashable, Sendable {
     let priceUSDC: String?
     let owner: String?
     let records: [String: String]?
-    /// False while nad's signing endpoint is not open to Desk; absent from older answers.
     let registration: Bool?
 
     var priceWei: NativeAmount? { NativeAmount(decimalText: priceMON) }
@@ -65,7 +62,6 @@ struct NadCall: Decodable, Sendable {
     }
 }
 
-/// Desk's server in front of Nad Name Service: reads from the chain, calldata for writes.
 @MainActor
 @Observable
 final class NadNamesModel {
@@ -101,7 +97,6 @@ final class NadNamesModel {
         loaded = true
     }
 
-    /// Availability and price for a typed label, debounced by the caller.
     func check(_ label: String) async {
         checkProblem = nil
         guard Self.isValidLabel(label) else { status = nil; return }
@@ -124,12 +119,10 @@ final class NadNamesModel {
 
     func clearCheck() { status = nil; checkProblem = nil }
 
-    /// Calldata for a write to a name this wallet owns.
     func calldata(_ body: [String: Any]) async throws -> NadCall {
         try await post(view: "nad-calldata", body: body)
     }
 
-    /// The registration transaction, once nad has co-signed the request.
     func registration(label: String, owner: String, attributes: [String: String]) async throws -> NadCall {
         let list = attributes.filter { !$0.value.isEmpty }.map { ["key": $0.key, "value": $0.value] }
         return try await post(view: "nad-register", body: ["name": label, "owner": owner, "setAsPrimary": true, "attributes": list])

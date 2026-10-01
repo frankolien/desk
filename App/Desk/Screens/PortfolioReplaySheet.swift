@@ -4,8 +4,6 @@ import DeskUI
 import SwiftUI
 import UIKit
 
-/// Turns the equity Desk has already observed into a short, shareable portfolio story.
-/// Nothing is uploaded: preview, MP4 rendering and saving all happen on this phone.
 struct PortfolioReplaySheet: View {
     private enum PresentationMode {
         case snapshot
@@ -153,8 +151,6 @@ struct PortfolioReplaySheet: View {
             rangeLabel = "Last activity"
         }
 
-        // A new profile still deserves a truthful replay: a flat line, not fabricated
-        // volatility. Two endpoints also make the chart's geometry well-defined.
         if samples.isEmpty {
             let current = currentTotal.map { Double($0.raw) / 1_000_000 } ?? 0
             let pnl = currentPnL.map { Double($0.raw) / 1_000_000 }
@@ -518,7 +514,6 @@ private struct PortfolioReplayData: Sendable {
     }
 }
 
-/// A scaled preview of the exact export canvas, so the saved MP4 and the screen agree.
 private struct PortfolioReplayPreview: View {
     let data: PortfolioReplayData
     let progress: Double
@@ -720,8 +715,7 @@ private struct PortfolioReplayCard: View {
     }
 
     private func format(_ dollars: Double, signed: Bool = false) -> String {
-        // Replay data is recorded in AUSD. Exporting in USD keeps a saved video stable
-        // even if the viewer changes their display-currency preference later.
+        // Replay data is recorded in AUSD; exporting in USD keeps a saved video stable across currency settings.
         let sign = dollars < 0 ? "−" : (signed && dollars > 0 ? "+" : "")
         let absolute = abs(dollars)
         let body: String

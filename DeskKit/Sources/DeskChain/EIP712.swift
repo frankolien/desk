@@ -1,10 +1,6 @@
 import DeskAuth
 import Foundation
 
-/// EIP-712 hashing over typed data whose shape the venue supplies.
-///
-/// Generic rather than hardcoded to Perpl's `PerplRegisterApiKey`, because the payload
-/// is returned by the server and its fields have already changed once.
 public enum EIP712 {
     public struct Field: Decodable, Sendable, Hashable {
         public let name: String
@@ -40,10 +36,7 @@ public enum EIP712 {
         case valueNotAString(field: String)
     }
 
-    /// keccak256(0x1901 || domainSeparator || structHash(primaryType, message)).
-    ///
-    /// Internal on purpose. This hashes whatever arrived, and what arrives is chosen by
-    /// the server; the wallet key signs the result. `digest(_:expecting:)` is the way in.
+    /// Internal on purpose: it hashes whatever the server sent. `digest(_:expecting:)` is the way in.
     static func digest(_ typedData: TypedData) throws -> Data {
         var preimage = Data([0x19, 0x01])
         preimage.append(try domainSeparator(typedData))
@@ -56,8 +49,6 @@ public enum EIP712 {
         try structHash(type: "EIP712Domain", data: typedData.domain, types: typedData.types)
     }
 
-    /// `Name(type1 name1,type2 name2)`, with referenced struct types appended in
-    /// alphabetical order.
     public static func encodeType(_ primary: String, types: [String: [Field]]) throws -> String {
         guard let fields = types[primary] else { throw Failure.unknownType(primary) }
 
@@ -150,9 +141,6 @@ public enum EIP712 {
         }
     }
 
-    /// `uint8` and `int128` are not `uint256` wearing a label. Encoding an out-of-range
-    /// value into a full word produces a digest a Solidity verifier will never agree
-    /// with, because it hashes the truncated type.
     static func integerWidth(_ type: String) -> (signed: Bool, bits: Int)? {
         let signed: Bool
         let suffix: Substring

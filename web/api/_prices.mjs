@@ -1,7 +1,4 @@
-/// Price alerts for every Perpl market: a round level broken or fallen through, and a
-/// day's move past 5, 10 or 20 percent. Levels are a tenth of the price's magnitude —
-/// $1K on Bitcoin, $100 on Ether, $10 on Solana, a tenth of a cent on MON — so the
-/// alert says the number a person would say.
+/// Levels are a tenth of the price's magnitude: $1K on Bitcoin, $100 on Ether.
 
 export const ASSET_NAMES = {
   BTC: "Bitcoin", ETH: "Ethereum", SOL: "Solana", MON: "Monad", HYPE: "Hyperliquid", ZEC: "Zcash", LIT: "Lighter", PUMP: "Pump", VVV: "Venice", NEAR: "NEAR",
@@ -10,7 +7,6 @@ export const MOVE_THRESHOLDS = [0.05, 0.1, 0.2];
 const LEVEL_QUIET_S = 6 * 3600;
 const MARK_TTL_S = 7 * 86400;
 
-/// Every market's last mark in one key: one read and one write a scan, not one per market.
 export const MARKS_KEY = "alerts:marks";
 export const levelKey = (name, level, direction) => `alerts:pxlevel:${name}:${level}:${direction}`;
 export const moveKey = (name, day, direction, threshold) => `alerts:pxmove:${name}:${day}:${direction}${Math.round(threshold * 100)}`;
@@ -35,7 +31,6 @@ export function priceText(value) {
   return `$${Number(value.toPrecision(3)).toString()}`;
 }
 
-/// What changed between the last reading and this one, per market.
 export function priceEvents(name, previous, current) {
   const events = [];
   if (!(current.mark > 0)) return events;
@@ -69,8 +64,6 @@ export function pricePayload(name, event) {
 
 export const MAX_TARGETS = 20;
 
-/// Prices a phone asked to hear about: each is told once, when the mark crosses it,
-/// and then forgotten. `null` when the list is malformed.
 export function parseTargets(targets) {
   if (targets == null) return [];
   if (!Array.isArray(targets) || targets.length > MAX_TARGETS) return null;
@@ -105,8 +98,6 @@ export function targetPayload(target, mark) {
   };
 }
 
-/// Bitcoin because it is the market everyone watches, Monad because Desk lives on it.
-/// Everything else only reaches a phone that put the market on its watchlist.
 export const ALWAYS_TOLD = new Set(["BTC", "MON"]);
 
 export function wantsMarket(record, name) {
@@ -114,20 +105,16 @@ export function wantsMarket(record, name) {
   return ALWAYS_TOLD.has(name) || (record.priceMarkets ?? []).includes(name);
 }
 
-/// Reads the last marks, finds what crossed, and returns one delivery per subscriber
-/// per event. Levels stay quiet six hours once told; a day's move is told once per
-/// threshold and direction.
 export async function priceDeliveries({ store, quotes, subscribers, now = Date.now() }) {
   if (!quotes?.length) return { deliveries: [], events: 0, changed: [] };
   let stored = {};
-  try { stored = JSON.parse(await store.get(MARKS_KEY) ?? "{}") ?? {}; } catch { /* a baseline round */ }
+  try { stored = JSON.parse(await store.get(MARKS_KEY) ?? "{}") ?? {}; } catch {}
   // A market missing from one scan keeps its last mark for a week.
   const previous = Object.fromEntries(Object.entries(stored).filter(([, last]) => now - (last?.at ?? 0) < MARK_TTL_S * 1000));
   const day = new Date(now).toISOString().slice(0, 10);
   const deliveries = [];
   let events = 0;
   const marks = { ...previous };
-  // Subscribers whose targets fired, with the record they should be saved as.
   const changed = new Map();
   for (const quote of quotes) {
     marks[quote.name] = { mark: quote.mark, at: now };

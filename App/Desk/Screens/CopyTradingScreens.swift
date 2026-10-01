@@ -2,7 +2,6 @@ import DeskFlow
 import DeskUI
 import SwiftUI
 
-/// The rule sections shared by copying one trader and copying a basket.
 private struct CopyRulesSections: View {
     @Binding var rules: CopyRules
     let network: DeskNetwork
@@ -161,7 +160,6 @@ private struct PrimaryBarButton: View {
     }
 }
 
-/// The rules for copying one trader, set before anything is sent.
 struct AutoCopySheet: View {
     let address: String
     let name: String
@@ -232,7 +230,6 @@ struct AutoCopySheet: View {
     }
 }
 
-/// Copy the leaderboard's top traders as one portfolio, re-picked on a schedule.
 struct CopyBasketSheet: View {
     let copier: CopyTrader
 
@@ -294,7 +291,6 @@ struct CopyBasketSheet: View {
     }
 }
 
-/// Starts auto-copy from a trader's profile, or shows it is running.
 struct AutoCopyButton: View {
     let rules: CopyRules?
     let action: () -> Void
@@ -339,7 +335,6 @@ struct AutoCopyButton: View {
     }
 }
 
-/// Auto-copy at a glance, above the traders on Signals.
 struct CopyStatusCard: View {
     let copier: CopyTrader
     let onOpen: () -> Void
@@ -392,8 +387,6 @@ private func pnlTint(_ value: Double) -> Color {
     value < 0 ? DeskColor.fall.color : (value > 0 ? DeskColor.rise.color : .primary)
 }
 
-/// Auto-copy in one glance: the result, the switch, who is being copied and what just
-/// happened. Limits and the Live Activity live behind the settings button.
 struct CopyActivityScreen: View {
     let copier: CopyTrader
     let directory: TraderDirectory
@@ -409,7 +402,6 @@ struct CopyActivityScreen: View {
     private var openCopies: [OpenCopy] { copier.open.filter { $0.shadowed == showsShadow } }
     private var entries: [CopyLogEntry] { copier.log.filter { $0.shadowed == showsShadow } }
 
-    /// Each copied trader's result, in one pass over the log rather than one pass per row.
     private var records: [String: Double] {
         var out: [String: Double] = [:]
         for entry in copier.log {
@@ -541,8 +533,6 @@ struct CopyActivityScreen: View {
         #endif
     }
 
-    // MARK: - Summary
-
     private var summary: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 6) {
@@ -594,8 +584,6 @@ struct CopyActivityScreen: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // The share card's artwork, so the result reads like the card it can become: its D
-        // sits on the right, and the text keeps the dark side.
         .background {
             GeometryReader { proxy in
                 ZStack(alignment: .topTrailing) {
@@ -643,8 +631,6 @@ struct CopyActivityScreen: View {
                 .foregroundStyle(.white.opacity(0.55))
         }
     }
-
-    // MARK: - Rows
 
     private var chevron: some View {
         Image(systemName: "chevron.right")
@@ -697,7 +683,6 @@ private struct PauseButtonStyle: ViewModifier {
     }
 }
 
-/// Limits and the Live Activity, out of the way of the result.
 struct CopySettingsSheet: View {
     let copier: CopyTrader
 
@@ -770,7 +755,6 @@ struct CopySettingsSheet: View {
     }
 }
 
-/// Every copy, skip and close, with the detail the summary leaves out.
 struct CopyLogScreen: View {
     let entries: [CopyLogEntry]
     let shadow: Bool

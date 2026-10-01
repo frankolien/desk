@@ -21,11 +21,8 @@ final class AutoCopyPublisher {
     private var lastRequest = Date.distantPast
 
     private static let staleAfter: TimeInterval = 90
-    /// How long a request that ActivityKit refused waits before being tried again. Without
-    /// it the copy loop's tick retries five times a second, forever.
     private static let requestBackoff: TimeInterval = 60
 
-    /// What the glance is derived from, cheap enough to compute on every tick.
     private struct Signature: Equatable {
         let entries: Int
         let newest: UUID?
@@ -37,9 +34,6 @@ final class AutoCopyPublisher {
     }
 
     func follow(_ copier: CopyTrader) {
-        // The log and the figures are only worth rebuilding when something moved. A heartbeat
-        // still runs every ten seconds, which is what keeps the Live Activity's stale date
-        // ahead of the clock.
         let signature = Signature(
             entries: copier.log.count, newest: copier.log.first?.id, open: copier.open.count,
             traders: copier.traders.count, paused: copier.isPaused, streaming: copier.isStreaming,
@@ -78,9 +72,8 @@ final class AutoCopyPublisher {
         let content = ActivityContent(state: state, staleDate: .now.addingTimeInterval(Self.staleAfter))
 
         if activities.isEmpty {
-            // ActivityKit refuses for reasons that do not clear immediately — the system limit,
-            // a focus mode, the user turning activities off — so a refusal waits rather than
-            // being retried on the next tick. One the person swiped away stays away.
+            // ActivityKit refusals do not clear immediately, so a refusal waits out a backoff
+            // rather than retrying every tick. One the person swiped away stays away.
             guard !dismissedByUser, UIApplication.shared.applicationState == .active,
                   Date.now.timeIntervalSince(lastRequest) > Self.requestBackoff else { return }
             lastRequest = .now
@@ -94,7 +87,6 @@ final class AutoCopyPublisher {
             }
             return
         }
-        // A heartbeat keeps the stale date ahead while Desk is open.
         guard state != lastState || Date.now.timeIntervalSince(lastPush) > Self.staleAfter / 3 else { return }
         lastState = state
         lastPush = .now
@@ -132,8 +124,6 @@ final class AutoCopyPublisher {
     }
 }
 
-/// Whether the copy loop may be woken while Desk is closed. Read by the session on
-/// leaving and by the loop on every tick; written only from Auto-Copy settings.
 enum AutoCopyAway {
     static let key = "desk.copy.away"
     static var isOn: Bool {

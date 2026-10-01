@@ -2,25 +2,8 @@ import DeskMoney
 import DeskPerpl
 import Foundation
 
-/// The one place an order goes through.
-///
-/// Every piece of this already existed — the socket, the builder, the tracker, the request
-/// counter — and none of them were joined up, so the ticket's confirm button dismissed a
-/// sheet. What was missing is the thing that knows the order of operations, and the order
-/// of operations is where this protocol is unforgiving:
-///
-///   1. `rq` must strictly increase per account and is seeded from the wallet snapshot on
-///      every connect. A value at or below the last forwarded one rejects with `sr: 32`,
-///      so the counter is reseeded on reconnect rather than carried across one.
-///   2. An order must be handed to the tracker **before** it is sent. The gateway can
-///      answer faster than the send call returns, and a status frame arriving for an
-///      untracked id is dropped — which presents to the user as an order that vanished.
-///   3. `mt: 3` with `code: 0` means forwarded, not filled. Only `mt: 24` settles
-///      anything. The tracker enforces that; this type must not second-guess it.
-///
-/// An actor because the socket, the counter and the tracker have to move together. Two
-/// concurrent submissions racing for request ids is exactly the bug that produces `sr: 32`
-/// on the second one.
+/// An actor so socket, `rq` counter and tracker move together: racing request ids get `sr: 32`.
+/// `mt: 3` with `code: 0` means forwarded, not filled; only `mt: 24` settles an order.
 public actor OrderDesk {
     public enum Event: Sendable, Hashable {
         case account(PerplAccount)
@@ -29,17 +12,13 @@ public actor OrderDesk {
         case order(frameID: Int64, phase: OrderPhase, fill: OrderFill?)
     }
     public enum Failure: Error, Sendable, Equatable {
-        /// No enrolled key, so nothing can be signed. The honest state before enrolment.
         case notEnrolled
         case notConnected
-        /// The venue refuses forwarded orders for this account until `fw` is set, which
-        /// the opening sequence does. Worth its own case because the sentence a user
-        /// needs is "finish opening your desk", not "the order failed".
+        /// The venue refuses forwarded orders until the opening sequence sets `fw`.
         case forwardingNotAllowed
         case noAccount
     }
 
-    /// What the caller has to decide. Everything else is derived.
     public struct Draft: Sendable, Hashable {
         public struct Protection: Sendable, Hashable {
             public let stopLoss: Price?
@@ -76,23 +55,16 @@ public actor OrderDesk {
     private var account: UInt32?
     private var allowsForwarding = true
     private var initialAccount: PerplAccount?
-    /// Frame ids are this device's own correlation handle and only have to be non-zero
-    /// and unique within a connection.
     private var nextFrameID: Int64 = 1
 
-    /// `firstFrameID` continues an earlier desk's numbering, so an answer still owed to
-    /// that desk's order can never be read as one of this desk's.
     public init(socket: PerplSocket, market: Market, firstFrameID: Int64 = 1) {
         self.socket = socket
         self.market = market
         nextFrameID = max(1, firstFrameID)
     }
 
-    /// The id the next order will carry.
     public var upcomingFrameID: Int64 { nextFrameID }
 
-    /// Makes another market of the same exchange instance the default, keeping the socket
-    /// and every order still being followed. False for a market on another instance.
     public func retarget(_ next: Market) -> Bool {
         guard next.instanceID == market.instanceID else { return false }
         market = next
@@ -101,10 +73,6 @@ public actor OrderDesk {
 
     public var accountID: UInt32? { account }
 
-    /// Opens the socket and takes the seeds the protocol requires from the snapshot.
-    ///
-    /// The snapshot arriving at all is the only evidence the gateway accepted the key —
-    /// there is no acknowledgement frame — which is why this returns rather than reports.
     @discardableResult
     public func open(credentials: PerplCredentials) async throws -> WalletSnapshot {
         let snapshot = try await socket.connect(credentials: credentials)
@@ -125,20 +93,8 @@ public actor OrderDesk {
 
     public var accountSnapshot: PerplAccount? { initialAccount }
 
-    /// Whether the account will accept forwarded orders. Set from `mt: 21`; false means
-    /// the desk is not finished opening rather than that anything failed.
     public func noteForwarding(_ allowed: Bool) { allowsForwarding = allowed }
 
-    /// Sends one market order and returns the frame id to watch it by.
-    ///
-    /// The head block comes from the caller rather than being read here, because the
-    /// deadline has to be computed against the block the venue most recently reported and
-    /// this type does not own the market-state stream.
-    ///
-    /// `other` sends on a market other than the one this desk was opened for. The account
-    /// belongs to the exchange instance rather than the market, and the request counter
-    /// must be shared by every order the account sends, so a second desk per market would
-    /// be the `sr: 32` race again.
     public func place(
         _ draft: Draft, headBlock: Int64, ttlBlocks: UInt32 = 30, in other: Market? = nil
     ) async throws -> Int64 {
@@ -162,11 +118,8 @@ public actor OrderDesk {
             requestID: await counter.take(),
             frameID: frameID)
 
-        // Before the send, not after. The gateway can answer faster than `send` returns,
-        // and a status frame for an untracked id is dropped — which the user experiences
-        // as an order that disappeared.
-        // `lb` is zero in the v235 wire request, but the UI still needs a local timeout.
-        // Keep that deadline out of the payload and derive it from the advertised windows.
+        // Track before sending: the gateway can answer before `send` returns and drops untracked ids.
+        // `lb` is zero on the wire; this local deadline stays out of the payload.
         let (deadline, overflow) = headBlock.addingReportingOverflow(Int64(market.orderWaitBlocks))
         try await tracker.track(
             frameID: frameID,
@@ -178,9 +131,8 @@ public actor OrderDesk {
             await tracker.forget(frameID)
             throw error
         }
-        // Once this point is reached the opening order may fill. Never forget it if a
-        // later protective send fails: losing correlation would make a live position
-        // look as though it never existed.
+        // The opening order may fill from here on; never forget it if a protective send
+        // fails, or a live position would look as though it never existed.
         try await sendProtection(for: draft, linkedTo: request.requestID, in: market)
         return frameID
     }
@@ -191,9 +143,6 @@ public actor OrderDesk {
         return other
     }
 
-    /// Sends stop loss and take profit as Perpl trigger orders linked to the opening
-    /// request. The venue owns these orders after admission, so they still protect the
-    /// position if iOS suspends Desk or the app is closed.
     private func sendProtection(for draft: Draft, linkedTo openingRequestID: Int64, in market: Market) async throws {
         guard let protection = draft.protection, let account, let counter else { return }
         let triggers: [(Price?, TriggerPriceCondition)] = [
@@ -265,8 +214,6 @@ public actor OrderDesk {
         return frameID
     }
 
-    /// Adds venue-hosted protection to an already-open position. Linking by position id
-    /// lets Perpl retire the triggers when that position closes or reverses.
     public func protectPosition(
         _ position: PerplPosition,
         stopLoss: Price?,
@@ -305,24 +252,12 @@ public actor OrderDesk {
         }
     }
 
-    /// One reader over the socket, applying every frame to the tracker and reporting
-    /// which order moved.
-    ///
-    /// The venue refuses a second frame stream and splitting the first is worse than
-    /// sharing it, so the single read lives in here rather than in a caller. Callers get
-    /// phase changes; anything else on the socket is applied and not re-broadcast.
-    ///
-    /// Ends when the socket ends. A closed socket is not an error to swallow — the caller
-    /// has to know the session is gone, which is why the stream finishes rather than
-    /// quietly stopping.
+    /// The only reader over the socket: the venue refuses a second frame stream.
     public func observe() -> AsyncStream<Event> {
         AsyncStream { continuation in
             let task = Task {
                 do {
                     for try await frame in try await socket.frames() {
-                        // `mt: 21` carries the forwarding flag, which decides whether an
-                        // order can be sent at all. Read here because this is the only
-                        // reader.
                         if frame.kind == .account,
                            let account = try? frame.decode(PerplAccount.self) {
                             noteForwarding(account.allowsForwarding)
@@ -340,8 +275,6 @@ public actor OrderDesk {
                         }
                     }
                 } catch {
-                    // Falls through to finish: the socket closing is the event, and the
-                    // close code has already been mapped by the socket itself.
                 }
                 continuation.finish()
             }
@@ -361,23 +294,14 @@ public actor OrderDesk {
         await tracker.deadline(of: frameID)
     }
 
-    /// Every order one frame moved; an order update can carry several of ours at once.
     public func applyAll(_ frame: InboundFrame) async -> [Int64] {
         await tracker.applyAll(frame)
     }
 
-    /// Feeds one inbound frame to the tracker and reports which order it moved, if any.
-    ///
-    /// Kept as a push rather than a subscription so the caller owns the single read of
-    /// `socket.frames()` — the venue refuses a second frame stream, and splitting the
-    /// first is worse than sharing it.
     public func apply(_ frame: InboundFrame) async -> Int64? {
         await tracker.apply(frame)
     }
 
-    /// Anything still unsettled once the head block has passed its deadline is expired
-    /// rather than pending forever. The difference between a sentence and a spinner that
-    /// never ends.
     public func expire(headBlock: Int64) async -> [Int64] {
         await tracker.expire(headBlock: headBlock)
     }

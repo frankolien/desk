@@ -26,8 +26,6 @@
     return node;
   }
 
-  /* JSON colouring: keys, strings, numbers, booleans and null become spans. */
-
   const TOKEN = /("(?:[^"\\]|\\.)*")(\s*:)?|\b(?:true|false)\b|\bnull\b|-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/g;
 
   function colorJson(text) {
@@ -63,8 +61,6 @@
     paint(code, code.textContent);
   });
 
-  /* Tabs: buttons with role=tab inside a role=tablist; panels found by aria-controls. */
-
   function select(tab) {
     const list = tab.parentNode;
     $$("[role=tab]", list).forEach((other) => {
@@ -97,8 +93,6 @@
 
   $$("[data-tabs] .docs-tablist").forEach(wireTabs);
 
-  /* Copy buttons. */
-
   function copyText(text, button) {
     const done = () => {
       const label = button.textContent;
@@ -118,11 +112,9 @@
     area.value = text;
     document.body.appendChild(area);
     area.select();
-    try { document.execCommand("copy"); done(); } catch (e) { /* nothing to do */ }
+    try { document.execCommand("copy"); done(); } catch (e) {}
     area.remove();
   }
-
-  /* Code samples, generated from the example URL so all four agree with it. */
 
   function samples(url, envelope, accept) {
     const parsed = new URL(url);
@@ -165,8 +157,6 @@
     $(".docs-code-head", panel).remove();
     show(current);
   });
-
-  /* Try it: one inline panel per endpoint, built from the parameter rows. */
 
   function pill(text, tone) {
     return el("span", { class: "page-pill" + (tone ? " is-" + tone : ""), text });
@@ -264,7 +254,7 @@
           headersEl.appendChild(el("li", {}, [el("b", { text: name + ": " }), value]));
         });
         let pretty = text;
-        try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (e) { /* shown raw */ }
+        try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (e) {}
         paint(outCode, pretty);
         output.hidden = false;
       })).catch((error) => {
@@ -288,8 +278,6 @@
       if (open) { const first = $("input, select, button", panel); if (first) first.focus(); }
     });
   });
-
-  /* Sidebar: search, active section, status pill. */
 
   const search = $("[data-search]");
   const nav = $("[data-nav]");
@@ -344,8 +332,6 @@
       .catch(() => { statusPill.className = "page-pill is-unknown"; statusPill.textContent = "Status unavailable"; });
   }
 
-  /* Response schema toggle: a typed skeleton derived from openapi.json for every 200 example. */
-
   function schemaSkeleton(doc) {
     const deref = (schema) => (schema && schema.$ref ? deref(schema.$ref.replace(/^#\//, "").split("/").reduce((node, key) => node && node[key], doc)) : schema);
     function render(schema, indent) {
@@ -398,9 +384,7 @@
       end.appendChild(toggle);
       end.parentNode.addEventListener("tabchange", (event) => { toggle.hidden = event.detail.tab.getAttribute("aria-controls").indexOf("-200") < 0; });
     });
-  }).catch(() => { /* the examples stand on their own */ });
-
-  /* Old anchors from the previous page keep working. */
+  }).catch(() => {});
 
   function redirectHash() {
     const id = location.hash.slice(1);

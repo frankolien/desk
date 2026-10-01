@@ -3,14 +3,6 @@ import DeskPerpl
 import DeskUI
 import SwiftUI
 
-/// An open position, at a glance.
-///
-/// A compact portfolio row. Full risk analysis belongs on the detail screen; repeating it
-/// inside every row made a handful of positions consume the whole Perps page.
-///
-/// Mark, profit and liquidation distance descend from a single tick and therefore dim as
-/// a group when the price goes stale. Entry, size and leverage do not dim: they are still
-/// true whatever the network is doing, and dimming them would say otherwise.
 struct OpenPositionCard: View {
     let figures: PositionFigures
     let symbol: String
@@ -115,8 +107,7 @@ struct OpenPositionCard: View {
                 .contentTransition(.numericText())
 
             // The denominator is named because there is no standard one: Hyperliquid
-            // divides by equity, Binance by entry margin, OKX by position margin. An
-            // unlabelled percentage is three different numbers.
+            // divides by equity, Binance by entry margin, OKX by position margin.
             Text(HomeScreen.percent(figures.returnOnMarginMicros) + " on margin")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundStyle(DeskColor.nightMuted.color)
@@ -125,12 +116,6 @@ struct OpenPositionCard: View {
         .animation(.snappy(duration: 0.25), value: figures.unrealisedPnL.raw)
     }
 
-    /// Room left, drawn rather than stated.
-    ///
-    /// A percentage alone does not convey how close is close. A bar that empties does,
-    /// and it is the one element on the card that should be alarming when it is nearly
-    /// gone. Full at ten percent of room, because beyond that the difference stops
-    /// mattering.
     private var liquidationBar: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
@@ -160,12 +145,8 @@ struct OpenPositionCard: View {
         .opacity(isStale ? 0.55 : 1)
     }
 
-    /// Entry, size and the liquidation price. None of these dim — they are still true
-    /// while the network is down.
-    ///
-    /// Each figure is rendered at its own market's decimals rather than at a default.
-    /// `display` takes them without one on purpose: price and size scales differ per
-    /// market, and a shared default would round one of them wrongly.
+    /// None of these dim: they stay true while the network is down. Each uses its own
+    /// market's decimals on purpose; price and size scales differ per market.
     private var facts: some View {
         HStack(spacing: 0) {
             fact("Size", figures.size.display(fractionDigits: figures.size.decimals) + " " + symbol)

@@ -1,21 +1,8 @@
 import DeskUI
 import SwiftUI
 
-/// Confirmation by holding, not by tapping.
-///
-/// A tap is the wrong gesture for an irreversible, leveraged order. It is the same gesture
-/// as scrolling past, it is what a mis-aimed thumb produces, and it is what the rest of
-/// the screen has been teaching for the previous minute. A hold cannot happen by accident:
-/// it takes a decision to start and a second decision not to let go.
-///
-/// Every exchange app that ships leverage on a phone has converged on this or on a swipe,
-/// and a hold is the better of the two — a swipe has a direction, and on a screen where
-/// direction already means long or short, a second directional gesture is one meaning too
-/// many.
-///
-/// Releasing early cancels and says so. The progress does not persist between attempts,
-/// because a bar that resumes where it stopped rewards repeated jabbing, which is the
-/// input this exists to refuse.
+/// Progress deliberately resets between attempts: a bar that resumes where it stopped
+/// rewards repeated jabbing, which is the input this exists to refuse.
 struct HoldToConfirm: View {
     let title: String
     let tint: DeskRGB
@@ -33,8 +20,6 @@ struct HoldToConfirm: View {
         ZStack {
             Capsule().fill(tint.color.opacity(isEnabled ? 0.24 : 0.1))
 
-            // The fill is the gesture made visible. It is the whole control; the text on
-            // top only names what is about to happen.
             GeometryReader { proxy in
                 Capsule()
                     .fill(tint.color)
@@ -50,9 +35,6 @@ struct HoldToConfirm: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
-            // Once the fill is past the text the label has to survive on top of the tint,
-            // so it switches to the colour computed for that fill rather than staying
-            // white and disappearing into it.
             .foregroundStyle(progress > 0.55 ? label.color : DeskColor.nightText.color)
             .animation(.easeInOut(duration: 0.15), value: progress > 0.55)
             .padding(.horizontal, 22)
@@ -65,9 +47,8 @@ struct HoldToConfirm: View {
                 .onChanged { _ in if isEnabled, !isHolding { begin() } }
                 .onEnded { _ in cancel() })
         .accessibilityRepresentation {
-            // VoiceOver cannot hold a button down, and a control nobody using VoiceOver
-            // can operate is not a safety feature. The confirmation there is the system's
-            // own double-tap plus the label naming the consequence.
+            // VoiceOver cannot hold a button down, so there the system's double-tap plus a
+            // label naming the consequence is the confirmation.
             Button(title, action: action).disabled(!isEnabled)
         }
         .onDisappear { ticker?.cancel() }
@@ -89,8 +70,6 @@ struct HoldToConfirm: View {
             isHolding = false
             Haptics.success()
             action()
-            // Reset after the action, so the control does not sit full behind whatever
-            // the action presented.
             withAnimation(.easeOut(duration: 0.25)) { progress = 0 }
         }
     }

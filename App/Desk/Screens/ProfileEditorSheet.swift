@@ -3,7 +3,6 @@ import DeskUI
 import PhotosUI
 import SwiftUI
 
-/// The name and picture other traders see beside this wallet.
 struct ProfileEditorSheet: View {
     let model: AppModel
     let onClose: () -> Void
@@ -122,7 +121,6 @@ struct ProfileEditorSheet: View {
         }
     }
 
-    /// A 256-point square crop, centred, small enough to travel in a request.
     static func squared(_ source: UIImage) -> UIImage {
         let side: CGFloat = 256
         let scale = max(side / source.size.width, side / source.size.height)
@@ -135,7 +133,6 @@ struct ProfileEditorSheet: View {
         }
     }
 
-    /// JPEG under about 60 KB: quality steps down until it fits.
     static func jpeg(_ image: UIImage) -> Data? {
         for quality in [0.82, 0.7, 0.55, 0.4] {
             if let data = image.jpegData(compressionQuality: quality), data.count <= 60_000 { return data }

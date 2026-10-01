@@ -7,29 +7,6 @@ import Combine
 import Foundation
 import SwiftUI
 
-/// Watchlist and Search, over the markets the venue actually lists.
-///
-/// Both screens previously rendered a hard-coded table: five instruments with typed-in
-/// prices, invented percentage changes, and a wallet list carrying figures like
-/// "+$3.43M" and "186 trades" belonging to nobody. Two of the five markets do not exist
-/// on Perpl at all, and the leverage cap shown for Bitcoin was 40× against a real ceiling
-/// of 15×. In an app whose whole argument is that it never shows a number it cannot
-/// stand behind, that was the most dishonest surface in it.
-///
-/// Nothing needed inventing. The context call the price already makes lists every open
-/// market with its own mark and its own margin fractions, so these render seven real
-/// instruments at real prices — and say plainly which of them can be traded here.
-///
-/// The wallet list is gone rather than rebuilt. It needed account identities, and Perpl's
-/// public feed carries none; the same reason `SignalsScreen` reads the market rather than
-/// the crowd.
-
-// MARK: - Watchlist
-
-/// The saved markets, perps and spot together, for the Signals tab.
-///
-/// Saved locally. A watchlist is the user's own note about markets, it never needs to
-/// leave the phone, and the list is short enough that defaults are the right home.
 struct WatchlistSection: View {
     let market: MarketModel
     let onOpenMarket: (Market) -> Void
@@ -50,9 +27,6 @@ struct WatchlistSection: View {
         SpotWatchlistStorage.decode(savedSpotData)
     }
 
-    /// A saved token carries the figures it had when it was saved, and a search result
-    /// has none. The card wants today's, so the server is asked for the whole list at once
-    /// and the answer is written back where the list lives.
     private func refreshSpotFigures() async {
         let saved = spotRows
         guard !saved.isEmpty else { return }
@@ -136,8 +110,6 @@ struct WatchlistSection: View {
         }
     }
 
-    /// Nothing saved is not an error, and it is not an empty void either — it names the
-    /// one action that fills it.
     private var empty: some View {
         VStack(spacing: 12) {
             Image(systemName: "star")
@@ -165,8 +137,6 @@ struct WatchlistSection: View {
     }
 }
 
-// MARK: - Search
-
 struct MarketSearchScreen: View {
     let model: AppModel
     let market: MarketModel
@@ -183,7 +153,6 @@ struct MarketSearchScreen: View {
     @StateObject private var discovery = TokenDiscoveryModel()
     @Namespace private var navigationSpace
 
-    /// Names look like names: a dot, an @, or an address.
     private var looksLikeAName: Bool {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.hasPrefix("@") || text.hasPrefix("0x")
@@ -195,7 +164,6 @@ struct MarketSearchScreen: View {
         Set(savedIDs.split(separator: ",").compactMap { UInt32($0) })
     }
 
-    /// "Solana" finds SOL: the market's common name counts as much as its ticker.
     private static let marketNames: [String: String] = [
         "BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "MON": "Monad", "ZEC": "Zcash",
         "HYPE": "Hyperliquid", "LIT": "Lighter", "PUMP": "Pump", "VVV": "Venice", "NEAR": "NEAR Protocol", "DOGE": "Dogecoin", "XRP": "Ripple",
@@ -361,7 +329,6 @@ struct MarketSearchScreen: View {
                             .frame(minHeight: 150)
                     }
 
-                    // Directly above the rows it titles.
                     HStack {
                         Text("All perpetual markets")
                             .font(.system(size: 18, weight: .bold, design: .rounded))
@@ -374,8 +341,6 @@ struct MarketSearchScreen: View {
                     .padding(.top, 30)
 
                     if market.allMarkets.isEmpty {
-                        // Still loading the context. Skeletons rather than "no results",
-                        // which would be a claim about the venue.
                         VStack(alignment: .leading, spacing: 14) {
                             ForEach(0..<4, id: \.self) { SkeletonRow(widthFraction: 0.8 - Double($0) * 0.1) }
                         }
@@ -413,8 +378,6 @@ struct MarketSearchScreen: View {
             .refreshable { if Showcase.spotTrading { await discovery.refresh() } }
             }
             .toolbar(.hidden, for: .navigationBar)
-            // The field floats above the tab bar, where a thumb already is, rather than
-            // in a navigation bar this screen does not show.
             .safeAreaInset(edge: .bottom) {
                 field
                     .padding(.horizontal, 16)
@@ -427,14 +390,11 @@ struct MarketSearchScreen: View {
                     .toolbar(.hidden, for: .tabBar)
             }
             #if DEBUG
-            // `-spot-buy` opens the first buyable trending token with its Buy sheet up,
-            // so the sheet can be captured on any simulator without tapping through.
             .task {
                 let arguments = ProcessInfo.processInfo.arguments
                 guard arguments.contains("-spot-buy") || arguments.contains("-wallet-demo") else { return }
                 while discovery.trending.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
                 if arguments.contains("-wallet-demo") {
-                    // A Monad token, so the holder opened has a ledger to show.
                     var monad = discovery.trending.first { $0.chainIndex == (arguments.contains("-wallet-solana") ? "501" : "143") }
                     if monad == nil {
                         await discovery.search("0x5e49e1f85813f2b65858860a3fa231b4186f2e0e")
@@ -481,7 +441,6 @@ struct MarketSearchScreen: View {
                 #endif
             }
             #if DEBUG
-            // `-search-demo vitalik.eth` types a name into search for capture.
             .onAppear {
                 let arguments = ProcessInfo.processInfo.arguments
                 if let index = arguments.firstIndex(of: "-search-demo"), arguments.indices.contains(index + 1) { query = arguments[index + 1] }
@@ -540,8 +499,6 @@ struct MarketSearchScreen: View {
     private func toggle(_ id: UInt32) {
         var next = saved
         if next.contains(id) { next.remove(id) } else { next.insert(id) }
-        // Sorted so the stored string is stable: an unordered set would rewrite the
-        // defaults value on every toggle even when the membership had not changed.
         savedIDs = next.sorted().map(String.init).joined(separator: ",")
         TradeAlerts.shared.watchlistChanged()
         Haptics.selection()
@@ -556,8 +513,6 @@ struct MarketSearchScreen: View {
     }
 }
 
-// MARK: - Spot discovery
-
 struct TrendingSpotToken: Identifiable, Hashable, Codable, Sendable {
     let id: String
     let chainIndex: String
@@ -567,7 +522,6 @@ struct TrendingSpotToken: Identifiable, Hashable, Codable, Sendable {
     let logoURL: String
     let contract: String
     let decimals: Double?
-    /// Both optional: a build can meet a deployment that predates them.
     let quotable: Bool?
     let buyable: Bool?
     let nativeSymbol: String?
@@ -581,11 +535,8 @@ struct TrendingSpotToken: Identifiable, Hashable, Codable, Sendable {
     let communityRecognized: Bool?
     let riskLevel: String?
 
-    /// Only from hosts that serve token artwork.
-    ///
-    /// The address comes from the discovery feed, which forwards whatever the upstream
-    /// listed. Following it anywhere told a host of someone else's choosing this device's
-    /// address and which tokens are being looked at, on every browse.
+    /// Only from hosts that serve token artwork: the upstream picks this URL, and fetching
+    /// it anywhere would tell an arbitrary host this device's address and what it browses.
     var artworkURL: URL? { TokenArtwork.url(logoURL) }
 }
 
@@ -610,8 +561,6 @@ final class TokenDiscoveryModel: ObservableObject {
         if !latestQuery.isEmpty { await load(query: latestQuery, intoSearch: true) }
     }
 
-    /// The listing for a token asked for by address, or a page built from what is known:
-    /// OKX's search skips most Monad tokens.
     func find(_ target: TokenOpenRequest.Target) async -> TrendingSpotToken {
         let match = { (list: [TrendingSpotToken]) in
             list.first { $0.chainIndex == target.chainIndex && $0.contract.caseInsensitiveCompare(target.contract) == .orderedSame }
@@ -641,7 +590,6 @@ final class TokenDiscoveryModel: ObservableObject {
         var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/token-discovery")!
         if !query.isEmpty { components.queryItems = [URLQueryItem(name: "q", value: query)] }
         let url = components.url!
-        // What this list showed last time, at once; the network's answer replaces it.
         if (intoSearch ? searchResults : trending).isEmpty,
            let cached = await ResponseCache.shared.cached(url) {
             let tokens = try? await Task.detached(priority: .utility) {
@@ -692,7 +640,6 @@ struct TrendingSpotRow: View {
                     .truncationMode(.tail)
             }
             Spacer(minLength: 8)
-            // Price and change in one trailing column, as every other row in Desk reads.
             VStack(alignment: .trailing, spacing: 3) {
                 Text(token.price.map(spotPrice) ?? "$—")
                     .font(.system(size: 15, weight: .bold).monospacedDigit())
@@ -810,11 +757,6 @@ private struct SpotWatchlistCard: View {
     }
 }
 
-/// Three shapes of the same formatter, built once.
-///
-/// A `NumberFormatter` was constructed per value, including once per decoded trade inside a
-/// two-second poll — around thirty constructions a second while a spot screen is open, each
-/// pulling locale and ICU state.
 private let spotFormatters: [SpotPriceShape: NumberFormatter] = {
     var out: [SpotPriceShape: NumberFormatter] = [:]
     for shape in SpotPriceShape.allCases {
@@ -840,8 +782,6 @@ func spotPrice(_ value: Double) -> String {
     let shape: SpotPriceShape = value >= 100 ? .large : (value >= 1 ? .medium : .small)
     return spotFormatters[shape]?.string(from: NSNumber(value: value)) ?? "$—"
 }
-
-// MARK: - One market
 
 private struct MarketRow: View {
     let model: MarketModel
@@ -909,8 +849,6 @@ private struct MarketRow: View {
                 .stroke(DeskColor.nightLine.color, lineWidth: 0.5))
     }
 
-    /// A colour per symbol so rows are told apart before they are read. Derived from the
-    /// symbol rather than kept in a table, so a market the venue adds still gets one.
     static func tint(for symbol: String) -> Color {
         let seed = AddressAvatar.seed(for: symbol)
         return Color(hue: seed.primary / 360, saturation: 0.55, brightness: 0.85)
@@ -992,9 +930,8 @@ private struct SpotTransaction: Identifiable, Sendable {
     let amount: String
     let value: String
     let wallet: SpotWallet
-    /// The venue's own id for the trade. It used to include `age`, which changes on every
-    /// two-second poll, so every row under a minute old took a new identity and the whole
-    /// list was torn down and rebuilt rather than diffed.
+    /// The venue's own id for the trade. Never include `age`: it changes every poll, so
+    /// rows would take new identities and the list would rebuild rather than diff.
     let id: String
 }
 
@@ -1047,7 +984,6 @@ private struct SpotTokenDetailScreen: View {
                 .padding(.top, 20)
                 .padding(.bottom, 12)
                 .background {
-                    // Rows pass under this bar as they scroll; the fade keeps them behind.
                     LinearGradient(
                         colors: [.black.opacity(0), .black.opacity(0.9), .black],
                         startPoint: .top, endPoint: .bottom)
@@ -1084,8 +1020,6 @@ private struct SpotTokenDetailScreen: View {
             try? await Task.sleep(for: .milliseconds(800))
             tradeSide = "Buy"
         }
-        // `-wallet-demo` opens the first holder with a resolved name, so the profile
-        // can be captured without waiting on a wallet that has one.
         .task {
             guard ProcessInfo.processInfo.arguments.contains("-wallet-demo") else { return }
             while feed.holders.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
@@ -1482,8 +1416,6 @@ private final class SpotLiveFeed: ObservableObject {
             URLQueryItem(name: "period", value: period)
         ]
         let url = components.url!
-        // The chart as it was last drawn, so the screen opens on a line rather than a
-        // spinner; the read that follows replaces it.
         if candles.isEmpty, let cached = await ResponseCache.shared.cached(url, maxAge: 3_600) {
             let currentSymbol = symbol
             if let payload = try? await Task.detached(priority: .utility, operation: {
@@ -1853,8 +1785,6 @@ private enum SpotFormat {
         return formatter
     }()
 
-    /// Quote amounts arrive with up to eighteen places; six significant digits is what a
-    /// person compares.
     static func amount(_ text: String?) -> String {
         guard let text, let value = Decimal(string: text, locale: Locale(identifier: "en_US_POSIX")) else { return "—" }
         return significant.string(from: value as NSDecimalNumber) ?? text
@@ -2008,7 +1938,6 @@ private final class SpotPurchaseModel: ObservableObject {
         remember(token, quoted, wallet: wallet)
     }
 
-    /// A fill is a holding. Recorded on the device so Home can ask the chain about it.
     private func remember(_ token: TrendingSpotToken, _ quoted: RelayQuote, wallet: EthereumAddress) {
         guard phase == .filled else { return }
         SpotPurchases.record(SpotPurchase(
@@ -2043,9 +1972,7 @@ private struct SpotSellQuote: View {
     @StateObject private var quote = SpotQuoteModel()
     @State private var amount = ""
 
-    /// From the feed, which reads one chain table. The switch that used to be here
-    /// answered "ETH" for every chain it had not heard of, Arc included, whose gas token
-    /// is USDC.
+    /// From the feed's chain table, never assumed to be ETH: Arc's gas token is USDC.
     private var nativeSymbol: String { token.nativeSymbol ?? "native token" }
 
     private var isQuotable: Bool { token.quotable ?? true }
@@ -2115,7 +2042,6 @@ private struct SpotSellQuote: View {
                 .buttonStyle(.plain).foregroundStyle(.black).background(.white, in: Capsule())
                 .disabled(amount.isEmpty || quote.isLoading).opacity(amount.isEmpty ? 0.35 : 1)
             } else {
-                // Said before an amount is typed rather than after a quote fails.
                 Label("No quote provider covers \(token.chainName) yet.",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
@@ -2144,9 +2070,8 @@ private final class SpotQuoteModel: ObservableObject {
 
     func fetch(token: TrendingSpotToken, side: String, amount: String) async {
         clear(); isLoading = true; defer { isLoading = false }
-        // The discovery feed carries no decimal for any token it trends, so requiring one
-        // here stopped every quote before it was sent. The server resolves it from the
-        // chain; a hint is passed only when there is one.
+        // The discovery feed carries no decimals, so none is required here: the server
+        // resolves it from the chain, and a hint is passed only when there is one.
         var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/swap-quote")!
         var items = [
             URLQueryItem(name: "chainIndex", value: token.chainIndex),
@@ -2253,7 +2178,6 @@ private struct WalletResource: Decodable {
     struct WalletLabel: Decodable, Identifiable { let code: String; let text: String; var id: String { code } }
 }
 
-/// The token page, pushed from a tab that only knows the address.
 struct SpotTokenPage: View {
     let target: TokenOpenRequest.Target
     let model: AppModel
@@ -2270,7 +2194,6 @@ struct SpotTokenPage: View {
     }
 }
 
-/// Reuses the discovery wallet profile for a wallet followed from Signals.
 struct TrackedWalletProfile: View {
     let address: String
     let model: AppModel
@@ -2282,7 +2205,6 @@ struct TrackedWalletProfile: View {
 
 private struct WalletProfileScreen: View {
     let wallet: SpotWallet
-    /// The token the wallet was reached from; nil when it was reached by name.
     let token: TrendingSpotToken?
     var feed: SpotLiveFeed? = nil
     let model: AppModel
@@ -2320,7 +2242,6 @@ private struct WalletProfileScreen: View {
     }
 
     private func logo(_ chainIndex: String, _ contract: String) -> URL? {
-        // Native coins are in the app's own catalog.
         if contract.isEmpty { return nil }
         if let token, chainIndex == token.chainIndex, contract.caseInsensitiveCompare(token.contract) == .orderedSame, let own = token.artworkURL { return own }
         let key = chainIndex == "501" ? contract : contract.lowercased()
@@ -2487,8 +2408,6 @@ private struct WalletProfileScreen: View {
         #endif
     }
 
-    /// The real listing when the discovery feed knows the token, so the page has its
-    /// chart and figures; the wallet's own facts when it does not.
     private func open(_ row: Row) {
         guard !row.contract.isEmpty else { return }
         if let token, row.chainIndex == token.chainIndex, row.contract.caseInsensitiveCompare(token.contract) == .orderedSame {
@@ -2508,8 +2427,6 @@ private struct WalletProfileScreen: View {
                 communityRecognized: nil, riskLevel: nil)
         }
     }
-
-    // MARK: Header pieces
 
     private var avatar: some View {
         Group {
@@ -2592,8 +2509,6 @@ private struct WalletProfileScreen: View {
         }
         .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.1)).frame(height: 0.5).padding(.horizontal, -20) }
     }
-
-    // MARK: Content
 
     @ViewBuilder
     private var content: some View {
@@ -2761,8 +2676,6 @@ private struct WalletProfileScreen: View {
             let snapshot = try JSONDecoder().decode(WalletResource.self, from: data)
             let artwork = await prepareArtwork(for: snapshot)
             guard !Task.isCancelled else { return }
-            // Commit the data and its available art together: rows never appear with
-            // a random subset of remote images still popping in one by one.
             preparedArtwork = artwork
             resource = snapshot
             resourceFailed = false

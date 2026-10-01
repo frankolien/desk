@@ -3,9 +3,6 @@ import {
   ZEROX_CHAINS, chainName, isQuotable, nativeToken, rpcEndpoint,
 } from "./_chains.mjs";
 
-/// `decimals()`. Resolved from the chain rather than required from the caller: the
-/// discovery feed returns a null decimal for every token OKX trends, so a client that had
-/// to supply one could never ask for a quote at all.
 const DECIMALS_SELECTOR = "0x313ce567";
 const decimalsCache = new Map();
 
@@ -49,8 +46,6 @@ export function readableUnits(text, decimals) {
   return fraction ? `${whole}.${fraction}` : whole;
 }
 
-/// A token's decimals, from the caller's hint when it has one and from the chain when it
-/// does not. Cached: the same token is quoted repeatedly while someone edits an amount.
 export async function resolveDecimals(chainIndex, tokenAddress, hint, fetchImpl = fetch) {
   if (Number.isInteger(hint) && hint >= 0 && hint <= 30) return hint;
   const isSolana = chainIndex === "501";
@@ -64,8 +59,7 @@ export async function resolveDecimals(chainIndex, tokenAddress, hint, fetchImpl 
     : /^0x[a-fA-F0-9]{40}$/.test(tokenAddress);
   if (!rpc || !addressed) return null;
 
-  // Solana holds decimals on the mint rather than behind a contract call, so it is asked
-  // a different question. Without this it answered "unknown decimals" for every token.
+  // Solana holds decimals on the mint rather than behind a contract call.
   const request = isSolana
     ? { jsonrpc: "2.0", id: 1, method: "getTokenSupply", params: [tokenAddress] }
     : {
@@ -141,17 +135,11 @@ async function zeroXQuote({ chainIndex, amount, fromTokenAddress, toTokenAddress
   };
 }
 
-
-/// MON → AUSD on Monad mainnet, as a transaction the wallet can sign.
-///
-/// The only swap Desk signs on its own chain. It funds a mainnet desk from an exchange
-/// withdrawal of MON without leaving the app, and it is bounded by construction: the
-/// wallet sells its native token, so nothing is approved and the most a bad route can
-/// take is the MON sent with the call.
+/// MON → AUSD on Monad mainnet. Bounded by construction: the wallet sells its native token,
+/// so nothing is approved and a bad route can take at most the MON sent with the call.
 export const MONAD = "143";
 export const AUSD = "0x00000000efe302beaa2b3e6e1b18d08d69a9012a";
 export const NATIVE_MON = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
-/// 0x's AllowanceHolder, one address on every chain 0x deploys to.
 export const ALLOWANCE_HOLDER = "0x0000000000001ff3684f28c67538d4d072c22734";
 const SWAP_SLIPPAGE_BPS = "100";
 
@@ -234,8 +222,6 @@ export default async function handler(req, res) {
   const readableAmount = String(req.query.amount || "");
   const hinted = Number(req.query.tokenDecimals);
 
-  // Malformed input and an unsupported chain are different answers. They used to share
-  // one 400, so the app could not tell a bad request from a chain Desk cannot price.
   if (!validAddress(tokenAddress) || !["buy", "sell"].includes(side)) {
     return res.status(400).json({ error: "Valid quote parameters required" });
   }

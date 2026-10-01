@@ -2,15 +2,10 @@ import Foundation
 import Testing
 @testable import DeskAuth
 
-/// One test per finding from the adversarial audit of 13 September 2026. Every
-/// standards vector passed while all of this was broken.
 @Suite("Auth audit regressions")
 struct AuthAuditRegressionTests {
     let prfOutput = Data((1...32).map(UInt8.init))
 
-    // An index with the high bit set used to harden the last EVM step and, because `|`
-    // is idempotent, collapse two ed25519 accounts onto one key: index 0 and index
-    // 2^31 shared a Perpl API key while showing different addresses.
     @Test("an index that would harden the path is refused")
     func hardenedIndexRefused() {
         for index: UInt32 in [0x8000_0000, 0x8000_0001, 0x8000_0007, 0xFFFF_FFFF] {
@@ -29,9 +24,8 @@ struct AuthAuditRegressionTests {
         }
     }
 
-    // BIP-39 mandates NFKD; Foundation's `precomposed...` spelling is NFKC. Invisible
-    // with Mera's empty passphrase and an ASCII wordlist, which is why the pinned
-    // vector could not see it. Ground truth from @scure/bip39.
+    // BIP-39 mandates NFKD; Foundation's `precomposed...` spelling is NFKC. Ground truth
+    // from @scure/bip39.
     @Test("the seed uses NFKD, so a non-ASCII passphrase matches every other wallet")
     func seedNormalisationIsNFKD() throws {
         let words = try BIP39.mnemonic(entropy: prfOutput)
@@ -53,7 +47,6 @@ struct AuthAuditRegressionTests {
             == BIP39.seed(mnemonic: words, passphrase: "e\u{0301}"))
     }
 
-    // The one hand-written primitive used to trap on `1..<0`.
     @Test("pbkdf2 declines degenerate parameters instead of trapping")
     func pbkdf2DoesNotTrap() {
         #expect(Hashing.pbkdf2SHA512(password: Data("x".utf8), salt: Data(), iterations: 0, length: 32).isEmpty)

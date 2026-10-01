@@ -4,8 +4,6 @@ import Testing
 
 @testable import DeskPerpl
 
-/// A position frame shaped the way the venue sends one: two-letter keys, amounts as
-/// strings of raw scaled integers, small numbers as JSON numbers.
 private func positionJSON(
     side: Int = 1,
     collateral: String = "10000000000",
@@ -32,11 +30,8 @@ private let btc = MarketConfig(
 
 @Suite("Decoding a position")
 struct PerplPositionTests {
-    /// The trap in the venue's own wording. It calls these fields "decimal string", which
-    /// reads as "a number with a point in it". They are raw integers at the collateral's
-    /// six decimals, so `"100000000"` is one hundred AUSD — not one hundred million.
-    /// Reading it the other way is wrong by a factor of a million, which would show a
-    /// liquidated account as solvent.
+    /// The venue calls these "decimal string", but they are raw integers at six decimals:
+    /// `"100000000"` is one hundred AUSD.
     @Test("An amount string is raw units, not a decimal figure")
     func amountsAreRawUnits() throws {
         let position = try JSONDecoder().decode(
@@ -53,9 +48,6 @@ struct PerplPositionTests {
         #expect(short.side == .short)
     }
 
-    /// `PositionStatus`'s numeric values are not published, so openness is keyed on the
-    /// exit price — which is only written when a position closes. Marked here because it
-    /// is the one inference in the decoder and it must not become folklore.
     @Test("A position with an exit price is closed")
     func openness() throws {
         let open = try JSONDecoder().decode(PerplPosition.self, from: positionJSON())
@@ -78,9 +70,6 @@ struct PerplPositionTests {
         #expect(frame.positions.first?.marketID == 16)
     }
 
-    /// `b` is the balance and `lb` the part locked behind open positions, so what is free
-    /// is the difference. Rendering `b` as "available" overstates it by exactly the margin
-    /// backing the user's own position.
     @Test("Free collateral is balance less locked")
     func accountFreeBalance() throws {
         let body = Data(#"{"mt":21,"in":12,"id":42,"fw":true,"fr":false,"b":"1500000000","lb":"500000000"}"#.utf8)
@@ -119,13 +108,10 @@ struct PositionFiguresTests {
         #expect(long.unrealisedPnL.raw == -short.unrealisedPnL.raw)
     }
 
-    /// The residue is a Q16 fraction of one tick. Ignoring it does not average out — it
-    /// leans the same way on every position, which reads to a user as the app being wrong
-    /// rather than as rounding.
+    /// The residue is a Q16 fraction of one tick.
     @Test("The entry residue moves the figure, and in the right direction")
     func residueIsApplied() throws {
         let without = try figures(markRaw: 1_100_000)
-        // Half a tick further up means the long entered higher, so it has made less.
         let with = try figures(residue: 32_768, markRaw: 1_100_000)
         #expect(with.unrealisedPnL < without.unrealisedPnL)
     }
@@ -141,8 +127,6 @@ struct PositionFiguresTests {
         #expect(plain == withResidue)
     }
 
-    /// The number that matters once someone is in a position: not how much room they had
-    /// at entry, but how much is left now.
     @Test("Liquidation distance shrinks as the price moves against the position")
     func distanceShrinks() throws {
         let comfortable = try figures(markRaw: 1_050_000)
@@ -152,8 +136,6 @@ struct PositionFiguresTests {
         #expect(b < a)
     }
 
-    /// A mark already past the liquidation price is no room at all. A negative distance
-    /// rendered as "-3% away" is a sentence with no meaning.
     @Test("Past the liquidation price the distance is zero, never negative")
     func neverNegative() throws {
         let figures = try figures(markRaw: 1_000)
@@ -170,9 +152,6 @@ struct PositionFiguresTests {
         #expect(figures.returnOnMarginMicros == 1_000_000)
     }
 
-    /// Perpl's own published worked example: a $100,000 BTC long at 10x with 4%
-    /// maintenance liquidates at $94,000. Pinned so a change to the margin formula fails
-    /// here rather than on a user's position.
     @Test("The venue's published liquidation example still holds")
     func publishedExample() throws {
         let figures = try figures(
@@ -188,9 +167,6 @@ struct PositionFiguresTests {
         #expect(PositionFigures(position: position, market: btc, mark: mark) == nil)
     }
 
-    /// Mark, PnL and liquidation distance all descend from one price. Derived separately
-    /// in a view they can come from two different ticks, and the screen then shows a PnL
-    /// that does not match the mark above it.
     @Test("Every figure descends from the mark it was given")
     func figuresShareOneTick() throws {
         let figures = try figures(markRaw: 1_050_000)
@@ -198,8 +174,6 @@ struct PositionFiguresTests {
     }
 }
 
-/// A position frame with the market, account and position id under the caller's control,
-/// so a book can be built out of several of them.
 private func bookJSON(
     market: Int = 16, account: Int = 42, id: Int64 = 7,
     size: Int64 = 1_000_000, exit: Int64? = nil
@@ -242,9 +216,6 @@ struct PositionBookTests {
         #expect(merged[0].isOpen == false)
     }
 
-    /// The reported bug: a position closed on the venue, reported under a new id, left
-    /// the old row on screen still marked open. Closing it again sent an order with
-    /// nothing to match, which came back as expired.
     @Test("A close reported under a new id retires the row it replaces")
     func closeUnderNewIdRetiresTheOldRow() throws {
         let held = try position(id: 7)
@@ -262,8 +233,6 @@ struct PositionBookTests {
         #expect(merged.map(\.positionID) == [11])
     }
 
-    /// Only the same account on the same market. Two people, or two markets, are not
-    /// evidence about each other.
     @Test("Another account's position on the same market is untouched")
     func otherAccountsSurvive() throws {
         let mine = try position(account: 42, id: 7)
@@ -273,7 +242,6 @@ struct PositionBookTests {
         #expect(merged.filter { $0.accountID == 42 }.allSatisfy { !$0.isOpen })
     }
 
-    /// A closed row is history, and history does not get retired by what comes after it.
     @Test("A closed row on the market stays in the book")
     func closedRowsAreKept() throws {
         let past = try position(id: 3, exit: 900_000)

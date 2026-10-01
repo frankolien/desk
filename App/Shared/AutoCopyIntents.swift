@@ -2,8 +2,6 @@ import ActivityKit
 import AppIntents
 import WidgetKit
 
-/// Every auto-copy intent runs in Desk's own process, so a pause from the Lock Screen also
-/// reaches a copy loop that is running.
 enum AutoCopyControl {
     static let controlKind = "com.opia.desk.auto-copy-control"
     static let widgetKind = "com.opia.desk.auto-copy"

@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// The currency balances and profit are shown in. Trading stays in AUSD, and the sheet
-/// says so, so nobody expects to deposit naira.
 struct CurrencySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""

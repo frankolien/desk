@@ -1,14 +1,11 @@
 import ActivityKit
 import Foundation
 
-/// The App Group Desk shares with its widgets, Live Activity and controls.
 enum DeskGroup {
     static let identifier = "group.com.opia.desk"
     static var defaults: UserDefaults { UserDefaults(suiteName: identifier) ?? .standard }
 }
 
-/// Auto-copy's on/off switch, readable and writable from outside Desk: Siri, Shortcuts,
-/// Control Center and the widget's button all set it, and the copy loop reads it every tick.
 enum AutoCopySwitch {
     private static let key = "desk.copy.paused"
 
@@ -18,7 +15,6 @@ enum AutoCopySwitch {
     }
 }
 
-/// What auto-copy is doing, as the app last wrote it for surfaces outside the app.
 struct AutoCopyGlance: Codable, Hashable, Sendable {
     struct Move: Codable, Hashable, Sendable, Identifiable {
         enum Kind: String, Codable, Sendable { case opened, closed }
@@ -57,8 +53,7 @@ struct AutoCopyGlance: Codable, Hashable, Sendable {
         DeskGroup.defaults.set(try? JSONEncoder().encode(self), forKey: Self.key)
     }
 
-    /// Signing out. The widget and the Live Activity read this, so leaving it behind shows
-    /// the previous account's traders and result on the Lock Screen of whoever signs in next.
+    /// Signing out: left behind, this shows the previous account's traders on the next Lock Screen.
     static func forget() {
         DeskGroup.defaults.removeObject(forKey: key)
     }
@@ -83,7 +78,6 @@ struct AutoCopyGlance: Codable, Hashable, Sendable {
         updatedAt: .now)
 }
 
-/// Auto-copy on the Lock Screen and in the Dynamic Island while Desk is copying.
 struct AutoCopyActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
         var today: Double

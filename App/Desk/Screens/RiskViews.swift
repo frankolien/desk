@@ -44,8 +44,6 @@ struct TokenRisk: Decodable, Sendable {
     let facts: [Fact]
     let checkedAt: Double
 
-    /// What a list row can say before the server has looked: the same thresholds the
-    /// server uses, on the figures the discovery feed already carries.
     static func quick(riskLevel: String?, liquidity: Double?, communityRecognized: Bool?) -> RiskLevel {
         var weight = 0
         var checked = false
@@ -220,8 +218,7 @@ struct RiskSheet: View {
     }
 }
 
-/// The sentence and the warnings above a confirm control. Warnings inform; a single
-/// "high" one asks for one acknowledging tap, never a second confirmation.
+/// Warnings inform; a single "high" one asks for one acknowledging tap, never a second confirmation.
 struct PreSignWarning: Identifiable, Equatable {
     enum Level { case info, caution, high }
     let text: String

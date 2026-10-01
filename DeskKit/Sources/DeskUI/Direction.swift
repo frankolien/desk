@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Encoded so it survives a grayscale filter: luminance differs, not only hue.
 public enum Direction: String, Sendable, Hashable, CaseIterable {
     case up
     case down
@@ -19,7 +18,6 @@ public enum Direction: String, Sendable, Hashable, CaseIterable {
         self == .up ? long : short
     }
 
-    /// Renders a value with a real minus sign and no hyphen anywhere.
     public static func signed(_ text: String) -> String {
         text.hasPrefix("-") ? minus + text.dropFirst() : text
     }

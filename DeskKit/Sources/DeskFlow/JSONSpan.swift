@@ -1,14 +1,7 @@
 import Foundation
 
-/// Finds the exact bytes of a top-level key's value inside a JSON document.
-///
-/// Perpl's enrolment hands back a `typed_data` object and a `mac` over it, and the
-/// enrol call has to send both back. Decoding the object and re-encoding it would
-/// reorder its keys — Swift dictionaries have no order — and any mac computed over the
-/// serialised form would then fail against bytes the server never produced. The Node
-/// spike survived this only because JavaScript preserves key order through a parse.
-///
-/// So the object is never re-encoded. It is spliced back out of the response verbatim.
+/// Perpl's enrolment returns `typed_data` with a `mac` over its exact bytes. Re-encoding
+/// would reorder keys and break the mac, so the object is spliced out verbatim.
 enum JSONSpan {
     enum Failure: Error, Equatable, Sendable {
         case notAnObject
@@ -56,8 +49,6 @@ enum JSONSpan {
         return index
     }
 
-    /// Returns the index one past the closing quote. Escapes are honoured, so a `\"`
-    /// inside a value does not end it.
     private static func endOfString(_ bytes: [UInt8], from start: Int) throws -> Int {
         var index = start + 1
         while index < bytes.count {

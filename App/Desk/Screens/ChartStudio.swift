@@ -18,8 +18,6 @@ enum OrientationLock {
     }
 }
 
-// MARK: - Model
-
 enum ChartStyle: String, CaseIterable, Identifiable {
     case candles, hollow, bars, line, area, heikinAshi
     var id: String { rawValue }
@@ -120,8 +118,6 @@ enum ChartTool: String, CaseIterable, Identifiable {
     }
 }
 
-/// A point on the chart in the chart's own units, so it survives new candles, a zoom,
-/// and a relaunch.
 struct ChartAnchor: Codable, Hashable {
     var time: Double
     var price: Double
@@ -149,7 +145,6 @@ enum ChartDrawingStore {
     }
 }
 
-/// Everything the painter needs, gathered once per frame.
 struct StudioFrame {
     var candles: [ChartCandle]
     var interval: Double
@@ -169,8 +164,6 @@ struct StudioFrame {
     var leverage: Int = 1
 }
 
-/// Study series over the full history, computed when the candles change rather than on
-/// every finger move.
 struct StudySet {
     var ma7: [Double?] = []
     var ma25: [Double?] = []
@@ -212,10 +205,6 @@ struct StudySet {
     }
 }
 
-// MARK: - Geometry
-
-/// Where everything sits for one frame size. Shared by the painter and the gestures, so
-/// a finger and a pixel agree about which candle they mean.
 struct StudioGeometry {
     static let axisWidth: CGFloat = 60
     static let timeAxisHeight: CGFloat = 20
@@ -270,8 +259,6 @@ struct StudioGeometry {
     func slot(atX x: CGFloat) -> Int { Int((x / slotWidth).rounded(.down)) }
     func fractionalIndex(atX x: CGFloat) -> Double { Double(x / slotWidth) - 0.5 + Double(window.end - window.visible) }
 }
-
-// MARK: - Painter
 
 struct StudioPainter {
     let frame: StudioFrame
@@ -724,15 +711,12 @@ struct StudioPainter {
                             seconds: abs(ruler.to.time - ruler.from.time))
     }
 
-    /// The candle under the crosshair, if any.
     var hoveredIndex: Int? {
         guard let crosshair = frame.crosshair else { return nil }
         let index = frame.window.index(atSlot: geometry.slot(atX: crosshair.x))
         return frame.candles.indices.contains(index) ? index : nil
     }
 
-    /// Where the horizontal line sits: the finger, or the nearest of the candle's four
-    /// prices when the magnet is on.
     func crosshairPrice(at point: CGPoint) -> Double {
         let free = geometry.scale.value(atY: point.y)
         guard frame.magnet, let index = hoveredIndex else { return free }
@@ -803,7 +787,6 @@ struct StudioPainter {
     }
 }
 
-/// The drawing alone, so a share image and the live screen render the same pixels.
 struct StudioCanvas: View {
     let frame: StudioFrame
 
@@ -815,17 +798,10 @@ struct StudioCanvas: View {
     }
 }
 
-// MARK: - Screen
-
-/// The chart at full size: history to pan and pinch through, studies, drawings that
-/// persist per market, a crosshair that doubles as a ruler, and the order buttons so
-/// nobody has to leave to act on what they saw. Portrait by default; a button turns it.
 struct ChartStudio: View {
     let market: MarketModel
     let network: String
     var guides: [PriceGuide] = []
-    /// The side of the position this chart was opened from, so a level knows whether it
-    /// would be a take profit or a stop.
     var heldSide: Direction?
     var onTrade: ((Direction, TicketPreset?) -> Void)?
     var onProtect: ((_ takeProfit: String?, _ stopLoss: String?) -> Void)?
@@ -870,8 +846,6 @@ struct ChartStudio: View {
     private var drawingKey: String { ChartDrawingStore.key(market.symbol, network: network) }
     private var priceScale: Double { pow(10.0, Double(market.market?.config.priceDecimals ?? 0)) }
 
-    /// The venue's candles with the live mark folded into the newest one, so the last
-    /// bar moves with the price between candle refreshes.
     private var candles: [ChartCandle] {
         var series = market.candles.map { $0.chartCandle(scale: priceScale) }
         if let mark = market.mark.value, let last = series.last {
@@ -944,8 +918,6 @@ struct ChartStudio: View {
         .onChange(of: drawings) { ChartDrawingStore.save(drawings, key: drawingKey) }
         #if DEBUG
         .task {
-            // `-chart-style <name>` picks a style; `-studio-demo` puts the crosshair, a ruler,
-            // a level and an alert on screen for a screenshot.
             let arguments = ProcessInfo.processInfo.arguments
             if let index = arguments.firstIndex(of: "-chart-style"), index + 1 < arguments.count,
                ChartStyle(rawValue: arguments[index + 1]) != nil {
@@ -991,8 +963,6 @@ struct ChartStudio: View {
         }
     }
 
-    /// What a horizontal level can become: protection on a held position, protection on a
-    /// new order, or a one-time alert. Which side it protects follows from where it sits.
     @ViewBuilder private func levelActions(_ drawing: ChartDrawing) -> some View {
         let price = drawing.a.price
         let text = priceText(price)
@@ -1025,7 +995,6 @@ struct ChartStudio: View {
         Button("Remove level", role: .destructive) { drawings.removeAll { $0.id == drawing.id } }
     }
 
-    /// The ruler read as an order: enter now, take profit where the ruler ends.
     private struct Plan { let title: String; let symbol: String; let act: () -> Void }
 
     private func plan(for ruler: (from: ChartAnchor, to: ChartAnchor)) -> Plan? {
@@ -1057,8 +1026,6 @@ struct ChartStudio: View {
         window.update(total: series.count, prepended: prepended)
         studies = StudySet(candles: series.map { $0.chartCandle(scale: priceScale) })
     }
-
-    // MARK: Header
 
     private var hovered: ChartCandle? {
         guard crosshair != nil, canvasSize != .zero else { return nil }
@@ -1152,7 +1119,6 @@ struct ChartStudio: View {
         .frame(height: 44)
     }
 
-    /// The hovered candle's four prices, its volume, and the time left in the live one.
     private var readout: some View {
         HStack(spacing: 10) {
             if let last = candles.last {
@@ -1190,7 +1156,6 @@ struct ChartStudio: View {
         CandleIntervalRail.intervals.first { $0.0 == market.candleIntervalSeconds }?.1 ?? "\(market.candleIntervalSeconds)s"
     }
 
-    /// Time left in the current candle, ticking once a second on its own.
     private var countdown: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let interval = Double(market.candleIntervalSeconds)
@@ -1220,8 +1185,6 @@ struct ChartStudio: View {
         landscape.toggle()
         OrientationLock.request(landscape ? .landscapeRight : .portrait)
     }
-
-    // MARK: Chart
 
     private var chart: some View {
         GeometryReader { proxy in
@@ -1285,9 +1248,6 @@ struct ChartStudio: View {
         .animation(.easeOut(duration: 0.15), value: window.isAtLatest)
     }
 
-    /// One finger. A drag pans; a drag that begins on the crosshair measures from it; in
-    /// crosshair mode a drag carries the crosshair; and a finger that rests before it
-    /// moves brings the crosshair up under itself for as long as it stays down.
     private func dragGesture(geometry: StudioGeometry, painter: StudioPainter) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { value in
@@ -1457,8 +1417,6 @@ struct ChartStudio: View {
         return hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy))
     }
 
-    // MARK: Toolbar
-
     private var intervals: some View {
         HStack(spacing: 0) {
             ForEach(CandleIntervalRail.intervals, id: \.0) { seconds, label in
@@ -1602,8 +1560,6 @@ struct ChartStudio: View {
         }
         .buttonStyle(.plain)
     }
-
-    // MARK: Share
 
     private func share() {
         var still = frame

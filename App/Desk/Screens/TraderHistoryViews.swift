@@ -1,8 +1,6 @@
 import DeskUI
 import SwiftUI
 
-/// A trader's record from Perpl's position events: statistics, style, one score and the
-/// last closed trades. Built on the server from the chain; nothing here is estimated.
 struct TraderHistory: Decodable, Sendable {
     struct Market: Decodable, Sendable { let symbol: String; let pnl: Double; let count: Int }
 
@@ -61,7 +59,6 @@ struct TraderHistory: Decodable, Sendable {
     }
 }
 
-/// The score as a native gauge, tinted by band.
 struct TraderScoreGauge: View {
     let score: Int
 
@@ -85,7 +82,6 @@ struct TraderScoreGauge: View {
     }
 }
 
-/// The closed-trades tab.
 struct TraderTradesList: View {
     let history: TraderHistory?
     let loaded: Bool
@@ -141,7 +137,6 @@ struct TraderTradesList: View {
     }
 }
 
-/// The statistics tab: score, style, and the figures behind them.
 struct TraderStatsView: View {
     let history: TraderHistory?
     let loaded: Bool

@@ -21,15 +21,11 @@ struct FreshnessTests {
 
     @Test("A connected but stalled socket still goes stale")
     func connectedButStalled() {
-        // The reason the model exists: a socket can be connected and quiet, and showing
-        // a stale number as a live one is lying.
         #expect(policy.state(age: .seconds(8), socketIsConnected: true) == .stale)
     }
 
     @Test("A closed socket is disconnected at once, whatever the age says")
     func closedSocketIsImmediate() {
-        // Waiting fifteen seconds to admit what we already know would leave the confirm
-        // button live over a price that cannot be refreshed.
         #expect(policy.state(age: .zero, socketIsConnected: false) == .disconnected)
         #expect(policy.state(age: .milliseconds(100), socketIsConnected: false) == .disconnected)
     }
@@ -38,15 +34,12 @@ struct FreshnessTests {
     func confirmRules() {
         #expect(Freshness.live.allowsConfirm)
         #expect(Freshness.settling.allowsConfirm)
-        // Stale is re-priced on submit rather than blocked: refusing to trade on a quiet
-        // market would be the wrong call far more often than the right one.
         #expect(Freshness.stale.allowsConfirm)
         #expect(Freshness.disconnected.allowsConfirm == false)
     }
 
     @Test("Every state still renders the last known value")
     func neverBlank() {
-        // Never blank, never a dash, never a zero, never a spinner over a number.
         for state in Freshness.allCases { #expect(state.showsLastKnownValue) }
         #expect(Freshness.live.flashesOnChange)
         #expect(Freshness.settling.flashesOnChange == false)

@@ -4,7 +4,6 @@ import DeskMoney
 import DeskPerpl
 import Foundation
 
-/// Where the two contracts live, taken from `pub/context` rather than hardcoded.
 public struct ExchangeAddresses: Sendable, Hashable {
     public let collateralToken: EthereumAddress
     public let exchange: EthereumAddress
@@ -14,23 +13,15 @@ public struct ExchangeAddresses: Sendable, Hashable {
         case collateralTokenMissing
         case instanceMissing
         case addressMalformed(String)
-        /// The venue named a contract this build does not pin. Nothing is signed.
         case addressNotPinned(String)
     }
 
-    /// The addresses directly. The context-derived initialiser below is what production
-    /// uses; this one exists so a test — and a future configuration file — can name the
-    /// three without standing up a whole venue context.
     public init(collateralToken: EthereumAddress, exchange: EthereumAddress, minimumToOpen: Money) {
         self.collateralToken = collateralToken
         self.exchange = exchange
         self.minimumToOpen = minimumToOpen
     }
 
-    /// The addresses this venue names, checked against the ones this build pins.
-    ///
-    /// `pinnedTo` is nil only in tests and in code that never signs; every path that reaches
-    /// the wallet key passes the network it is trading on.
     public init(context: PerplContext, pinnedTo network: DeskNetwork? = nil) throws {
         guard let token = context.collateralToken else { throw Failure.collateralTokenMissing }
         guard let instance = context.instances.first else { throw Failure.instanceMissing }
@@ -65,11 +56,8 @@ public struct ExchangeAddresses: Sendable, Hashable {
     }
 }
 
-/// Opening a desk: approve, create, allow forwarding, enrol.
-///
-/// Four steps, not three. Each is checked before it is run, so a failure anywhere resumes
-/// from the first unsatisfied precondition rather than from the beginning — which is what
-/// the product document asks for, and what stops a retry paying for an approval twice.
+/// Opening a desk: approve, create, allow forwarding, enrol. Each step is checked before it runs,
+/// so a retry resumes at the first unsatisfied one and never pays for an approval twice.
 public actor OpeningSequence {
     public enum Step: String, Sendable, Hashable, CaseIterable {
         case approve
@@ -111,8 +99,7 @@ public actor OpeningSequence {
         self.addresses = addresses
     }
 
-    /// Opens with the first of several derived trading keys Perpl will enrol, and says
-    /// which one it was: that index is what every later session has to derive.
+    /// Returns the derived key index Perpl enrolled; every later session has to derive that one.
     public func open(
         wallet: WalletKey,
         tradingKeys: @escaping @Sendable (UInt32) throws -> TradingKey,
@@ -135,10 +122,8 @@ public actor OpeningSequence {
         trading: TradingKey,
         deposit: Money,
         label: String,
-        /// Forwarding cannot be read back before enrolment — the flag lives on the
-        /// account object in the wallet snapshot, which needs the key this sequence is
-        /// still creating. Setting it true when it already is costs one cheap
-        /// transaction, so it runs unless the caller has seen it enabled.
+        /// Forwarding cannot be read back before enrolment (the flag needs the key being created),
+        /// so it is set unless the caller has seen it enabled; re-setting costs one cheap transaction.
         forwardingKnownEnabled: Bool = false,
         report: @Sendable (Progress) -> Void = { _ in }
     ) async throws -> APIKey {
@@ -153,10 +138,7 @@ public actor OpeningSequence {
         return key
     }
 
-    /// Every on-chain step before enrolment, each skipped when the chain says it is done.
-    ///
-    /// The account is looked for first. One that exists already holds its collateral at
-    /// the exchange, so a new phone with an empty wallet goes straight to a fresh key.
+    /// The account is looked for first: an existing one already holds its collateral at the exchange.
     private func prepare(
         wallet: WalletKey,
         deposit: Money,
@@ -196,8 +178,6 @@ public actor OpeningSequence {
         }
     }
 
-    // MARK: - Preconditions
-
     public func allowance(owner: EthereumAddress) async throws -> Money {
         let result = try await rpc.callContract(
             to: addresses.collateralToken,
@@ -205,11 +185,6 @@ public actor OpeningSequence {
         return ABIMoney.decode(result)
     }
 
-    /// The wallet's own AUSD. Named for what it reads: `balanceOf` on the collateral
-    /// token is the balance in the wallet, and collateral held *at the exchange* is a
-    /// different figure that only the authenticated account snapshot carries. The old
-    /// name said "collateral" and the distinction is the difference between money you can
-    /// deposit and money already backing a position.
     public func walletAUSD(of owner: EthereumAddress) async throws -> Money {
         let result = try await rpc.callContract(
             to: addresses.collateralToken, data: try Calldata.balanceOf(owner))
@@ -229,8 +204,6 @@ public actor OpeningSequence {
         }
     }
 
-    // MARK: - Machinery
-
     private func run(
         _ step: Step,
         from wallet: WalletKey,
@@ -244,7 +217,5 @@ public actor OpeningSequence {
         report(Progress(step: step, outcome: .finished))
     }
 
-    /// Kept as a name the tests already reach for; the decoder itself now lives in
-    /// `ABIMoney` so `BalanceReader` cannot drift from it.
     static func money(_ word: Data) -> Money { ABIMoney.decode(word) }
 }

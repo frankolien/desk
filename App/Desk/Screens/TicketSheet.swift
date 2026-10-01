@@ -4,7 +4,6 @@ import DeskPerpl
 import DeskUI
 import SwiftUI
 
-
 struct TicketPreset: Hashable {
     var takeProfit: String?
     var stopLoss: String?
@@ -14,15 +13,10 @@ struct TicketSheet: View {
     let side: Direction
     let market: Market?
     let mark: Price?
-    /// Injected rather than built here: the ticket does not own a socket and must not
-    /// decide whether an order can be sent. It asks, and is answered in a sentence.
     let session: TradingSession
     var isPriceFresh = true
-    /// Where the leverage rail starts, for a ticket opened from someone else's position.
     var initialLeverage = 1
-    /// Protection handed in from the chart, where a level or a ruler chose the price.
     var preset: TicketPreset?
-    /// The market's live book, when the screen behind the ticket follows one.
     var book: OrderBook? = nil
     let onDismiss: () -> Void
 
@@ -31,12 +25,8 @@ struct TicketSheet: View {
     @State private var stopLoss = ""
     @State private var takeProfit = ""
     @State private var handledFill = false
-    /// Set once this sheet sends an order, so a fill from an earlier one is never shown here.
     @State private var submitted = false
-    /// Opened while an earlier order from a ticket like this one was still in flight; its
-    /// fill is shown here.
     @State private var watchingEarlier = false
-    /// The order in flight or last finished is this ticket's to speak for.
     private var mine: Bool { submitted || watchingEarlier }
 
     private func origin(for market: Market) -> TradingSession.OrderOrigin {
@@ -59,11 +49,8 @@ struct TicketSheet: View {
     private var protection: OrderDesk.Draft.Protection? {
         guard let market, let mark else { return nil }
         let decimals = market.config.priceDecimals
-        // Rounded towards the mark on both sides, so a typed trigger is never moved further
-        // away than asked: a long's stop sits below the mark and rounds up, a short's sits
-        // above and rounds down, and the take profits are the mirror of that. Rounding by
-        // field rather than by side moved a short's stop away from the mark and made the
-        // realised loss a tick larger than the one on screen.
+        // Rounded towards the mark by side, so a typed trigger is never moved further away
+        // than asked: a long's stop rounds up, a short's rounds down, take profits mirror it.
         let sl = stopLoss.isEmpty ? nil : (side == .up
             ? Price(selling: stopLoss, decimals: decimals)
             : Price(buying: stopLoss, decimals: decimals))
@@ -73,8 +60,7 @@ struct TicketSheet: View {
         guard sl != nil || tp != nil else { return nil }
         if let sl, side == .up ? sl >= mark : sl <= mark { return nil }
         if let tp, side == .up ? tp <= mark : tp >= mark { return nil }
-        // A stop beyond the liquidation price can never fire: the venue closes the position
-        // first. Accepting one showed protection the position did not have.
+        // A stop beyond the liquidation price can never fire: the venue closes the position first.
         if let sl, let quote, side == .up ? sl <= quote.liquidationPrice : sl >= quote.liquidationPrice {
             return nil
         }
@@ -93,8 +79,6 @@ struct TicketSheet: View {
         return Money(raw: quote.total.raw - free.raw)
     }
 
-    /// The least margin that buys one size unit at this leverage, when what was typed
-    /// buys none. Perpl sets no other minimum.
     private var smallestMargin: String? {
         guard quote == nil, let market, let mark, mark.raw > 0,
               let margin = Money(text: amount.isEmpty ? "0" : amount), margin.raw > 0 else { return nil }
@@ -104,7 +88,6 @@ struct TicketSheet: View {
         return String(format: "%.2f", max(smallest, 0.01))
     }
 
-    /// Said once, the first time someone sends with leverage, in place of the disclaimer.
     @AppStorage("desk.leverageExplainerSeen") private var leverageUnderstood = false
     private var firstLeverageLine: String? {
         guard leverage > 1, !leverageUnderstood, let quote else { return nil }
@@ -126,11 +109,8 @@ struct TicketSheet: View {
     }
 
     private func sizeFor(_ notional: Money, mark: Price, market: Market) -> Size? {
-        // size = notional / price, at the market's own size scale. The scale is built by
-        // integer multiplication: `pow(10:)` returns a Double, which stops being exact at
-        // 10^23 while the venue's own limit on these decimals is higher than that, and
-        // converting a non-representable Double to Int128 is a trap rather than a wrong
-        // answer. Nothing in this app does arithmetic on a price in Double.
+        // Scale built by integer multiplication: `pow(10:)` is a Double, inexact past 10^23,
+        // and converting a non-representable Double to Int128 traps.
         let exponent = Int(market.config.sizeDecimals) + Int(market.config.priceDecimals)
         guard exponent >= 0, exponent <= 38 else { return nil }
         var scale = Int128(1)
@@ -145,8 +125,6 @@ struct TicketSheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         HStack(spacing: 9) {
-                            // The market's own mark. This drew Bitcoin for every market,
-                            // so shorting PUMP showed a Bitcoin coin on the ticket.
                             MarketTokenLogo(symbol: market?.symbol ?? "", size: 30)
                             Text(side.word())
                                 .font(DeskType.title)
@@ -183,9 +161,6 @@ struct TicketSheet: View {
                     .minimumScaleFactor(0.8)
                     .padding(.top, 4)
 
-                    // What it costs, immediately under what was typed. Paired rather than
-                    // stacked: five full-width rows for four figures did not leave the
-                    // keypad and the confirm control room on the sheet.
                     VStack(spacing: 12) {
                         HStack(alignment: .top, spacing: 12) {
                             figure("Your margin", quote?.margin.display() ?? Unavailable.text)
@@ -199,8 +174,6 @@ struct TicketSheet: View {
                             figure("Total", quote?.total.display() ?? Unavailable.text,
                                    alignment: .trailing)
                         }
-                        // Held from the first frame, dashes until there is a figure, so the
-                        // keypad never moves under a finger.
                         if book != nil {
                             HStack(spacing: 6) {
                                 Text("Est. fill")
@@ -233,7 +206,6 @@ struct TicketSheet: View {
                             showsProtection = true
                         }
                         #if DEBUG
-                        // `-ticket-demo` fills a leveraged order so the preview can be captured.
                         if ProcessInfo.processInfo.arguments.contains("-ticket-demo") {
                             amount = "120"
                             leverage = min(15, max(1, market?.config.maxLeverage ?? 1))
@@ -302,8 +274,6 @@ struct TicketSheet: View {
                     }
                     .padding(.top, 14)
 
-                    // Shorter keys than the other sheets: the ticket carries the most above
-                    // its pad, and the bottom row has to stay above the confirm control.
                     AmountKeypad(text: $amount, keyHeight: 46, spacing: 4)
                         .padding(.top, 2)
 
@@ -322,8 +292,6 @@ struct TicketSheet: View {
                     }
 
                     if mine, session.hasFailed, let reason = session.statusText {
-                        // Above the control rather than in an alert: an alert is dismissed and
-                        // forgotten, and the reason is the thing the user has to act on.
                         HStack(alignment: .top, spacing: 8) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.system(size: 13, weight: .bold))
@@ -374,9 +342,6 @@ struct TicketSheet: View {
                 }
             }
 
-            // The one place the venue's own vocabulary is worth showing, because
-            // "forwarded" is a real state a user can be stuck in and a spinner is not an
-            // explanation.
             if let status = mine
                 ? (session.isBusy || session.order.outcome == .settled ? session.statusText : nil)
                 : (session.isBusy ? "Another order is still in flight." : nil) {
@@ -393,8 +358,6 @@ struct TicketSheet: View {
         .background(DeskColor.night.color)
         .interactiveDismissDisabled(mine && session.isBusy)
         .onAppear {
-            // An earlier order's outcome is not this ticket's, unless a ticket for the same
-            // market and side sent it and it is still in flight.
             if session.isBusy {
                 watchingEarlier = market.map { session.orderOrigin == origin(for: $0) } ?? false
             } else {
@@ -405,9 +368,7 @@ struct TicketSheet: View {
             guard outcome == .settled, submitted || watchingEarlier, !handledFill else { return }
             handledFill = true
             Task { @MainActor in
-                // Leave the venue's confirmation visible for a beat before returning to
-                // the portfolio. Forwarded is deliberately not enough: only a real fill
-                // earns automatic dismissal.
+                // Forwarded is deliberately not enough: only a real fill earns automatic dismissal.
                 try? await Task.sleep(for: .milliseconds(session.order.fill?.isPartial == true ? 2_600 : 650))
                 guard !Task.isCancelled, session.order.outcome == .settled else { return }
                 onDismiss()
@@ -415,10 +376,6 @@ struct TicketSheet: View {
         }
     }
 
-    /// What this market order would take from the live book: the average price, where it
-    /// sits against the mark positions are valued at, and whether the book holds the whole
-    /// size within the slippage bound the order carries. Less than that comes back partly
-    /// filled. A crossed book is mid-update and shows nothing.
     private var bookEstimate: (price: String, versusMark: String, short: String?)? {
         guard let book, book.isReady, (book.spreadRaw ?? 1) > 0,
               let quote, let market, let mark, mark.raw > 0 else { return nil }
@@ -445,11 +402,6 @@ struct TicketSheet: View {
         return (price, versusMark, short)
     }
 
-    /// Builds the draft and hands it to the session.
-    ///
-    /// There is no branch here for "not enrolled". Whether an order can be signed is the
-    /// session's answer, arrived at through the same call the real path takes, so the day
-    /// a key exists nothing in this file changes.
     private func submit() async {
         submitted = true
         if leverage > 1 { leverageUnderstood = true }
@@ -458,9 +410,8 @@ struct TicketSheet: View {
             side: side == .up ? .long : .short,
             size: quote.size,
             leverageHundredths: leverage * 100,
-            // The venue's own cap, not a number chosen here. A market order is a
-            // marketable limit bounded by slippage, so this is the only thing standing
-            // between a thin book and a fill at any price.
+            // The venue's own cap. A market order is a limit bounded by slippage, so this is
+            // all that stands between a thin book and a fill at any price.
             slippageBps: min(50, market.maxMarketSlippageBps),
             protection: protection)
 

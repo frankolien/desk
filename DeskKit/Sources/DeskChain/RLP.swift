@@ -1,6 +1,5 @@
 import Foundation
 
-/// Recursive-length-prefix encoding, the form a transaction is signed and broadcast in.
 enum RLP {
     enum Item {
         case bytes(Data)
@@ -20,11 +19,8 @@ enum RLP {
         }
     }
 
-    /// A quantity, with leading zeros removed. Zero is the empty string, never `0x00`.
-    ///
-    /// This is the rule that breaks a signature quietly: `0x00` and `` are different RLP
-    /// and therefore different preimages, and every field of a transaction that happens
-    /// to be zero goes through here.
+    /// Leading zeros removed; zero is the empty string, never `0x00`. The two are different
+    /// RLP, so getting this wrong quietly breaks the signature of any zero field.
     static func quantity(_ bytes: Data) -> Item {
         var trimmed = bytes
         while trimmed.first == 0 { trimmed = trimmed.dropFirst() }

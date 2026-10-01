@@ -4,7 +4,6 @@ import DeskAuth
 import Foundation
 import UIKit
 
-/// A platform passkey with the PRF extension. The PRF output is the only secret; both keys derive from it on demand.
 @MainActor
 final class PasskeyCeremony: NSObject, PasskeyService {
     /// 18.4 is the first version whose PRF output can be trusted. Below it the ceremony
@@ -23,30 +22,15 @@ final class PasskeyCeremony: NSObject, PasskeyService {
 
     var lastSeenAddress: EthereumAddress? { store.address }
 
-    /// Signs in with an existing passkey. **Never creates one.**
-    ///
-    /// This used to fall through to registration when the assertion came back empty, and
-    /// that was a way to lose someone's money. iOS returns `.canceled` both when no
-    /// credential matched *and* when the user dismissed the sheet — the two are
-    /// indistinguishable by code — so a mis-tapped dismissal ran a registration, Mera
-    /// minted a fresh user handle, and the new passkey derived a different address. To
-    /// the user their funded account had simply vanished, and there is no way back from
-    /// it.
-    ///
-    /// Creating a credential is now `createAccounts()`, reached only by a person choosing
-    /// it. Cancellation is cancellation.
+    /// Signs in with an existing passkey and never creates one: falling through to
+    /// registration on a cancel would mint a second wallet at a different address.
     func deriveAccounts(tradingIndex: @Sendable (EthereumAddress) -> UInt32) async throws -> DerivedAccounts {
         try requireSupportedSystem()
         return try await derive(from: try await assertExisting(), tradingIndex: tradingIndex)
     }
 
-    /// Creates a passkey, and with it a new wallet.
-    ///
-    /// Only ever called from an explicit choice, and it refuses outright if this device
-    /// has already derived an address. A second passkey for the same relying party is a
-    /// second wallet: the first one keeps the funds and nothing in the app can reach them
-    /// again. Refusing is the only safe answer, and it is a refusal rather than a warning
-    /// because a warning is something people tap through.
+    /// Refuses if this device already derived an address: a second passkey is a second
+    /// wallet, and the first one's funds become unreachable from the app.
     func createAccounts(tradingIndex: @Sendable (EthereumAddress) -> UInt32) async throws -> DerivedAccounts {
         try requireSupportedSystem()
         if let existing = store.address {
@@ -68,7 +52,6 @@ final class PasskeyCeremony: NSObject, PasskeyService {
         from output: Data, tradingIndex: @Sendable (EthereumAddress) -> UInt32
     ) async throws -> DerivedAccounts {
         var prf = output
-        // The bytes exist for exactly as long as the two derivations take.
         defer { prf.resetBytes(in: 0..<prf.count) }
         guard prf.count == 32 else { throw PasskeyFailure.prfReturnedNothing }
 
@@ -76,8 +59,6 @@ final class PasskeyCeremony: NSObject, PasskeyService {
         let trading = try PasskeyAccounts.deriveTradingKey(
             prfOutput: prf, index: tradingIndex(address))
         store.record(address)
-        // `hasDesk` is a fact about the chain, not about the passkey. It is read by
-        // `BalanceReader` after sign-in rather than guessed here.
         return DerivedAccounts(address: address, trading: trading, hasDesk: false)
     }
 
@@ -96,46 +77,32 @@ final class PasskeyCeremony: NSObject, PasskeyService {
         defer { prf.resetBytes(in: 0..<prf.count) }
         guard prf.count == 32 else { throw PasskeyFailure.prfReturnedNothing }
 
-        // Derived, used, and gone. Neither key leaves this scope and neither is
-        // returned, and the bytes trading keys come from are wiped when it closes.
         let wallet = try PasskeyAccounts.deriveWalletKey(prfOutput: prf)
         return try await TradingKeys.scoped(prf: prf) { try await body(wallet, $0) }
     }
-
-    // MARK: - The two ceremonies
 
     private func assertExisting() async throws -> Data {
         let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(
             relyingPartyIdentifier: relyingParty.identifier)
         let request = provider.createCredentialAssertionRequest(challenge: Self.challenge())
-        // Spelled the way the overlay actually exposes it: a static member, not an
-        // initialiser. Confirmed against the working probe in the sibling app rather
-        // than guessed from the Objective-C header, which refines away the init.
+        // A static member, not an initialiser: the Swift overlay refines the init away.
         request.prf = .inputValues(
             .init(saltInput1: PasskeyAccounts.prfSalt, saltInput2: nil),
             perCredentialInputValues: nil)
-        // Never a passkey the platform would have to guess at, and never a password.
         return try await perform(request, isAssertion: true)
     }
 
     private func createNew() async throws -> Data {
         let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(
             relyingPartyIdentifier: relyingParty.identifier)
-        // The user handle is the credential's identity to the relying party. It is random
-        // because there is no account server to name the user against — the passkey is
-        // the account.
         let request = provider.createCredentialRegistrationRequest(
             challenge: Self.challenge(),
             name: displayName,
             userID: Data((0..<32).map { _ in UInt8.random(in: .min ... .max) }))
-        // Registration only asks whether PRF is available for this credential; it does
-        // not return key material, so the key still comes from an assertion afterwards.
         request.prf = .checkForSupport
         return try await perform(request, isAssertion: false)
     }
 
-    /// Runs one request and pulls the PRF output out of whichever kind of result comes
-    /// back.
     private func perform(_ request: ASAuthorizationRequest, isAssertion: Bool) async throws -> Data {
         let controller = ASAuthorizationController(authorizationRequests: [request])
         let delegate = CeremonyDelegate(isAssertion: isAssertion)
@@ -149,33 +116,20 @@ final class PasskeyCeremony: NSObject, PasskeyService {
 
         switch authorization.credential {
         case let assertion as ASAuthorizationPlatformPublicKeyCredentialAssertion:
-            // Swift refines the output to a `SymmetricKey` rather than raw bytes, so it
-            // has to be copied out before it can be used as BIP-39 entropy.
             guard let key = assertion.prf?.first else { throw PasskeyFailure.prfReturnedNothing }
             return Data(key.withUnsafeBytes { Array($0) })
         case let registration as ASAuthorizationPlatformPublicKeyCredentialRegistration:
-            // A registration that reports no PRF support is a credential that can never
-            // derive a wallet. It is better to fail here than to let the user fund an
-            // address they will not be able to reach again.
-            // A credential that cannot derive a wallet is worse than no credential: the
-            // user would fund an address they could never reach again.
             guard registration.prf?.isSupported == true else { throw PasskeyFailure.prfUnsupported }
-            // Registration confirms support but returns no key material, so the key comes
-            // from an assertion against the credential just made. Safe to call here and
-            // only here: a credential certainly exists, because it was created a moment
-            // ago by this same call.
+            // Registration returns no key material, so the key comes from an assertion
+            // against the credential just made.
             return try await assertExisting()
         default:
             throw PasskeyFailure.platformRefused("That credential can't be used with Desk.")
         }
     }
 
-    /// A random challenge.
-    ///
-    /// There is no server to issue one, and that is not a weakness here: the challenge
-    /// guards against replay of an *authentication assertion to a server*, and Desk has no
-    /// server to replay one to. What matters is the PRF output, which depends on the
-    /// credential and the salt and not on the challenge at all.
+    /// Locally random on purpose: there is no server to replay an assertion to, and the
+    /// PRF output depends only on the credential and the salt.
     private static func challenge() -> Data {
         Data((0..<32).map { _ in UInt8.random(in: .min ... .max) })
     }
@@ -190,7 +144,6 @@ extension PasskeyCeremony: ASAuthorizationControllerPresentationContextProviding
     }
 }
 
-/// Bridges the delegate callbacks to one continuation, resumed exactly once.
 private final class CeremonyDelegate: NSObject, ASAuthorizationControllerDelegate {
     var continuation: CheckedContinuation<ASAuthorization, any Error>?
     private let isAssertion: Bool
@@ -213,24 +166,6 @@ private final class CeremonyDelegate: NSObject, ASAuthorizationControllerDelegat
         continuation = nil
     }
 
-    /// The platform's error codes, turned into the app's own vocabulary.
-    ///
-    /// `.canceled` is the interesting one: it is returned both when the user dismisses the
-    /// sheet and when there was no credential to offer them. The two are indistinguishable
-    /// by code, which is why the flow treats a cancelled assertion as "try creating one"
-    /// rather than as a refusal.
-    /// The platform's error codes, kept distinguishable.
-    ///
-    /// The first version mapped `.canceled`, `.notHandled` and `.failed` all to
-    /// `noCredentialFound`, which made every possible failure — a domain that is not
-    /// associated, a provisioning profile without the capability, a network the device
-    /// could not reach Apple's CDN over — present as "no passkey on this device yet".
-    /// That is the one message guaranteed to send someone hunting in the wrong place, and
-    /// it hid a real setup failure behind a sentence about their phone.
-    ///
-    /// Only `.canceled` now means "there was nothing to offer", because iOS returns it
-    /// both when the user dismisses the sheet and when no credential matched. `.failed`
-    /// on an assertion almost always means the association has not taken.
     private static func translate(_ error: any Error, isAssertion: Bool) -> any Error {
         guard let authorization = error as? ASAuthorizationError else {
             let underlying = error as NSError
@@ -239,15 +174,12 @@ private final class CeremonyDelegate: NSObject, ASAuthorizationControllerDelegat
         }
         switch authorization.code {
         case .canceled:
-            // iOS returns this both for a dismissed sheet and for no matching credential,
-            // and nothing distinguishes them. Treated as a cancellation, because the other
-            // reading led to silently creating a second wallet.
+            // Also returned when no credential matched; treated as a cancel, never as
+            // "create one", which would silently make a second wallet.
             return PasskeyFailure.cancelledByUser
         case .invalidResponse:
             return PasskeyFailure.prfReturnedNothing
         case .failed, .notHandled:
-            // The message names the likely cause and what to check, because this is a
-            // setup failure and the user cannot fix it by trying again.
             let lead = isAssertion
                 ? "Face ID sign-in needs one more setup step."
                 : "Account creation needs one more setup step."
@@ -271,9 +203,6 @@ struct LastSeenAddressStore: Sendable {
         return EthereumAddress(bytes: Self.hex(text))
     }
 
-    /// Twenty bytes from a 0x-prefixed string, or nothing. Written here rather than
-    /// reached for from the chain module: this is a defaults value that may be anything,
-    /// including a string some other version of the app wrote.
     private static func hex(_ text: String) -> Data {
         let digits = text.hasPrefix("0x") || text.hasPrefix("0X") ? String(text.dropFirst(2)) : text
         guard digits.count == 40 else { return Data() }

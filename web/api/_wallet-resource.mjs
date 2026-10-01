@@ -5,15 +5,6 @@ import { TRACKED_KEY, indexWallet, ledgerKey, summarize } from "./_ledger.mjs";
 import { SOLANA } from "./_solana.mjs";
 import { currentPrices, describeWallet, logosFor, metaReader, priceReader, walletBalances } from "./_wallet.mjs";
 
-/// Everything Desk knows about a wallet, in one answer: who it is, what it holds on every
-/// chain OKX reads, and its trade ledger on Monad with realised and unrealised PnL.
-///
-///   GET /api/activity?view=wallet&address=0x…[&chainIndex=143&contract=0x…]
-///
-/// The ledger is built on first sight, within this function's budget, and continued
-/// by the worker afterwards; `ledger.status` says which. A page never waits on the
-/// chain for balances or identity.
-
 const MONAD = "143";
 const BACKFILL_BLOCKS = 45 * 216_000;
 const INDEX_BUDGET_MS = 25_000;
@@ -46,8 +37,6 @@ export async function walletResource(address, { chainIndex = MONAD, contract = "
   return { address: wanted, observedAt: now(), identity, ...wallet, ledger, labels, logos, balanceErrors: lastBalanceErrors() };
 }
 
-/// Descriptions, not verdicts: what the ledger says this wallet is like. Only a
-/// sanctions source would justify a red label, and there is none in the stack.
 export function walletLabels({ identity = null, ledger = {}, holdings = [], now = Date.now() } = {}) {
   const labels = [];
   const trades = ledger.trades ?? [];
@@ -72,19 +61,13 @@ export function walletLabels({ identity = null, ledger = {}, holdings = [], now 
   return labels;
 }
 
-/// OKX refuses a whole balance call if one chain in it is not one it serves, and which
-/// chains those are changes. Small groups in parallel, with the chain in view and Monad
-/// in a group of their own, so one refusal costs a few chains rather than all of them.
 const unsupportedChains = new Set();
-/// What OKX said when a balance group failed; surfaced so a missing chain is diagnosable.
 let balanceErrors = [];
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/// OKX answers a group of chains together and fails the whole group when one chain
-/// is not served — sometimes naming it, sometimes not. A named chain is dropped; an
-/// unnamed refusal splits the group until the guilty chain stands alone and is
-/// remembered. A rate limit waits once.
+/// OKX fails a whole chain group when one chain is not served, sometimes without naming it:
+/// a named chain is dropped; an unnamed refusal splits the group until the culprit is alone.
 async function balancesFor(address, group, depth = 0) {
   const chains = group.filter((index) => !unsupportedChains.has(index));
   if (!chains.length) return null;
@@ -127,8 +110,6 @@ async function balancesAcross(address, chains, chainIndex) {
 
 export function lastBalanceErrors() { return balanceErrors; }
 
-/// The worker indexes Solana wallets from the public RPC; the page reads what it has
-/// written so far and asks for the wallet to be picked up if nothing is there yet.
 async function solanaLedger(address, { store, now }) {
   if (!store) return { status: "unavailable" };
   store.sadd(TRACKED_KEY, address).catch(() => {});
@@ -153,8 +134,7 @@ async function monadLedger(address, { store, hypersync, now }) {
     });
   } catch (error) {
     const stored = await store.get(ledgerKey(address)).catch(() => null);
-    // HyperSync's free tier rate-limits; the worker will get to this wallet, so the page
-    // is told the history is on its way rather than that there is none.
+    // HyperSync's free tier rate-limits; the worker will index this wallet, so history is pending, not empty.
     if (!stored) {
       store.sadd(TRACKED_KEY, address).catch(() => {});
       return { status: /429/.test(error.message) ? "indexing" : "unavailable", detail: error.message, behind: null };

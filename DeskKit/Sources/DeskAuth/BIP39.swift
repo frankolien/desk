@@ -5,10 +5,8 @@ enum BIP39 {
         case entropyLengthUnsupported(Int)
     }
 
-    /// Entropy to a mnemonic. Mera feeds 32 bytes of PRF output straight in, giving 24
-    /// words; changing this mapping changes every derived address.
-    /// Internal, not public: anything that can regenerate the 24 words undoes the
-    /// promise that there is no phrase for a screen to show.
+    /// Changing this mapping changes every derived address. Internal, not public: nothing
+    /// may regenerate the 24 words for a screen to show.
     static func mnemonic(entropy: Data) throws -> [String] {
         guard entropy.count % 4 == 0, (16...32).contains(entropy.count) else {
             throw Failure.entropyLengthUnsupported(entropy.count)

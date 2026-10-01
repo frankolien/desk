@@ -4,7 +4,6 @@ import Security
 import UIKit
 import UserNotifications
 
-/// A followed trader's move, as delivered by a push and opened by a tap.
 struct TradeAlert: Identifiable, Hashable, Sendable {
     enum Event: String, Sendable { case opened, flipped, added, closed }
 
@@ -55,32 +54,23 @@ final class TradeAlerts {
 
     private(set) var alerted: [String]
     private(set) var permission: Permission = .undetermined
-    /// Set when the server could not be told, so the switch never claims more than is true.
     var problem: String?
-    /// The alert the person tapped, waiting for the trading shell to open it.
     var opened: TradeAlert?
-    /// Whether it was opened with the notification's Copy button, which goes straight to
-    /// the ticket instead of the alert sheet.
     var openedToCopy = false
 
     private var deviceToken: String?
     private var confirmOnSync = false
     private var syncTask: Task<Void, Never>?
-    /// Something changed on this phone that the server has not heard yet. Cleared by a
-    /// successful sync, retried on the next foreground; never a dialog by itself.
     private var needsSync = false
     private var registrationRetry: Task<Void, Never>?
 
     private static let storageKey = "desk.alertedTraders"
     private static let pricesKey = "desk.alerts.prices"
     private static let targetsKey = "desk.alerts.targets"
-    /// Prices this phone asked to hear about once, set from the chart.
     private(set) var targets: [PriceTarget] = {
         guard let data = UserDefaults.standard.data(forKey: "desk.alerts.targets") else { return [] }
         return (try? JSONDecoder().decode([PriceTarget].self, from: data)) ?? []
     }()
-    /// Levels broken and big days on every Perpl market. Off until switched on: a push for
-    /// every market is noise to most people and costs the server on every scan.
     private(set) var priceAlerts = UserDefaults.standard.bool(forKey: "desk.alerts.prices")
     private static let nicknameKey = "desk.traderNicknames"
     private static let primerKey = "desk.alertsPrimerShown"
@@ -98,7 +88,6 @@ final class TradeAlerts {
         deviceToken = UserDefaults.standard.string(forKey: Self.tokenKey)
     }
 
-    /// The buttons a trade alert carries when pressed and held.
     static func registerCategories() {
         let copy = UNNotificationAction(
             identifier: copyAction, title: "Copy Trade", options: [.foreground, .authenticationRequired],
@@ -133,8 +122,6 @@ final class TradeAlerts {
         }
     }
 
-    /// Re-registers on launch and on every return to the foreground, which also refreshes
-    /// the server's copy before it expires and catches up on anything unsynced.
     func resume() async {
         // Before 1 Oct a missing setting meant on, so the server may still push prices to this
         // install. Say off once, explicitly, so it stops.
@@ -143,14 +130,12 @@ final class TradeAlerts {
             if deviceToken != nil || lastSyncedAt != nil { scheduleSync() }
         }
         await refreshPermission()
-        // A silent wake needs a token but no permission, so copying registers regardless.
         let wantsAlerts = !alerted.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty || !targets.isEmpty
         guard (permission == .allowed && wantsAlerts) || !copying.isEmpty else { return }
         UIApplication.shared.registerForRemoteNotifications()
         if needsSync, deviceToken != nil { scheduleSync() }
     }
 
-    /// Asks iOS if it has not been asked; false when notifications are off for Desk.
     @discardableResult
     func setPriceAlerts(_ on: Bool) async -> Bool {
         if on {
@@ -172,8 +157,6 @@ final class TradeAlerts {
         targets.filter { $0.market == market.uppercased() }
     }
 
-    /// One push when the mark crosses `price`, then forgotten. The side is read from where
-    /// the price sits against the mark now. False when notifications are off for Desk.
     @discardableResult
     func addTarget(market: String, price: Double, mark: Double) async -> Bool {
         guard price > 0, price != mark else { return false }
@@ -199,7 +182,6 @@ final class TradeAlerts {
         scheduleSync()
     }
 
-    /// The server told this price; the line comes off the chart.
     func targetFired(market: String, level: Double) {
         targets.removeAll { $0.market == market.uppercased() && $0.price == level }
         persistTargets()
@@ -209,8 +191,6 @@ final class TradeAlerts {
         UserDefaults.standard.set(try? JSONEncoder().encode(targets), forKey: Self.targetsKey)
     }
 
-    /// Asks iOS if it has not been asked, then watches the trader. False when notifications
-    /// are off for Desk, which only Settings can change.
     @discardableResult
     func turnOn(for address: String) async -> Bool {
         let center = UNUserNotificationCenter.current()
@@ -235,8 +215,6 @@ final class TradeAlerts {
         scheduleSync()
     }
 
-    /// Mute from a notification, where Desk may only be awake for a few seconds: the
-    /// server is told before this returns.
     func mute(_ address: String) async {
         guard isOn(for: address) else { return }
         alerted.removeAll { $0.caseInsensitiveCompare(address) == .orderedSame }
@@ -245,11 +223,6 @@ final class TradeAlerts {
         await sync()
     }
 
-    /// Signing out: the server forgets the subscription, and so does this phone.
-    ///
-    /// The server holds the device token, the followed addresses and the names given to
-    /// them for sixty days, refreshed on every launch. Nothing called this, so signing out
-    /// left all of it in place and being renewed.
     func signOut() async {
         let hadSubscription = !alerted.isEmpty || !copying.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty || !targets.isEmpty
             || deviceToken != nil || lastSyncedAt != nil
@@ -286,8 +259,6 @@ final class TradeAlerts {
         scheduleSync()
     }
 
-    /// Apple could not be reached for a token. The follow is already saved on this phone,
-    /// so nothing is lost; iOS is asked again shortly, and again on the next foreground.
     func didFailToRegister() {
         needsSync = true
         registrationRetry?.cancel()
@@ -300,7 +271,6 @@ final class TradeAlerts {
 
     func namesChanged() { if !alerted.isEmpty { scheduleSync() } }
 
-    /// The perp markets on the watchlist, by symbol, for price alerts beyond Bitcoin and Monad.
     static var watchlistSymbols: [String] {
         let ids = UserDefaults.standard.string(forKey: "desk.watchlist")?.split(separator: ",").map(String.init) ?? []
         let symbols = UserDefaults.standard.dictionary(forKey: "desk.marketSymbols") as? [String: String] ?? [:]
@@ -315,8 +285,6 @@ final class TradeAlerts {
     private static let copyingKey = "desk.alerts.copying"
     private(set) var copying: [String] = UserDefaults.standard.stringArray(forKey: "desk.alerts.copying") ?? []
 
-    /// The traders the copy loop wants to be woken for. A token is needed to be woken
-    /// at all, and asking iOS for one shows no prompt.
     func setCopying(_ addresses: [String]) {
         guard addresses != copying else { return }
         copying = addresses
@@ -325,8 +293,6 @@ final class TradeAlerts {
         scheduleSync()
     }
 
-    /// Tracked wallets ride on the same subscription. Tracking one is a reason to hold a
-    /// token even with no trader alerts on.
     func trackingChanged() {
         Task {
             #if DEBUG
@@ -352,7 +318,6 @@ final class TradeAlerts {
         UserDefaults.standard.set(alerted, forKey: Self.storageKey)
     }
 
-    /// Changes made in quick succession go up as one request, in the order they were made.
     private func scheduleSync() {
         needsSync = true
         syncTask?.cancel()
@@ -392,8 +357,6 @@ final class TradeAlerts {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        // A dropped connection is retried here, then left for the next foreground. Only
-        // the server saying no is worth a dialog.
         var answer: (Data, URLResponse)?
         for attempt in 0..<3 {
             if attempt > 0 { try? await Task.sleep(for: .seconds(attempt * 3)) }
@@ -407,7 +370,6 @@ final class TradeAlerts {
             return
         }
         if confirm { confirmOnSync = false }
-        // A target the server no longer holds has fired while this phone was not told.
         let kept = (try? JSONDecoder().decode(SyncAnswer.self, from: data))?.targets ?? []
         let fired = sentTargets.filter { !kept.contains($0) }
         if !fired.isEmpty { targets.removeAll { fired.contains($0) }; persistTargets() }
@@ -482,8 +444,6 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         TradeAlerts.shared.didFailToRegister()
     }
 
-    /// A background push: a trader this phone copies has moved. The loop takes the copy
-    /// itself if it is still running with its key; otherwise the alert, if any, stands.
     func application(
         _ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any]
     ) async -> UIBackgroundFetchResult {
@@ -524,16 +484,14 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
            let token = desk["token"] as? String {
             let wallet = desk["wallet"] as? String ?? ""
             let chainIndex = desk["chainIndex"] as? String ?? "143"
-            // Only wallets this phone tracks can open a token from a push, for the same reason as below.
             guard await TrackedWallets.shared.isTracking(wallet) else { return }
             let symbol = desk["symbol"] as? String
             await MainActor.run { TokenOpenRequest.shared.open(.init(chainIndex: chainIndex, contract: token, symbol: symbol)) }
             return
         }
         guard let alert = TradeAlert(userInfo: userInfo) else { return }
-        // A payload naming a trader this phone does not follow did not come from a
-        // subscription this phone made. Nothing here can trade, but it can put a stranger's
-        // position in front of someone with a Copy button beside it.
+        // A trader this phone does not follow came from no subscription it made; showing it
+        // would put a stranger's position beside a Copy button.
         guard await TradeAlerts.shared.isOn(for: alert.trader) else { return }
         let action = response.actionIdentifier
         if action == TradeAlerts.muteAction {

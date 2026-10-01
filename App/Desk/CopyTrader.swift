@@ -17,8 +17,6 @@ struct CopiedTrader: Codable, Hashable, Identifiable {
     var isFromBasket: Bool { source == .basket }
 }
 
-/// Copy the leaderboard's best as a portfolio: the top traders, re-picked on a schedule, all
-/// under one set of rules.
 struct CopyBasket: Codable, Hashable {
     var size: Int
     var rules: CopyRules
@@ -26,7 +24,6 @@ struct CopyBasket: Codable, Hashable {
     var lastRotation: Date?
 }
 
-/// A copy Desk opened, live or simulated, and still expects to be open.
 struct OpenCopy: Codable, Hashable, Identifiable {
     let id: UUID
     let trader: String
@@ -46,7 +43,6 @@ struct OpenCopy: Codable, Hashable, Identifiable {
     var shadowed: Bool { isShadow == true }
     var notional: Double { margin * Double(leverage) }
 
-    /// Unrealised profit of a shadow copy at the last mark it was priced at.
     func shadowPnL(takerFeeMicros: Int64) -> Double? {
         guard let shadow, let lastMark else { return nil }
         return shadow.pnl(at: lastMark, takerFeeMicros: takerFeeMicros)
@@ -65,18 +61,14 @@ struct CopyLogEntry: Codable, Hashable, Identifiable {
     var detail: String
     var leverage: Int?
     var margin: Double?
-    /// From the moment the trader's move was seen to the fill.
     var fillSeconds: Double?
-    /// Realised on close, in AUSD, funding and fees included.
     var pnl: Double?
     var isShadow: Bool?
-    /// How far the fill landed from the trader's entry, against the copy. Negative is better.
     var slippageBps: Int?
 
     var shadowed: Bool { isShadow == true }
 }
 
-/// Copies followed traders' entries and exits onto this account, shadow or live, under the person's rules.
 @MainActor
 @Observable
 final class CopyTrader {
@@ -88,28 +80,20 @@ final class CopyTrader {
     private(set) var basket: CopyBasket?
     private(set) var lastRead: Date?
     private(set) var readProblem: String?
-    /// Whether moves are arriving from the chain as they happen.
     private(set) var isStreaming = false
-    /// A sentence for the shell's toast when a copy fills or closes.
     var onEvent: ((String) -> Void)?
 
     let network: DeskNetwork
     private var baselines: [String: [String: ObservedPosition]] = [:]
-    /// Traders whose book read as empty once. A second reading has to agree before the
-    /// copies are closed.
     private var unconfirmedFlat: Set<String> = []
-    /// Log entries still waiting for the venue's realised figure, by the position it closed.
     private var pendingRealised: [UUID: Int64] = [:]
-    /// When a basket re-pick that found nobody may be tried again.
     private var basketRetry: Date?
     private var portfolios: [String: Double] = [:]
     private var accounts: [UInt64: String] = [:]
     private var wokenAt: Date?
-    /// When a push last woke the loop, for the settings sheet to show the path works.
     private(set) var lastWokenAt: Date? = UserDefaults.standard.object(forKey: "desk.copy.lastWake") as? Date
     private var cycles = 0
     private var syncedCopying: [String]?
-    /// The loop that is running, for the background push handler to wake.
     static weak var current: CopyTrader?
     private let stream = PositionStream()
     private let glance = AutoCopyPublisher()
@@ -140,8 +124,6 @@ final class CopyTrader {
         }
         stream.onState = { [weak self] live in self?.isStreaming = live }
     }
-
-    // MARK: - Settings
 
     func rules(for address: String) -> CopyRules? {
         traders.first { $0.id == address.lowercased() }?.rules
@@ -193,13 +175,10 @@ final class CopyTrader {
         persist()
     }
 
-    /// Closes a shadow copy by hand at its last mark.
     func closeShadow(_ copy: OpenCopy) {
         guard copy.shadowed, let mark = copy.lastMark else { return }
         settleShadow(copy, at: mark, detail: "Closed by you.")
     }
-
-    // MARK: - Figures
 
     struct Figures {
         let realised: Double
@@ -212,9 +191,6 @@ final class CopyTrader {
     }
 
     func figures(shadow: Bool) -> Figures {
-        // One day boundary for the whole pass. `Calendar.current` copies the autoupdating
-        // calendar on every access, and this used to run per entry, per call, five times a
-        // second.
         let dayStart = Calendar.current.startOfDay(for: .now)
         let entries = log.filter { $0.shadowed == shadow }
         let closed = entries.compactMap(\.pnl)
@@ -240,7 +216,6 @@ final class CopyTrader {
 
     func isCopying(_ address: String) -> Bool { traders.contains { $0.id == address.lowercased() } }
 
-    /// AUSD micros from a figure that came off the network, clamped rather than trapped.
     private static func microsClamping(_ value: Double) -> Int64 {
         guard !value.isNaN else { return 0 }
         let micros = (value * 1_000_000).rounded()
@@ -251,7 +226,6 @@ final class CopyTrader {
         mainnet.market(symbol)?.config.takerFeeMicros ?? Self.defaultTakerFeeMicros
     }
 
-    /// What copying one trader has made so far, in each mode.
     func record(for address: String) -> (live: Double, shadow: Double, trades: Int) {
         let entries = log.filter { $0.trader.lowercased() == address.lowercased() }
         return (entries.filter { !$0.shadowed }.compactMap(\.pnl).reduce(0, +),
@@ -259,11 +233,6 @@ final class CopyTrader {
                 entries.compactMap(\.pnl).count)
     }
 
-    // MARK: - The loop
-
-    /// Wakes the loop as a position event would and waits for the cycle it triggers —
-    /// up to twenty seconds, which is what iOS allows a background push. True when a
-    /// cycle ran; false when the loop is not running or the key is gone.
     func wake() async -> Bool {
         let before = cycles
         wokenAt = wokenAt ?? .now
@@ -282,7 +251,6 @@ final class CopyTrader {
         var lastCycle = Date.distantPast
         var streaming = false
         while !Task.isCancelled {
-            // Siri, Control Center, the widget or the Live Activity may have flipped it.
             if AutoCopySwitch.isPaused != isPaused {
                 isPaused = AutoCopySwitch.isPaused
                 record(CopyLogEntry(
@@ -290,8 +258,6 @@ final class CopyTrader {
                     detail: isPaused ? "Auto-copy paused from outside Desk." : "Auto-copy resumed from outside Desk."))
             }
             let active = !traders.isEmpty || basket != nil || !open.isEmpty
-            // The stream carries every position event on the exchange, so it runs only while
-            // there is someone to copy.
             if active != streaming {
                 streaming = active
                 if active {
@@ -311,8 +277,6 @@ final class CopyTrader {
                 baselines = [:]
                 readProblem = nil
             }
-            // The server wakes this loop for the traders it is told about, and only
-            // while the switch is on.
             let copying = AutoCopyAway.isOn ? traders.map { $0.address.lowercased() }.sorted() : []
             if copying != syncedCopying {
                 syncedCopying = copying
@@ -323,7 +287,6 @@ final class CopyTrader {
         }
     }
 
-    /// Trader closes that came while the person's book was unread, closed once it is.
     /// Saved with the copies, so a relaunch or a network round trip still closes them.
     private struct DeferredClose: Codable, Equatable { let trader: String; let symbol: String; let verb: String }
     private var deferredCloses: [DeferredClose] = [] {
@@ -368,16 +331,14 @@ final class CopyTrader {
                 baselines[trader.id] = after
                 continue
             }
-            // A book that went from held to empty in one reading is the shape a failed read
-            // takes when it arrives as a success. A real full close still looks like this on
-            // the next reading, so it costs one cycle and nothing else; a blip costs nothing.
+            // Held to empty in one reading can be a failed read arriving as a success. A real close
+            // still reads empty on the next cycle, so waiting one costs nothing.
             if after.isEmpty, !before.isEmpty, unconfirmedFlat.insert(trader.id).inserted {
                 continue
             }
             if !after.isEmpty { unconfirmedFlat.remove(trader.id) }
             baselines[trader.id] = after
             for move in CopyPlanner.moves(before: before, after: after) {
-                // Stopped or edited while an earlier move was being sent.
                 guard let rules = rules(for: trader.address) else { break }
                 switch move {
                 case .opened(let position):
@@ -414,16 +375,12 @@ final class CopyTrader {
         var books: [String: [String: ObservedPosition]] = [:]
         var seen: Set<String> = []
         for trader in body.traders {
-            // The server says so when the chain would not answer. Leaving the trader out of
-            // `books` skips their diff entirely, which is what an unknown book deserves.
             if trader.unreadable == true { continue }
             var book: [String: ObservedPosition] = [:]
             for position in trader.positions {
                 let size = Double(position.size) ?? 0
                 let entry = Double(position.entry) ?? 0
                 let mark = Double(position.mark) ?? 0
-                // A row that cannot be sized or priced is not copied and not counted. Letting
-                // it through means sizing and price protection run on a number that is not one.
                 guard size.isFinite, size > 0, entry.isFinite, entry > 0, mark.isFinite, mark >= 0 else { continue }
                 let observed = ObservedPosition(
                     symbol: position.market, side: position.isLong ? .long : .short,
@@ -437,8 +394,6 @@ final class CopyTrader {
             if let account = trader.accountId.flatMap(UInt64.init) { accounts[account] = trader.id }
             seen.insert(trader.id)
         }
-        // Anything no longer being copied is dropped rather than accumulated: a stale entry
-        // here keeps waking the loop for a trader the person stopped following.
         let live = Set(traders.map(\.id)).union(open.map { $0.trader.lowercased() })
         accounts = accounts.filter { live.contains($0.value) }
         portfolios = portfolios.filter { live.contains($0.key) }
@@ -453,15 +408,11 @@ final class CopyTrader {
         if let fetched = await MainnetMarkets.fetch() { mainnet.update(fetched) }
     }
 
-    // MARK: - Baskets
-
     private func rotateBasketIfDue() async {
         guard let basket else { return }
         if let basketRetry, Date.now < basketRetry { return }
         if let last = basket.lastRotation, Date.now.timeIntervalSince(last) < Double(basket.rotateHours) * 3600 { return }
         let manual = Set(traders.filter { !$0.isFromBasket }.map(\.id))
-        // Best by indexed score first, so the basket holds consistent traders rather than
-        // whoever is up most right now; open PnL only when no history exists yet.
         var candidates = await basketCandidates(view: "scores")
         if candidates.count < basket.size { candidates += await basketCandidates(view: "top") }
         var seen = Set<String>()
@@ -470,10 +421,6 @@ final class CopyTrader {
             .prefix(basket.size)
             .map { $0 }
         guard !picked.isEmpty else {
-            // Nothing to pick: the leaderboard is down, or everything it offered is already
-            // being copied. Waiting ten minutes rather than the whole rotation keeps a
-            // transient outage from costing a day of basket, and keeps a permanent one from
-            // costing a request every four seconds.
             basketRetry = .now.addingTimeInterval(600)
             return
         }
@@ -510,8 +457,6 @@ final class CopyTrader {
         let traders: [Row]
     }
 
-    // MARK: - Shadow copies
-
     private func priceShadows(_ marks: [String: Double]) {
         for copy in open where copy.shadowed {
             guard let mark = marks[copy.symbol], let index = open.firstIndex(where: { $0.id == copy.id }) else { continue }
@@ -536,8 +481,6 @@ final class CopyTrader {
             pnl: fill.pnl(at: price, takerFeeMicros: takerFee(for: copy.symbol)), isShadow: true))
     }
 
-    // MARK: - Opening
-
     private func openCopy(
         _ theirs: ObservedPosition, trader: String, rules: CopyRules, seenAt: Date,
         model: AppModel, market: MarketModel, session: TradingSession
@@ -551,7 +494,6 @@ final class CopyTrader {
         guard !isPaused else { return note(.skipped, "Auto-copy was paused.") }
         if !shadow, !model.isKeyUnlocked { return note(.skipped, "Desk was locked, so nothing was sent.") }
 
-        // Shadow copies are priced on mainnet, where the trader actually trades.
         if shadow, mainnet.market(theirs.symbol) == nil { await refreshMainnet() }
         let target = shadow
             ? mainnet.market(theirs.symbol)
@@ -585,9 +527,8 @@ final class CopyTrader {
             realisedToday: Money(raw: Self.microsClamping(today)) ?? .zero
         ) {
         case .failure(let skip):
-            // Only money pauses everything. A paper loss stops paper copies for the day and
-            // nothing else; through `setPaused`, so the App Group flag the run loop, the
-            // widget, Siri and Control Center all read is set too.
+            // Only money pauses everything; a paper loss stops paper copies for the day. Through
+            // `setPaused`, so the App Group flag the widget, Siri and Control Center read is set too.
             if case .dailyLossLimit = skip, !shadow {
                 setPaused(true)
                 return note(.paused, sentence(for: skip, rules: rules))
@@ -612,9 +553,8 @@ final class CopyTrader {
                 sizeRaw: plan.draft.size.raw, leverage: plan.leverage, margin: plan.margin, positionID: nil,
                 openedAt: .now, isShadow: true, shadow: fill, lastMark: markValue, theirEntry: theirs.entry))
             entry.fillSeconds = Date.now.timeIntervalSince(seenAt)
-            // Against the mark this copy was priced at, not the trader's entry: their entry
-            // is a price on another venue, and the difference between two venues is not
-            // slippage.
+            // Against the mark this copy was priced at, not the trader's entry: that is a price on
+            // another venue, and the gap between two venues is not slippage.
             entry.slippageBps = CopyPlanner.chaseBps(entry: markValue, mark: fill.entry, side: side)
             record(entry)
             onEvent?("Shadow copied \(Self.name(for: trader)): \(label)")
@@ -622,7 +562,6 @@ final class CopyTrader {
         }
 
         do {
-            // Positions that existed before this copy can never be its fill.
             let held = Set(model.openPositions.map(\.positionID))
             let isLong = side == .long
             let heldSizes = Dictionary(uniqueKeysWithValues: model.openPositions
@@ -630,24 +569,17 @@ final class CopyTrader {
                 .map { ($0.positionID, $0.sizeRaw) })
             let handOrders = session.handOrders[target.id] ?? 0
             let handInFlight = await session.handOrderUnresolved(on: target.id)
-            // Positions read without a live connection may predate what a reconnect shows.
             let snapshotIsLive = session.isConnected
             let epoch = session.connectionEpoch
             let frameID = try await session.placeCopy(plan.draft, in: target)
             var outcome = await settlement(of: frameID, session: session, retryBlocks: target.orderRetryBlocks, since: epoch)
-            // The order went out; whatever stopped this wait, the person hears about it.
             guard !Task.isCancelled else { return note(.failed, "Perpl didn't confirm this copy. Check your \(symbol) position; Desk isn't tracking it.") }
-            // Perpl never answered, or Desk stopped listening. A position that appears on
-            // this side anyway is the order's fill, and its answer may land while that is
-            // looked for.
             var late: PerplPosition?
             switch outcome {
             case .settled?, .unfilled?, .rejected?, .failed?: break
             default:
                 late = await newPosition(marketID: target.id, isLong: isLong, model: model, excluding: held)
                 outcome = await session.phase(of: frameID)
-                // A first failure that only now arrived gets its retry window, if Desk was
-                // listening throughout; otherwise it is no answer at all.
                 if case .failed? = outcome {
                     if session.connectionEpoch == epoch {
                         outcome = await settlement(of: frameID, session: session, retryBlocks: target.orderRetryBlocks, since: epoch)
@@ -659,11 +591,7 @@ final class CopyTrader {
             }
             switch outcome {
             case .settled:
-                // The venue confirmed this fill, so the position it landed in may be one the
-                // person already held on this side; it is attached either way.
                 let filled = await newPosition(marketID: target.id, isLong: side == .long, model: model)
-                // A market order can fill in part; the copy is the size that filled, and the
-                // margin behind it in the same proportion, so the exposure cap counts it right.
                 let got = await session.fill(of: frameID)
                 let planned = plan.draft.size.raw
                 let sizeRaw = (got?.filledRaw ?? 0) > 0 ? min(got!.filledRaw, planned) : planned
@@ -688,14 +616,8 @@ final class CopyTrader {
             case .unfilled:
                 note(.failed, "Not filled within the slippage limit. Nothing was opened.")
             default:
-                // The venue stopped answering, which is not the same as nothing happening.
-                // A fill that lands after the poll gives up is a real position: recording it
-                // is what keeps the open-copy limit, the exposure cap and closing with the
-                // trader true. Saying "nothing was opened" and walking away was a position
-                // the app then had no idea it held.
-                // Only a fill no hand order could explain, no larger than this order, is
-                // taken as its own: a new position, or growth of one already held on this
-                // side, where Perpl merges fills. Anything else is the person's own trade.
+                // No answer is not no fill: a late fill is a real position and must count against the limits.
+                // Only a fill no hand order explains, no larger than this order, is taken (Perpl merges fills).
                 let planned = plan.draft.size.raw
                 let byHand = handInFlight || (session.handOrders[target.id] ?? 0) != handOrders
                 let changed = model.openPositions.filter { position in
@@ -723,8 +645,6 @@ final class CopyTrader {
                     record(entry)
                     onEvent?("Copied \(Self.name(for: trader)): \(label)")
                 } else {
-                    // Unanswered is not unfilled: orders carry no venue deadline, so this
-                    // one can still fill after the wait.
                     note(.failed, "Perpl didn't confirm this copy. Check your \(symbol) position; Desk isn't tracking it.")
                 }
             }
@@ -732,8 +652,6 @@ final class CopyTrader {
             note(.failed, TradingSession.sentence(for: error))
         }
     }
-
-    // MARK: - Closing
 
     private func closeCopy(
         trader: String, symbol: String, because verb: String, mark: Double,
@@ -826,14 +744,9 @@ final class CopyTrader {
         }
     }
 
-    /// Live copies Perpl closed on its own — a stop loss, a take profit, a liquidation, or
-    /// the person closing it by hand — are settled from the venue's record of the close.
     private func reconcileLive(model: AppModel) {
         guard model.trading.positions.value != nil else { return }
         for copy in open where !copy.shadowed {
-            // A copy whose position id never arrived is matched on its market and side, the
-            // same fallback the close path uses. Without it such a copy stayed open forever
-            // and quietly consumed a slot against the open-copy and exposure limits.
             let positionID = copy.positionID ?? model.closedTrades
                 .filter { $0.marketID == copy.marketID && $0.isLong == copy.isLong && $0.closedAt >= copy.openedAt }
                 .max { $0.positionID < $1.positionID }?.positionID
@@ -849,20 +762,12 @@ final class CopyTrader {
         }
     }
 
-    /// The order's phase once the venue has decided it, or its last phase after twenty
-    /// seconds without an answer.
-    ///
-    /// A failure is held until the order's deadline and a full retry window from when it
-    /// was first seen have both passed, because a later non-failure still decides the
-    /// order. A local expiry is only Desk's own timeout, and orders carry no venue
-    /// deadline, so it is waited out to the end.
-    /// A failure that stands while Desk was not listening the whole time is no answer, and
-    /// comes back nil.
+    /// A failure is held until the order deadline and a full retry window have both passed, since a
+    /// later non-failure still decides it. A failure seen while Desk was not listening throughout is nil.
     private func settlement(
         of frameID: Int64, session: TradingSession, retryBlocks: UInt32, since epoch: Int
     ) async -> OrderPhase? {
         let start = ContinuousClock.now
-        // A head that was stale when the failure came can jump past the window at once.
         let minimum = TradingSession.blockTime * Int(retryBlocks)
         var failedAt: (block: Int64, at: ContinuousClock.Instant)?
         while true {
@@ -875,7 +780,6 @@ final class CopyTrader {
                 let pastDeadline = await session.isPastDeadline(frameID)
                 let windowPassed = pastDeadline && elapsed >= minimum
                     && session.headBlock > seen.block + Int64(retryBlocks)
-                // Counted from the failure, not the send, in case the head stops arriving.
                 if windowPassed || elapsed > .seconds(12) {
                     let phase = await session.phase(of: frameID)
                     if case .failed? = phase, session.connectionEpoch != epoch { return nil }
@@ -888,7 +792,6 @@ final class CopyTrader {
         }
     }
 
-    /// The position a fill just opened, once the stream reports it.
     private func newPosition(marketID: UInt32, isLong: Bool, model: AppModel, excluding held: Set<Int64> = []) async -> PerplPosition? {
         let tracked = Set(open.compactMap(\.positionID)).union(held)
         for _ in 0..<20 {
@@ -902,11 +805,6 @@ final class CopyTrader {
         return nil
     }
 
-    /// Fills in a realised figure that arrived after the close was recorded.
-    ///
-    /// `compactMap(\.pnl)` drops entries with no figure, and the daily loss limit is built
-    /// from exactly that sum — so a close whose `dpnl` frame was late counted as zero
-    /// forever, and the limit the person set was quietly larger than they set it.
     private func backfillRealised(model: AppModel) {
         guard !pendingRealised.isEmpty, model.trading.positions.value != nil else { return }
         for (entryID, positionID) in pendingRealised {
@@ -967,8 +865,6 @@ final class CopyTrader {
         return names[address.lowercased()] ?? TraderSnapshot.short(address)
     }
 
-    // MARK: - Storage
-
     private func persist() {
         Self.save(traders, key: "desk.copy.traders", network: network)
         Self.save(guards, key: "desk.copy.guards", network: network)
@@ -989,8 +885,6 @@ final class CopyTrader {
     }
 
     #if DEBUG
-    /// Sample rows for reviewing the screens in a simulator, which cannot sign a real order.
-    /// Never persisted.
     func seedForReview() {
         guard log.isEmpty else { return }
         let whale = "0x95D2602d30DA1179fd13274839e60345857ca648"
@@ -1018,8 +912,6 @@ final class CopyTrader {
     #endif
 }
 
-/// Perpl mainnet's markets and marks, for pricing shadow copies against the real venue
-/// whichever network Desk trades on.
 struct MainnetMarkets {
     private(set) var markets: [String: Market] = [:]
     private var fetchedAt: Date?
@@ -1054,9 +946,8 @@ final class PositionStream {
 
     private var watched: Set<UInt64> = []
     private var runner: Task<Void, Never>?
-    /// Held so `stop()` can close it. `URLSessionWebSocketTask.receive()` does not honour
-    /// task cancellation, so cancelling the runner alone left the socket — and its
-    /// exchange-wide subscription — open until the next frame happened to arrive.
+    /// Held so `stop()` can close it: `URLSessionWebSocketTask.receive()` ignores task
+    /// cancellation, so cancelling the runner alone leaves the socket open.
     private var socket: URLSessionWebSocketTask?
 
     func watch(_ accounts: Set<UInt64>) { watched = accounts }
@@ -1080,8 +971,6 @@ final class PositionStream {
                         let message = try await task.receive()
                         guard case .string(let text) = message else { continue }
                         if text.contains("\"id\":1"), text.contains("result") { self?.onState?(true); continue }
-                        // Every position event on the exchange arrives here, not only the
-                        // copied traders', so the JSON parse runs off the main actor.
                         guard let account = await Self.account(inFrame: text),
                               let self, self.watched.contains(account) else { continue }
                         self.onMove?(account)

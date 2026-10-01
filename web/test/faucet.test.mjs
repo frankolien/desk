@@ -1,4 +1,3 @@
-// node --test web/test/faucet.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -42,23 +41,19 @@ test("shared limits stop one caller bringing a hundred fresh wallets", async () 
   const headers = { "x-forwarded-for": "203.0.113.9" };
   const wallet = (index) => `0x${String(index).padStart(40, "b")}`;
 
-  // Ten wallets from one caller are allowed; the eleventh is not.
   for (let index = 0; index < 10; index += 1) {
     assert.equal(await limited(store, wallet(index), headers), null);
   }
   const refused = await limited(store, wallet(99), headers);
   assert.equal(refused?.reason, "too-soon");
 
-  // A different caller is unaffected, but a wallet already funded today is refused again.
   assert.equal(await limited(store, wallet(50), { "x-forwarded-for": "198.51.100.4" }), null);
   const repeat = await limited(store, wallet(0), { "x-forwarded-for": "198.51.100.4" });
   assert.equal(repeat?.reason, "too-soon");
 
-  // A store that cannot answer refuses rather than waving everyone through.
   // A store that is down does not refuse the drip: the on-chain thresholds still hold.
   const broken = { set: async () => { throw new Error("redis"); } };
   assert.equal(await limited(broken, wallet(1), headers), null);
-  // No store configured at all keeps the in-memory behaviour.
   assert.equal(await limited(null, wallet(1), headers), null);
 });
 
@@ -170,7 +165,6 @@ test("when Agora's faucet is empty, Desk's own wallet sends the AUSD and frees t
   assert.deepEqual(chain.calls.map((c) => c[0]), ["mon", "desk-ausd"]);
   assert.equal(chain.calls[1][2], AUSD_FALLBACK);
 
-  // With nothing in Desk's wallet either, the refusal frees the wallet to try again later.
   const dry = fakeChain(
     { recipientMON: MON_THRESHOLD, recipientAUSD: 0n, faucetMON: FULL_FAUCET, faucetAUSD: 0n },
     { simulateClaim: async () => ({ ok: false, reason: "faucet-empty" }) });

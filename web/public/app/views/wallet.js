@@ -55,7 +55,7 @@ const cssColor = (name) => getComputedStyle(document.documentElement).getPropert
 const rgba = (hex, a) => `rgba(${parseInt(hex.slice(1, 3), 16)}, ${parseInt(hex.slice(3, 5), 16)}, ${parseInt(hex.slice(5, 7), 16)}, ${a})`;
 
 const recent = () => { try { return JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]").filter((a) => typeof a === "string"); } catch { return []; } };
-const remember = (address) => { try { localStorage.setItem(RECENT_KEY, JSON.stringify([address, ...recent().filter((a) => a.toLowerCase() !== address.toLowerCase())].slice(0, 5))); } catch { /* private window */ } };
+const remember = (address) => { try { localStorage.setItem(RECENT_KEY, JSON.stringify([address, ...recent().filter((a) => a.toLowerCase() !== address.toLowerCase())].slice(0, 5))); } catch {} };
 
 export default async function mount(el, params) {
   if (!params.address && connectedWallet()) { navigate(`/app/wallet/${connectedWallet().address}`, { replace: true }); return () => {}; }
@@ -142,7 +142,6 @@ export default async function mount(el, params) {
 
   const reading = `<div class="wl-reading pulse">Reading this wallet's Monad history…</div>`;
 
-  // ── PnL ──
   let chart = null;
   const pnlHost = $("[data-pnl]", el);
   function paintPnl() {
@@ -162,7 +161,6 @@ export default async function mount(el, params) {
     const start = span === Infinity ? Math.min(...trades.map((t) => t.time)) - 3600_000 : Date.now() - span;
     const sells = trades.filter((t) => t.side === "sell" && t.gain != null && t.time > start).sort((a, b) => a.time - b.time);
     if (!sells.length) return [];
-    // Cumulative realized PnL holds between sells; ~120 evenly spaced samples carry the line edge to edge.
     const now = Date.now();
     const step = Math.max((now - start) / 120, 60_000);
     const stamps = new Set([start, now, ...sells.map((t) => t.time)]);
@@ -212,7 +210,6 @@ export default async function mount(el, params) {
   });
   paintPnl();
 
-  // ── Tabs ──
   const list = $("[data-list]", el);
   const foot = $("[data-foot]", el);
   const tabs = {
@@ -311,6 +308,6 @@ async function mountPicker(el) {
     try {
       const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
       if (accounts?.[0]) navigate(`/app/wallet/${accounts[0]}`);
-    } catch { /* declined */ }
+    } catch {}
   });
 }

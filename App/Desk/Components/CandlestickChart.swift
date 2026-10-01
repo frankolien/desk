@@ -1,9 +1,6 @@
 import DeskUI
 import SwiftUI
 
-/// A horizontal line across the price plot: where the user got in, and where the venue
-/// takes them out. The price arrives already formatted, so the chart never decides how
-/// many digits a market shows.
 struct PriceGuide: Identifiable, Hashable {
     let label: String
     let value: Double
@@ -13,16 +10,9 @@ struct PriceGuide: Identifiable, Hashable {
     var id: String { label }
 }
 
-/// Every candlestick Desk draws, on every screen.
-///
-/// The perpetual markets and the spot tokens used to have separate charts with separate
-/// axis arithmetic, and the spot one had no price labels at all. They take the same
-/// candles now, so the chart a user reads before opening a position, while holding it,
-/// and while looking at a token they do not own is one drawing with one scale.
 struct CandlestickChart: View {
     let candles: [ChartCandle]
     var guides: [PriceGuide] = []
-    /// The candle under a held finger; nil until the chart is pressed.
     @State private var scrubbed: Int?
 
     private static let stamp: DateFormatter = {
@@ -62,8 +52,6 @@ struct CandlestickChart: View {
             let volumes = samples.compactMap(\.volume)
             let hasVolume = volumes.contains { $0 > 0 }
             let plotWidth = size.width - 62
-            // Without a volume band the price keeps the whole frame, which is what the
-            // spot feed needs: it publishes no volume per candle.
             let priceHeight = hasVolume ? size.height * 0.76 : size.height - 6
             let volumeTop = size.height * 0.80
             let layout = CandleLayout(count: samples.count, width: plotWidth)
@@ -96,7 +84,6 @@ struct CandlestickChart: View {
                 wick.move(to: CGPoint(x: x, y: axis.y(candle.high)))
                 wick.addLine(to: CGPoint(x: x, y: axis.y(candle.low)))
                 context.stroke(wick, with: .color(color), lineWidth: 0.7)
-                // Narrow bodies: a fat candle hides the wick, which is the telling part.
                 let halfBody = max(1, layout.step * 0.16)
                 let body = CGRect(x: x - halfBody, y: top,
                                   width: halfBody * 2, height: max(1, bottom - top))
@@ -138,8 +125,6 @@ struct CandlestickChart: View {
                     line, with: .color(guide.tint.opacity(placement.isOffScale ? 0.4 : 0.85)),
                     style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
 
-                // An arrow when the price is off-scale: a line pinned to the edge
-                // otherwise reads as a price that is right there.
                 let caption = switch placement.offScale {
                 case .above: guide.label + " ↑"
                 case .below: guide.label + " ↓"
@@ -216,7 +201,6 @@ extension MarketModel.Candle {
     }
 }
 
-/// The corner control that opens the full-screen chart.
 struct ChartExpandButton: View {
     let action: () -> Void
 
@@ -235,8 +219,6 @@ struct ChartExpandButton: View {
     }
 }
 
-/// The interval rail under a chart. One control, so the market screen and the position
-/// screen cannot drift into offering different ranges of the same series.
 struct CandleIntervalRail: View {
     let market: MarketModel
 

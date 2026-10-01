@@ -1,35 +1,24 @@
 import Foundation
 
-/// Monad charges the gas **limit**, not the gas used, so the limit is the bill.
-///
-/// A library's conventional 1.5x to 2x safety multiplier is an eighty-six percent
-/// overcharge here. This type exists so no such default can reach a user.
+/// Monad charges the gas **limit**, not the gas used, so the limit is the bill. A
+/// conventional 1.5x to 2x safety multiplier would overcharge the user.
 public enum GasPolicy: Sendable {
     public enum Failure: Error, Equatable, Sendable {
         case estimateNotUsable(UInt64)
     }
 
-    /// Monad's own published constant: 10,750 basis points.
     public static let marginBasisPoints: UInt64 = 10_750
 
     /// Below this a transaction is dropped at the mempool as `FeeTooLow`. Monad's own
     /// best-practices page still shows 50 gwei, which would be rejected.
     public static let minimumFeeWei: UInt64 = 100_000_000_000
 
-    /// What the node itself suggests.
     public static let priorityFeeWei: UInt64 = 2_000_000_000
 
-    /// A plain transfer is exactly this and takes no buffer.
     public static let plainTransferGas: UInt64 = 21_000
 
-    /// Read from `eth_getBlockByNumber` on testnet, 13 September. A single transaction
-    /// cannot exceed it, so an estimate above it is a bad answer rather than a big one.
     public static let blockGasLimit: UInt64 = 150_000_000
 
-    /// Every input here arrives from an RPC node the app was pointed at, so each is a
-    /// number someone else chose. Swift traps on overflow rather than wrapping, and a
-    /// trap is a dead process, not a caught error — which is why the bounds are checked
-    /// rather than assumed.
     public static func gasLimit(estimate: UInt64) throws -> UInt64 {
         guard estimate > 0, estimate <= blockGasLimit else {
             throw Failure.estimateNotUsable(estimate)

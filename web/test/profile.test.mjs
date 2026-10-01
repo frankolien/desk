@@ -1,4 +1,3 @@
-// node --test web/test/profile.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { privateKeyToAccount } from "viem/accounts";
@@ -35,7 +34,6 @@ test("a wallet sets its profile with a signature, and the resolver puts it first
   assert.equal(saved.status, 200);
   assert.equal(saved.body.profile.name, "heliben");
   assert.match(saved.body.profile.avatar, /view=avatar&address=0x[0-9a-f]{40}&v=\d+$/);
-  // The merged identity cache was dropped so the new profile is seen on the next read.
   assert.equal(store.values.has(`id:${account.address.toLowerCase()}`), false);
 
   const stored = await readProfile(store, account.address);
@@ -50,7 +48,6 @@ test("a wallet sets its profile with a signature, and the resolver puts it first
   assert.equal(identity.source, "desk");
   assert.equal(identity.name, "heliben");
   assert.match(identity.avatar, /view=avatar/);
-  // What Desk does not carry is still borrowed from the other sources.
   assert.equal(identity.bio, "gm");
 });
 
@@ -93,7 +90,6 @@ test("a profile is deleted only with a delete signature from its wallet", async 
   assert.equal((await saveProfile(store, await signed(), { now: NOW })).status, 200);
   assert.ok(await readProfile(store, account.address));
 
-  // A save signature replayed as a delete is refused.
   const save = await signed();
   const replay = await deleteProfile(store, { address: save.address, timestamp: save.timestamp, signature: save.signature }, { now: NOW });
   assert.equal(replay.status, 401);

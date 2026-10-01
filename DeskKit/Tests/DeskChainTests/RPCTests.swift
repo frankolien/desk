@@ -58,8 +58,6 @@ struct QuantityTests {
 
     @Test("A balance too large for UInt64 throws rather than wrapping")
     func balanceOverflow() throws {
-        // Eighteen decimals outgrows a UInt64 at about eighteen units, and a wrapped
-        // balance is a number the user would act on.
         let eighteenMON = "0xfffffffffffffffff"
         #expect(throws: Quantity.Failure.tooLargeForUInt64(eighteenMON)) {
             try Quantity.uint64(eighteenMON)
@@ -125,7 +123,6 @@ struct MonadRPCTests {
                 return
             }
             #expect(code == 3)
-            // The selector survives so the screen can say which revert it was.
             #expect(FaucetRevert(selector: try #require(data)) == .transferFailed)
         }
     }
@@ -164,8 +161,6 @@ struct MonadRPCTests {
     }
 }
 
-/// Against the real testnet. Off unless `DESK_LIVE=1`, so an ordinary run stays offline
-/// and takes no dependency on somebody else's uptime.
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["DESK_LIVE"] == "1"))
 struct LiveMonadTests {
     private let ausd = EthereumAddress(bytes: Data(hex: "a9012a055bd4e0edff8ce09f960291c09d5322dc"))!
@@ -184,15 +179,12 @@ struct LiveMonadTests {
         #expect(fee >= GasPolicy.minimumFeeWei)
     }
 
-    /// Selector, ABI encoding, RPC envelope and quantity decoding, end to end against a
-    /// contract nobody here deployed.
     @Test("The faucet's AUSD balance reads back through our own calldata")
     func faucetBalance() async throws {
         let client = MonadRPC(configuration: try .testnet())
         let result = try await client.callContract(to: ausd, data: try Calldata.balanceOf(faucet))
         #expect(result.count == 32)
         let balance = result.reduce(Int128(0)) { $0 << 8 | Int128($1) }
-        // Six decimals, and it held 670,000 AUSD on 11 September.
         #expect(balance > 1_000_000)
     }
 }
@@ -206,7 +198,6 @@ struct TransactionSenderTests {
             Data(hex: "4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318")))
     }
 
-    /// estimateGas, baseFeePerGas, transactionCount, sendRawTransaction — in that order.
     private func happyPath(hash: String) -> ScriptedTransport {
         ScriptedTransport([
             #"{"jsonrpc":"2.0","id":1,"result":"0x12ad0"}"#,
@@ -254,8 +245,6 @@ struct TransactionSenderTests {
 
     @Test("A send that never left gives its nonce back")
     func nonceReleasedOnFailure() async throws {
-        // Without this every later send in the session is numbered one too high and
-        // waits in the mempool for a transaction that will never arrive.
         let nonces = NonceRegistry()
         let failing = ScriptedTransport([
             #"{"jsonrpc":"2.0","id":1,"result":"0x12ad0"}"#,

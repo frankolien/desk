@@ -4,9 +4,6 @@ import { getAddress } from "viem";
 
 import { okxConfigured, okxGet, okxPost } from "./_okx.mjs";
 
-/// What a wallet holds, what its tokens are, and what they were worth at a given
-/// minute — the three reads behind the wallet resource, all from OKX and the chain.
-
 const MAX_ROWS = 12;
 const MONAD = "143";
 const SYMBOL_SELECTOR = "0x95d89b41";
@@ -17,8 +14,6 @@ const number = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-/// Rows from OKX to the shape the app reads. Risk-flagged tokens are dropped; the rest
-/// sort by value with the unpriced at the end.
 export function describeWallet(rows, contract) {
   const wanted = String(contract ?? "").toLowerCase();
   const assets = [];
@@ -54,8 +49,6 @@ export function describeWallet(rows, contract) {
   };
 }
 
-/// Artwork for tokens the balance API names but does not picture. Native tokens
-/// are drawn from the app's own catalog.
 const TRUST_WALLET_CHAINS = {
   "1": "ethereum", "10": "optimism", "56": "smartchain", "137": "polygon", "8453": "base", "42161": "arbitrum",
   "43114": "avalanchec", "59144": "linea", "534352": "scroll", "5000": "mantle", "146": "sonic", "501": "solana",
@@ -103,28 +96,24 @@ export async function logosFor(items, { store = null, search = okxGet } = {}) {
       : String(candidate.tokenContractAddress ?? "").toLowerCase() === item.contract.toLowerCase();
     try {
       const rows = await search("/api/v6/dex/market/token/search", { chains: item.chainIndex, search: item.contract, limit: "3" });
-      // Search may rank an unrelated token first. An incorrect logo is worse than
-      // an honest fallback on a wallet profile.
+      // Search may rank an unrelated token first; a wrong logo is worse than a fallback.
       const row = (Array.isArray(rows) ? rows : []).find(same);
       url = String(row?.tokenLogoUrl ?? "");
-    } catch { /* drawn from the symbol instead */ }
-    // Search by symbol finds what search by contract does not, as long as the contract agrees.
+    } catch {}
     if (!url && item.symbol) {
       try {
         const rows = await search("/api/v6/dex/market/token/search", { chains: item.chainIndex, search: item.symbol, limit: "10" });
         const row = (Array.isArray(rows) ? rows : []).find(same);
         url = String(row?.tokenLogoUrl ?? "");
-      } catch { /* next source */ }
+      } catch {}
     }
-    // Trust Wallet's asset list pictures the established tokens OKX's search skips.
     if (!url && TRUST_WALLET_CHAINS[item.chainIndex]) {
       try {
         const assetAddress = item.chainIndex === "501" ? item.contract : getAddress(item.contract);
         const candidate = `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/${TRUST_WALLET_CHAINS[item.chainIndex]}/assets/${assetAddress}/logo.png`;
         if (await exists(candidate)) url = candidate;
-      } catch { /* not a valid address for a checksum */ }
+      } catch {}
     }
-    // OKX's search does not index most Monad tokens; nad.fun pictures the ones it launched.
     if (!url && item.chainIndex === "143") {
       try {
         const controller = new AbortController();
@@ -132,7 +121,7 @@ export async function logosFor(items, { store = null, search = okxGet } = {}) {
         const response = await fetch(`https://api.nad.fun/token/${item.contract}`, { signal: controller.signal });
         clearTimeout(timer);
         if (response.ok) url = String((await response.json())?.token_info?.image_uri ?? "");
-      } catch { /* no picture */ }
+      } catch {}
     }
     if (url) logos[id] = url;
     // Missing art is often a transient index/CDN failure, not a permanent fact.
@@ -148,7 +137,6 @@ export async function walletBalances(address, chains) {
   });
 }
 
-/// Today's price per token, in one call.
 export async function currentPrices(chainIndex, contracts) {
   const map = new Map();
   if (!okxConfigured() || contracts.length === 0) return map;
@@ -162,13 +150,10 @@ export async function currentPrices(chainIndex, contracts) {
       const price = number(row.price);
       if (price != null) map.set(contract === native ? NATIVE : contract, price);
     }
-  } catch { /* unpriced today, marked null */ }
+  } catch {}
   return map;
 }
 
-/// The price of a token at a moment, from the candle that covers it: the minute if OKX
-/// has one, else the hour, else the day. Cached by hour in the store, so a wallet with
-/// a hundred trades in one token costs one call per hour it traded in.
 export function priceReader({ store = null, chainIndex = MONAD, fetchCandles = okxGet } = {}) {
   const memory = new Map();
   return async function priceAt(token, time) {
@@ -192,7 +177,7 @@ export function priceReader({ store = null, chainIndex = MONAD, fetchCandles = o
         const row = Array.isArray(rows) ? rows[0] : null;
         const close = row ? number(row[4]) : null;
         if (close != null && close > 0) { price = close; break; }
-      } catch { /* try a coarser bar */ }
+      } catch {}
     }
     memory.set(key, price);
     if (store) store.set(key, price == null ? "" : String(price), { ex: 30 * 24 * 3600 }).catch(() => {});
@@ -214,7 +199,6 @@ function decodeString(hex) {
   return Buffer.from(body.slice(128, 128 + length * 2), "hex").toString("utf8");
 }
 
-/// Symbol and decimals of a token, from the chain, remembered for a month.
 export function metaReader({ store = null, chainIndex = MONAD, fetchImpl = fetch } = {}) {
   const memory = new Map([[NATIVE, { symbol: CHAINS[chainIndex]?.symbol ?? "MON", decimals: 18 }]]);
   const endpoint = rpcEndpoint(chainIndex);
@@ -243,7 +227,7 @@ export function metaReader({ store = null, chainIndex = MONAD, fetchImpl = fetch
         const symbol = rows[0]?.result ? decodeString(rows[0].result).trim() : "";
         value = { symbol: symbol || `${token.slice(0, 6)}…`, decimals };
       }
-    } catch { /* not an ERC-20 we can read; skipped */ }
+    } catch {}
     memory.set(token, value);
     if (store && value) store.set(key, JSON.stringify(value), { ex: 30 * 24 * 3600 }).catch(() => {});
     return value;

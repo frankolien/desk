@@ -1,4 +1,3 @@
-// node --test web/test/moderation.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 

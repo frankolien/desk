@@ -10,8 +10,7 @@ extension AutoCopyGlance.Move {
     }
 }
 
-/// A figure worth money. Marked private so iOS redacts it on a locked screen: a widget and
-/// a Live Activity are read by whoever is looking at the phone, not only by its owner.
+/// Marked private so iOS redacts it on a locked screen.
 struct PnLText: View {
     let value: Double
 
@@ -36,14 +35,12 @@ struct DeskMark: View {
     }
 }
 
-/// The status sentence under the title, shared by every surface so they never disagree.
 func autoCopyStatus(paused: Bool, traders: Int, openCopies: Int, shadow: Bool) -> String {
     if paused { return "Paused" }
     let who = traders == 1 ? "1 trader" : "\(traders) traders"
     return "\(shadow ? "Shadow · " : "")\(who) · \(openCopies) open"
 }
 
-/// "now", "12m", "3h", "2d": a widget row has no room for "2 min, 5 sec".
 func shortAge(_ date: Date, now: Date = .now) -> String {
     let seconds = max(0, now.timeIntervalSince(date))
     switch seconds {

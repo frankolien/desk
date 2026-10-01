@@ -14,7 +14,6 @@ const TOKEN_ID = /^(\d{1,10}):(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/;
 const PRICE_BATCH = 20;
 const number = (value) => { const n = Number(value); return Number.isFinite(n) ? n : null; };
 
-/// One OKX call for a whole table: `?view=prices&tokens=chain:addr,chain:addr` (up to 20).
 async function handlePrices(req, res) {
   const ids = [...new Set(String(req.query.tokens ?? "").split(",").map((v) => v.trim()).filter(Boolean))].slice(0, PRICE_BATCH);
   const parsed = ids.map((id) => TOKEN_ID.exec(id)).filter(Boolean).map((m) => ({ chainIndex: m[1], tokenContractAddress: m[2] }));
@@ -36,9 +35,6 @@ async function handlePrices(req, res) {
 
 const SPARKLINE_BATCH = 10;
 
-/// A day of hourly closes per token, oldest first, for the small charts on Home:
-/// `?view=sparklines&tokens=chain:addr,…` (up to 10). A token OKX cannot chart comes
-/// back with no points rather than failing the batch.
 async function handleSparklines(req, res) {
   const ids = [...new Set(String(req.query.tokens ?? "").split(",").map((v) => v.trim()).filter(Boolean))].slice(0, SPARKLINE_BATCH);
   const parsed = ids.map((id) => TOKEN_ID.exec(id)).filter(Boolean).map((m) => ({ chainIndex: m[1], contract: m[2] }));

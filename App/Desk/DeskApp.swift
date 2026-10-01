@@ -9,15 +9,11 @@ struct DeskApp: App {
     @UIApplicationDelegateAdaptor(DeskAppDelegate.self) private var appDelegate
     @State private var model = AppModel(passkey: DeskApp.passkeyService)
 
-
     static let relyingPartyIdentifier = "desk-trading-opia.vercel.app"
 
     static var relyingParty: RelyingParty? {
-        // `RelyingParty` refuses the shapes that fail on a device rather than at build
-        // time — a scheme, a path, a port, a trailing dot, a bare label.
         try? RelyingParty(relyingPartyIdentifier)
     }
-
 
     static var passkeyService: any PasskeyService {
 
@@ -61,14 +57,10 @@ struct DeskApp: App {
     }
 }
 
-/// The stage decides the screen, so there is no way to be on Fund without an address or
-/// on Market without a desk.
 struct RootView: View {
     let model: AppModel
     @State private var showsLaunchMoment = true
 
-    /// A `-stage` launch has chosen its screen; the returning path must not sign in
-    /// over the top of it.
     private static var isStaged: Bool {
         #if DEBUG
         ProcessInfo.processInfo.arguments.contains("-stage")
@@ -90,8 +82,6 @@ struct RootView: View {
                         NadOnboardingScreen(model: model) { model.finishNameOnboarding() }
                             .transition(.opacity)
                     } else {
-                        // Rebuilt on a network switch, so no market or socket from the other
-                        // network survives inside it.
                         TradingShell(model: model)
                             .id(model.network)
                     }
@@ -110,8 +100,6 @@ struct RootView: View {
                     .zIndex(1)
             }
         }
-        // Said once, at the top, on every screen. The figures underneath keep showing
-        // what was last read; this is why they have stopped moving.
         .overlay(alignment: .top) {
             if !Connectivity.shared.isOnline {
                 OfflineBanner()
@@ -124,20 +112,8 @@ struct RootView: View {
         .task { await DisplayCurrency.shared.refresh() }
         .task {
             guard showsLaunchMoment else { return }
-            // The mark's own animation chain finishes at about 1.28 s, once the wordmark
-            // and the tagline that followed it are gone. Waiting 3.1 s on top of iOS's
-            // launch frame held a working app behind a logo for nearly four seconds, on
-            // every launch, warm or cold.
             try? await Task.sleep(for: .milliseconds(1_300))
-            // A device that has signed in before is asked for Face ID here, under the
-            // mark, and lands on Home. It used to land on the onboarding every launch
-            // and wait for a tap on "Continue" — a screen for people who have not
-            // decided yet, shown to someone who decided last week. Cancelling the
-            // prompt drops through to that screen, where the button still works.
             if model.isReturning, model.stage == .welcome, !Self.isStaged {
-                // The sealed key first: one Face ID. The passkey ceremony only when
-                // there is nothing sealed. A refused Face ID is left alone — the
-                // onboarding is underneath, with its button.
                 if await model.resume() == .unavailable { await model.signIn() }
             }
             withAnimation(.easeInOut(duration: 0.62)) {
@@ -146,7 +122,6 @@ struct RootView: View {
         }
     }
 }
-
 
 @MainActor
 final class KeyGrace {
@@ -161,10 +136,8 @@ final class KeyGrace {
 
         task = UIApplication.shared.beginBackgroundTask(withName: "desk.trading-key-grace") { [weak self] in
             MainActor.assumeIsolated {
-                // iOS is out of patience, not the grace. The session checks the absence
-                // against a monotonic clock on return, so nothing is lost by not wiping
-                // here — and wiping here was what made every trip to another app cost a
-                // sign-in, because this fires at about thirty seconds regardless.
+                // iOS is out of patience, not the grace: the session checks the absence on return against a
+                // monotonic clock, so nothing is wiped here (this fires at about thirty seconds regardless).
                 self?.timer?.cancel()
                 // The handler must end the task before it returns, or iOS ends the app.
                 self?.finishBackgroundTask()
@@ -208,7 +181,6 @@ final class KeyGrace {
     }
 }
 
-/// The one sentence the app says about the network, in the app's own glass.
 private struct OfflineBanner: View {
     var body: some View {
         HStack(spacing: 8) {

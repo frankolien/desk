@@ -67,7 +67,6 @@ struct LeverageExplainer: View {
 
                 Spacer()
 
-                // The button says what is missing rather than sitting there dead.
                 PrimaryButton(
                     title: canContinue
                         ? "Got it"

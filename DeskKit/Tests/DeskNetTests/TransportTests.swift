@@ -7,8 +7,6 @@ import Testing
 struct HTTPResponseTests {
     @Test("Header names are matched without regard to how the server capitalised them")
     func headersAreCaseInsensitive() {
-        // `Date`, `date` and `DATE` are the same header, and clock-skew detection reads
-        // it by name.
         let response = HTTPResponse(
             status: 200, body: Data(), headers: ["Date": "now", "Retry-After": "30", "X-MiXeD": "1"])
         #expect(response.headers["date"] == "now")
@@ -32,7 +30,6 @@ struct HTTPResponseTests {
 struct WebSocketChannelTests {
     @Test("Only wss is accepted")
     func secureOnly() {
-        // A ws:// socket would carry the sign-in frame, and with it the API key, in clear.
         #expect(throws: URLSessionWebSocket.Failure.mustBeWSS(scheme: "ws")) {
             try URLSessionWebSocket(url: URL(string: "ws://testnet.perpl.xyz/ws/v1/trading")!)
         }

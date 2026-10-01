@@ -1,15 +1,10 @@
 import Foundation
 import Security
 
-/// The timestamp and nonce a request is signed with.
-///
-/// One value used for both the canonical string and the headers. Generating them
-/// separately is the bug this type exists to prevent: the gateway recomputes the
-/// canonical string from the headers, so a millisecond of drift between the two is a
-/// rejected signature that looks like a clock problem.
+/// One value for both the canonical string and the headers: the gateway recomputes the
+/// string from the headers, so any drift between the two is a rejected signature.
 public struct RequestStamp: Sendable, Hashable {
     public let timestampMilliseconds: Int64
-    /// Base64url, unpadded, 16 random bytes. Single-use at the gateway.
     public let nonce: String
 
     public init(timestampMilliseconds: Int64, nonce: String) {

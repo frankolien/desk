@@ -1,11 +1,5 @@
 import { okxGet, okxPost } from "./_okx.mjs";
 
-/// Risk for a token, as reasons a person can check rather than a score they cannot:
-/// each triggered reason carries a weight, the weights add up to a level, and the
-/// reasons are shown while the number is not. No data is "unchecked", never "low".
-///
-///   GET /api/token-details?view=risk&chainIndex=143&address=0x…[&riskLevel=&communityRecognized=]
-
 const NADFUN_TOKEN_URL = "https://api.nad.fun/token/";
 
 const number = (value) => {
@@ -33,9 +27,8 @@ export function okxRiskLevel(value) {
   return null;
 }
 
-/// The largest holder is very often the pool itself. When its balance is about what
-/// the pool would hold for the quoted liquidity, it is treated as the pool and left
-/// out of the concentration count.
+/// The largest holder is often the pool itself; one holding about what the quoted liquidity
+/// implies is treated as the pool and left out of the concentration count.
 export function looksLikePool(holder, { liquidity, price }) {
   if (!holder || liquidity == null || price == null || price <= 0) return false;
   const poolTokens = (liquidity / 2) / price;

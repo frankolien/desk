@@ -4,13 +4,10 @@ import DeskPerpl
 import Foundation
 import Security
 
-/// Persists only Perpl's opaque identifier. It cannot sign anything by itself; every
-/// authenticated request still borrows the transient Face ID-derived trading key.
+/// Persists only Perpl's opaque identifier, which cannot sign anything by itself.
 struct APIKeyStore: Sendable {
     static let standard = APIKeyStore(service: "com.opia.desk.perpl-api-key.v2")
 
-    /// A Perpl API key is enrolled with one exchange on one chain, so each network keeps
-    /// its own. Testnet stays on the original service, where existing desks are stored.
     static func forNetwork(_ network: DeskNetwork) -> APIKeyStore {
         network == .testnet ? standard : APIKeyStore(service: "com.opia.desk.perpl-api-key.v2.\(network.rawValue)")
     }
@@ -19,8 +16,6 @@ struct APIKeyStore: Sendable {
 
     init(service: String) { self.service = service }
 
-    /// Perpl's token and the index of the trading key it was issued for. The two only
-    /// work together: a session opened with any other derived key is refused.
     struct Stored: Sendable {
         let apiKey: APIKey
         let tradingIndex: UInt32
@@ -41,8 +36,7 @@ struct APIKeyStore: Sendable {
         if let record = try? JSONDecoder().decode(Record.self, from: data), !record.token.isEmpty {
             return Stored(apiKey: APIKey(record.token), tradingIndex: record.tradingIndex)
         }
-        // Entries written before the index was recorded hold the bare token, and every
-        // one of them was enrolled with the key at the initial index.
+        // Older entries hold the bare token, enrolled with the key at the initial index.
         guard let token = String(data: data, encoding: .utf8), !token.isEmpty else { return nil }
         return Stored(apiKey: APIKey(token), tradingIndex: TradingKeyIndex.initial)
     }

@@ -30,8 +30,6 @@ enum DecimalText {
         guard index == end else { return nil }
         guard integerEnd > integerStart || fractionEnd > fractionStart else { return nil }
 
-        // Leading zeros must not consume the width budget: a zero-padded venue field
-        // is still a small number.
         var significantStart = integerStart
         while significantStart < integerEnd, bytes[significantStart] == UInt8(ascii: "0") {
             significantStart += 1
@@ -48,8 +46,6 @@ enum DecimalText {
         }
         magnitude *= scaleFactor
 
-        // Every rounding case is directional, so digits past the scale only need
-        // testing for being nonzero, never comparing against a midpoint.
         var hasRemainder = false
         for (offset, position) in (fractionStart..<fractionEnd).enumerated() {
             let digit = Int128(bytes[position] - 48)
@@ -87,9 +83,7 @@ enum DecimalText {
         return (raw < 0 ? "-" : "") + digits[..<splitIndex] + "." + digits[splitIndex...]
     }
 
-    /// Never routes through `parse`: re-parsing exact text at a wider scale needs more
-    /// room than the value itself, which is how a million dollars asked for twelve
-    /// decimal places came back as zero.
+    /// Never routes through `parse`: re-parsing at a wider scale can overflow and come back as zero.
     static func render(
         raw: Int64,
         decimals: UInt8,
@@ -108,7 +102,6 @@ enum DecimalText {
         return render(raw: reduced, decimals: fractionDigits)
     }
 
-    /// Insert a separator into the integer part of an already-rendered decimal string.
     static func group(_ rendered: String, every stride: Int, with separator: String, point: String) -> String {
         var body = Substring(rendered)
         var sign = ""

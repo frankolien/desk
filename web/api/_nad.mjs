@@ -1,6 +1,5 @@
-/// Nad Name Service on Monad mainnet, read through the chain and written as calldata the
-/// phone signs. Addresses are pinned here and in the app; the app refuses to sign for
-/// any other target, so this module can only ever ask the wallet to talk to nad.
+/// Addresses are pinned here and in the app, which refuses to sign for any other target, so this
+/// module can only ever ask the wallet to talk to nad.
 import { createPublicClient, encodeFunctionData, formatUnits, http, namehash, parseAbi } from "viem";
 
 export const NNS = "0xCc7a1bfF8845573dbF0B3b96e25B9b549d4a2eC7";
@@ -28,8 +27,6 @@ export const controllerAbi = parseAbi([
   "function registerWithSignature((string name, address nameOwner, bool setAsPrimaryName, address referrer, bytes32 discountKey, bytes discountClaimProof, uint256 nonce, uint256 deadline, (string key, string value)[] attributes, address paymentToken) params, bytes signature) payable",
 ]);
 
-/// The label nad accepts from Desk: lower-case letters, digits and hyphens, 1–32 long.
-/// nad itself allows emoji; Desk keeps to what a keyboard types until that is asked for.
 export function cleanLabel(value) {
   const label = String(value ?? "").trim().toLowerCase().replace(/\.nad$/, "");
   return /^[a-z0-9-]{1,32}$/.test(label) && !label.startsWith("-") && !label.endsWith("-") ? label : null;
@@ -41,7 +38,6 @@ export function nadClient(rpc = "https://rpc.monad.xyz") {
   return createPublicClient({ transport: http(rpc, { timeout: 8_000, batch: true }) });
 }
 
-/// Whether the label can be had, what it costs, and what its records say if it is taken.
 export async function nameStatus(label, { client = nadClient(), fetchImpl = fetch } = {}) {
   const [available, mon, usdc, reserved] = await Promise.all([
     client.readContract({ address: NNS, abi: nnsAbi, functionName: "isNameAvailable", args: [label] }),
@@ -64,7 +60,6 @@ export async function nameStatus(label, { client = nadClient(), fetchImpl = fetc
   return out;
 }
 
-/// The names a wallet holds, which is primary, and each one's records.
 export async function namesOf(address, { client = nadClient() } = {}) {
   const [names, primary] = await Promise.all([
     client.readContract({ address: NNS, abi: nnsAbi, functionName: "getNamesOfAddress", args: [address] }),
@@ -81,8 +76,6 @@ export async function namesOf(address, { client = nadClient() } = {}) {
   };
 }
 
-/// Calldata for the two writes the phone can make on its own, and for the registration
-/// once nad's co-signature is in hand. Every result names its target so the app can pin it.
 export function setRecordsCalldata(label, records) {
   const attributes = RECORD_KEYS.filter((key) => key in records).map((key) => ({ key, value: String(records[key] ?? "").slice(0, 280) }));
   if (!attributes.length) return null;
@@ -100,9 +93,7 @@ export function registerCalldata(params, signature, priceWei) {
   };
 }
 
-/// Registration needs nad's co-signature over the request. The endpoint that issues it
-/// is not public; when nad gives Desk one it goes in `NAD_REGISTER_URL`, and this turns
-/// their answer into a transaction the phone can check and sign. Until then: 503.
+/// Registration needs nad's co-signature from `NAD_REGISTER_URL`, which is not public yet; until then, 503.
 export async function registerRequest({ name, owner, setAsPrimary = true, attributes = [] }, { fetchImpl = fetch, url = process.env.NAD_REGISTER_URL } = {}) {
   if (!url) return { status: 503, body: { error: "Registering through Desk isn't open yet. Nad's signing endpoint is pending.", reason: "not-configured" } };
   const label = cleanLabel(name);

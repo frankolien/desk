@@ -2,7 +2,6 @@ import DeskMoney
 import Foundation
 import Observation
 
-
 @MainActor
 @Observable
 final class DisplayCurrency {
@@ -44,11 +43,8 @@ final class DisplayCurrency {
     private static let endpoint = URL(string: "https://web-lovat-nine-49.vercel.app/api/fx")!
 
     private(set) var code: String
-    /// Dollars to each currency. Kept from the last good fetch so an offline launch still
-    /// shows the chosen currency rather than silently falling back to dollars.
     private(set) var rates: [String: Double]
     private var fetchedAt: Date?
-    /// The last fetch failed and no rate is held for the choice, so figures stay in dollars.
     private(set) var ratesUnavailable = false
 
     private init() {
@@ -59,7 +55,6 @@ final class DisplayCurrency {
 
     var option: Option { Self.options.first { $0.code == code } ?? Self.options[0] }
 
-    /// Dollars convert only once a rate exists; until then figures stay in dollars and say so.
     private var active: (option: Option, rate: Double) {
         if let rate = rates[code] { return (option, rate) }
         return (Self.options[0], 1)
@@ -89,7 +84,6 @@ final class DisplayCurrency {
 
     func rate(for code: String) -> Double? { rates[code] }
 
-    /// A dollar amount in the chosen currency: "₦1,702,560.18", "−€42.10".
     func format(_ dollars: Double, signed: Bool = false, compact: Bool = false) -> String {
         let (option, rate) = active
         let value = dollars * rate

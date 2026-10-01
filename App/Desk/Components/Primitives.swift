@@ -2,9 +2,6 @@ import DeskUI
 import SwiftUI
 import UIKit
 
-/// One tactile vocabulary for Desk. Navigation is soft, changing a choice is a precise
-/// tick, committing money is firm, and outcomes use the system's success/error patterns.
-/// Keeping it here stops every screen inventing its own vibration strength.
 @MainActor
 enum Haptics {
     static func touch() {
@@ -30,8 +27,6 @@ enum Haptics {
     static func failure() { error() }
 }
 
-/// A plain button should still feel pressed. The small compression is quick enough to
-/// read as contact rather than decoration and freezes automatically with Reduce Motion.
 struct DeskPressStyle: ButtonStyle {
     var haptic = true
     var scale: CGFloat = 0.975
@@ -58,10 +53,6 @@ struct DeskPressStyle: ButtonStyle {
     }
 }
 
-/// The approved Desk identity from the app asset catalog.
-///
-/// Keeping the crop, corner treatment and shadow here means launch, onboarding and any
-/// later branded surface cannot slowly turn into slightly different versions of the mark.
 struct DeskBrandMark: View {
     let size: CGFloat
 
@@ -90,8 +81,6 @@ struct PrimaryButton: View {
     var isEnabled = true
     var action: () -> Void
 
-    /// Dark text on every light fill, light text on the one dark fill. Chosen by the
-    /// contrast the palette actually has rather than by which button it is.
     static func label(on tint: DeskRGB) -> DeskRGB {
         tint.contrastRatio(against: DeskColor.onFall) >= tint.contrastRatio(against: DeskColor.nightText)
             ? DeskColor.onFall : DeskColor.nightText
@@ -112,8 +101,6 @@ struct PrimaryButton: View {
     }
 }
 
-/// A label and a value on one line. The value is monospaced-digit so a column of them
-/// does not ripple as it updates.
 struct ValueRow: View {
     let label: String
     let value: String
@@ -144,8 +131,6 @@ struct ValueRow: View {
 }
 
 extension View {
-    /// The app's one raised surface. Liquid Glass where the system supplies it, and a
-    /// material with a hairline where it does not.
     @ViewBuilder
     func deskGlass<S: Shape>(interactive: Bool = false, in shape: S) -> some View {
         if #available(iOS 26.0, *) {
@@ -158,8 +143,6 @@ extension View {
 }
 
 extension View {
-    /// The one filled action in a native sheet: Liquid Glass tinted where the system has
-    /// it, the standard prominent button where it does not.
     @ViewBuilder
     func deskProminentButton(tint: Color = DeskColor.action.color) -> some View {
         if #available(iOS 26.0, *) {
@@ -179,7 +162,6 @@ extension View {
     }
 }
 
-/// Only ever on something tappable. Dark means flat: a chip is a hint, not a card.
 struct Chip<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -194,8 +176,6 @@ struct Chip<Content: View>: View {
     }
 }
 
-/// The app's own keypad, on the ground. Never the system keyboard sliding over the
-/// figure the user is deciding about.
 struct AmountKeypad: View {
     @Binding var text: String
     var keyHeight: CGFloat = 56
@@ -225,7 +205,6 @@ struct AmountKeypad: View {
         case ".":
             if !text.contains(".") { text += text.isEmpty ? "0." : "." }
         default:
-            // No leading zeros, and no more than two decimal places for a dollar figure.
             if text == "0" { text = key } else if decimals < 2 { text += key }
         }
     }
@@ -236,12 +215,8 @@ struct AmountKeypad: View {
     }
 }
 
-/// A sheet the height of what is in it.
-///
-/// A fixed detent is a guess about the content's height, and the guess is wrong on
-/// every phone but the one it was made on: on a Pro Max the leftover reads as a layout
-/// that stopped early, on an SE the button falls off the bottom. The content is measured
-/// at its ideal height — spacers collapse, text wraps as it will — and the detent follows.
+/// A sheet the height of its content, measured at its ideal height: a fixed detent is right only
+/// on the phone it was tuned on.
 struct FittedSheet: ViewModifier {
     @State private var height: CGFloat = 0
 

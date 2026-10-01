@@ -19,8 +19,6 @@ enum Quantity {
         return "0x" + (text.first == "0" ? String(text.dropFirst()) : text)
     }
 
-    /// Nodes are not consistent about leading zeros in what they return, so parsing is
-    /// lenient where rendering is strict.
     static func bytes(_ text: String) throws -> Data {
         guard text.count >= 2, text.hasPrefix("0x") || text.hasPrefix("0X") else {
             throw Failure.notAQuantity(text)
@@ -36,9 +34,7 @@ enum Quantity {
         return Data(trimmed)
     }
 
-    /// Throws rather than truncating. A balance in a token with eighteen decimals
-    /// outgrows a `UInt64` at about eighteen units, and a silently wrapped balance is a
-    /// number the user would act on.
+    /// Throws rather than truncating: an 18-decimal balance outgrows `UInt64` at about 18 units.
     static func uint64(_ text: String) throws -> UInt64 {
         let bytes = try bytes(text)
         guard bytes.count <= 8 else { throw Failure.tooLargeForUInt64(text) }

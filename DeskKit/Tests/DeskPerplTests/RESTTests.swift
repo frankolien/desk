@@ -136,9 +136,6 @@ struct RESTSecurityTests {
 
 @Suite("REST signing")
 struct RESTSigningTests {
-    /// Rebuilds the canonical string from what was actually sent and verifies the
-    /// signature against it. This is the only test that proves the signed bytes and the
-    /// sent bytes are the same bytes.
     private func verifyRoundTrip(_ request: URLRequest, body: Data, chainID: UInt64) throws {
         let headers = try #require(request.allHTTPHeaderFields)
         let url = try #require(request.url)
@@ -212,8 +209,6 @@ struct RESTRetryTests {
         _ = try await rest.signedData(try PerplEndpoint(method: .get, path: "/v1/trading/account-history"))
 
         #expect(transport.requests.count == 3)
-        // The gateway burns a nonce on every attempt it sees, so a resend of the same
-        // bytes would be rejected as a replay even when the first attempt never landed.
         let nonces = Set(transport.requests.compactMap { $0.allHTTPHeaderFields?[PerplHeaders.nonce] })
         #expect(nonces.count == 3)
     }

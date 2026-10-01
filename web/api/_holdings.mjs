@@ -1,24 +1,13 @@
 import { rpcEndpoint } from "./_chains.mjs";
 import { okxConfigured, okxPost } from "./_okx.mjs";
 
-/// What a wallet holds of the tokens it bought through Desk: the balance read from each
-/// token's own chain, and the price OKX quotes for it now.
-///
-/// The app keeps the list of what was bought; this reads the chain for how much is
-/// still held, so a token sent elsewhere or sold shows as what it is rather than as
-/// what was paid for.
-///
-///   GET /api/token-details?view=holdings&address=0x…&items=<chainIndex>:<contract>,…   (up to 20)
-///
-/// A view on token-details rather than a function of its own: the Hobby plan allows
-/// twelve functions per deployment and this would have been the thirteenth.
+/// A view on token-details, not its own function: the Hobby plan allows twelve per deployment.
 
 const BALANCE_OF = "0x70a08231";
 const DECIMALS = "0x313ce567";
 const MAX_ITEMS = 20;
 
-/// A balance in the token's own units, from the raw integer and its decimals, written
-/// with as many places as the amount needs and no more. Truncated, never rounded up.
+/// Truncated, never rounded up.
 export function describeHolding(rawHex, decimals, price) {
   if (typeof rawHex !== "string" || !/^0x[0-9a-fA-F]*$/.test(rawHex)) return null;
   const raw = BigInt(rawHex === "0x" ? "0x0" : rawHex);

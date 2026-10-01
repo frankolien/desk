@@ -2,8 +2,6 @@ import Foundation
 import Testing
 @testable import DeskChain
 
-/// Pinned to a payload fetched from Perpl's live testnet on 13 September 2026, with the
-/// expected hashes computed by viem over the same bytes.
 @Suite("EIP-712")
 struct EIP712Tests {
     let payload: EIP712.TypedData
@@ -45,9 +43,8 @@ struct EIP712Tests {
              + "address verifyingContract,bytes32 salt)")
     }
 
-    // Two fields arrive as hex strings while typed as integers: chainId "0x279f" and
-    // time "0x1a09a29c91c". Hashing either as characters gives a digest the gateway
-    // rejects, and viem produces that wrong digest silently rather than throwing.
+    // chainId and time arrive as hex strings typed as integers; hashing them as characters
+    // gives a digest the gateway rejects, and viem produces it silently.
     @Test("hex-string integers hash as numbers")
     func hexStringIntegersHashAsNumbers() throws {
         #expect(try ABIWord.uint("0x279f") == ABIWord.uint("10143"))
@@ -56,9 +53,7 @@ struct EIP712Tests {
             == "000000000000000000000000000000000000000000000000000000000000279f")
     }
 
-    // Declaring chainId as a string is what a naive implementation effectively does
-    // with "0x279f". viem produces 0xae2a4c... that way, silently, and the gateway
-    // answers 400.
+    // Declaring chainId as a string reproduces the naive digest the gateway answers 400 to.
     @Test("hashing the chain id as characters gives viem's wrong digest")
     func theTrapItself() throws {
         var types = payload.types

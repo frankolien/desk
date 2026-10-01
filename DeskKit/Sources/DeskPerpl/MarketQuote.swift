@@ -2,8 +2,6 @@ import DeskMoney
 import Foundation
 
 extension OrderQuote {
-    /// A quote against a live market, taking every rate and fraction from `pub/context`
-    /// rather than from anywhere in the source.
     public static func forMarket(
         _ market: Market,
         side: Side,
@@ -18,9 +16,8 @@ extension OrderQuote {
         else { throw OrderQuote.Failure.scaleMismatch }
         return try quote(
             side: side, size: size, price: price, leverageHundredths: leverageHundredths,
-            // A post-only limit pays maker; everything else pays taker. Quoting the maker
-            // rate on an order that crosses would understate the cost by a factor of
-            // nearly eight on BTC.
+            // A post-only limit pays maker; everything else pays taker. Maker on a crossing
+            // order would understate the cost nearly eightfold on BTC.
             feeMicros: isMaker ? market.config.makerFeeMicros : market.config.takerFeeMicros,
             initialMarginFraction: market.config.initialMarginFraction,
             maintenanceMarginFraction: market.config.maintenanceMarginFraction,

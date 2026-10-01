@@ -1,17 +1,5 @@
-// Trader history from Perpl's own position events.
-//
-// The exchange lists open positions but keeps no trade history, so this reads the event
-// log instead: every open, partial close, close and liquidation on mainnet, streamed
-// from HyperSync in block order and folded into one compact record per account. Each
-// record carries running statistics and the last trades, so a profile, a score or a
-// leaderboard is a lookup rather than a scan.
-//
-// Statistics live in sixteen Redis shards keyed by account id, about half a kilobyte per
-// account; a run reads them with one MGET and writes back only the shards it changed. The
-// last trades live under each account's own key and are written only when that account
-// closes something. Perpl produces tens of thousands of position events a day from a few
-// hundred accounts, and this split is what keeps the worker's quarter-hourly run cheap in
-// commands and bandwidth.
+// Trader history, which Perpl does not keep, folded from its mainnet position events.
+// Statistics live in sixteen Redis shards by account id; last trades under each account's key.
 
 import { randomBytes } from "node:crypto";
 
@@ -39,7 +27,6 @@ function word(hex, index) {
 
 const signed = (value) => BigInt.asIntN(256, value);
 
-/// One log as the fields a record needs, or null when it is not a position event.
 export function decodeEvent(log, timestamps) {
   const topic = String(log.topic0 ?? log.topics?.[0] ?? "").toLowerCase();
   const kind = KIND_BY_TOPIC[topic];
@@ -48,8 +35,7 @@ export function decodeEvent(log, timestamps) {
   const base = {
     kind,
     block: Number(log.block_number),
-    // Position within the block, so a range read twice can be told from two real events in
-    // the same block.
+    // Position within the block, so a range read twice can be told from two real events.
     logIndex: Number(log.log_index ?? log.logIndex ?? 0),
     time: timestamps.get(Number(log.block_number)) ?? null,
     perp: Number(word(data, 0)),
@@ -76,10 +62,6 @@ export function emptyRecord() {
     addr: null, open: {}, n: 0, w: 0, l: 0, gp: 0, gl: 0, cum: 0, peak: 0, dd: 0,
     streak: 0, bestStreak: 0, worstStreak: 0, hold: 0, holdN: 0, lev: 0, levN: 0,
     longs: 0, shorts: 0, liq: 0, vol: 0, funding: 0, first: null, last: null, markets: {},
-    // The last block folded into this record. Every figure here is an accumulation, so an
-    // event applied twice counts twice and there is no way to notice afterwards — and a
-    // replay is not hypothetical: the shards and the cursor are written in one Upstash
-    // pipeline, which is not a transaction, so the cursor can fail after the shards land.
     block: 0, logIndex: -1,
   };
 }
@@ -93,15 +75,11 @@ function realise(record, pnl, time) {
   if (time) record.last = Math.max(record.last ?? 0, time);
 }
 
-/// A closed round trip: [closed at, symbol, long 1 / short 0, entry, exit, pnl, held seconds,
-/// leverage, liquidated 1 / 0].
-/// Folds one event into an account's record, and returns the trade it completed, if any.
-/// `market` supplies the symbol and decimals.
+/// Returns the closed round trip, if any: [closed at, symbol, long 1 / short 0, entry, exit,
+/// pnl, held seconds, leverage, liquidated 1 / 0].
 export function applyEvent(record, event, market) {
-  // Already folded in. Every figure here is an accumulation, so an event applied twice
-  // counts twice with no way to notice afterwards — and a replay is not hypothetical: the
-  // shards and the cursor are written in one Upstash pipeline, which is not a transaction,
-  // so the cursor can fail after the shards have landed.
+  // Already folded in. Figures accumulate, and shards and cursor are written in one Upstash
+  // pipeline, which is not a transaction, so a replay after a failed cursor write must be skipped.
   if (event.block != null) {
     const index = event.logIndex ?? 0;
     if (event.block < record.block || (event.block === record.block && index <= record.logIndex)) return null;
@@ -109,9 +87,7 @@ export function applyEvent(record, event, market) {
     record.logIndex = index;
   }
   const symbol = market?.name ?? `#${event.perp}`;
-  // A market this build has never seen cannot be priced. Scaling by one reported a BTC
-  // entry ten times too large and a volume a million times too large, which then fed the
-  // score; the trade still counts, its prices do not.
+  // A market this build has never seen cannot be priced: the trade counts, its prices do not.
   const known = Number.isInteger(market?.config?.price_decimals) && Number.isInteger(market?.config?.size_decimals);
   const priceScale = known ? 10 ** market.config.price_decimals : null;
   const sizeScale = known ? 10 ** market.config.size_decimals : null;
@@ -137,7 +113,6 @@ export function applyEvent(record, event, market) {
     return null;
   }
 
-  // closed or liquidated: the round trip ends here.
   const total = round((position?.r ?? 0) + event.pnl);
   const exit = event.priceRaw != null && priceScale ? Number(event.priceRaw) / priceScale : null;
   const holdSeconds = position?.t && event.time ? Math.max(0, event.time - position.t) : null;
@@ -166,12 +141,10 @@ export function applyEvent(record, event, market) {
     holdSeconds, position?.lev ?? null, event.kind === "liquidated" ? 1 : 0];
 }
 
-/// Newest first, at most the recent window.
 export function mergeTrades(existing, added) {
   return [...added].reverse().concat(existing ?? []).slice(0, RECENT_TRADES);
 }
 
-/// The figures a person reads, the tags that describe a style, and one score.
 export function statistics(record) {
   const n = record.n;
   const winRate = n ? record.w / n : null;
@@ -208,23 +181,14 @@ export function statistics(record) {
   };
 }
 
-/// Closed trades a record needs before its score counts in full.
 export const CONFIDENT_TRADES = 50;
 
-/// 0–100. Win rate, profit factor and drawdown against what was won, weighted by how many
-/// trades back them and how much money moved, less a penalty for each liquidation. A lucky
-/// handful of trades, or hundreds of trades worth cents, cannot outrank a real record.
 export function score(record) {
   if (!record.n) return null;
   const winRate = record.w / record.n;
   const profitFactor = record.gl > 0 ? Math.min(record.gp / record.gl, 3) : (record.gp > 0 ? 3 : 0);
   const drawdown = Math.min(record.dd / Math.max(record.gp, 1), 1);
   const raw = 45 * winRate + 35 * (profitFactor / 3) + 20 * (1 - drawdown);
-  // Three things have to be true before a record is believed: enough trades, enough money
-  // moved through them, and more than one market. This raises the cost of a manufactured
-  // record — two accounts crossing each other on the book can hand one of them a perfect
-  // one for the price of the taker fee — without pretending to detect it: telling wash
-  // trading from real trading needs the counterparty, which these events do not carry.
   const markets = Object.keys(record.markets ?? {}).length;
   const confidence = Math.min(1, record.n / CONFIDENT_TRADES)
     * Math.min(1, (record.gp + record.gl) / 250)
@@ -240,7 +204,6 @@ const duration = (seconds) => {
   return `${Math.round(seconds / 86_400)} d`;
 };
 
-/// A sentence built only from the figures, so it can never claim what the data does not show.
 export function describe(stats) {
   if (!stats.trades) return "No closed trades on record yet.";
   const parts = [];
@@ -256,8 +219,6 @@ export function describe(stats) {
   return parts.join(" ");
 }
 
-/// Reads position events from HyperSync, folds them into the shards, and advances the
-/// cursor. Stops at the deadline and resumes from the cursor on the next run.
 export async function indexHistory({ store, hypersync, markets, now = Date.now, deadline }) {
   const height = await hypersync.height();
   const tip = height - FINALITY_LAG;
@@ -291,7 +252,6 @@ export async function indexHistory({ store, hypersync, markets, now = Date.now, 
       cursor = page.nextBlock;
     }
   } catch (error) {
-    // Pages already folded in are kept, so a refusal halfway through a catch-up costs one page.
     if (cursor === start) throw error;
     failure = error;
   }
@@ -312,7 +272,6 @@ export async function indexHistory({ store, hypersync, markets, now = Date.now, 
   return { from: start, to: cursor, events, accounts: accounts.length, behind: tip - cursor };
 }
 
-/// When the index last moved forward, read by the health check.
 export const INDEX_STATUS_KEY = "hist:advanced";
 export const INDEX_LOCK_KEY = "hist:lock";
 
@@ -327,15 +286,12 @@ export async function indexWithLock({ store, hypersync, markets, budgetMs, lockS
     try {
       if (await store.get(INDEX_LOCK_KEY) === token) await store.del(INDEX_LOCK_KEY);
     } catch {
-      // A lock nobody released expires on its own.
     }
   }
 }
 
-/// The index can run on its own HyperSync token, so wallet indexing cannot starve it.
 export const indexToken = () => process.env.HYPERSYNC_INDEX_TOKEN || process.env.HYPERSYNC_TOKEN;
 
-/// The best-scoring accounts with enough trades to mean something.
 export function leaders(shards, limit = 50) {
   const rows = [];
   for (const shard of shards) {
@@ -377,7 +333,6 @@ export function hypersyncClient({ token = process.env.HYPERSYNC_TOKEN, url = "ht
         nextBlock: Number(body.next_block),
       };
     },
-    /// Any query, as HyperSync takes it; used by the wallet ledger.
     async raw(query) {
       const response = await fetchImpl(`${url}/query`, { method: "POST", headers, body: JSON.stringify(query) });
       if (!response.ok) throw new Error(`hypersync ${response.status}`);

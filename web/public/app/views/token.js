@@ -98,9 +98,9 @@ const skel = (w = "100%", h = 14) => `<div class="skel" style="width:${w};height
 const icon = (id) => `<svg aria-hidden="true"><use href="#${id}"/></svg>`;
 
 function readWatch() { try { return JSON.parse(localStorage.getItem(WATCH_KEY) || "[]"); } catch { return []; } }
-function writeWatch(list) { try { localStorage.setItem(WATCH_KEY, JSON.stringify(list)); } catch { /* private mode */ } }
+function writeWatch(list) { try { localStorage.setItem(WATCH_KEY, JSON.stringify(list)); } catch {} }
 function readFaces() { try { return localStorage.getItem(FACES_KEY) !== "0"; } catch { return true; } }
-function writeFaces(on) { try { localStorage.setItem(FACES_KEY, on ? "1" : "0"); } catch { /* private mode */ } }
+function writeFaces(on) { try { localStorage.setItem(FACES_KEY, on ? "1" : "0"); } catch {} }
 
 function precisionFor(price) {
   if (price == null || price <= 0) return 2;
@@ -109,14 +109,12 @@ function precisionFor(price) {
   return Math.min(12, -Math.floor(Math.log10(price)) + 3);
 }
 
-/// Token prices keep their significant digits where fmtUsd would round them to cents.
 const tokenPrice = (value) => (value == null || !Number.isFinite(Number(value)) ? "—" : Number(value) >= 1 ? fmtUsd(value) : `$${fmtSmall(Number(value)).replace(/(\.\d*?[1-9])0+$/, "$1")}`);
 
 function copyButton(text) {
   return `<button class="tk-copy" type="button" data-copy="${esc(text)}" aria-label="Copy contract">${icon("i-copy")}</button>`;
 }
 
-/// A face alone: the avatar, or a monogram on the same gradient `person()` uses.
 function face(address, id = knownIdentity(address), size = 20) {
   if (id?.avatar) return `<span class="logo logo-${size}"><img src="${esc(id.avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></span>`;
   const mark = esc(String(address ?? "").replace(/^0x/i, "").slice(0, 2).toUpperCase());
@@ -195,8 +193,6 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
 
   const q = (s) => $(s, el);
 
-  // ── Identity and stats ────────────────────────────────
-
   const [discovery, details] = await Promise.all([
     api(`/api/token-discovery?q=${encodeURIComponent(address)}`, { ttl: 60_000, signal }).catch(() => null),
     api(`/api/token-details?chainIndex=${chainIndex}&address=${address}`, { ttl: 15_000, signal }).catch(() => null),
@@ -253,16 +249,12 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     setTimeout(() => use.setAttribute("href", "#i-copy"), 1200);
   });
 
-  // ── About ─────────────────────────────────────────────
-
   q("#tk-about-body").innerHTML = `
     <div class="row-between"><span>Chain</span><span class="row" style="gap:6px">${logo(nativeLogo(chainIndex), chainName, 16)}${esc(chainName)}</span></div>
     <div class="row-between"><span>Contract</span><span class="row mono k" style="gap:6px">${esc(short(address))} ${copyButton(address)}</span></div>
     ${supply != null ? `<div class="row-between"><span>Supply</span><span class="num k">${fmtAmount(supply, 0)}</span></div>` : ""}
     ${row?.explorerURL && !/\/null$/.test(row.explorerURL) ? `<div class="row-between"><span>Explorer</span><a class="btn btn-ghost btn-xs" href="${esc(row.explorerURL)}" target="_blank" rel="noopener">Explorer ${icon("i-ext")}</a></div>` : ""}`;
   $$("#tk-about-body .btn svg", el).forEach((svg) => { svg.style.width = "12px"; svg.style.height = "12px"; });
-
-  // ── Ticket ────────────────────────────────────────────
 
   let side = query.side === "sell" ? "sell" : "buy";
   let pct = null;
@@ -318,8 +310,6 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   });
   paintTicket();
 
-  // ── Risk ──────────────────────────────────────────────
-
   api(`/api/token-details?view=risk&chainIndex=${chainIndex}&address=${address}&riskLevel=${encodeURIComponent(row?.riskLevel ?? "")}&communityRecognized=${row?.communityRecognized ?? ""}`, { ttl: 60_000, signal })
     .catch(() => null)
     .then((risk) => {
@@ -334,8 +324,6 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
         : `<div class="line muted"><i></i><span>No checks ran for this token.</span></div>`)
         + (risk ? `<div class="checked">Checked${risk.checkedAt ? ` ${ago(risk.checkedAt)}` : ""} · OKX, nad.fun, on-chain</div>` : "");
     });
-
-  // ── Chart ─────────────────────────────────────────────
 
   let bar = "5m";
   let scale = query.scale === "mc" ? "mc" : "price";
@@ -386,7 +374,6 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     chart.applyOptions({ localization: { priceFormatter } });
     candleSeries.setData(candles.map(toPoint));
     volumeSeries.setData(candles.map(toVolume));
-    // Bars keep TradingView's spacing rather than stretching a thin tape across the pane.
     if (!framed) { chart.timeScale().applyOptions({ barSpacing: Math.min(12, Math.max(4, chartEl.clientWidth / (candles.length + 8))) }); chart.timeScale().scrollToRealTime(); framed = true; }
     legend?.update(candles[candles.length - 1], candles[candles.length - 2], bar);
     countdown?.tick();
@@ -423,8 +410,6 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     countdown?.tick();
     schedulePlace();
   };
-
-  // ── Faces on the chart ────────────────────────────────
 
   const facesEl = q("#tk-faces");
   const tipEl = q("#tk-tip");
@@ -487,7 +472,6 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     faceNodes = [];
     if (!facesOn || !chart) { hideTip(); return; }
     const groups = new Map();
-    // The biggest trades on the tape, not all of them: the chart stays readable.
     const biggest = [...trades.slice(0, 60)].sort((a, b) => (num(b.volume) ?? 0) - (num(a.volume) ?? 0)).slice(0, FACES_MAX);
     for (const t of biggest) {
       const at = Number(t.time);
@@ -543,8 +527,6 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     Promise.all(fresh.map((a) => identity(a))).then((ids) => { if (!dead && ids.some(Boolean)) then(); });
   };
 
-  // ── Trades, holders, traders, launch ──────────────────
-
   const TAB_IDS = TABS.map(([id]) => id);
   let tab = TAB_IDS.includes(query.tab) ? query.tab : "trades";
   $$("[data-tab]", el).forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
@@ -562,7 +544,6 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   };
 
   const TX_EXPLORERS = { "143": "https://monadscan.com/tx/", "501": "https://solscan.io/tx/", "1": "https://etherscan.io/tx/", "8453": "https://basescan.org/tx/", "56": "https://bscscan.com/tx/", "42161": "https://arbiscan.io/tx/", "10": "https://optimistic.etherscan.io/tx/", "137": "https://polygonscan.com/tx/" };
-  // The other leg of the swap: what was paid for a buy, what was received for a sell.
   const quoteLeg = (t) => (t.changedTokenInfo ?? []).find((c) => String(c.tokenAddress ?? "").toLowerCase() !== address.toLowerCase() && c.tokenSymbol !== symbol);
   const txLink = (t) => {
     const base = TX_EXPLORERS[String(chainIndex)];
@@ -793,8 +774,6 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     chartEl.insertAdjacentHTML("beforeend", `<div class="empty pulse">Loading…</div>`);
     refresh(mine, true).catch(() => { if (mine === generation && !dead) { candles = []; paintChart(); } });
   });
-
-  // ── Polling ───────────────────────────────────────────
 
   const refresh = async (mine, full) => {
     const out = await api(`/api/market-snapshot?chainIndex=${chainIndex}&address=${address}&period=${bar}&limit=100`, { signal });

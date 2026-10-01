@@ -1,6 +1,5 @@
 import Foundation
 
-/// The peer went away, and why.
 public struct SocketClosed: Error, Sendable, Hashable {
     public let code: Int
     public let reason: String?
@@ -18,10 +17,8 @@ public protocol WebSocketChannel: Sendable {
     func close()
 }
 
-/// URLSession callbacks are documented as one-shot, but cancellation can race a pending
-/// WebSocket ping and deliver more than one completion on the delegate queue. A checked
-/// continuation deliberately traps on the second resume, so the callback boundary must
-/// enforce the one-shot rule itself.
+/// Cancellation can race a pending ping and deliver a second URLSession completion, which
+/// would trap a checked continuation; this enforces the one-shot rule itself.
 final class OneShotVoidContinuation: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Void, any Error>?
@@ -45,8 +42,6 @@ public final class URLSessionWebSocket: WebSocketChannel, @unchecked Sendable {
         case unknownFrameKind
     }
 
-    // Both stored properties are set once in `init` and never written again; URLSession
-    // and its tasks are documented as safe to use from any thread.
     private let session: URLSession
     private let task: URLSessionWebSocketTask
 
@@ -95,11 +90,8 @@ public final class URLSessionWebSocket: WebSocketChannel, @unchecked Sendable {
         session.invalidateAndCancel()
     }
 
-    /// The thrown error carries no close code — a refused sign-in surfaces as
-    /// `NSPOSIXErrorDomain 57, "Socket is not connected"`, which is the same thing a
-    /// dropped network produces. The code lives on the task and is only readable after
-    /// the failure, and it is the whole difference between "your key was refused" and
-    /// "you went through a tunnel".
+    /// A refused sign-in throws the same POSIX 57 as a dropped network; only the task's
+    /// close code, readable after the failure, tells them apart.
     private func closure(or error: any Error) -> any Error {
         let code = task.closeCode.rawValue
         guard code != 0 else { return error }

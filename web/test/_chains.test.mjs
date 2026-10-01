@@ -1,7 +1,3 @@
-// node --test web/test/_chains.test.mjs
-//
-// The swap route had no test of any kind, which is how a stale seven-chain allowlist and
-// a required decimal the feed never supplies both survived in production.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -12,7 +8,6 @@ import handler, {
   baseUnits, readableUnits, resolveDecimals, validAddress,
 } from "../api/swap-quote.mjs";
 
-/// Enough of Vercel's response object to see which answer the route chose.
 function recorder() {
   const out = { status: null, body: null, headers: {} };
   return {
@@ -25,7 +20,6 @@ function recorder() {
 const quote = (query) => handler({ method: "GET", query }, recorder());
 
 test("0x's published chain set is carried verbatim", () => {
-  // Counted from 0x's supported-chains documentation.
   assert.equal(ZEROX_CHAINS.size, 21);
   for (const id of ["1", "56", "8453", "42161", "143", "4663"]) {
     assert.ok(ZEROX_CHAINS.has(id), `${id} should be quotable through 0x`);
@@ -33,10 +27,8 @@ test("0x's published chain set is carried verbatim", () => {
 });
 
 test("Robinhood Chain is quotable and Arc is not", () => {
-  // The bug this file exists for: every trending token on 4663 was refused as malformed.
   assert.equal(isQuotable("4663"), true);
   assert.equal(chainName("4663"), "Robinhood Chain");
-  // Arc's gas token is USDC, so it cannot borrow the shared EVM native either.
   assert.equal(isQuotable("5042"), false);
   assert.equal(chainName("5042"), "Arc");
   assert.equal(nativeToken("5042"), null);
@@ -91,8 +83,6 @@ test("A caller's decimal hint is trusted without a network call", async () => {
 });
 
 test("Decimals come off the chain when the feed has none", async () => {
-  // The discovery feed returns a null decimal for every token, so this is the path that
-  // actually runs in production.
   const calls = [];
   const fetchImpl = async (url, options) => {
     calls.push({ url, body: JSON.parse(options.body) });
@@ -107,8 +97,6 @@ test("Decimals come off the chain when the feed has none", async () => {
 });
 
 test("Solana decimals come off the mint, not a contract call", async () => {
-  // eth_call means nothing on Solana, so every token there was refused as having
-  // unconfirmable precision until this asked the right question.
   const calls = [];
   const fetchImpl = async (url, options) => {
     calls.push({ url, body: JSON.parse(options.body) });
@@ -141,8 +129,6 @@ test("An RPC that answers with nonsense is refused", async () => {
 const ARGUS = "0x78e35c13252836e2313208ab48f8bb07a7551a43";
 
 test("An unsupported chain is answered as such, not as a bad request", async () => {
-  // Every Arc token used to come back 400 "Valid quote parameters required", which reads
-  // as the app having sent something wrong.
   const result = await quote({
     chainIndex: "5042", tokenAddress: ARGUS, side: "buy", amount: "0.01", tokenDecimals: "18",
   });
@@ -153,9 +139,8 @@ test("An unsupported chain is answered as such, not as a bad request", async () 
 });
 
 test("A chain 0x covers gets past both gates", async () => {
-  // Robinhood was refused outright. With no credentials in the test environment the route
-  // now reaches the provider step and reports that instead, which is the proof it is no
-  // longer rejected as malformed input.
+  // No credentials in tests: reaching the provider step is the proof the chain is not
+  // rejected as malformed input.
   const result = await quote({
     chainIndex: "4663", tokenAddress: ARGUS, side: "buy", amount: "0.01", tokenDecimals: "18",
   });
@@ -164,8 +149,6 @@ test("A chain 0x covers gets past both gates", async () => {
 });
 
 test("A token whose decimals cannot be confirmed is refused honestly", async () => {
-  // Chain 999 is quotable through 0x but carries no RPC, because its identity is
-  // contested, so an unhinted token there cannot be sized safely.
   const result = await quote({
     chainIndex: "999", tokenAddress: ARGUS, side: "buy", amount: "0.01",
   });

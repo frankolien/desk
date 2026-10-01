@@ -95,8 +95,6 @@ struct PasskeyAccountsTests {
 extension Data {
     var hex: String { map { String(format: "%02x", $0) }.joined() }
 
-    /// Traps on a malformed literal. A typo in a future vector must fail loudly rather
-    /// than quietly become zeroes that something then asserts against.
     init(hex: String) {
         precondition(hex.count % 2 == 0, "hex literal has an odd length")
         var bytes = [UInt8]()

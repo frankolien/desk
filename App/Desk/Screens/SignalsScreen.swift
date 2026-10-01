@@ -9,7 +9,6 @@ struct SignalsScreen: View {
     let session: TradingSession
     let copier: CopyTrader
     let onOrderFilled: (Direction, String) -> Void
-    /// Set by Home's Top Traders link; the screen opens on that section and clears it.
     @Binding var opensTop: Bool
 
     private enum Section: String, CaseIterable, Identifiable {
@@ -17,7 +16,6 @@ struct SignalsScreen: View {
         var id: String { rawValue }
         static var shown: [Section] { Showcase.signalsExtras ? allCases : [.traders, .top] }
     }
-
 
     @State private var section: Section = .traders
     @State private var showsMarket = false
@@ -143,7 +141,6 @@ struct SignalsScreen: View {
                 opensTop = false
             }
             #if DEBUG
-            // `-smart-money` opens the Smart money destination; `-track-demo` seeds a tracked wallet.
             .task {
                 let arguments = ProcessInfo.processInfo.arguments
                 if arguments.contains("-track-demo"), TrackedWallets.shared.list.isEmpty {
@@ -342,8 +339,6 @@ struct SignalsScreen: View {
         }
     }
 
-    /// Their market, side and leverage on your own testnet ticket. The amount is yours to
-    /// choose: their size is sized to their account, not to this one.
     private func copy(_ position: TraderPosition) {
         copy(market: position.market, isLong: position.isLong, leverage: position.leverage,
              trader: selectedTrader?.address ?? "", entry: position.entry, pnlPercent: position.pnlPercent)
@@ -381,7 +376,6 @@ struct SignalsScreen: View {
     }
 
     #if DEBUG
-    /// `-open-copy` brings the copy sheet up on a long BTC, for a screenshot.
     private func openDemoCopy() async {
         guard ProcessInfo.processInfo.arguments.contains("-open-copy") else { return }
         for _ in 0..<50 where market.allMarkets.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
@@ -390,8 +384,6 @@ struct SignalsScreen: View {
     }
     #endif
 
-    /// Liquid Glass where the system has it: the chosen segment is a glass pill that slides
-    /// between positions. A material with a hairline stands in below iOS 26.
     @ViewBuilder private var sectionPicker: some View {
         if #available(iOS 26.0, *) {
             GlassEffectContainer(spacing: 0) {
@@ -494,13 +486,6 @@ struct SignalsScreen: View {
             .padding(.bottom, 130)
     }
 
-    // MARK: - The headline
-
-    /// Mark against index: the one reading that says what the crowd is doing.
-    ///
-    /// Drawn as two marks on a line rather than stated as a percentage, because "0.2%
-    /// above" means nothing to someone who has not held a perpetual, while two dots that
-    /// do not line up is immediately legible.
     private func premium(_ signals: MarketSignals) -> some View {
         let micros = signals.premiumMicros ?? 0
         let above = micros > 0
@@ -562,13 +547,11 @@ struct SignalsScreen: View {
                     .frame(height: 3)
                     .frame(maxHeight: .infinity, alignment: .center)
 
-                // The index, fixed.
                 Circle()
                     .strokeBorder(DeskColor.nightMuted.color, lineWidth: 2)
                     .frame(width: 11, height: 11)
                     .position(x: centre, y: proxy.size.height / 2)
 
-                // The perp, offset by the premium.
                 Circle()
                     .fill(tint.color)
                     .frame(width: 13, height: 13)
@@ -581,8 +564,6 @@ struct SignalsScreen: View {
         .accessibilityLabel("Premium over index")
         .accessibilityValue(Self.percent(micros))
     }
-
-    // MARK: - The rows
 
     private func spread(_ signals: MarketSignals) -> some View {
         row(symbol: "arrow.left.and.right",
@@ -652,8 +633,6 @@ struct SignalsScreen: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Skeletons rather than a spinner: the rows that will be here are drawn empty, so the
-    /// screen reads as filling rather than as broken.
     private var waiting: some View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(0..<4, id: \.self) { index in

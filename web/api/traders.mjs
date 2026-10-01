@@ -29,7 +29,6 @@ export function formatFixed(raw, decimals, places = decimals) {
   return `${negative ? "-" : ""}${whole}${fraction ? `.${fraction}` : ""}`;
 }
 
-/// Perp ids with a position, from the account's four 256-bit banks.
 export function perpIdsFromBitmap(positions) {
   const ids = [];
   ["bank1", "bank2", "bank3", "bank4"].forEach((bank, index) => {
@@ -41,8 +40,6 @@ export function perpIdsFromBitmap(positions) {
   return ids;
 }
 
-/// One open position as a person reads it. Leverage is entry notional over the
-/// collateral posted, which is what the venue sized the position with.
 export function describePosition(position, mark, market) {
   const { price_decimals: priceDecimals, size_decimals: sizeDecimals } = market.config;
   const lot = BigInt(position.lotLNS);
@@ -71,8 +68,6 @@ export function describePosition(position, mark, market) {
   };
 }
 
-/// Traders ranked by what their open positions are making right now. Ties and empty
-/// books are ordered by value so the list is stable between refreshes.
 export function rankTraders(positions, limit = TOP) {
   const byAccount = new Map();
   for (const { accountId, raw, described } of positions) {
@@ -87,14 +82,6 @@ export function rankTraders(positions, limit = TOP) {
     .slice(0, limit);
 }
 
-/// What every open position on one market adds up to.
-///
-/// This is the exchange's own list rather than a sample of it: `allPositions` pages the
-/// contract until the list ends. When it ends because the page budget ran out instead,
-/// `complete` is false and every figure below is a floor, which the screen says out loud.
-///
-/// One account holds at most one position per market, so the two trader counts cannot
-/// double-count anybody.
 export function aggregateMarket(entries, market, complete = true) {
   let longValue = 0n;
   let shortValue = 0n;
@@ -104,8 +91,6 @@ export function aggregateMarket(entries, market, complete = true) {
 
   for (const { row, mark } of entries) {
     const described = describePosition(row, mark, market);
-    // Cents, the same rounding `rankTraders` uses, so the leaderboard and this screen
-    // never disagree about what a position is worth.
     const value = BigInt(Math.round(Number(described.value) * 1e6));
     if (described.side === "long") { longValue += value; longTraders += 1; }
     else { shortValue += value; shortTraders += 1; }
@@ -122,8 +107,6 @@ export function aggregateMarket(entries, market, complete = true) {
     shortTraders,
     longValue: formatFixed(longValue, COLLATERAL_DECIMALS, 2),
     shortValue: formatFixed(shortValue, COLLATERAL_DECIMALS, 2),
-    // Computed here rather than in the app: two clients would round a share differently,
-    // and a bar that disagrees with the figures beside it is worse than no bar.
     longShareBps: total > 0n ? Number((longValue * 10_000n) / total) : null,
     biggest: biggest === null ? null : {
       accountId: String(biggest.accountId),
@@ -162,11 +145,6 @@ export function chainReader(rpcURL = process.env.MONAD_MAINNET_RPC || "https://r
   const read = (functionName, args) => client.readContract({ address: EXCHANGE, abi: EXCHANGE_VIEWS, functionName, args });
 
   return {
-    /// Every open position on one market, and whether that is really every one.
-    ///
-    /// The page budget can run out before the contract's list does. The rows read so far
-    /// are still true, but a total built from them is a floor rather than the book, and
-    /// the caller has to be able to tell the difference.
     async allPositions(market) {
       const out = [];
       let start = 0n;
@@ -186,8 +164,6 @@ export function chainReader(rpcURL = process.env.MONAD_MAINNET_RPC || "https://r
     async accountByAddress(address) {
       return read("getAccountByAddr", [address]);
     },
-    /// Open whatever the mark says. A missing mark is not a closed position, and reading
-    /// it as one would tell every follower the trader had left.
     async openPosition(perpId, accountId) {
       const [row, mark, valid] = await read("getPositionV2", [BigInt(perpId), BigInt(accountId)]);
       return row.lotLNS > 0n ? { row, mark: valid ? mark : row.pricePNS } : null;
@@ -195,14 +171,8 @@ export function chainReader(rpcURL = process.env.MONAD_MAINNET_RPC || "https://r
   };
 }
 
-/// One trader's book, or `unreadable` when the chain would not answer.
-///
-/// The distinction is the whole point: auto-copy diffs this against what it saw last time,
-/// so a read that failed must never arrive as a trader holding nothing. That is a wave of
-/// closes on positions the trader still holds.
-/// A wallet with no Perpl account reverts; a chain that would not answer throws something
-/// else. The first is a fact about the trader, the second is an absence of facts, and only
-/// the second must stop auto-copy from diffing.
+/// A wallet with no Perpl account reverts; a chain that would not answer throws otherwise.
+/// Only the second must stop auto-copy from diffing, or a failed read closes every copy.
 export function isRevert(error) {
   for (let cause = error; cause; cause = cause.cause) {
     if (cause.name === "ContractFunctionRevertedError" || cause.name === "ExecutionRevertedError") return true;
@@ -239,8 +209,6 @@ async function trader(chain, book, address) {
 
 const validAddress = (value) => /^0x[a-fA-F0-9]{40}$/.test(value);
 
-/// One sentence from a language model, grounded only in the figures, when a key is set.
-/// Cached for a day so a popular profile costs one call, not one per view.
 async function styleSummary({ store, fetchImpl, account, stats, apiKey = process.env.ANTHROPIC_API_KEY }) {
   if (!apiKey || !store || stats.trades < 5) return null;
   const cacheKey = `hist:ai:${account}:${stats.trades}`;
@@ -275,7 +243,6 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
   return async function handler(req, res) {
     const view = String(req.query.view || "top");
 
-    // A wallet's own name and picture: set with a signature, read by anyone.
     if (view === "profile") {
       res.setHeader("Cache-Control", "private, no-store");
       if (req.method === "POST") {
@@ -301,13 +268,10 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
       if (await isProfileHidden(store, address)) return res.status(404).json({ error: "No picture." });
       const stored = await readProfile(store, address);
       if (!stored?.image) return res.status(404).json({ error: "No picture." });
-      // The URL carries the version, so a picture can be cached hard and replaced by a new URL.
       res.setHeader("Cache-Control", "public, max-age=86400, immutable");
       res.setHeader("Content-Type", stored.type || "image/jpeg");
       return res.status(200).send(Buffer.from(stored.image, "base64"));
     }
-    // .nad names: what a wallet holds, whether a label is free and its price, and the
-    // calldata for the writes the wallet signs itself.
     if (view === "nad") {
       const address = String(req.query.address ?? "");
       if (!validAddress(address)) return res.status(400).json({ error: "A wallet address is required." });
@@ -323,7 +287,6 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
       if (!label) return res.status(400).json({ error: "Names are 1–32 lower-case letters, digits and hyphens.", reason: "invalid" });
       try {
         res.setHeader("Cache-Control", "public, s-maxage=10, stale-while-revalidate=30");
-        // Whether Desk can sign a registration today, so the phone says so before the walk.
         return res.status(200).json({ ...(await nameStatus(label, { fetchImpl })), registration: Boolean(process.env.NAD_REGISTER_URL) });
       } catch {
         return res.status(502).json({ error: "Nad Name Service could not be read right now." });
@@ -375,7 +338,6 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
       }
       const identities = await resolveIdentities([found.address], { fetchImpl, chain, store, ens });
       const identity = identities[found.address] ?? null;
-      // A name that resolved forward but has no reverse record is still that wallet's name.
       if (identity && found.source !== "address" && found.source !== "farcaster") {
         identity.name = query.replace(/^@/, "");
         identity.source = found.source;
@@ -476,8 +438,6 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
           .map((market, index) => aggregateMarket(pages[index].rows, market, pages[index].complete))
           .filter((row) => row.traders > 0)
           .sort((a, b) => (Number(b.longValue) + Number(b.shortValue)) - (Number(a.longValue) + Number(a.shortValue)));
-        // The biggest position is the one row worth opening a profile from, so it is the
-        // only account this view resolves to an address.
         const accounts = await Promise.all(rows.map((row) => chain.accountById(BigInt(row.biggest.accountId))));
         rows.forEach((row, index) => { row.biggest.address = accounts[index]?.accountAddr ?? null; });
         res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
@@ -506,9 +466,8 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
           return res.status(400).json({ error: `Between 1 and ${MAX_FOLLOWED} wallet addresses are required.` });
         }
         const traders = await Promise.all(addresses.map((address) => trader(chain, book, address)));
-        // Auto-copy asks for a reading no older than the request itself. Private either
-        // way: the addresses are in the URL, so a shared cache would hold one person's
-        // follow list keyed by exactly the tuple that identifies them.
+        // Private either way: the addresses are in the URL, so a shared cache would hold
+        // one person's follow list.
         res.setHeader("Cache-Control", req.query.fresh === "1"
           ? "private, no-store" : "private, max-age=10");
         return res.status(200).json({

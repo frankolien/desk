@@ -1,14 +1,7 @@
-/// A Desk profile: a name and a picture a wallet chose for itself.
-///
-/// Proven by a signature from the wallet key over a short message that carries the
-/// address and the time, so a profile can only be set by the phone that holds the key,
-/// and an old signature cannot be replayed a week later. Stored in the alerts store and
-/// served through the identity resolver as the first source, ahead of Farcaster and ENS.
 import { verifyMessage } from "viem";
 
 import { hiddenProfiles } from "./_moderation.mjs";
 export const MAX_NAME = 24;
-/// Base64 of a 256×256 JPEG at moderate quality runs 15–40 KB; this leaves headroom.
 export const MAX_IMAGE_BASE64 = 120_000;
 export const SIGNATURE_WINDOW_MS = 10 * 60_000;
 const SAVE_GAP_SECONDS = 20;
@@ -26,7 +19,6 @@ export function deleteMessage(address, timestamp) {
   return `Delete Desk profile\n${String(address).toLowerCase()}\n${timestamp}`;
 }
 
-/// Removes a wallet's profile, proven the same way a save is.
 export async function deleteProfile(store, body, { now = Date.now(), verify = verifyMessage } = {}) {
   if (!store) return { status: 503, body: { error: "Profiles are not configured." } };
   const address = String(body?.address ?? "");
@@ -52,7 +44,6 @@ export function cleanName(value) {
   return name.length > MAX_NAME ? name.slice(0, MAX_NAME).trim() : name;
 }
 
-/// JPEG or PNG, by the bytes, not by what the caller said.
 export function imageType(base64) {
   if (!/^[A-Za-z0-9+\/]+=*$/.test(base64)) return null;
   const head = Buffer.from(base64.slice(0, 16), "base64");
@@ -81,7 +72,6 @@ export async function readProfile(store, address) {
   try { return JSON.parse(raw); } catch { return null; }
 }
 
-/// Desk profiles for a batch of addresses, in the identity resolver's shape.
 export async function deskProfiles(store, addresses) {
   const found = new Map();
   const evm = addresses.filter(evmAddress);
@@ -96,7 +86,7 @@ export async function deskProfiles(store, addresses) {
       const stored = JSON.parse(rows[index]);
       const profile = publicProfile(address, stored);
       if (profile && (profile.name || profile.avatar)) found.set(address.toLowerCase(), profile);
-    } catch { /* a bad row is no profile */ }
+    } catch {}
   });
   return found;
 }

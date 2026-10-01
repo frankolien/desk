@@ -28,9 +28,7 @@ struct OrderTrackerTests {
 
     @Test("A forwarded order has not reached the book")
     func forwardedIsNotFilled() async throws {
-        // The trap the whole type exists for. `code: 0` on mt 3 means the gateway
-        // accepted it for forwarding — not posted, not filled. A screen reading this as
-        // a fill tells the user they hold a position they may not hold.
+        // `code: 0` on mt 3 means accepted for forwarding, not posted and not filled.
         let tracker = try await tracked()
         await tracker.apply(try frame(#"{"mt":3,"sn":1,"code":0}"#))
         #expect(await tracker.phase(of: 1) == .forwarded)
@@ -51,8 +49,7 @@ struct OrderTrackerTests {
 
     @Test("A non-zero status is the one case that may fail fast")
     func rejectionIsTerminal() async throws {
-        // 34 is order forwarding still disabled: an opening-sequence bug, not a trading
-        // one, and no update will follow it.
+        // 34 is order forwarding still disabled; no update will follow it.
         let tracker = try await tracked()
         await tracker.apply(try frame(#"{"mt":3,"sn":1,"code":1,"sr":34}"#))
         #expect(await tracker.phase(of: 1) == .rejected(code: 1, subReason: 34))
@@ -62,7 +59,6 @@ struct OrderTrackerTests {
 
     @Test("A late duplicate status cannot walk a settled order backwards")
     func terminalIsSticky() async throws {
-        // The socket reports out of order and more than once.
         let tracker = try await tracked()
         await tracker.apply(try frame(#"{"mt":24,"sn":1}"#))
         await tracker.apply(try frame(#"{"mt":3,"sn":1,"code":0}"#))
@@ -71,7 +67,6 @@ struct OrderTrackerTests {
 
     @Test("An update settles an order we had written off")
     func updateOverridesRejection() async throws {
-        // The venue is the authority on its own book, not our state machine.
         let tracker = try await tracked()
         await tracker.apply(try frame(#"{"mt":3,"sn":1,"code":2,"sr":7}"#))
         await tracker.apply(try frame(#"{"mt":24,"sn":1}"#))
@@ -85,7 +80,6 @@ struct OrderTrackerTests {
         #expect(await tracker.expire(headBlock: 120).isEmpty)
         #expect(await tracker.expire(headBlock: 121) == [1])
         #expect(await tracker.phase(of: 1) == .expired)
-        // And a settled order is never expired out from under itself.
         try await tracker.track(frameID: 2, deadlineBlock: 50)
         await tracker.apply(try frame(#"{"mt":24,"sn":2}"#))
         #expect(await tracker.expire(headBlock: 9_999).isEmpty)
@@ -103,13 +97,10 @@ struct OrderTrackerTests {
     @Test("Finished orders are forgotten in order, and orders still in flight are not")
     func boundedMemory() async throws {
         let tracker = OrderTracker()
-        // Auto-copy sends three frames per copy — the order, its stop and its take profit —
-        // and nothing forgot them, so the map grew for the life of the session.
         for frameID in 1...200 {
             try await tracker.track(frameID: Int64(frameID), deadlineBlock: 10_000)
             _ = await tracker.apply(try frame(#"{"mt":24,"rq":\#(frameID),"pid":7}"#))
         }
-        // One left in flight, which must survive however much settles after it.
         try await tracker.track(frameID: 500, deadlineBlock: 10_000)
         for frameID in 201...260 {
             try await tracker.track(frameID: Int64(frameID), deadlineBlock: 10_000)
@@ -141,7 +132,6 @@ struct OrderStatusRulesTests {
 
     @Test("A failed update is a failure with its reasons, never a fill")
     func failureIsNotAFill() async throws {
-        // The bug this suite exists for: every update used to read as "Filled".
         let tracker = try await tracker(1)
         await tracker.apply(try frame(#"{"mt":24,"d":[{"rq":1,"st":7,"sr":44,"fr":8,"os":"1000","fs":"0"}]}"#))
         #expect(await tracker.phase(of: 1) == .failed(reason: 44, failure: 8))
@@ -211,7 +201,6 @@ struct OrderStatusRulesTests {
 
     @Test("One frame carrying two of our orders moves both")
     func batchWithTwoOrders() async throws {
-        // An opening order and its stop can arrive together; the stop used to be dropped.
         let tracker = try await tracker(1, 2)
         let moved = await tracker.applyAll(try frame(#"{"mt":24,"d":[{"rq":1,"st":4,"os":5,"fs":5},{"rq":2,"st":8,"os":5,"fs":0},{"rq":99,"st":4}]}"#))
         #expect(moved == [1, 2])

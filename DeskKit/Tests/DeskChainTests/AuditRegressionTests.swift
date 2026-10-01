@@ -4,9 +4,6 @@ import Testing
 
 @testable import DeskChain
 
-/// Every case here is a defect the 13 September audit of DeskChain found, each of which
-/// the module's own tests passed at the time. They stay as the reason the fix stays.
-
 @Suite("Audit: typed data the wallet key must refuse")
 struct SigningGuardTests {
     private func payload() throws -> EIP712.TypedData {
@@ -24,9 +21,6 @@ struct SigningGuardTests {
         #expect(checked == (try EIP712.digest(try payload())))
     }
 
-    /// The one that matters. Hashing cannot tell an enrolment from a permit, and the
-    /// wallet key signs the result, so an unlimited AUSD allowance is one hostile
-    /// response away unless the shape itself is pinned.
     @Test("A permit served in place of an enrolment is refused")
     func permitIsRefused() throws {
         let permit = EIP712.TypedData(
@@ -156,8 +150,6 @@ struct ABIWordRegressionTests {
 
     @Test("Only ASCII digits are digits")
     func nonASCIIDigitsRefused() {
-        // `Character.wholeNumberValue` answers for all of these, so `"١٠٠"` parsed as a
-        // hundred and `"1²"` as twelve.
         for text in ["١٠٠", "１２３", "੧੨੩", "൧൨൩", "1²", "０"] {
             #expect(throws: (any Error).self, "\(text)") { try ABIWord.uint(text) }
         }
@@ -166,8 +158,6 @@ struct ABIWordRegressionTests {
 
     @Test("Odd-length hex is refused rather than truncated")
     func oddLengthRefused() throws {
-        // Dropping the trailing nibble made `0xabc` and `0xab` hash alike: two payloads
-        // under one signature.
         #expect(throws: ABIWord.Failure.oddLengthHex("0xabc")) { try ABIWord.hexBytes("0xabc") }
         #expect(throws: ABIWord.Failure.notHex("abcd")) { try ABIWord.hexBytes("abcd") }
         #expect(try ABIWord.hexBytes("0xabcd") == Data([0xab, 0xcd]))
@@ -194,7 +184,6 @@ struct ABIWordRegressionTests {
         #expect(try ABIWord.int("0") == Data(repeating: 0, count: 32))
         #expect(throws: (any Error).self) { try ABIWord.int("128", bits: 8) }
         #expect(throws: Never.self) { try ABIWord.int("127", bits: 8) }
-        // The negative end reaches one further than the positive one.
         #expect(throws: Never.self) { try ABIWord.int("-128", bits: 8) }
         #expect(throws: (any Error).self) { try ABIWord.int("-129", bits: 8) }
     }
@@ -204,7 +193,6 @@ struct ABIWordRegressionTests {
         let word = try ABIWord.bytesN("0xdeadbeef", count: 4)
         #expect(word.prefix(4) == Data([0xde, 0xad, 0xbe, 0xef]))
         #expect(word.dropFirst(4).allSatisfy { $0 == 0 })
-        // Routing it through `uint` would have left-padded and produced a wrong word.
         #expect(word != (try ABIWord.uint("0xdeadbeef")))
     }
 
@@ -220,9 +208,7 @@ struct ABIWordRegressionTests {
 struct HostileNodeTests {
     @Test("A gas estimate too large to be one is refused, not trapped on")
     func gasEstimateOverflow() {
-        // `estimate * 10_750 + 9_999` traps above 1_715_976_192_903_213, and a trap is a
-        // dead process rather than a caught error. `eth_estimateGas` is a hex quantity
-        // from whatever node the app was pointed at.
+        // `estimate * 10_750 + 9_999` traps above 1_715_976_192_903_213, killing the process.
         #expect(throws: GasPolicy.Failure.estimateNotUsable(UInt64.max)) {
             try GasPolicy.gasLimit(estimate: .max)
         }
@@ -272,9 +258,6 @@ struct HostileNodeTests {
 struct FaucetRevertTests {
     @Test("0x5274afe7 is OpenZeppelin's, not the faucet's")
     func safeERC20Selector() {
-        // `cast sig` confirms it is `SafeERC20FailedOperation(address)`, raised for any
-        // failed ERC-20 operation. Calling it "drained" told the user the faucet was
-        // empty for a failure that had nothing to do with the balance.
         #expect(FaucetRevert(selector: Data(hex: "5274afe7")) == .transferFailed)
         #expect(Calldata.selector("SafeERC20FailedOperation(address)") == Data(hex: "5274afe7"))
     }

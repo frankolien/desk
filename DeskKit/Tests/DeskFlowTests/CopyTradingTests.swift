@@ -51,7 +51,6 @@ struct CopyTradingTests {
         let result = try plan(btc(), rules: rules).get()
         #expect(result.side == .long)
         #expect(result.draft.leverageHundredths == 500)
-        // 10 AUSD × 5 ÷ 60,000 = 0.000833 BTC, truncated to five decimals.
         #expect(result.draft.size.raw == 83)
         #expect(result.draft.protection?.stopLoss?.raw == 570_000)
         #expect(result.draft.protection?.takeProfit?.raw == 660_000)
@@ -97,8 +96,6 @@ struct CopyTradingTests {
 
     @Test("A figure the server should never send is clamped, not trapped")
     func chaseSurvivesGarbage() {
-        // A denormal entry makes the ratio exceed every integer type. `Int(_:)` would trap,
-        // and the position it came from is persisted, so the crash would repeat every launch.
         #expect(CopyPlanner.chaseBps(entry: 1e-300, mark: 60_000, side: .long) == Int.max)
         #expect(CopyPlanner.chaseBps(entry: 1e-300, mark: 60_000, side: .short) == Int.min)
         #expect(CopyPlanner.chaseBps(entry: .nan, mark: 60_000, side: .long) == 0)
@@ -144,15 +141,14 @@ struct CopyTradingTests {
     @Test("A copy has to afford its fee, not only its margin")
     func affordability() throws {
         let rules = CopyRules(mode: .live, marginPerTrade: 10, maxLeverage: 5)
-        // 10 AUSD of margin at 5x is 50 of notional; the venue's taker fee on that is 0.01725.
         #expect(skip(try plan(btc(), rules: rules, free: money(10))) == .insufficientBalance)
         #expect(try plan(btc(), rules: rules, free: Money(raw: 10_017_250)).get().margin == 10)
     }
 
     @Test("Price protection measures the trader's own venue, not the one the copy fills on")
     func chaseIsMeasuredOnOneVenue() throws {
-        // Desk trades testnet, where BTC marks 60,000; the trader entered on mainnet at
-        // 95,000 and it marks 95,300 there. The copy is 32 bps late, not 3,684 bps early.
+        // Desk trades testnet, where BTC marks 60,000; the trader entered on mainnet at 95,000 and it
+        // marks 95,300 there. The copy is 32 bps late, not 3,684 bps early.
         let theirs = ObservedPosition(symbol: "btc", side: .long, size: 0.5, entry: 95_000,
                                       mark: 95_300, collateral: 0, leverage: 5)
         #expect(skip(try plan(theirs, rules: CopyRules(mode: .live, maxChaseBps: 25))) == .chased(bps: 32))
@@ -165,7 +161,6 @@ struct CopyTradingTests {
         let fill = try shadowFill(rules: rules)
         #expect(abs(fill.entry - 60_018) < 0.001)
         #expect(abs(fill.fees - 0.01725) < 0.00001)
-        // Flat price: the round trip costs slippage and both fees.
         #expect(fill.pnl(at: 60_000, takerFeeMicros: 345) < 0)
         let exit = 60_000 * (1 - ShadowFill.slippageBps / 10_000)
         let expected = (exit - fill.entry) * fill.units - fill.fees - exit * fill.units * 345 / 1_000_000
@@ -174,25 +169,19 @@ struct CopyTradingTests {
         #expect(fill.triggered(at: 57_000)?.exit == .stop)
         #expect(fill.triggered(at: 66_100)?.exit == .take)
         #expect(fill.triggered(at: 60_500) == nil)
-        // A loss is never more than the margin behind it.
         #expect(fill.pnl(at: 1, takerFeeMicros: 345) == -10)
     }
 
     @Test("A shadow copy is liquidated where the venue would liquidate it, and cannot recover")
     func shadowLiquidates() throws {
-        // No stop at all: without a liquidation price this copy would ride to zero and then
-        // recover, reporting a profit the real position could never have made.
         let rules = CopyRules(marginPerTrade: 10, maxLeverage: 5, stopLossPercent: nil, takeProfitPercent: nil)
         let fill = try shadowFill(rules: rules)
         let liquidation = try #require(fill.liquidation)
-        // 5x with a 4% maintenance margin liquidates 16% below the entry.
         #expect(abs(liquidation - fill.entry * 0.84) < 1)
         #expect(fill.triggered(at: liquidation - 1)?.exit == .liquidation)
         #expect(fill.triggered(at: liquidation + 1) == nil)
-        // Liquidated is the whole margin, not the arithmetic of a close at that price.
         #expect(fill.pnl(at: liquidation, takerFeeMicros: 345) == -10)
         #expect(fill.pnl(at: liquidation - 5_000, takerFeeMicros: 345) == -10)
-        // And it cannot recover: the copy is gone at that point, not floored.
         #expect(fill.pnl(at: fill.entry, takerFeeMicros: 345) < 0)
     }
 
@@ -202,11 +191,9 @@ struct CopyTradingTests {
         let fill = try shadowFill(rules: rules)
         let stop = try #require(fill.stop)
         let take = try #require(fill.take)
-        // Between the stop and liquidation, a long fills at the mark that broke it.
         let gapped = try #require(fill.triggered(at: stop - 50))
         #expect(gapped.exit == .stop)
         #expect(gapped.price == stop - 50)
-        // A take profit keeps its own price however far the market overshot.
         #expect(fill.triggered(at: take + 5_000)?.price == take)
     }
 

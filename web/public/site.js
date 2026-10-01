@@ -1,8 +1,3 @@
-/* Desk — trydesk.trade
-   Everything here is progressive: the page reads correctly with none of it. The live
-   figures come from the same API the app reads, and every moving part stops under
-   prefers-reduced-motion. */
-
 (function () {
   "use strict";
 
@@ -17,7 +12,6 @@
   a=t.getElementsByTagName(n)[0],a.parentNode.insertBefore(u,a))}(window,document,'script');
   window.twq('config', 'rfvat');
 
-  /* Count a conversion only when someone deliberately leaves for TestFlight. */
   $$('[data-x-testflight]').forEach(function (link) {
     link.addEventListener('click', function () {
       if (typeof window.twq === 'function') {
@@ -47,7 +41,6 @@
     if (video.readyState === 0) video.load();
   }
 
-  /* ── Reveal ── */
   var revealed = $$(".site-reveal");
   if ("IntersectionObserver" in window && revealed.length) {
     var io = new IntersectionObserver(function (entries) {
@@ -58,7 +51,6 @@
     revealed.forEach(function (el) { el.classList.add("in"); });
   }
 
-  /* ── Recordings that play only while on screen ── */
   var scrollVideos = $$("[data-scroll-video]");
   if ("IntersectionObserver" in window && scrollVideos.length) {
     var vio = new IntersectionObserver(function (entries) {
@@ -72,11 +64,6 @@
     $$("video").forEach(function (v) { if (reduced.matches) v.pause(); });
   });
 
-  /* ── Hero: three statements, three recordings, one card that changes colour ──
-     Scrolling inside the hero steps the slides — down to the next, up to the one
-     before — and only past the last one does the page scroll. A wheel or a swipe
-     is claimed only while the page is at the very top, so there is no way to be
-     stuck: scroll up from anywhere lower and the page moves as usual. */
   var heroEl = $(".site-hero");
   var hero = $("[data-hero]");
   if (hero && heroEl) {
@@ -164,8 +151,8 @@
     heroSchedule();
   }
 
-  /* ── Security carousel ── */
   var car = $("[data-carousel]");
+  
   if (car) {
     var cslides = [
       { title: "No server can trade for anyone.", text: "Including ours. Your keys stay on your iPhone. The wallet key is made fresh for each transaction and never stored, and the order key is sealed to your Face ID. Our server pushes notifications and reads public chain data. Nothing it holds could move your money." },
@@ -209,7 +196,6 @@
     carSchedule();
   }
 
-  /* ── Slider: drag with the mouse, snap with the wheel, arrows to page ── */
   var slider = $("[data-slider]");
   if (slider) {
     var down = false, startX = 0, startLeft = 0, moved = false;
@@ -237,7 +223,6 @@
     });
   }
 
-  /* ── Live figures ── */
   function money(n) {
     if (n >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
     if (n >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M";
@@ -248,8 +233,6 @@
   function shortAddr(a) { return a ? a.slice(0, 6) + "…" + a.slice(-4) : "—"; }
   function hue(a) { var h = 0; for (var i = 2; i < a.length; i++) h = (h * 31 + a.charCodeAt(i)) >>> 0; return h % 360; }
 
-  // Counts up on first sight, then holds. Truncates rather than rounds on the way, so
-  // the figure never shows a number higher than the one it lands on.
   function countUp(el, target, format) {
     if (reduced.matches || !("requestAnimationFrame" in window)) { el.textContent = format(target); return; }
     var t0 = null, D = 1300, done = false;
@@ -281,7 +264,6 @@
         '<span class="site-muted">' + money(oi) + " open</span></span>";
     }).join("");
     track.innerHTML = items + items;
-    // Speed follows length: roughly 90 px a second, whatever the market count.
     $(".site-ticker").style.setProperty("--duration", Math.max(30, Math.round(track.scrollWidth / 2 / 90)) + "s");
   }
 

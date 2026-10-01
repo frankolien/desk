@@ -2,7 +2,6 @@ import CoreImage.CIFilterBuiltins
 import SwiftUI
 import UIKit
 
-/// The wallet address as a code another wallet can scan, drawn once per address.
 struct AddressQR: View {
     let address: String
     var size: CGFloat = 168

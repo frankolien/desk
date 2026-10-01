@@ -5,10 +5,6 @@ import DeskUI
 import SwiftUI
 import UIKit
 
-/// Profile: who this is, what it is worth, and what it holds.
-///
-/// Small type and plain rows. The screen is a ledger to be read, not a set of cards to
-/// be admired, and every figure on it is one this phone has actually observed.
 struct HomeScreen: View {
     private struct PositionContext: Identifiable {
         let held: PerplPosition
@@ -54,8 +50,6 @@ struct HomeScreen: View {
     @State private var editsProfile = false
     @State private var showsPortfolioReplay = false
 
-    // MARK: Figures
-
     private var collateralInCurrency: String {
         model.collateral.value.map { DisplayCurrency.shared.format($0) } ?? Unavailable.text
     }
@@ -64,7 +58,6 @@ struct HomeScreen: View {
         model.walletAUSD.value.map { DisplayCurrency.shared.format($0) } ?? Unavailable.text
     }
 
-    /// Everything the person holds here: collateral on the desk and AUSD in the wallet.
     private var total: Money? {
         guard let collateral = model.collateral.value else { return nil }
         return collateral + (model.walletAUSD.value ?? .zero)
@@ -74,7 +67,6 @@ struct HomeScreen: View {
         total.map { DisplayCurrency.shared.format($0) } ?? Unavailable.text
     }
 
-    /// AUSD first: it is the money the account holds. Another currency is a second line.
     private var totalPrimary: String {
         guard let total, DisplayCurrency.shared.code != "USD" else { return totalInCurrency }
         return total.display() + " AUSD"
@@ -127,7 +119,6 @@ struct HomeScreen: View {
         return "Desk since " + Date(timeIntervalSince1970: firstOpened).formatted(.dateTime.month(.abbreviated).year())
     }
 
-    /// The log inside the chosen window; the whole log for "All".
     private var shownEquity: [EquityLog.Point] {
         guard let seconds = range.seconds else { return equity }
         let cutoff = Date.now.addingTimeInterval(-seconds)
@@ -281,8 +272,6 @@ struct HomeScreen: View {
         Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
     }
 
-    // MARK: Chrome
-
     private var topBar: some View {
         ZStack {
             HStack {
@@ -338,15 +327,9 @@ struct HomeScreen: View {
         .accessibilityLabel(label)
     }
 
-    // MARK: Identity
-
-    /// Who this is, in the terms the rest of Desk uses for other traders: a name when one
-    /// is known on chain, the address otherwise, and the record so far.
     private var identity: some View {
         HStack(alignment: .top, spacing: 14) {
             Button { editsProfile = true } label: {
-                // The trader avatar, not the generated one: a Farcaster, ENS, nad or SNS
-                // picture set elsewhere shows here the way it shows on every other trader.
                 TraderAvatar(address: model.address?.checksummed ?? "", size: 58)
                     .overlay(alignment: .bottomTrailing) {
                         Image(systemName: "pencil")
@@ -366,8 +349,6 @@ struct HomeScreen: View {
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .foregroundStyle(DeskColor.nightText.color)
                     .lineLimit(1)
-                // The address line is the copy button. Tapping an address and having it
-                // copied is what every wallet has taught people to expect.
                 Button {
                     model.copyAddress()
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -401,8 +382,6 @@ struct HomeScreen: View {
             Spacer(minLength: 0)
         }
     }
-
-    // MARK: Portfolio
 
     private var portfolio: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -445,7 +424,6 @@ struct HomeScreen: View {
         }
     }
 
-    /// The change over the chosen window when the log has it; the open PnL otherwise.
     /// AUSD, like the total above it, unless the display currency is USD.
     private func captionMoney(_ money: Money) -> String {
         guard DisplayCurrency.shared.code != "USD" else { return DisplayCurrency.shared.format(money, signed: true) }
@@ -477,8 +455,6 @@ struct HomeScreen: View {
         .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
     }
 
-    /// Worth over time, as this phone has seen it. A single reading is a level line: the
-    /// chart starts flat and earns its shape.
     private var equityChart: some View {
         let points = chartPoints
         let up = (points.last ?? 0) >= (points.first ?? 0)
@@ -500,9 +476,6 @@ struct HomeScreen: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: Cash
-
-    /// The one row that answers "what can I trade with", with the two things to do about it.
     private var cashRow: some View {
         HStack(spacing: 12) {
             TokenLogo(asset: .ausd, size: 40)
@@ -561,10 +534,6 @@ struct HomeScreen: View {
         .accessibilityLabel(label)
     }
 
-    // MARK: Setup
-
-    /// Shown while this network has no Perpl account. The rest of Profile stays usable, so
-    /// a switch to mainnet lands here rather than back at onboarding.
     private var setupCard: some View {
         let mainnet = model.network.holdsRealFunds
         let returning = model.hasDesk.value == true
@@ -595,8 +564,6 @@ struct HomeScreen: View {
         }
         .buttonStyle(DeskPressStyle())
     }
-
-    // MARK: Positions
 
     private var ledger: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -743,7 +710,6 @@ struct HomeScreen: View {
         .buttonStyle(DeskPressStyle())
     }
 
-    /// One line of the ledger: no container, a hairline under it, figures on the right.
     private func ledgerRow<Mark: View>(
         @ViewBuilder mark: @escaping () -> Mark, title: String, subtitle: String,
         value: String, detail: String?, tint: DeskRGB, action: @escaping () -> Void
@@ -782,8 +748,6 @@ struct HomeScreen: View {
         .buttonStyle(DeskPressStyle())
     }
 
-    /// Liquidation distance rather than size, because distance is the figure that
-    /// changes and the one that can end the position.
     private func positionSubtitle(_ position: PositionFigures) -> String {
         guard let distance = position.liquidationDistanceMicros else { return "Liq. \(Unavailable.text)" }
         return distance == 0 ? "At liquidation" : "Liq. \(Self.percent(distance, signed: false)) away"
@@ -794,8 +758,6 @@ struct HomeScreen: View {
         Percent.micros(micros, signed: signed)
     }
 
-    /// The key's switch. Unlocked, a tap locks it; locked, a tap goes straight to Face ID,
-    /// because that is the only thing a person tapping a locked key wants.
     private var sessionRow: some View {
         Button {
             Task { if model.isKeyUnlocked { await model.lock() } else { _ = await model.unlock() } }

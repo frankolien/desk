@@ -5,11 +5,9 @@ import DeskUI
 import SafariServices
 import SwiftUI
 
-/// A truthful final setup screen. A row is complete only when the chain says it is;
-/// tapping a button never advances local presentation state by itself.
+/// A row is complete only when the chain says it is, never because a button was tapped.
 struct FundScreen: View {
     let model: AppModel
-    /// Set when presented from inside the app for a network without an account.
     var onClose: (() -> Void)? = nil
     @State private var didCopy = false
     @State private var faucetPage: FaucetPage?
@@ -161,8 +159,6 @@ struct FundScreen: View {
 
     private var actionPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // The code sits beside the balance rather than under it, so the whole screen
-            // fits without scrolling on the smallest phone Desk runs on.
             HStack(alignment: .center, spacing: 14) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Available to deposit")
@@ -187,7 +183,6 @@ struct FundScreen: View {
                 if canSwapForCollateral {
                     showsSwap = true
                 } else if needsFunds && !model.network.hasFaucet {
-                    // No faucet on mainnet: the next step is someone sending funds here.
                     model.copyAddress()
                     didCopyForDeposit = true
                 } else {
@@ -240,7 +235,6 @@ struct FundScreen: View {
     private var hasMON: Bool { model.hasSetupGas }
     private var hasMinimumAUSD: Bool { (model.walletAUSD.value ?? .zero) >= minimum }
     private var needsFunds: Bool { !hasMON || !hasMinimumAUSD }
-    /// Mainnet, MON in hand, collateral short: the swap is the next step, not a transfer.
     private var canSwapForCollateral: Bool { !hasMinimumAUSD && model.swappableMON != nil }
     private var isFunding: Bool { model.isWorking && needsFunds }
     private var balancesKnown: Bool { model.walletMON.value != nil && model.walletAUSD.value != nil }

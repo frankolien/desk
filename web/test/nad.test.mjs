@@ -1,4 +1,3 @@
-// node --test web/test/nad.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { decodeFunctionData, namehash } from "viem";

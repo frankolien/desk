@@ -12,8 +12,6 @@ struct RLPTests {
 
     @Test("Zero is the empty string, never a zero byte")
     func zeroIsEmpty() {
-        // `0x00` and `` are different preimages, so getting this wrong changes the
-        // digest of every transaction with a zero field — which is most of them.
         #expect(hex(RLP.quantity(UInt64(0))) == "80")
         #expect(hex(RLP.quantity(Data([0, 0, 0]))) == "80")
         #expect(hex(.bytes(Data([0]))) == "00")
@@ -120,8 +118,6 @@ struct WalletSignerTests {
 
     @Test("Signing is deterministic, so a repeat is the same signature")
     func deterministic() throws {
-        // Unlike CryptoKit's Ed25519, which is hedged. RFC 6979 means a signature can be
-        // pinned to a vector rather than only verified.
         let key = SecureBytes(Data(hex: "4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318"))
         let digest = Keccak.hash("desk")
         let first = try WalletSigner.sign(digest: digest, privateKey: key)
