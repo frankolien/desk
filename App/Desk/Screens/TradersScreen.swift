@@ -480,7 +480,7 @@ struct TradersFeed: View {
         guard sort != .openPnL, let record = directory.records[trader.id] else { return nil }
         switch sort {
         case .openPnL: return nil
-        case .score: return "Score \(record.score)"
+        case .score: return "Score \(record.score)" + (record.trades.map { " · \($0) trades" } ?? "")
         case .winRate: return record.winRate.map { "Win \(Int(($0 * 100).rounded()))% · \(record.trades ?? 0) trades" }
         case .realised: return record.realised.map { "\($0 >= 0 ? "+" : "−")\(TraderFormat.compact(abs($0))) realized" }
         }
@@ -576,7 +576,8 @@ struct TradersFeed: View {
                         ForEach(Array(rows.enumerated()), id: \.element.id) { index, trader in
                             Button { onSelect(trader) } label: {
                                 LeaderRow(trader: trader, rank: index + 1, name: directory.name(for: trader.address),
-                                          score: directory.scores[trader.id], metric: metric(for: trader),
+                                          score: directory.scores[trader.id], trades: directory.records[trader.id]?.trades,
+                                          metric: metric(for: trader),
                                           isFollowed: directory.isFollowing(trader.address),
                                           isLast: index == rows.count - 1)
                             }
@@ -700,6 +701,8 @@ private struct LeaderRow: View {
     let rank: Int
     let name: String
     var score: Int? = nil
+    /// Beside every score: a score from a handful of trades means little.
+    var trades: Int? = nil
     var metric: String? = nil
     var isFollowed = false
     let isLast: Bool
@@ -708,7 +711,8 @@ private struct LeaderRow: View {
         if let metric { return metric }
         let count = trader.positions.count
         let noun = count == 1 ? "position" : "positions"
-        return "\(count) \(noun) · \(TraderFormat.compact(trader.positionValue))" + (score.map { " · Score \($0)" } ?? "")
+        return "\(count) \(noun) · \(TraderFormat.compact(trader.positionValue))"
+            + (score.map { " · Score \($0)" + (trades.map { " (\($0) trades)" } ?? "") } ?? "")
     }
 
     var body: some View {
