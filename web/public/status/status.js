@@ -54,7 +54,7 @@
     }).catch(function () {
       overall.textContent = "";
       overall.appendChild(pill("Unreachable", "fail"));
-      meta.textContent = "The health endpoint did not answer. Trying again in 30 seconds.";
+      meta.textContent = "The health endpoint did not answer. Trying again in 2 minutes.";
     });
   }
 

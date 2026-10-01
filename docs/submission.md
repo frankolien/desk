@@ -11,7 +11,7 @@ Face ID on this iPhone.
 
 - Platform: native Swift 6 / SwiftUI, iOS 18.4+, iPhone.
 - Chain: Monad. Exchange: Perpl. Collateral: AUSD. Credential: Mera passkeys.
-- Repository: this repo. Server: 12 Vercel functions in [`web/`](../web).
+- Repository: this repo. Server: 11 Vercel functions in [`web/`](../web).
 - Tests: 535 Swift tests in 86 suites (`swift test --package-path DeskKit`, ~0.3 s once
   built, no simulator) and 213 Node tests (`cd web && node --test`).
 
@@ -25,10 +25,12 @@ Face ID on this iPhone.
   signing key. The wallet key that moves AUSD is derived again for each transaction and
   never stored. The order key can place and close orders but cannot withdraw. It is sealed
   in the keychain with `biometryCurrentSet` and `WhenPasscodeSetThisDeviceOnly`, so only
-  this iPhone's current Face ID enrolment opens it. It leaves memory when you lock Desk,
-  when the phone locks with Desk open, and after five minutes in the background (twelve
-  hours if away copying is on). Losing the phone and its iCloud backup means the funds are
-  gone, and the app says so in those words during onboarding.
+  this iPhone's current Face ID enrolment opens it. It leaves memory when you lock Desk
+  and when the phone locks with Desk open. In the background iOS suspends Desk, so after
+  five minutes away (twelve hours if away copying is on) the key can't be used, and it is
+  wiped the moment Desk returns, before anything can use it. Losing the phone and its
+  iCloud backup means the funds are gone, and the app says so in those words during
+  onboarding.
 - **Apple's own controls.** `TabView`, `Picker`, `Toggle`, `Menu`,
   `ContentUnavailableView`, context menus, sheets with detents. On iOS 26 the surfaces are
   Liquid Glass; older versions get the material equivalent. Dark only, because a trading
@@ -46,9 +48,9 @@ Four tabs.
 
 | Tab | What it does |
 |---|---|
-| Home | Perpl's markets and where traders are crowding; each market's chart and the ticket, with leverage and hold-to-confirm |
-| Search | Markets and tokens |
-| Signals | Following, Top traders, Watchlist, and Market (the crowd, long against short); trader profiles, scores and copy rules; the Auto-Copy hub with its result, open copies, history and limits |
+| Home | Perpl's markets, and Hot Markets: how many traders hold each busy market and which way they lean; each market's chart and the ticket, with leverage and hold-to-confirm |
+| Search | Perpl's markets, and wallets by address or name |
+| Signals | Following and Top traders; trader profiles, scores and copy rules; the Auto-Copy hub with its result, open copies, history and limits |
 | Profile | The AUSD balance, open and closed positions, Add funds, Withdraw, activity, and Settings with the network switch |
 
 ### Beyond the app itself
@@ -98,10 +100,10 @@ Rules are per trader; guards are account-wide:
 
 ### Profitability, measured rather than claimed
 
-Every copy records the time from the trader's move to the fill, and the slippage against
-their entry in basis points. The Auto-Copy screen shows realised PnL, win rate, copies and
-average time to fill, split between shadow and live. Shadow mode exists so a strategy can
-be proven before any money moves.
+Every copy records the time from when Desk saw the move to the fill, and, for live copies,
+the fill's slippage in basis points against the mark the copy was sized at. The Auto-Copy
+screen shows realised PnL, win rate, copies and average time to fill, split between shadow
+and live. Shadow mode exists so a strategy can be proven before any money moves.
 
 ### Real on-chain activity
 
@@ -139,7 +141,7 @@ App/Shared/        App Group state and App Intents, compiled into both
 DeskKit/           local Swift package, seven targets with load-bearing boundaries:
                    DeskMoney (arithmetic, no network by construction), DeskNet,
                    DeskAuth, DeskChain, DeskPerpl, DeskFlow, DeskUI
-web/api/           12 Vercel functions: market data, faucet, swaps, traders, alerts
+web/api/           11 Vercel functions: market data, faucet, swaps, traders, alerts
 ```
 
 **No server can trade for anyone.** The server pushes notifications, reads public chain

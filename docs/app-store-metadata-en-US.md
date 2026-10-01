@@ -54,9 +54,8 @@ Add funds sheet has "Get test AUSD", which funds the wallet from a faucet within
 "Open desk" then creates the trading account. Everything can be reviewed on testnet with no
 real money. Mainnet is opt-in from Settings and requires the reviewer's own MON.
 
-User-generated content: each market has a live chat and wallets can set a name and picture.
-Every message can be reported or its poster blocked from a long press; every profile can be
-reported from its screen. Reports are reviewed within 24 hours, and content that several
-people report is hidden automatically until reviewed. Contact for review questions: the
-support URL above.
+User-generated content: wallets can set a public name and picture. Every profile can be
+reported from its screen. Reports are reviewed within 24 hours, and a name or picture that
+several people report is hidden automatically until reviewed. Contact for review questions:
+the support URL above.
 

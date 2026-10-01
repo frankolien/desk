@@ -26,13 +26,13 @@ Monad* and Perpl's *Best Use of Perpl's API*. Swift 6, SwiftUI, iOS 18.4+, iPhon
 
 ## What it does
 
-- **Trade perps** — market and limit orders signed on the device, sent over Perpl's
+- **Trade perps** — market orders signed on the device, sent over Perpl's
   websocket and tracked to a terminal phase. A market order is immediate-or-cancel within
   its slippage limit, so it fills at once or not at all. Hold to confirm. Every figure
   rounds the way that costs you.
-- **See which way the crowd leans** — every open position on every market summed live:
-  long against short, traders on each side, the biggest single position in the book, and
-  a floor note when the book could not be read in full.
+- **See which way the crowd leans** — Hot Markets on Home adds up every open position on
+  the busiest markets, live: how much is open, how many traders hold it, and which way
+  they lean.
 - **Follow the traders worth following** — a leaderboard read from the exchange
   contract, trade history indexed from the chain's own position events through Envio
   HyperSync, and a score built on win rate, profit factor and drawdown, weighted by the
@@ -44,8 +44,6 @@ Monad* and Perpl's *Best Use of Perpl's API*. Swift 6, SwiftUI, iOS 18.4+, iPhon
   This Trader* on the notification; Copy Trade opens the ticket already filled in.
 - **It doesn't leave the phone** — Portfolio, Watchlist and Auto-Copy widgets; a Live
   Activity with a working pause in the Dynamic Island; a Control Center toggle; Siri.
-- **Spot, too** — trending tokens with a live chart, transactions, holders and the order
-  book, with a buy on the ones you can hold.
 - **Share the result** — a position card over your own photo, with a code that opens Desk.
 
 ## Security, in one paragraph
@@ -53,12 +51,13 @@ Monad* and Perpl's *Best Use of Perpl's API*. Swift 6, SwiftUI, iOS 18.4+, iPhon
 No server can trade for anyone, including ours. The wallet key that moves AUSD is derived
 from the passkey for each transaction and never stored. The order key can place and close
 orders but cannot withdraw. It is sealed in the keychain so only this iPhone's current
-Face ID enrolment opens it, and it leaves memory when you lock Desk, when the phone locks
-with Desk open, and after five minutes in the background (twelve hours with away copying
-on). The server pushes notifications and reads public chain data. Nothing it holds could
-move your money, which is why live copying needs Desk and its key, and why that is a
-deliberate trade rather than a shortcut. An unreadable position book is never treated as
-an empty one, because that would announce closes that never happened.
+Face ID enrolment opens it. It leaves memory when you lock Desk and when the phone locks
+with Desk open. In the background iOS suspends Desk, so after five minutes away (twelve
+hours with away copying on) the key can't be used, and it is wiped the moment Desk returns,
+before anything can use it. The server pushes notifications and reads public chain data.
+Nothing it holds could move your money, which is why live copying needs Desk and its key,
+and why that is a deliberate trade rather than a shortcut. An unreadable position book is
+never treated as an empty one, because that would announce closes that never happened.
 
 ## Layout
 
@@ -70,8 +69,8 @@ DeskKit/            the Swift package — money, chain, auth, Perpl protocol, fl
   Sources/DeskPerpl   REST and websocket clients, orders, positions, figures, the position book
   Sources/DeskChain   Monad RPC, EIP-712, transactions, pinned to viem vectors
   Sources/DeskAuth    passkeys, PRF derivation, the signing session
-web/                the Vercel project: the landing page and twelve functions
-  api/                traders, crowd, history, alerts, faucet, fx, market stream, relay, spot
+web/                the Vercel project: the landing page and eleven functions
+  api/                traders, crowd, history, alerts, faucet, fx, relay, spot
   public/             the site — flat colour cards, product recordings, live figures
   tools/serve.mjs     local server with /api proxied to production
 docs/               PRD, technical spec, system design, screens, algorithms, submission
@@ -116,7 +115,7 @@ in the app can reach them, by construction: the app has no server credential to 
 ## Status
 
 Shipped to TestFlight on a testnet build. 535 Swift tests and 213 server tests pass. The
-site, the alerts pipeline, the history indexer and the twelve functions are deployed.
+site, the alerts pipeline, the history indexer and the eleven functions are deployed.
 
 The only recorded live fill so far is on testnet: a 0.06518 BTC long on 15 September 2026,
 in [`docs/perpl-order-400-audit-2026-09-15.md`](docs/perpl-order-400-audit-2026-09-15.md).

@@ -54,7 +54,7 @@
     <div class="site-wrap">
       <p class="site-eyebrow">Privacy</p>
       <h1 id="privacy-title" class="page-title">Your keys stay on your phone. So does almost everything else.</h1>
-      <p class="site-sub">The app has no accounts and no analytics. This site&rsquo;s home page uses an X ad pixel. This page says exactly what leaves your iPhone and this site, where it goes, and how to make it go away.</p>
+      <p class="site-sub">The app has no passwords and no analytics. This site&rsquo;s home page uses an X ad pixel. This page says exactly what leaves your iPhone and this site, where it goes, and how to make it go away.</p>
     </div>
   </section>
 
@@ -76,7 +76,7 @@
         <p><em>Effective 1 October 2026.</em></p>
 
         <h2 id="short">The short version</h2>
-        <p>The app has no accounts, no passwords and no analytics. Your keys are made and kept on your iPhone. The only things our server ever learns about you are what it needs to send you a push notification you asked for, and the public wallet address you are looking at. Signing out deletes what the server holds for your phone. The one exception to &ldquo;no tracking&rdquo; is the X ad pixel on this site&rsquo;s home page, described below.</p>
+        <p>The app has no passwords and no analytics. Your keys are made and kept on your iPhone. Our server learns only what it needs to send the push notifications you ask for, the public wallet addresses you look at, and the public name and picture of your Desk profile, if you set one. Signing out deletes your alert subscription from the server. Delete account in Settings also deletes your profile. The one exception to &ldquo;no tracking&rdquo; is the X ad pixel on this site&rsquo;s home page, described below.</p>
 
         <h2 id="phone">What stays on your iPhone</h2>
         <ul>
@@ -86,16 +86,17 @@
         </ul>
 
         <h2 id="server">What our server holds, and for how long</h2>
-        <p>The server at <code>trydesk.trade</code> holds nothing about you until you turn on alerts, follow a trader, track a wallet, or switch on away copying. When you do, the phone sends:</p>
+        <p>The server at <code>trydesk.trade</code> holds nothing about you until you turn on alerts, follow a trader, track a wallet, switch on away copying, or set up a Desk profile. For alerts, tracking and away copying, the phone sends:</p>
         <ul>
           <li>A random install secret the app generated, which is how the phone proves a later request is its own. It is not derived from your wallet or your device.</li>
           <li>The Apple push token for this install, so we can send the notification.</li>
-          <li>The trader addresses you follow and the names you gave them, the wallet addresses you track with their names and minimums, the market symbols on your watchlist, and whether price alerts are on.</li>
+          <li>The trader addresses you follow and the names you gave them, the traders you copy with away copying on, the wallet addresses you track with their names and minimums, the market symbols on your watchlist, whether price alerts are on, and any price targets you set.</li>
         </ul>
-        <p>This is stored for sixty days from the last time the app refreshed it, in a Redis database hosted by Upstash through Vercel, and is deleted when you sign out or turn everything off. It is never sold, shared or used for anything but sending the pushes you asked for.</p>
+        <p>This is stored for sixty days from the last time the app refreshed it, in a Redis database hosted by Upstash through Vercel. It is deleted when you sign out, delete your account, or turn everything off. It is never sold, shared or used for anything but sending the pushes you asked for.</p>
+        <p>If you set up a Desk profile, the server keeps the name and picture you chose, linked to your wallet address, in the same database. A profile is public: anyone who opens your wallet in Desk can see it. It is kept until you delete it with Delete account in Settings. Signing out does not delete it.</p>
         <p>Every other request the app makes carries at most a public wallet address: yours, when it asks for your balances or history, or someone else's when you open their profile. Addresses on a public blockchain are public by design.</p>
         <p>If you joined the waitlist on this site, we hold that email address until the invite has gone out, and delete it on request.</p>
-        <p>Our hosts, Vercel and Railway, keep ordinary request logs, including IP addresses, for a short time. We use the IP address only for hourly rate limits and never to identify anyone.</p>
+        <p>Our hosts, Vercel and Railway, keep ordinary request logs, including IP addresses, for a short time. We use the IP address only for rate limits and never to identify anyone.</p>
 
         <h2 id="third">Who else receives something</h2>
         <p>Desk reads from and writes to services it does not run. Each receives only what the request needs:</p>
@@ -115,14 +116,15 @@
         <h2 id="not">What we do not do</h2>
         <ul>
           <li>No analytics, advertising or crash-reporting SDKs in the app, and no tracking identifier. The only tracking anywhere is the X pixel on this site&rsquo;s home page.</li>
-          <li>No account, email or phone number is needed to use Desk.</li>
+          <li>No email, phone number or password is needed to use Desk.</li>
           <li>We do not sell data and we do not share it beyond the services above.</li>
           <li>Desk is not for anyone under 18.</li>
         </ul>
 
         <h2 id="rights">Your choices</h2>
         <ul>
-          <li><strong>Sign out</strong> in the app: the server forgets your push token, install secret, followed traders, tracked wallets and watchlist, and the app forgets everything it stored on the phone.</li>
+          <li><strong>Sign out</strong> in the app: the server deletes your alert subscription, with your push token, followed traders, tracked wallets and watchlist. This phone clears your followed traders, copy settings and tracked wallets. Your Desk profile stays.</li>
+          <li><strong>Delete account</strong> in Settings: the server deletes your Desk profile and your alert subscription, and this iPhone forgets its keys. Your wallet and Perpl account live on the blockchain and stay, and your passkey still opens them.</li>
           <li><strong>Turn off alerts, tracking or away copying</strong> and the matching data is removed from the server on the next sync.</li>
           <li><strong>Block the X pixel</strong> with any content blocker. The site works the same without it.</li>
           <li><strong>Ask us</strong> to delete a waitlist email or anything else, through the contact on the <a href="/support">support page</a>.</li>

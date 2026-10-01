@@ -1,7 +1,8 @@
 name: health watchdog
 # The Railway worker runs the alerts scan every minute and the trader index every fifteen,
 # so nothing here scans or indexes. Hourly, this reads the health check and turns red when
-# a critical check fails (HTTP 503) or the alerts scan or the trader index has stalled.
+# a critical check fails (HTTP 503), or when the alerts scan or the trader index is not
+# pass or warn: stalled, or never reported since the worker was deployed.
 on:
   schedule:
     - cron: "23 * * * *"
@@ -16,4 +17,4 @@ jobs:
           cat health.json
       - name: alerts scan and trader index are moving
         run: |
-          jq -e '[.checks["cron:lastRunAge"][0].status, .checks["trader-index:lastAdvanceAge"][0].status] | all(. != "fail")' health.json
+          jq -e '[.checks["cron:lastRunAge"][0].status, .checks["trader-index:lastAdvanceAge"][0].status] | all(. == "pass" or . == "warn")' health.json

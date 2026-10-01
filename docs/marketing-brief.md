@@ -12,16 +12,21 @@ wallet key that moves your AUSD is never stored. The order key, which can't with
 sealed to your Face ID on this iPhone. There is no seed phrase and no wallet app.
 
 The hook is not Face ID. The hook is: **copy the traders who are actually winning.** Desk
-reads every trader off Perpl's exchange contract — nobody submits a record — ranks them on
-what survives (win rate, profit factor, drawdown, weighted by money at risk), and copies
-their moves as soon as their trade lands on the chain, under rules you set. Shadow mode
+reads every trader off Perpl's exchange contract — nobody submits a record — scores them
+out of 100 on their record (win rate, profit factor and drawdown, counted in full only after
+about fifty trades with real money behind them), and copies their moves as soon as their
+trade lands on the chain, under rules you set. Shadow mode
 copies with no money so a strategy can be proven first.
 
-Other things it does, all real and shipped: a live crowd view (long vs short on every
-market), push alerts with a Copy button on the notification, Home Screen widgets
-(Portfolio, Watchlist, Auto-Copy), a Live Activity in the Dynamic Island with a working
-pause, spot trading on trending tokens, and a share card for any position — your result
-over your own photo with a QR that opens Desk.
+Other things it does, all real and in the current build: Hot Markets on Home (how many
+traders hold each of the busiest markets, and which way they lean), push alerts with a Copy
+button on the notification, Home Screen widgets (Portfolio, Watchlist, Auto-Copy), a Live
+Activity in the Dynamic Island with a working pause, and a share card for any open position:
+your result over your own photo, with a QR that opens Desk.
+
+Built but hidden in the current TestFlight build, so do not post or promise them: spot
+trading on trending tokens, and the Signals Market tab (the full long against short view
+of every market).
 
 - Site: https://trydesk.trade (live; ticker and figures on it are read from the exchange)
 - App Store name: *Desk: Trade Perps on Monad* — on TestFlight now, **testnet build**
@@ -35,7 +40,7 @@ over your own photo with a QR that opens Desk.
 In the next three weeks, in this order:
 
 1. **TestFlight installs** from people who trade, not from people who click.
-2. **Share cards in the wild** — every closed position can produce one; each one is an ad
+2. **Share cards in the wild** — any open position can produce one; each one is an ad
    with a QR on it.
 3. **Retweets from the Monad and Perpl accounts** — during Metropolis they amplify builders;
    that is the biggest free reach available.
@@ -60,6 +65,8 @@ Vanity metrics (followers, impressions) are not goals. Installs and cards are.
   `web/public/shots/`. They can be recut to any ratio.
 - Device captures: Lock Screen with the Live Activity and an alert, Home Screen with the
   widgets, the alerts primer, the spot screen, a share card.
+- The crowd feed recording and the spot screen capture show screens that are hidden in the
+  current build. Do not post them.
 - The site, which renders well as a screenshot at 1440 and on a phone.
 - The live API: `https://trydesk.trade/api/traders` (leaderboard, addresses, PnL, open
   positions) and `?view=crowd` (long/short per market). Real numbers, refreshed on request,
@@ -130,7 +137,7 @@ that appears in this brief.
 1. **X account setup** — three handle options if @desk / @trydesk are taken; a bio under
    160 characters; what the header image should show (I will render it); pinned post.
 2. **Launch thread** — eight tweets, one recording each, in this order: the hook (copy the
-   traders who are winning, with the leaderboard clip), Face ID sign-in, the crowd view,
+   traders who are winning, with the leaderboard clip), Face ID sign-in, Hot Markets,
    an alert landing on the Lock Screen, Auto-Copy pausing from the Dynamic Island, the
    widgets, the share card, the TestFlight link. Each tweet under 200 characters.
 3. **Trader tag post** — the template for tagging a leaderboard trader with their page.

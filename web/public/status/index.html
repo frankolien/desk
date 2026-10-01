@@ -52,7 +52,7 @@
       <div class="status-overall" style="margin-top:28px" data-overall aria-live="polite">
         <span class="page-pill is-unknown">Checking…</span>
       </div>
-      <p class="status-meta" style="margin:14px 0 0" data-meta>Reads <a href="/api/v1/health">/api/v1/health</a> every 30 seconds.</p>
+      <p class="status-meta" style="margin:14px 0 0" data-meta>Reads <a href="/api/v1/health">/api/v1/health</a> every 2 minutes.</p>
 
       <ul class="status-rows" data-rows>
         <li class="status-row" data-check="redis:responseTime">
@@ -86,7 +86,7 @@
           <span class="status-row-value" data-value>—</span>
         </li>
       </ul>
-      <p class="status-legend"><strong>pass</strong> is all good; <strong>warn</strong> means a third party is slow or a background job is late, and the app still works; <strong>fail</strong> means a critical piece is down and the API answers 503. Third parties: <a href="https://monad.xyz">Monad</a>, <a href="https://perpl.trade">Perpl</a>, Upstash, Vercel and Railway.</p>
+      <p class="status-legend"><strong>pass</strong> is all good. <strong>warn</strong> means a third party is slow or a background job is late, and the app still works. <strong>fail</strong> on Store or Indexing worker means a critical piece is down, and the API answers 503. <strong>fail</strong> on Alerts scan or Trader index means that job has stopped: alerts or trader scores go stale, but the API still answers. Third parties: <a href="https://monad.xyz">Monad</a>, <a href="https://perpl.trade">Perpl</a>, Upstash, Vercel and Railway.</p>
     </div>
   </section>
 

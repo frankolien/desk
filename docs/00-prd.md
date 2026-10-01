@@ -71,18 +71,19 @@ screen, because there is nothing to export.
 The Ed25519 key that Perpl trades with is derived from the same passkey, then sealed in
 the keychain with `biometryCurrentSet` and `WhenPasscodeSetThisDeviceOnly`, so only this
 iPhone's current Face ID enrolment opens it. It can place and close orders but cannot
-withdraw. It lives in memory while Desk is open, and is zeroed five minutes after Desk
-leaves the foreground, the moment the phone locks, or when the person locks Desk
-themselves.
+withdraw. It lives in memory while Desk is open, and is zeroed the moment the phone locks
+or the person locks Desk. In the background iOS suspends the app, so after five minutes
+away (twelve hours with away copying on) the key can no longer be used, and it is wiped the
+moment Desk returns, before anything can use it.
 
 This is a real security property and also a real product one: the Account screen shows
 whether the key is unlocked, and a button that locks it now. Most apps
 hide their key handling. This one makes it the interface.
 
-**Losing the phone costs nothing.** The passkey lives in iCloud Keychain. A new phone
-signs in with Face ID and finds the same address, the same exchange account and the
-same open position. No backup file, no phrase, no support ticket. Thirty seconds of
-the demo video is a second device signing in and the position appearing.
+**Losing the phone does not lose the account.** The passkey lives in iCloud Keychain. A
+new phone signs in with Face ID to the same wallet and the same Perpl account. It then
+reconnects with one Face ID prompt and a small network fee, paid in a little MON, before
+the positions appear. No backup file, no phrase, no support ticket.
 
 **One passkey, two products.** The same passkey is a signer on an Olien treasury, the
 other Metropolis entry. A team's treasury can fund a desk and a trader can trade inside
@@ -185,8 +186,9 @@ key is unlocked, a button that locks it now, and sign out.
 There is no countdown. A fifteen-minute window was specified here first, and it was
 wrong: when it ran out it put Face ID — or a sign-out — between a person and closing a
 losing position. The trading key cannot move money, so a timer on it bought no safety.
-It lives while Desk is open, survives five minutes in another app, and is wiped after
-that or when the phone locks.
+It lives while Desk is open and is wiped when the phone locks. In another app it stays
+usable for five minutes. After that it can't be used, and it is wiped the moment Desk
+returns.
 
 Withdrawals are contract calls the wallet signs, never the API key. That is worth a
 sentence on the screen, because it is the reason a stolen API token cannot take the
@@ -195,8 +197,9 @@ money.
 Done when:
 - Nothing interrupts an order while Desk is open, and locking Desk forces a Face ID
   prompt on the next order.
-- Leaving Desk for more than five minutes, or locking the phone, zeroes the key,
-  provable by the next order asking for Face ID.
+- Locking the phone zeroes the key. After more than five minutes away the key can't be
+  used, and it is zeroed when Desk returns. Either way Desk asks for Face ID again before
+  the next order.
 - A withdrawal reaches the derived address on Monad and the collateral figure drops by
   the right amount.
 
