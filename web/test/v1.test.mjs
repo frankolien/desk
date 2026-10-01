@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createHealth, gradeAge, overall } from "../api/_health.mjs";
+import { createHealth, defaultProbes, gradeAge, overall } from "../api/_health.mjs";
 import { TIERS, clientIp, rateLimit } from "../api/_ratelimit.mjs";
 import { memoryStore } from "../api/_store.mjs";
 import { createHandler as relayHandler } from "../api/relay-quote.mjs";
@@ -186,6 +186,7 @@ const probes = (overrides = {}) => ({
   perpl: async () => 200,
   heartbeat: async () => ({ at: T - 60_000, wallets: 3, indexed: 2, behind: 0 }),
   lastScan: async () => new Date(T - 5 * 60_000).toISOString(),
+  traderIndex: async () => ({ at: T - 10 * 60_000, block: 50_000_000, behind: 0 }),
   ...overrides,
 });
 
@@ -198,7 +199,7 @@ test("health grades ages and rolls checks up: critical failures fail, the rest w
   assert.equal(cached, false);
   assert.equal(report.status, "pass");
   assert.equal(report.releaseId, "abc1234");
-  assert.deepEqual(Object.keys(report.checks), ["redis:responseTime", "monad-rpc:responseTime", "perpl:responseTime", "worker:heartbeatAge", "cron:lastRunAge"]);
+  assert.deepEqual(Object.keys(report.checks), ["redis:responseTime", "monad-rpc:responseTime", "perpl:responseTime", "worker:heartbeatAge", "cron:lastRunAge", "trader-index:lastAdvanceAge"]);
   assert.equal(report.checks["monad-rpc:responseTime"][0].block, 12_345);
   assert.equal(report.checks["monad-rpc:responseTime"][0].observedUnit, "ms");
   assert.equal(report.checks["worker:heartbeatAge"][0].observedValue, 60);
@@ -221,6 +222,28 @@ test("health grades ages and rolls checks up: critical failures fail, the rest w
 
   const slow = (await createHealth({ store: null, probes: probes({ perpl: () => new Promise(() => {}) }), now: () => T, timeoutMs: 10 })()).report;
   assert.equal(slow.checks["perpl:responseTime"][0].status, "warn");
+});
+
+test("health says how long ago the trader index last moved forward, and only warns when it stalls", async () => {
+  const fresh = (await createHealth({ store: null, probes: probes(), now: () => T })()).report;
+  const check = fresh.checks["trader-index:lastAdvanceAge"][0];
+  assert.deepEqual([check.status, check.observedValue, check.observedUnit, check.block, check.behind], ["pass", 600, "s", 50_000_000, 0]);
+
+  const late = (await createHealth({ store: null, probes: probes({ traderIndex: async () => ({ at: T - 50 * 60_000, block: 1, behind: 9 }) }), now: () => T })()).report;
+  assert.equal(late.checks["trader-index:lastAdvanceAge"][0].status, "warn");
+  // Not critical: a stuck index fails its own row but only degrades the whole.
+  const frozen = (await createHealth({ store: null, probes: probes({ traderIndex: async () => ({ at: T - 14 * 86_400_000 }) }), now: () => T })()).report;
+  assert.equal(frozen.checks["trader-index:lastAdvanceAge"][0].status, "fail");
+  assert.equal(frozen.status, "warn");
+  const never = (await createHealth({ store: null, probes: probes({ traderIndex: async () => null }), now: () => T })()).report;
+  assert.equal(never.checks["trader-index:lastAdvanceAge"][0].status, "unknown");
+
+  // The default probe reads what the index writes.
+  const store = memoryStore();
+  await store.set("hist:advanced", JSON.stringify({ at: T - 90_000, block: 7, behind: 3 }));
+  const read = (await createHealth({ store, probes: defaultProbes({ store, fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ result: "0x1" }) }) }), now: () => T })()).report;
+  assert.equal(read.checks["trader-index:lastAdvanceAge"][0].observedValue, 90);
+  assert.equal(read.checks["trader-index:lastAdvanceAge"][0].behind, 3);
 });
 
 test("health is memoised for ten seconds and served as health+json, 503 on fail", async () => {

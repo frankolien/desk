@@ -10,7 +10,7 @@
   "externalDocs": { "url": "https://trydesk.trade/docs" },
   "servers": [{ "url": "https://trydesk.trade" }],
   "tags": [
-    { "name": "Markets", "description": "Perpl's open markets and exchange candles for their assets." },
+    { "name": "Markets", "description": "Perpl's open markets and Perpl's own candles for them." },
     { "name": "Traders", "description": "Perpl traders: the leaderboard and one trader's closed trades." },
     { "name": "Identity", "description": "Names and avatars for an address." },
     { "name": "Wallets", "description": "Holdings and the Monad ledger of a wallet." },
@@ -37,7 +37,7 @@
                     "rateLimits": { "default": "60/min", "expensive": "10/min" },
                     "endpoints": [
                       { "path": "/api/v1/markets", "tier": "default", "description": "Every open Perpl market: mark, 24h change and volume, open interest, funding, leverage" },
-                      { "path": "/api/v1/markets/{market}/candles", "tier": "default", "description": "Exchange candles for a market's asset. ?bar=1m|5m|15m|1H|4H|1D" },
+                      { "path": "/api/v1/markets/{market}/candles", "tier": "default", "description": "Perpl's own candles for a market. ?bar=1m|5m|15m|1H|4H|1D" },
                       { "path": "/api/v1/traders/top", "tier": "default", "description": "Top traders on Perpl by unrealised PnL. ?limit=1..25" }
                     ]
                   },
@@ -89,8 +89,8 @@
       "get": {
         "operationId": "marketCandles",
         "tags": ["Markets"],
-        "summary": "Exchange candles for a market's asset",
-        "description": "Perpl publishes no candle history, so these are the asset's own tape on OKX (`BTC-USDT` for the BTC market, and so on); the mark shown beside them in the app is Perpl's. Up to 300 candles, oldest first, at the `bar` size asked for. A market Desk has no instrument for answers `not_found`. Default tier; cached 60 s.",
+        "summary": "Perpl's candles for a market",
+        "description": "Candles from Perpl's own market data, so every listed market has a chart from the day it lists. Prices are in the market's quote, already scaled by its `priceDecimals`; volume is in AUSD. Up to 300 candles, oldest first, at the `bar` size asked for. A name that is not an open Perpl market answers `not_found`. Default tier; cached 60 s.",
         "parameters": [
           { "$ref": "#/components/parameters/Market" },
           {
@@ -102,7 +102,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Candles for the market's asset, oldest first.",
+            "description": "Candles for the market, oldest first.",
             "headers": { "$ref": "#/components/headers/RateLimit" },
             "content": {
               "application/json": {
@@ -111,11 +111,11 @@
                   "data": {
                     "market": "BTC", "bar": "1H",
                     "candles": [
-                      { "time": 1789959600, "open": 81318.5, "high": 81581.1, "low": 81250.1, "close": 81444.6, "volume": 110.48540878 },
-                      { "time": 1789963200, "open": 81444.6, "high": 81477.4, "low": 81234.6, "close": 81366.9, "volume": 79.72985612 }
+                      { "time": 1790870400, "open": 84113.8, "high": 84582.8, "low": 84035.9, "close": 84155.1, "volume": 809881.97941 },
+                      { "time": 1790874000, "open": 84155.1, "high": 85022.7, "low": 84154.5, "close": 84983.5, "volume": 400567.996151 }
                     ]
                   },
-                  "meta": { "asOf": "2026-09-21T04:37:21.649Z", "chain": "monad", "cached": false }
+                  "meta": { "asOf": "2026-10-01T17:48:04.262Z", "chain": "monad", "cached": false }
                 }
               }
             }
@@ -126,15 +126,15 @@
             "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" }, "example": { "type": "https://trydesk.trade/docs#error-invalid_request", "title": "Invalid request", "status": 400, "detail": "bar must be one of 1m, 5m, 15m, 1H, 4H, 1D.", "instance": "/api/v1/markets/BTC/candles", "code": "invalid_request" } } }
           },
           "404": {
-            "description": "The market name is well-formed but Desk has no exchange instrument for it.",
+            "description": "The market name is well-formed but is not an open Perpl market.",
             "headers": { "$ref": "#/components/headers/RateLimit" },
             "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" }, "example": { "type": "https://trydesk.trade/docs#error-not_found", "title": "Not found", "status": 404, "detail": "No candles for DOGE.", "instance": "/api/v1/markets/DOGE/candles", "code": "not_found" } } }
           },
           "429": { "$ref": "#/components/responses/RateLimited" },
           "503": {
-            "description": "The exchange did not answer or refused the request. Retry with backoff.",
+            "description": "Perpl did not answer or refused the request. Retry with backoff.",
             "headers": { "$ref": "#/components/headers/RateLimit" },
-            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" }, "example": { "type": "https://trydesk.trade/docs#error-upstream_unavailable", "title": "Upstream unavailable", "status": 503, "detail": "Candles could not be read: OKX HTTP 503", "instance": "/api/v1/markets/BTC/candles", "code": "upstream_unavailable" } } }
+            "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" }, "example": { "type": "https://trydesk.trade/docs#error-upstream_unavailable", "title": "Upstream unavailable", "status": 503, "detail": "Candles could not be read: Perpl HTTP 503", "instance": "/api/v1/markets/BTC/candles", "code": "upstream_unavailable" } } }
           }
         }
       }
@@ -338,7 +338,7 @@
         "operationId": "health",
         "tags": ["Monitoring"],
         "summary": "Service health",
-        "description": "draft-inadarei-api-health-check shape, not wrapped in the envelope. Probes Redis, the Monad RPC, Perpl, the indexing worker's heartbeat and the alerts cron; Redis and the worker are critical. 200 on pass or warn, 503 on fail. Sent `no-store`; memoised server-side for 10 s. Default tier.",
+        "description": "draft-inadarei-api-health-check shape, not wrapped in the envelope. Probes Redis, the Monad RPC, Perpl, the indexing worker's heartbeat, the alerts scan and the trader index; Redis and the worker are critical. 200 on pass or warn, 503 on fail. Sent `no-store`; memoised server-side for 10 s. Default tier.",
         "responses": {
           "200": {
             "description": "Healthy or degraded.",
@@ -353,7 +353,8 @@
                     "monad-rpc:responseTime": [{ "status": "pass", "observedValue": 16, "observedUnit": "ms", "time": "2026-09-21T03:06:48.408Z", "block": 106637740 }],
                     "perpl:responseTime": [{ "status": "pass", "observedValue": 36, "observedUnit": "ms", "time": "2026-09-21T03:06:48.408Z" }],
                     "worker:heartbeatAge": [{ "status": "pass", "observedValue": 81, "observedUnit": "s", "time": "2026-09-21T03:06:48.408Z", "wallets": 22, "behind": 0 }],
-                    "cron:lastRunAge": [{ "status": "warn", "observedValue": 3119, "observedUnit": "s", "time": "2026-09-21T03:06:48.408Z" }]
+                    "cron:lastRunAge": [{ "status": "warn", "observedValue": 3119, "observedUnit": "s", "time": "2026-09-21T03:06:48.408Z" }],
+                    "trader-index:lastAdvanceAge": [{ "status": "pass", "observedValue": 412, "observedUnit": "s", "time": "2026-09-21T03:06:48.408Z", "block": 106637700, "behind": 0 }]
                   }
                 }
               }
@@ -398,7 +399,7 @@
       },
       "Market": {
         "name": "market", "in": "path", "required": true,
-        "description": "A market name as listed by `/api/v1/markets`: letters and digits, 1 to 12 characters, in any case. Anything else is not a route (`unknown_route`); a well-formed name with no instrument is `not_found`.",
+        "description": "A market name as listed by `/api/v1/markets`: letters and digits, 1 to 12 characters, in any case. Anything else is not a route (`unknown_route`); a well-formed name that is not an open market is `not_found`.",
         "schema": { "type": "string", "pattern": "^[A-Za-z0-9]{1,12}$", "examples": ["BTC", "ETH", "SOL", "MON", "HYPE", "ZEC", "LIT", "PUMP"] },
         "example": "BTC"
       }
@@ -517,11 +518,11 @@
         "required": ["time", "open", "high", "low", "close", "volume"],
         "properties": {
           "time": { "type": "integer", "description": "Unix seconds the candle opened." },
-          "open": { "type": "number", "description": "Exchange price at the open, quoted in USDT." },
+          "open": { "type": "number", "description": "Price on Perpl at the open, scaled by the market's priceDecimals." },
           "high": { "type": "number" },
           "low": { "type": "number" },
           "close": { "type": "number" },
-          "volume": { "type": "number", "description": "Base-asset units traded on the exchange in the candle." }
+          "volume": { "type": "number", "description": "AUSD traded on Perpl in the candle." }
         }
       },
       "MarketCandles": {
@@ -601,7 +602,7 @@
           "bestMarket": { "oneOf": [{ "$ref": "#/components/schemas/MarketPnl" }, { "type": "null" }] },
           "worstMarket": { "oneOf": [{ "$ref": "#/components/schemas/MarketPnl" }, { "type": "null" }] },
           "tags": { "type": "array", "items": { "type": "string" }, "description": "Scalper, Day trader, Swing trader, High leverage, Low leverage, <SYM> specialist, Long-biased, Short-biased, Liquidated once, Liquidated N×." },
-          "score": { "type": ["integer", "null"], "minimum": 0, "maximum": 100 }
+          "score": { "type": ["integer", "null"], "minimum": 0, "maximum": 100, "description": "Counts in full from 50 closed trades; fewer scale it down. Read it beside `trades`." }
         }
       },
       "ClosedTrade": {
@@ -762,9 +763,9 @@
           "observedUnit": { "type": "string", "enum": ["ms", "s"] },
           "time": { "type": "string", "format": "date-time" },
           "output": { "type": "string", "description": "Why the probe failed." },
-          "block": { "type": "integer", "description": "monad-rpc only: latest block." },
+          "block": { "type": ["integer", "null"], "description": "monad-rpc: latest block. trader-index: the block the index has reached." },
           "wallets": { "type": ["integer", "null"], "description": "worker only: wallets tracked." },
-          "behind": { "type": ["integer", "null"], "description": "worker only: blocks behind the tip." }
+          "behind": { "type": ["integer", "null"], "description": "worker and trader-index: blocks behind the tip." }
         }
       },
       "Health": {
@@ -782,7 +783,8 @@
               "monad-rpc:responseTime": { "type": "array", "items": { "$ref": "#/components/schemas/Check" } },
               "perpl:responseTime": { "type": "array", "items": { "$ref": "#/components/schemas/Check" } },
               "worker:heartbeatAge": { "type": "array", "items": { "$ref": "#/components/schemas/Check" } },
-              "cron:lastRunAge": { "type": "array", "items": { "$ref": "#/components/schemas/Check" } }
+              "cron:lastRunAge": { "type": "array", "items": { "$ref": "#/components/schemas/Check" } },
+              "trader-index:lastAdvanceAge": { "type": "array", "items": { "$ref": "#/components/schemas/Check" }, "description": "Seconds since the trader index last moved forward; warn past 45 min, fail past 3 h. Not critical." }
             }
           }
         }

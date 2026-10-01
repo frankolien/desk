@@ -226,16 +226,19 @@ export async function fetchPage(hypersync, { wallet, from, to }) {
 }
 
 /// Brings one wallet's ledger up to the chain tip, within a deadline. Returns the
-/// ledger and whether it reached the tip.
-export async function indexWallet(address, { store, hypersync, price, meta, backfillBlocks, finalityLag = 20, now = Date.now, deadline = Infinity }) {
+/// ledger and whether it reached the tip. With `quietMs`, a run that found nothing new
+/// skips the write while the stored ledger is younger than that.
+export async function indexWallet(address, { store, hypersync, price, meta, backfillBlocks, finalityLag = 20, now = Date.now, deadline = Infinity, quietMs = 0 }) {
   const key = ledgerKey(address);
   const stored = await store.get(key);
   let ledger = stored ? JSON.parse(stored) : null;
   if (!ledger || ledger.version !== LEDGER_VERSION) ledger = emptyLedger(address);
+  const writtenAt = stored ? ledger.indexedAt : 0;
   const tip = (await hypersync.height()) - finalityLag;
   let cursor = ledger.cursor || Math.max(0, tip - backfillBlocks);
   const start = cursor;
   let pages = 0;
+  let applied = 0;
   let stopped = false;
   while (cursor < tip && !stopped) {
     const page = await fetchPage(hypersync, { wallet: address, from: cursor, to: tip });
@@ -246,14 +249,17 @@ export async function indexWallet(address, { store, hypersync, price, meta, back
       if (movement.block !== block && now() >= deadline) { cursor = movement.block; stopped = true; break; }
       block = movement.block;
       await applyMovement(ledger, movement, { price, meta });
+      applied += 1;
     }
     pages += 1;
     if (stopped) break;
     if (!(page.nextBlock > cursor)) break;
     cursor = page.nextBlock;
   }
+  // Nothing was applied, so the stored cursor still leads to this same ledger.
+  const quiet = applied === 0 && !stopped && writtenAt > 0 && now() - writtenAt < quietMs;
   ledger.cursor = cursor;
   ledger.indexedAt = now();
-  await store.set(key, JSON.stringify(ledger), { ex: 30 * 24 * 3600 });
-  return { ledger, complete: cursor >= tip, from: start, to: cursor, behind: Math.max(0, tip - cursor), pages };
+  if (!quiet) await store.set(key, JSON.stringify(ledger), { ex: 30 * 24 * 3600 });
+  return { ledger, complete: cursor >= tip, from: start, to: cursor, behind: Math.max(0, tip - cursor), pages, written: !quiet };
 }

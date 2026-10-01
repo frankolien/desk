@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { crossed, levelStep, levelText, parseTargets, priceDeliveries, priceEvents, pricePayload, targetPayload, wantsMarket } from "../api/_prices.mjs";
+import { MARKS_KEY, crossed, levelStep, levelText, parseTargets, priceDeliveries, priceEvents, pricePayload, targetPayload, wantsMarket } from "../api/_prices.mjs";
 import { memoryStore } from "../api/_store.mjs";
 import { parseSubscription } from "../api/alerts.mjs";
 
@@ -59,6 +59,20 @@ test("the first reading is the baseline, a level is told once in six hours, and 
   const again = await priceDeliveries({ store, quotes: [{ name: "BTC", mark: 85_050, prev: 84_000 }], subscribers, now: 4 });
   assert.equal(wobble.events, 1);
   assert.equal(again.events, 0);
+});
+
+test("every market's last mark lives in one key, and a market missing from a scan keeps its own", async () => {
+  const store = memoryStore();
+  const subscribers = [{ id: "a", record: { token: "t", prices: true } }];
+  await priceDeliveries({ store, quotes: [{ name: "BTC", mark: 84_900, prev: 84_000 }, { name: "MON", mark: 0.024, prev: 0.024 }], subscribers, now: 1 });
+  assert.deepEqual(Object.keys(JSON.parse(await store.get(MARKS_KEY))), ["BTC", "MON"]);
+  await priceDeliveries({ store, quotes: [{ name: "BTC", mark: 84_950, prev: 84_000 }], subscribers, now: 2 });
+  const back = await priceDeliveries({ store, quotes: [{ name: "MON", mark: 0.0251, prev: 0.024 }], subscribers, now: 3 });
+  // MON's mark from the first scan is still the baseline, so the level it crossed is told.
+  assert.equal(back.events, 1);
+  assert.equal(JSON.parse(await store.get(MARKS_KEY)).BTC.mark, 84_950);
+  const weekLater = await priceDeliveries({ store, quotes: [{ name: "BTC", mark: 90_000, prev: 84_000 }], subscribers, now: 8 * 86_400_000 });
+  assert.equal(weekLater.events, 0);
 });
 
 test("Bitcoin and Monad reach everyone; another market only a phone that watches it", () => {

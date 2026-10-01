@@ -10,3 +10,9 @@ export function selectWallets(tracked, urgent, cursor = 0, limit = 12, urgentLim
   const rotated = [...regular.slice(start), ...regular.slice(0, start)].slice(0, regularCount);
   return { wallets: [...priority, ...rotated], nextCursor: cursor + regularCount };
 }
+
+/// The trader index's wait after its nth failure in a row: a minute, doubling, capped at
+/// thirty, so a rate limit or a spent quota is not hammered.
+export function indexBackoffMs(failures, baseMs = 60_000, maxMs = 30 * 60_000) {
+  return Math.min(maxMs, baseMs * 2 ** Math.max(0, failures - 1));
+}

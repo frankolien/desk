@@ -88,7 +88,7 @@
             <p class="docs-nav-group">Markets</p>
             <ul>
               <li><a href="#markets" data-keywords="mark change volume open interest tvl funding leverage fees margin perpl ausd /api/v1/markets"><span class="docs-badge">GET</span>Markets</a></li>
-              <li><a href="#candles" data-keywords="market bar ohlc candles chart okx time open high low close volume /api/v1/markets/{market}/candles"><span class="docs-badge">GET</span>Candles</a></li>
+              <li><a href="#candles" data-keywords="market bar ohlc candles chart perpl time open high low close volume /api/v1/markets/{market}/candles"><span class="docs-badge">GET</span>Candles</a></li>
             </ul>
           </div>
           <div data-group>
@@ -154,7 +154,7 @@
 }</code></pre>
             <p>Errors are not wrapped. They are <a href="https://www.rfc-editor.org/rfc/rfc9457">RFC 9457 Problem Details</a> with a stable <code>code</code>; see <a href="#errors">Error codes</a>.</p>
             <h3>Where the data comes from</h3>
-            <p>Monad mainnet. Perpl&rsquo;s public context for the market list, Perpl&rsquo;s exchange contract for open positions, Perpl&rsquo;s position events through HyperSync for closed trades, a HyperSync-indexed ledger for wallet history, OKX for candles, balances and prices, and .nad, nad.fun, ENS and Farcaster for names. The <a href="#map">API map</a> says which route reads which.</p>
+            <p>Monad mainnet. Perpl&rsquo;s public context for the market list, Perpl&rsquo;s exchange contract for open positions, Perpl&rsquo;s position events through HyperSync for closed trades, a HyperSync-indexed ledger for wallet history, Perpl&rsquo;s market data for candles, OKX for wallet balances and token prices, and .nad, nad.fun, ENS and Farcaster for names. The <a href="#map">API map</a> says which route reads which.</p>
           </div>
         </section>
 
@@ -270,7 +270,7 @@ X-RateLimit-Reset: 1789960140</code></pre>
               <tbody>
                 <tr id="error-invalid_address"><td><code>invalid_address</code></td><td>400</td><td>The address in the path is not <code>0x</code> + 40 hex characters. Refused before any lookup.</td><td>Fix the address. Checksum case does not matter.</td></tr>
                 <tr id="error-invalid_request"><td><code>invalid_request</code></td><td>400</td><td>A query parameter is out of range, such as a <code>window</code> that is not <code>1h</code>, <code>6h</code> or <code>24h</code>, or a <code>bar</code> that is not one of the six sizes.</td><td>Use one of the documented values; <code>detail</code> names them.</td></tr>
-                <tr id="error-not_found"><td><code>not_found</code></td><td>404</td><td>The input is well-formed but the route has nothing for it: a market name <a href="#candles">candles</a> has no instrument for. Reserved on <a href="#identity">identity</a> and <a href="#wallets">wallets</a>; in practice both answer a record of nulls instead.</td><td>Treat as an empty answer. For candles, pick a market from <a href="#markets">the list</a>.</td></tr>
+                <tr id="error-not_found"><td><code>not_found</code></td><td>404</td><td>The input is well-formed but the route has nothing for it: a market name that is not an open Perpl market, on <a href="#candles">candles</a>. Reserved on <a href="#identity">identity</a> and <a href="#wallets">wallets</a>; in practice both answer a record of nulls instead.</td><td>Treat as an empty answer. For candles, pick a market from <a href="#markets">the list</a>.</td></tr>
                 <tr id="error-unknown_route"><td><code>unknown_route</code></td><td>404</td><td>No such path under <code>/api/v1</code>.</td><td>Check the <a href="#map">API map</a>; paths are case-sensitive.</td></tr>
                 <tr id="error-method_not_allowed"><td><code>method_not_allowed</code></td><td>405</td><td>Anything but <code>GET</code>, <code>HEAD</code> or <code>OPTIONS</code>.</td><td>Use <code>GET</code>. Nothing here takes a body.</td></tr>
                 <tr id="error-rate_limited"><td><code>rate_limited</code></td><td>429</td><td>Over the tier&rsquo;s limit for this client IP.</td><td>Wait <code>Retry-After</code> seconds, then retry once. See <a href="#backoff">Backing off</a>.</td></tr>
@@ -307,13 +307,13 @@ X-RateLimit-Reset: 1789960140</code></pre>
               <tbody>
                 <tr><td><code>GET /api/v1</code></td><td>default</td><td>60 s</td><td>Static: name, links, route list.</td></tr>
                 <tr><td><a href="#markets"><code>GET /api/v1/markets</code></a></td><td>default</td><td>10 s</td><td>Perpl&rsquo;s public context: every open market&rsquo;s config, state and funding.</td></tr>
-                <tr><td><a href="#candles"><code>GET /api/v1/markets/{market}/candles</code></a></td><td>default</td><td>60 s</td><td>OKX candles for the market&rsquo;s asset; Perpl keeps no candle history.</td></tr>
+                <tr><td><a href="#candles"><code>GET /api/v1/markets/{market}/candles</code></a></td><td>default</td><td>60 s</td><td>Perpl&rsquo;s own candles for the market.</td></tr>
                 <tr><td><a href="#traders-top"><code>GET /api/v1/traders/top</code></a></td><td>default</td><td>30 s</td><td>Perpl exchange contract on Monad, every open position on every market.</td></tr>
                 <tr><td><a href="#traders-history"><code>GET /api/v1/traders/{address}/history</code></a></td><td>expensive</td><td>60 s</td><td>Perpl position events via HyperSync, folded into per-account records.</td></tr>
                 <tr><td><a href="#identity"><code>GET /api/v1/identity/{address}</code></a></td><td>default</td><td>60 s</td><td>.nad names, nad.fun profiles, ENS, Farcaster; Perpl for the account id.</td></tr>
                 <tr><td><a href="#wallets"><code>GET /api/v1/wallets/{address}</code></a></td><td>expensive</td><td>60 s</td><td>OKX balances and prices across chains; HyperSync ledger on Monad; identity.</td></tr>
                 <tr><td><a href="#signals"><code>GET /api/v1/tokens/signals</code></a></td><td>default</td><td>15 s</td><td>Ledgers of tracked and leading wallets; OKX prices.</td></tr>
-                <tr><td><a href="#health"><code>GET /api/v1/health</code></a></td><td>default</td><td>no-store</td><td>Probes of Redis, Monad RPC, Perpl, the indexing worker and the alerts cron.</td></tr>
+                <tr><td><a href="#health"><code>GET /api/v1/health</code></a></td><td>default</td><td>no-store</td><td>Probes of Redis, Monad RPC, Perpl, the indexing worker, the alerts scan and the trader index.</td></tr>
                 <tr><td><a href="#stats"><code>GET /api/v1/stats</code></a></td><td>default</td><td>30 s</td><td>Counters in Redis. No addresses.</td></tr>
               </tbody>
             </table>
@@ -329,7 +329,7 @@ X-RateLimit-Reset: 1789960140</code></pre>
     "rateLimits": { "default": "60/min", "expensive": "10/min" },
     "endpoints": [
       { "path": "/api/v1/markets", "tier": "default", "description": "Every open Perpl market: mark, 24h change and volume, open interest, funding, leverage" },
-      { "path": "/api/v1/markets/{market}/candles", "tier": "default", "description": "Exchange candles for a market's asset. ?bar=1m|5m|15m|1H|4H|1D" },
+      { "path": "/api/v1/markets/{market}/candles", "tier": "default", "description": "Perpl's own candles for a market. ?bar=1m|5m|15m|1H|4H|1D" },
       { "path": "/api/v1/traders/top", "tier": "default", "description": "Top traders on Perpl by unrealised PnL. ?limit=1..25" },
       { "path": "/api/v1/traders/{address}/history", "tier": "expensive", "description": "A trader's closed trades and statistics" }
     ]
@@ -469,14 +469,14 @@ X-RateLimit-Reset: 1789960140</code></pre>
           <div class="docs-endpoint-body page-prose">
             <p class="docs-crumb">Markets</p>
             <h2 id="h-candles">Candles</h2>
-            <p class="docs-summary">Exchange candles for a market&rsquo;s asset at one of six bar sizes, oldest first, up to 300 of them.</p>
+            <p class="docs-summary">Perpl&rsquo;s candles for a market at one of six bar sizes, oldest first, up to 300 of them.</p>
             <div class="docs-methodbar">
               <span class="page-method">GET</span>
               <code class="page-path">/api/v1/markets/{market}/candles</code>
               <button type="button" class="docs-try-btn" data-try-toggle aria-expanded="false" aria-controls="try-candles">Try it <svg aria-hidden="true"><use href="#i-play"/></svg></button>
             </div>
             <div class="docs-try" id="try-candles" data-try-panel hidden></div>
-            <p>Perpl publishes no candle history, so these are the asset&rsquo;s own tape on OKX &mdash; <code>BTC-USDT</code> for the BTC market, and so on &mdash; and the mark the app draws beside them is Perpl&rsquo;s. Expect the two to sit close but not on top of each other. Each market Desk knows maps to one instrument; a name that matches no instrument answers <code>not_found</code>. The last candle is still forming and moves until its bar closes.</p>
+            <p>These come from Perpl&rsquo;s own market data, the same venue as the mark, so a market has a chart from the day it lists. Any open market in <a href="#markets">markets</a> works; any other name answers <code>not_found</code>. The last candle is still forming and moves until its bar closes.</p>
 
             <h3>Parameters</h3>
             <div class="docs-params">
@@ -488,8 +488,8 @@ X-RateLimit-Reset: 1789960140</code></pre>
                   <span class="docs-chip is-req">required</span>
                   <span class="docs-param-meta">letters and digits · 1 to 12</span>
                 </div>
-                <p>A market <code>name</code> from <a href="#markets">markets</a>. Case does not matter; the answer uppercases it. A name with no instrument behind it is refused with <code>not_found</code>; anything that is not letters and digits is not a route. Example: <code>BTC</code>.</p>
-                <div class="docs-param-vals"><code>BTC</code><code>ETH</code><code>SOL</code><code>MON</code><code>HYPE</code><code>ZEC</code><code>LIT</code><code>PUMP</code></div>
+                <p>A market <code>name</code> from <a href="#markets">markets</a>. Case does not matter; the answer uppercases it. A name that is not an open Perpl market is refused with <code>not_found</code>; anything that is not letters and digits is not a route. Example: <code>BTC</code>.</p>
+                <div class="docs-param-vals"><code>BTC</code><code>ETH</code><code>SOL</code><code>MON</code><code>HYPE</code><code>ZEC</code><code>LIT</code><code>PUMP</code><code>VVV</code><code>NEAR</code></div>
               </div>
               <div class="docs-param" id="candles-bar" data-param="bar" data-in="query" data-type="string" data-example="1H" data-enum="1m,5m,15m,1H,4H,1D">
                 <div class="docs-param-head">
@@ -522,24 +522,24 @@ X-RateLimit-Reset: 1789960140</code></pre>
     "bar": "1H",
     "candles": [
       {
-        "time": 1789959600,
-        "open": 81318.5,
-        "high": 81581.1,
-        "low": 81250.1,
-        "close": 81444.6,
-        "volume": 110.48540878
+        "time": 1790870400,
+        "open": 84113.8,
+        "high": 84582.8,
+        "low": 84035.9,
+        "close": 84155.1,
+        "volume": 809881.97941
       },
       {
-        "time": 1789963200,
-        "open": 81444.6,
-        "high": 81477.4,
-        "low": 81234.6,
-        "close": 81366.9,
-        "volume": 79.72985612
+        "time": 1790874000,
+        "open": 84155.1,
+        "high": 85022.7,
+        "low": 84154.5,
+        "close": 84983.5,
+        "volume": 400567.996151
       }
     ]
   },
-  "meta": { "asOf": "2026-09-21T04:37:21.649Z", "chain": "monad", "cached": false }
+  "meta": { "asOf": "2026-10-01T17:48:04.262Z", "chain": "monad", "cached": false }
 }</code></pre>
                 <p class="docs-fields-title">Fields</p>
                 <dl class="docs-fields">
@@ -547,8 +547,8 @@ X-RateLimit-Reset: 1789960140</code></pre>
                   <div><dt><code>data.bar</code><span class="docs-type">"1m" | "5m" | "15m" | "1H" | "4H" | "1D"</span></dt><dd>The candle size the answer covers.</dd></div>
                   <div><dt><code>data.candles[]</code><span class="docs-type">array</span></dt><dd>Oldest first, at most 300. The last one is still forming.</dd></div>
                   <div><dt><code>candles[].time</code><span class="docs-type">integer</span></dt><dd>Unix seconds the candle opened. Consecutive candles are one <code>bar</code> apart.</dd></div>
-                  <div><dt><code>candles[].open</code> <code>candles[].high</code> <code>candles[].low</code> <code>candles[].close</code><span class="docs-type">number</span></dt><dd>Exchange prices, quoted in USDT. Not Perpl&rsquo;s mark.</dd></div>
-                  <div><dt><code>candles[].volume</code><span class="docs-type">number</span></dt><dd>Base-asset units traded on the exchange in the candle; <code>110.48</code> BTC in the first above.</dd></div>
+                  <div><dt><code>candles[].open</code> <code>candles[].high</code> <code>candles[].low</code> <code>candles[].close</code><span class="docs-type">number</span></dt><dd>Prices on Perpl, already scaled by the market&rsquo;s <code>priceDecimals</code>.</dd></div>
+                  <div><dt><code>candles[].volume</code><span class="docs-type">number</span></dt><dd>AUSD traded on Perpl in the candle; about <code>810K</code> in the first above.</dd></div>
                 </dl>
               </div>
               <div class="docs-panel" role="tabpanel" id="panel-candles-400" aria-labelledby="tab-candles-400" data-status="400" hidden>
@@ -563,7 +563,7 @@ X-RateLimit-Reset: 1789960140</code></pre>
 }</code></pre>
               </div>
               <div class="docs-panel" role="tabpanel" id="panel-candles-404" aria-labelledby="tab-candles-404" data-status="404" hidden>
-                <p>Captured live from <code>/api/v1/markets/DOGE/candles</code>: a well-formed name Desk has no instrument for. The exchange is not asked.</p>
+                <p>Captured live from <code>/api/v1/markets/DOGE/candles</code>: a well-formed name that is not an open Perpl market. No candles are fetched.</p>
 <pre><code class="lang-json">{
   "type": "https://trydesk.trade/docs#error-not_found",
   "title": "Not found",
@@ -585,12 +585,12 @@ X-RateLimit-Reset: 1789960140</code></pre>
 }</code></pre>
               </div>
               <div class="docs-panel" role="tabpanel" id="panel-candles-503" aria-labelledby="tab-candles-503" data-status="503" hidden>
-                <p>The exchange did not answer or refused the request. <code>detail</code> ends with what went wrong. Shape as the server sends it.</p>
+                <p>Perpl did not answer or refused the request. <code>detail</code> ends with what went wrong. Shape as the server sends it.</p>
 <pre><code class="lang-json">{
   "type": "https://trydesk.trade/docs#error-upstream_unavailable",
   "title": "Upstream unavailable",
   "status": 503,
-  "detail": "Candles could not be read: OKX HTTP 503",
+  "detail": "Candles could not be read: Perpl HTTP 503",
   "instance": "/api/v1/markets/BTC/candles",
   "code": "upstream_unavailable"
 }</code></pre>
@@ -869,7 +869,7 @@ X-RateLimit-Reset: 1789960140</code></pre>
                   <div><dt><code>stats.since</code> <code>stats.lastActive</code><span class="docs-type">integer | null</span></dt><dd>Unix seconds of the first and last event seen.</dd></div>
                   <div><dt><code>stats.bestMarket</code> <code>stats.worstMarket</code><span class="docs-type">object | null</span></dt><dd><code>{ symbol, pnl, count }</code>: the market with the highest positive, and lowest negative, realised PnL. <code>null</code> when none qualifies.</dd></div>
                   <div><dt><code>stats.tags</code><span class="docs-type">string[]</span></dt><dd>Style words from the figures: <code>Scalper</code>, <code>Day trader</code>, <code>Swing trader</code>, <code>High leverage</code>, <code>Low leverage</code>, <code>&lt;SYM&gt; specialist</code>, <code>Long-biased</code>, <code>Short-biased</code>, <code>Liquidated once</code> / <code>Liquidated N×</code>.</dd></div>
-                  <div><dt><code>stats.score</code><span class="docs-type">integer | null</span></dt><dd>0–100. Win rate, profit factor and drawdown, weighted by how many trades and how much volume back them, less 5 per liquidation. <code>null</code> with no trades.</dd></div>
+                  <div><dt><code>stats.score</code><span class="docs-type">integer | null</span></dt><dd>0–100. Win rate, profit factor and drawdown, weighted by how many trades and how much volume back them, less 5 per liquidation. It counts in full from 50 closed trades, so read it beside <code>stats.trades</code>. <code>null</code> with no trades.</dd></div>
                   <div><dt><code>data.summary</code><span class="docs-type">string</span></dt><dd>One or two sentences about the style, built only from the figures.</dd></div>
                   <div><dt><code>data.summarySource</code><span class="docs-type">"ai" | "figures"</span></dt><dd>Whether a language model phrased it (from the same figures) or the server did.</dd></div>
                   <div><dt><code>data.trades[]</code><span class="docs-type">array</span></dt><dd>Newest first, at most the last 20 closed round trips.</dd></div>
@@ -1369,7 +1369,7 @@ X-RateLimit-Reset: 1789960140</code></pre>
           <div class="docs-endpoint-body page-prose">
             <p class="docs-crumb">Monitoring</p>
             <h2 id="h-health">Health</h2>
-            <p class="docs-summary">Service health in the <code>application/health+json</code> shape: Redis, Monad RPC, Perpl, the indexing worker and the alerts cron.</p>
+            <p class="docs-summary">Service health in the <code>application/health+json</code> shape: Redis, Monad RPC, Perpl, the indexing worker, the alerts scan and the trader index.</p>
             <div class="docs-methodbar">
               <span class="page-method">GET</span>
               <code class="page-path">/api/v1/health</code>
@@ -1390,7 +1390,7 @@ X-RateLimit-Reset: 1789960140</code></pre>
                 <span class="docs-tablist-end" data-tablist-end></span>
               </div>
               <div class="docs-panel" role="tabpanel" id="panel-health-200" aria-labelledby="tab-health-200" data-status="200">
-                <p>Captured live, in a <code>warn</code> state: the alerts cron had not run for 52 minutes. <code>Content-Type: application/health+json</code>.</p>
+                <p>Shape as the server sends it, in a <code>warn</code> state: the alerts scan had not run for 52 minutes. <code>Content-Type: application/health+json</code>.</p>
 <pre><code class="lang-json" data-example>{
   "status": "warn",
   "version": "1",
@@ -1411,6 +1411,9 @@ X-RateLimit-Reset: 1789960140</code></pre>
     ],
     "cron:lastRunAge": [
       { "status": "warn", "observedValue": 3119, "observedUnit": "s", "time": "2026-09-21T03:06:48.408Z" }
+    ],
+    "trader-index:lastAdvanceAge": [
+      { "status": "pass", "observedValue": 412, "observedUnit": "s", "time": "2026-09-21T03:06:48.408Z", "block": 106637700, "behind": 0 }
     ]
   }
 }</code></pre>
@@ -1426,6 +1429,7 @@ X-RateLimit-Reset: 1789960140</code></pre>
                   <div><dt><code>checks["perpl:responseTime"]</code><span class="docs-type">ms</span></dt><dd>Perpl&rsquo;s public context endpoint.</dd></div>
                   <div><dt><code>checks["worker:heartbeatAge"]</code><span class="docs-type">s</span></dt><dd>Seconds since the indexing worker last reported; warn over 4 min, fail over 10. Adds <code>wallets</code> tracked and blocks <code>behind</code>. Critical.</dd></div>
                   <div><dt><code>checks["cron:lastRunAge"]</code><span class="docs-type">s</span></dt><dd>Seconds since the alerts scan last ran; warn over 15 min, fail over 2 h.</dd></div>
+                  <div><dt><code>checks["trader-index:lastAdvanceAge"]</code><span class="docs-type">s</span></dt><dd>Seconds since the trader index behind scores and trader histories last moved forward; warn over 45 min, fail over 3 h. Adds the <code>block</code> it reached and how many blocks it was <code>behind</code>. Not critical.</dd></div>
                 </dl>
               </div>
               <div class="docs-panel" role="tabpanel" id="panel-health-429" aria-labelledby="tab-health-429" data-status="429" hidden>

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>Desk Status</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="description" content="Live health of Desk's API, its store, Monad RPC, Perpl and the indexing worker.">
+<meta name="description" content="Live health of Desk's API, its store, Monad RPC, Perpl, the indexing worker and the trader index.">
 <meta name="theme-color" content="#070907">
 <meta name="robots" content="noindex">
 <link rel="canonical" href="https://trydesk.trade/status">
@@ -77,6 +77,11 @@
         </li>
         <li class="status-row" data-check="cron:lastRunAge">
           <div><span class="status-row-name">Alerts scan</span><span class="status-row-what">Time since trade alerts last scanned. Warn past 15 minutes, fail past 2 hours.</span></div>
+          <span class="page-pill is-unknown" data-badge>unknown</span>
+          <span class="status-row-value" data-value>—</span>
+        </li>
+        <li class="status-row" data-check="trader-index:lastAdvanceAge">
+          <div><span class="status-row-name">Trader index</span><span class="status-row-what">Time since trader scores and histories last moved forward. Warn past 45 minutes, fail past 3 hours.</span></div>
           <span class="page-pill is-unknown" data-badge>unknown</span>
           <span class="status-row-value" data-value>—</span>
         </li>

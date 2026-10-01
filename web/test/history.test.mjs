@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  TOPICS, applyEvent, decodeEvent, describe, emptyRecord, indexHistory, leaders, mergeTrades, score, shardKey,
-  shardOf, statistics, tradesKey,
+  CONFIDENT_TRADES, INDEX_LOCK_KEY, INDEX_STATUS_KEY, TOPICS, applyEvent, decodeEvent, describe, emptyRecord, indexHistory,
+  indexWithLock, leaders, mergeTrades, score, shardKey, shardOf, statistics, tradesKey,
 } from "../api/_history.mjs";
 import { memoryStore } from "../api/_store.mjs";
 import { createHandler } from "../api/traders.mjs";
@@ -66,6 +66,21 @@ test("scores need trades and real money behind them, and liquidations cost", () 
     markets: { BTC: [300, 20] } };
   assert.ok(score(thin) < score(steady));
   assert.ok(score(thin) < 20);
+});
+
+test("a short record cannot outscore a long one with the same edge, and fifty trades earn full weight", () => {
+  const edge = (n) => ({ ...emptyRecord(), n, w: Math.round(n * 0.7), l: n - Math.round(n * 0.7),
+    gp: 20_000, gl: 7_000, dd: 2_000, vol: 500_000, markets: { BTC: [8_000, n], ETH: [5_000, 1] } });
+  assert.equal(CONFIDENT_TRADES, 50);
+  assert.ok(score(edge(18)) < score(edge(947)));
+  assert.ok(score(edge(18)) <= Math.ceil(score(edge(947)) * 18 / 50));
+  assert.equal(score(edge(50)), score(edge(947)));
+  assert.ok(score(edge(49)) < score(edge(50)));
+
+  // The leaderboard carries the count beside the score, so a reader can see what backs it.
+  const rows = leaders([{ 1: edge(18), 2: edge(947) }]);
+  assert.deepEqual(rows.map((row) => [row.account, row.trades]), [["2", 947], ["1", 18]]);
+  assert.equal(statistics(edge(18)).trades, 18);
 });
 
 test("a replayed block range does not count twice", () => {
@@ -135,6 +150,60 @@ test("indexing pages through HyperSync, writes shards, trades, leaders and the c
   assert.equal(shard["5201"].n, 1);
   assert.deepEqual(JSON.parse(await store.get(tradesKey("5201")))[0], [200, "BTC", 1, 60_000, 61_200, 25, 100, 5, 0]);
   assert.deepEqual(JSON.parse(await store.get("hist:leaders")), []);
+  const advanced = JSON.parse(await store.get(INDEX_STATUS_KEY));
+  assert.deepEqual([advanced.block, advanced.behind], [180, 0]);
+});
+
+test("the index records when it last moved forward, and only when it did", async () => {
+  const store = memoryStore();
+  await store.set("hist:cursor", "90");
+  const hypersync = { height: async () => 300, query: async ({ from, to }) => ({ logs: [], blocks: [], nextBlock: Math.min(to, from + 100) }) };
+  await indexHistory({ store, hypersync, markets, now: () => 5_000, deadline: 10_000 });
+  assert.deepEqual(JSON.parse(await store.get(INDEX_STATUS_KEY)), { at: 5_000, block: 280, behind: 0 });
+
+  // Already at the tip: nothing moved, so the time stays where it was.
+  await indexHistory({ store, hypersync: { ...hypersync, height: async () => 290 }, markets, now: () => 9_000, deadline: 10_000 });
+  assert.equal(JSON.parse(await store.get(INDEX_STATUS_KEY)).at, 5_000);
+});
+
+test("a page refused partway keeps the pages already read, then reports the refusal", async () => {
+  const store = memoryStore();
+  await store.set("hist:cursor", "90");
+  const pages = [{ logs: [opened(5201, true, 600_000, 95)], blocks: [{ number: 95, timestamp: 100 }], nextBlock: 110 }];
+  const hypersync = {
+    height: async () => 500,
+    query: async () => {
+      if (pages.length) return pages.shift();
+      throw new Error("hypersync 429");
+    },
+  };
+  await assert.rejects(indexHistory({ store, hypersync, markets, deadline: Date.now() + 5_000 }), /429/);
+  assert.equal(await store.get("hist:cursor"), "110");
+  assert.equal(JSON.parse(await store.get(shardKey(shardOf("5201"))))["5201"].longs, 1);
+
+  // Refused on the first page: nothing to keep, nothing written.
+  const untouched = memoryStore();
+  await untouched.set("hist:cursor", "90");
+  await assert.rejects(indexHistory({ store: untouched, hypersync, markets, deadline: Date.now() + 5_000 }), /429/);
+  assert.equal(await untouched.get("hist:cursor"), "90");
+  assert.equal(await untouched.get(INDEX_STATUS_KEY), null);
+});
+
+test("only one index run at a time, and a run frees the lock it took", async () => {
+  const store = memoryStore();
+  await store.set("hist:cursor", "90");
+  const hypersync = { height: async () => 120, query: async () => ({ logs: [], blocks: [], nextBlock: 100 }) };
+  await store.set(INDEX_LOCK_KEY, "someone else");
+  assert.deepEqual(await indexWithLock({ store, hypersync, markets, budgetMs: 1_000, lockSeconds: 60 }), { skipped: true });
+  assert.equal(await store.get(INDEX_LOCK_KEY), "someone else");
+
+  await store.del(INDEX_LOCK_KEY);
+  const report = await indexWithLock({ store, hypersync, markets, budgetMs: 1_000, lockSeconds: 60 });
+  assert.equal(report.to, 100);
+  assert.equal(await store.get(INDEX_LOCK_KEY), null);
+
+  await assert.rejects(indexWithLock({ store, hypersync: { ...hypersync, height: async () => { throw new Error("hypersync 503"); } }, markets, budgetMs: 1_000, lockSeconds: 60 }), /503/);
+  assert.equal(await store.get(INDEX_LOCK_KEY), null);
 });
 
 test("leaders need five trades and rank by score", () => {
@@ -171,6 +240,8 @@ test("a profile's history is looked up by address, with trades and a grounded su
 
   const scores = await handler({ method: "GET", query: { view: "scores" } }, recorder());
   assert.equal(scores.body.traders[0].address, "0x95D2602d30DA1179fd13274839e60345857ca648");
+  assert.deepEqual([scores.body.traders[0].score, scores.body.traders[0].trades], [70, 6]);
+  assert.equal(history.body.stats.score, statistics(record).score);
   const bad = await handler({ method: "GET", query: { view: "history", address: "nope" } }, recorder());
   assert.equal(bad.status, 400);
 });

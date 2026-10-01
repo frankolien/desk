@@ -122,3 +122,13 @@ test("the head and block time come from the stamps, and marks are read off the c
   assert.equal(live.body.data.marks.BTC, 81234.5);
   assert.match(live.headers["Cache-Control"], /s-maxage=2/);
 });
+
+test("candles stop at 300, the newest ones, when Perpl answers one more", async () => {
+  const fetchImpl = async (url) => {
+    if (url.includes("/pub/context")) return { ok: true, json: async () => ({ markets: [BTC], tokens: [{ symbol: "AUSD" }] }) };
+    return { ok: true, json: async () => ({ d: Array.from({ length: 301 }, (_, i) => ({ t: (i + 1) * 60_000, o: 10, h: 10, l: 10, c: 10, v: "1" })) }) };
+  };
+  const rows = await createMarkets({ fetchImpl, now: () => 1_790_000_000_000 }).candles("BTC", "1m");
+  assert.equal(rows.length, 300);
+  assert.deepEqual([rows[0].time, rows[299].time], [120, 18_060]);
+});

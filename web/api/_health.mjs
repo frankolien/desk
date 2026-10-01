@@ -1,3 +1,4 @@
+import { INDEX_STATUS_KEY } from "./_history.mjs";
 import { redisStore } from "./_store.mjs";
 
 const PROBE_TIMEOUT_MS = 2500;
@@ -71,6 +72,11 @@ export function defaultProbes({ store, fetchImpl = fetch, rpcURL = RPC_URL, perp
     async lastScan() {
       return store ? store.get(LAST_SCAN_KEY) : null;
     },
+    async traderIndex() {
+      if (!store) return null;
+      const raw = await store.get(INDEX_STATUS_KEY);
+      return raw ? JSON.parse(raw) : null;
+    },
   };
 }
 
@@ -81,8 +87,9 @@ export function createHealth({
   async function run() {
     const at = now();
     const time = new Date(at).toISOString();
-    const [redis, rpc, perpl, heartbeat, lastScan] = await Promise.all(
-      [probes.redis, probes.rpc, probes.perpl, probes.heartbeat, probes.lastScan].map((probe) => timed(probe, timeoutMs)),
+    const [redis, rpc, perpl, heartbeat, lastScan, traderIndex] = await Promise.all(
+      [probes.redis, probes.rpc, probes.perpl, probes.heartbeat, probes.lastScan, probes.traderIndex ?? (async () => null)]
+        .map((probe) => timed(probe, timeoutMs)),
     );
     const latency = (result, failStatus) => ({
       status: result.ok ? "pass" : failStatus, observedValue: result.ms, observedUnit: "ms", time,
@@ -90,6 +97,7 @@ export function createHealth({
     });
     const heartbeatAge = heartbeat.ok ? ageSeconds(heartbeat.value?.at, at) : null;
     const scanAge = lastScan.ok ? ageSeconds(lastScan.value, at) : null;
+    const indexAge = traderIndex.ok ? ageSeconds(traderIndex.value?.at, at) : null;
     const checks = {
       "redis:responseTime": [latency(redis, "fail")],
       "monad-rpc:responseTime": [{ ...latency(rpc, "warn"), ...(rpc.ok ? { block: rpc.value } : {}) }],
@@ -101,6 +109,11 @@ export function createHealth({
       }],
       "cron:lastRunAge": [{
         status: gradeAge(scanAge, { warn: 15 * 60, fail: 2 * 3600 }), observedValue: scanAge, observedUnit: "s", time,
+      }],
+      // The worker runs it every 15 minutes; three missed runs is late, three hours is stuck.
+      "trader-index:lastAdvanceAge": [{
+        status: gradeAge(indexAge, { warn: 45 * 60, fail: 3 * 3600 }), observedValue: indexAge, observedUnit: "s", time,
+        ...(traderIndex.ok && traderIndex.value ? { block: traderIndex.value.block ?? null, behind: traderIndex.value.behind ?? null } : {}),
       }],
     };
     return { status: overall(checks, ["redis:responseTime", "worker:heartbeatAge"]), version: "1", releaseId, time, checks };

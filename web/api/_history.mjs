@@ -10,8 +10,10 @@
 // account; a run reads them with one MGET and writes back only the shards it changed. The
 // last trades live under each account's own key and are written only when that account
 // closes something. Perpl produces tens of thousands of position events a day from a few
-// hundred accounts, and this split is what keeps a half-hourly run inside the free tier's
+// hundred accounts, and this split is what keeps the worker's quarter-hourly run cheap in
 // commands and bandwidth.
+
+import { randomBytes } from "node:crypto";
 
 export const TOPICS = {
   opened: "0x04cc3d2fc73a9dca30eba1d05eca80b1b1216350243580027046f434fed4db18",
@@ -206,6 +208,9 @@ export function statistics(record) {
   };
 }
 
+/// Closed trades a record needs before its score counts in full.
+export const CONFIDENT_TRADES = 50;
+
 /// 0–100. Win rate, profit factor and drawdown against what was won, weighted by how many
 /// trades back them and how much money moved, less a penalty for each liquidation. A lucky
 /// handful of trades, or hundreds of trades worth cents, cannot outrank a real record.
@@ -221,7 +226,7 @@ export function score(record) {
   // one for the price of the taker fee — without pretending to detect it: telling wash
   // trading from real trading needs the counterparty, which these events do not carry.
   const markets = Object.keys(record.markets ?? {}).length;
-  const confidence = Math.min(1, record.n / 20)
+  const confidence = Math.min(1, record.n / CONFIDENT_TRADES)
     * Math.min(1, (record.gp + record.gl) / 250)
     * Math.min(1, record.vol / 25_000)
     * (markets > 1 ? 1 : 0.6);
@@ -265,23 +270,30 @@ export async function indexHistory({ store, hypersync, markets, now = Date.now, 
   const touched = new Set();
   const completed = new Map();
   let events = 0;
+  let failure = null;
 
-  while (cursor < tip && now() < deadline) {
-    const page = await hypersync.query({ from: cursor, to: tip, topics: Object.values(TOPICS) });
-    const timestamps = new Map(page.blocks.map((block) => [Number(block.number), Number(block.timestamp)]));
-    for (const log of page.logs) {
-      const event = decodeEvent(log, timestamps);
-      if (!event) continue;
-      const shard = shardOf(event.account);
-      const record = shards[shard][event.account] ?? emptyRecord();
-      const trade = applyEvent(record, event, markets.get(event.perp));
-      if (trade) completed.set(event.account, [...(completed.get(event.account) ?? []), trade]);
-      shards[shard][event.account] = record;
-      touched.add(shard);
-      events += 1;
+  try {
+    while (cursor < tip && now() < deadline) {
+      const page = await hypersync.query({ from: cursor, to: tip, topics: Object.values(TOPICS) });
+      const timestamps = new Map(page.blocks.map((block) => [Number(block.number), Number(block.timestamp)]));
+      for (const log of page.logs) {
+        const event = decodeEvent(log, timestamps);
+        if (!event) continue;
+        const shard = shardOf(event.account);
+        const record = shards[shard][event.account] ?? emptyRecord();
+        const trade = applyEvent(record, event, markets.get(event.perp));
+        if (trade) completed.set(event.account, [...(completed.get(event.account) ?? []), trade]);
+        shards[shard][event.account] = record;
+        touched.add(shard);
+        events += 1;
+      }
+      if (!(page.nextBlock > cursor)) break;
+      cursor = page.nextBlock;
     }
-    if (!(page.nextBlock > cursor)) break;
-    cursor = page.nextBlock;
+  } catch (error) {
+    // Pages already folded in are kept, so a refusal halfway through a catch-up costs one page.
+    if (cursor === start) throw error;
+    failure = error;
   }
 
   const accounts = [...completed.keys()];
@@ -294,9 +306,34 @@ export async function indexHistory({ store, hypersync, markets, now = Date.now, 
     ]),
     ["hist:cursor", String(cursor)],
     ["hist:leaders", JSON.stringify(leaders(shards))],
+    ...(cursor > start ? [[INDEX_STATUS_KEY, JSON.stringify({ at: now(), block: cursor, behind: tip - cursor })]] : []),
   ], 30 * 24 * 3600);
+  if (failure) throw failure;
   return { from: start, to: cursor, events, accounts: accounts.length, behind: tip - cursor };
 }
+
+/// When the index last moved forward, read by the health check.
+export const INDEX_STATUS_KEY = "hist:advanced";
+export const INDEX_LOCK_KEY = "hist:lock";
+
+/// One run at a time. Each run writes whole shards back, so two at once would drop each
+/// other's events while the cursor moved past them.
+export async function indexWithLock({ store, hypersync, markets, budgetMs, lockSeconds, now = Date.now }) {
+  const token = randomBytes(16).toString("hex");
+  if (!await store.set(INDEX_LOCK_KEY, token, { ex: lockSeconds, nx: true })) return { skipped: true };
+  try {
+    return await indexHistory({ store, hypersync, markets, now, deadline: now() + budgetMs });
+  } finally {
+    try {
+      if (await store.get(INDEX_LOCK_KEY) === token) await store.del(INDEX_LOCK_KEY);
+    } catch {
+      // A lock nobody released expires on its own.
+    }
+  }
+}
+
+/// The index can run on its own HyperSync token, so wallet indexing cannot starve it.
+export const indexToken = () => process.env.HYPERSYNC_INDEX_TOKEN || process.env.HYPERSYNC_TOKEN;
 
 /// The best-scoring accounts with enough trades to mean something.
 export function leaders(shards, limit = 50) {

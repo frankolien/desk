@@ -33,7 +33,7 @@ const PROBLEMS = {
 export const ENDPOINTS = [
   { path: "/api/v1/markets", tier: "default", description: "Every open Perpl market: mark, 24h change and volume, open interest, funding, leverage" },
   { path: "/api/v1/markets/marks", tier: "default", description: "Every market's mark price read off the exchange contract this instant" },
-  { path: "/api/v1/markets/{market}/candles", tier: "default", description: "Exchange candles for a market's asset. ?bar=1m|5m|15m|1H|4H|1D" },
+  { path: "/api/v1/markets/{market}/candles", tier: "default", description: "Perpl's own candles for a market. ?bar=1m|5m|15m|1H|4H|1D" },
   { path: "/api/v1/traders/top", tier: "default", description: "Top traders on Perpl by unrealised PnL. ?limit=1..25" },
   { path: "/api/v1/traders/{address}/history", tier: "expensive", description: "A trader's closed trades and statistics" },
   { path: "/api/v1/identity/{address}", tier: "default", description: "Names and avatars for an address (.nad, nad.fun, ENS, Farcaster)" },

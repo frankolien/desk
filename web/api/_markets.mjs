@@ -109,7 +109,9 @@ export function createMarkets({ fetchImpl = fetch, now = Date.now, readMark = nu
         time: Math.floor(Number(c.t) / 1000), open: price(c.o), high: price(c.h), low: price(c.l), close: price(c.c),
         volume: Number(c.v) / 10 ** COLLATERAL_DECIMALS,
       }))
-      .sort((a, b) => a.time - b.time);
+      .sort((a, b) => a.time - b.time)
+      // The range is inclusive at both ends, so Perpl can answer one more than asked.
+      .slice(-CANDLE_COUNT);
     candleCache.set(key, { at: now(), value });
     return value;
   }

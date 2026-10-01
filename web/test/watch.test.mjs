@@ -180,9 +180,14 @@ test("the first scan sets a baseline, the next one pushes the new trade, and the
   assert.equal(apns.sent[0].record.token, TOKEN);
   assert.deepEqual(JSON.parse(await store.get(`alerts:seen:${WHALE}`)), { time: trades[1].time, hash: trades[1].hash });
 
+  const written = [];
+  const setMany = store.setMany.bind(store);
+  store.setMany = async (entries, ex) => { written.push(...entries.map(([key]) => key)); return setMany(entries, ex); };
   const quiet = await scan(scanArgs);
   assert.deepEqual(quiet.wallets, { watched: 1, events: 0, sent: 0 });
   assert.equal(apns.sent.length, 1);
+  // An unchanged marker is not written again: one command saved per wallet per scan.
+  assert.deepEqual(written.filter((key) => key.startsWith("alerts:seen:")), []);
 });
 
 test("twenty pushes an hour per subscription, then one digest every fifteen minutes", async () => {

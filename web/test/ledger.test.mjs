@@ -130,3 +130,39 @@ test("a deadline stops between blocks and leaves the cursor on the first block n
   assert.equal(result.ledger.cursor, 600);
   assert.equal(result.ledger.positions[FROGE].holding, 100_000);
 });
+
+test("with a quiet window, a run that found nothing skips the write until the stored ledger ages out", async () => {
+  const store = memoryStore();
+  let writes = 0;
+  const set = store.set.bind(store);
+  store.set = async (...args) => { writes += 1; return set(...args); };
+  let tip = 1_000_020;
+  const hypersync = {
+    async height() { return tip; },
+    async raw(query) {
+      if (query.from_block >= 1_000_000) return { logs: [], transactions: [], blocks: [], nextBlock: query.to_block };
+      return {
+        logs: [transfer("0xa", 500, USDC, ME, POOL, 100_000_000n, 0), transfer("0xa", 500, FROGE, POOL, ME, 10n ** 23n, 1)],
+        transactions: [tx("0xa")], blocks: [block(500, 1000)], nextBlock: 1_000_000,
+      };
+    },
+  };
+  const run = (now) => indexWallet(ME, { store, hypersync, price, meta, backfillBlocks: 1_000_000, now: () => now, quietMs: 120_000 });
+  assert.equal((await run(1_000)).written, true);
+  assert.equal(writes, 1);
+
+  tip += 30;
+  const quiet = await run(60_000);
+  assert.deepEqual([quiet.written, quiet.complete, writes], [false, true, 1]);
+  // The stored cursor is behind, but the range it re-reads holds nothing new.
+  assert.equal(JSON.parse(await store.get(`wl:${ME}`)).cursor, 1_000_000);
+
+  assert.equal((await run(130_000)).written, true);
+  assert.equal(writes, 2);
+  assert.equal(JSON.parse(await store.get(`wl:${ME}`)).cursor, 1_000_030);
+  assert.equal(JSON.parse(await store.get(`wl:${ME}`)).positions[FROGE].holding, 100_000);
+
+  // Without the option every run writes, as the rotation and the API expect.
+  await indexWallet(ME, { store, hypersync, price, meta, backfillBlocks: 1_000_000, now: () => 131_000 });
+  assert.equal(writes, 3);
+});

@@ -1,29 +1,40 @@
-import { hypersyncClient } from "../api/_history.mjs";
+import { hypersyncClient, indexWithLock } from "../api/_history.mjs";
 import { HEARTBEAT_KEY, TRACKED_KEY, URGENT_KEY, WATCHED_KEY, indexWallet, ledgerKey } from "../api/_ledger.mjs";
 import { SOLANA, indexSolanaWallet, isSolanaAddress, solanaMetaReader, solanaRpc } from "../api/_solana.mjs";
 import { redisStore } from "../api/_store.mjs";
 import { metaReader, priceReader } from "../api/_wallet.mjs";
-import { selectWallets } from "./queue.mjs";
+import { openMarkets } from "../api/traders.mjs";
+import { indexBackoffMs, selectWallets } from "./queue.mjs";
 
-/// The person at the back, running three loops on Railway with Vercel's env names:
+/// The person at the back, running four loops on Railway with Vercel's env names:
 /// - the fast lane keeps every wallet someone has pushes for at the chain tip, every
 ///   few seconds, so a tracked wallet's buy is known within a block or two;
 /// - the rotation brings every other opened wallet up in bounded rounds, newly followed
 ///   ones first, without starving the rest;
 /// - the scan calls the alert endpoint, which reads followed traders' books, marks and
-///   ledgers and sends what changed. Nothing waits for an outside scheduler.
+///   ledgers and sends what changed;
+/// - the trader index folds Perpl's position events into the records behind scores and
+///   trader histories. Nothing waits for an outside scheduler.
 
 const ROUND_PAUSE_MS = Number(process.env.WORKER_PAUSE_MS || 90_000);
 const FAST_PAUSE_MS = Number(process.env.WORKER_FAST_MS || 12_000);
-const SCAN_PAUSE_MS = Number(process.env.WORKER_SCAN_MS || 15_000);
+const SCAN_PAUSE_MS = Number(process.env.WORKER_SCAN_MS || 60_000);
+const INDEX_PAUSE_MS = Number(process.env.WORKER_INDEX_MS || 15 * 60_000);
 const PER_WALLET_BUDGET_MS = 20_000;
 const FAST_BUDGET_MS = 8_000;
 const BACKFILL_BLOCKS = 45 * 216_000;
 /// A wallet brought to the tip this recently is left alone by the rotation; HyperSync's
-/// free tier is shared with the alerts index and rate-limits when asked too often.
+/// free tier rate-limits when asked too often.
 const FRESH_MS = 5 * 60_000;
-const FAST_FRESH_MS = 10_000;
+/// The fast lane writes a ledger that found nothing new only this often.
+const FAST_QUIET_MS = 2 * 60_000;
+/// The scan rewrites the watched list about once a minute, so reading it more often is waste.
+const WATCHED_REFRESH_MS = 60_000;
 const BACKOFF_MS = 60_000;
+/// A run that ends this many blocks short of the tip (about ten minutes) goes again soon.
+const INDEX_CATCHUP_BLOCKS = 1_500;
+const INDEX_CATCHUP_MS = 15_000;
+const INDEX_LOCK_S = 120;
 let queueCursor = 0;
 
 const store = redisStore();
@@ -33,6 +44,8 @@ if (!store || !hypersync) {
   console.error("worker: KV_REST_API_URL, KV_REST_API_TOKEN and HYPERSYNC_TOKEN are required");
   process.exit(1);
 }
+const ownIndexToken = Boolean(process.env.HYPERSYNC_INDEX_TOKEN);
+const indexHypersync = ownIndexToken ? hypersyncClient({ token: process.env.HYPERSYNC_INDEX_TOKEN }) : hypersync;
 if (!process.env.CRON_SECRET) console.error("worker: CRON_SECRET is missing, so alerts will not be scanned");
 
 /// Candles come through Desk's own API rather than OKX directly, so the OKX key lives in
@@ -47,10 +60,19 @@ async function fetchCandles(path, params) {
 }
 
 let stopping = false;
-process.on("SIGTERM", () => { stopping = true; });
-process.on("SIGINT", () => { stopping = true; });
+const sleepers = new Set();
+function stop() {
+  stopping = true;
+  for (const wake of [...sleepers]) wake();
+}
+process.on("SIGTERM", stop);
+process.on("SIGINT", stop);
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms) => new Promise((resolve) => {
+  const wake = () => { clearTimeout(timer); sleepers.delete(wake); resolve(); };
+  const timer = setTimeout(wake, ms);
+  sleepers.add(wake);
+});
 
 const readers = {
   price: priceReader({ store, fetchCandles }),
@@ -67,10 +89,10 @@ function exclusive(work) {
   return run;
 }
 
-function indexOne(wallet, budgetMs) {
+function indexOne(wallet, budgetMs, quietMs = 0) {
   return exclusive(() => (isSolanaAddress(wallet)
     ? indexSolanaWallet(wallet, { store, rpc: solana, price: readers.solPrice, meta: readers.solMeta, paceMs: 250, deadline: Date.now() + budgetMs })
-    : indexWallet(wallet, { store, hypersync, price: readers.price, meta: readers.meta, backfillBlocks: BACKFILL_BLOCKS, deadline: Date.now() + budgetMs })));
+    : indexWallet(wallet, { store, hypersync, price: readers.price, meta: readers.meta, backfillBlocks: BACKFILL_BLOCKS, deadline: Date.now() + budgetMs, quietMs })));
 }
 
 let backoffUntil = 0;
@@ -81,6 +103,7 @@ function noteFailure(wallet, error) {
 
 async function rotation() {
   const [allWallets, urgent] = await Promise.all([store.smembers(TRACKED_KEY), store.smembers(URGENT_KEY)]);
+  const pending = new Set(urgent);
   const selected = selectWallets(allWallets, urgent, queueCursor);
   queueCursor = selected.nextCursor;
   const wallets = selected.wallets;
@@ -92,14 +115,14 @@ async function rotation() {
     if (Date.now() < backoffUntil) break;
     const known = stored[index] ? JSON.parse(stored[index]) : null;
     if (known && Date.now() - known.indexedAt < FRESH_MS) {
-      await store.srem(URGENT_KEY, wallet);
+      if (pending.has(wallet)) await store.srem(URGENT_KEY, wallet);
       continue;
     }
     try {
       const result = await indexOne(wallet, PER_WALLET_BUDGET_MS);
       indexed += 1;
       if (!result.complete) behind += 1;
-      if (result.complete) await store.srem(URGENT_KEY, wallet);
+      if (result.complete && pending.has(wallet)) await store.srem(URGENT_KEY, wallet);
     } catch (error) {
       noteFailure(wallet, error);
     }
@@ -109,24 +132,29 @@ async function rotation() {
   await store.set(HEARTBEAT_KEY, JSON.stringify({ at: Date.now(), wallets: allWallets.length, indexed, behind }), { ex: 3600 }).catch(() => {});
 }
 
+let watchedCache = { at: 0, wallets: [] };
+async function watchedWallets() {
+  if (Date.now() - watchedCache.at < WATCHED_REFRESH_MS) return watchedCache.wallets;
+  const raw = await store.get(WATCHED_KEY).catch(() => undefined);
+  if (raw === undefined) return watchedCache.wallets;
+  watchedCache = { at: Date.now(), wallets: raw ? JSON.parse(raw) : [] };
+  return watchedCache.wallets;
+}
+
 async function fastLane() {
-  const raw = await store.get(WATCHED_KEY).catch(() => null);
-  const watched = raw ? JSON.parse(raw) : [];
+  const watched = await watchedWallets();
   if (watched.length === 0) return;
-  const stored = await store.mget(watched.map(ledgerKey));
-  let indexed = 0;
-  for (const [index, wallet] of watched.entries()) {
+  let written = 0;
+  for (const wallet of watched) {
     if (stopping || Date.now() < backoffUntil) break;
-    const known = stored[index] ? JSON.parse(stored[index]) : null;
-    if (known && Date.now() - known.indexedAt < FAST_FRESH_MS) continue;
     try {
-      await indexOne(wallet, FAST_BUDGET_MS);
-      indexed += 1;
+      const result = await indexOne(wallet, FAST_BUDGET_MS, FAST_QUIET_MS);
+      if (result.written !== false) written += 1;
     } catch (error) {
       noteFailure(wallet, error);
     }
   }
-  if (indexed) console.log(`worker: fast lane ${indexed}/${watched.length}`);
+  if (written) console.log(`worker: fast lane wrote ${written}/${watched.length}`);
 }
 
 async function scanAlerts() {
@@ -140,15 +168,41 @@ async function scanAlerts() {
   if (sent) console.log(`worker: scan sent ${sent} (traders ${round.sent ?? 0}, wallets ${round.wallets?.sent ?? 0}, prices ${round.prices?.sent ?? 0})`);
 }
 
+let indexFailures = 0;
+/// Returns how long to wait before the next run: soon while catching up, longer and longer
+/// while HyperSync or Redis keeps refusing.
+async function traderIndex() {
+  // Sharing the wallets' token means sharing their turn and their backoff too.
+  if (!ownIndexToken && Date.now() < backoffUntil) return BACKOFF_MS;
+  try {
+    const markets = await openMarkets();
+    const run = () => indexWithLock({ store, hypersync: indexHypersync, markets, budgetMs: ownIndexToken ? 50_000 : 20_000, lockSeconds: INDEX_LOCK_S });
+    const report = await (ownIndexToken ? run() : exclusive(run));
+    indexFailures = 0;
+    // Someone else holds the lock, perhaps a run cut short by a redeploy; it expires soon.
+    if (report.skipped) return INDEX_LOCK_S * 1000;
+    console.log(`worker: trader index ${report.events} events, ${report.accounts} accounts, ${report.behind} blocks behind`);
+    return report.behind > INDEX_CATCHUP_BLOCKS ? INDEX_CATCHUP_MS : INDEX_PAUSE_MS;
+  } catch (error) {
+    indexFailures += 1;
+    if (!ownIndexToken && /429/.test(error.message)) backoffUntil = Date.now() + BACKOFF_MS;
+    const wait = indexBackoffMs(indexFailures);
+    console.error(`worker: trader index failed (${error.message}), trying again in ${Math.round(wait / 1000)} s`);
+    return wait;
+  }
+}
+
+/// Runs `work` every `pauseMs`, or waits as long as `work` asks when it returns a number.
 async function loop(name, work, pauseMs) {
   while (!stopping) {
     const started = Date.now();
+    let asked;
     try {
-      await work();
+      asked = await work();
     } catch (error) {
       console.error(`worker: ${name} failed: ${error.message}`);
     }
-    await sleep(Math.max(1_000, pauseMs - (Date.now() - started)));
+    await sleep(typeof asked === "number" ? asked : Math.max(1_000, pauseMs - (Date.now() - started)));
   }
 }
 
@@ -156,5 +210,6 @@ await Promise.all([
   loop("rotation", rotation, ROUND_PAUSE_MS),
   loop("fast lane", fastLane, FAST_PAUSE_MS),
   loop("scan", scanAlerts, SCAN_PAUSE_MS),
+  loop("trader index", traderIndex, INDEX_PAUSE_MS),
 ]);
 console.log("worker: stopped");

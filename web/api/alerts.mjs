@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 import { apnsClient, isDeadToken } from "./_apns.mjs";
-import { hypersyncClient, indexHistory } from "./_history.mjs";
+import { hypersyncClient, indexToken, indexWithLock } from "./_history.mjs";
 import { TRACKED_KEY, URGENT_KEY, WATCHED_KEY, ledgerKey } from "./_ledger.mjs";
 import { createMarkets } from "./_markets.mjs";
 import { MAX_TARGETS, parseTargets, priceDeliveries } from "./_prices.mjs";
@@ -319,7 +319,8 @@ async function walletDeliveries({ store, watchers, now }) {
   addresses.forEach((address, index) => {
     if (!ledgers[index]) return;
     const ledger = JSON.parse(ledgers[index]);
-    markers.push([seenKey(address), JSON.stringify(newestMarker(ledger))]);
+    const marker = JSON.stringify(newestMarker(ledger));
+    if (marker !== seen[index]) markers.push([seenKey(address), marker]);
     // The first reading is the baseline, as with trader books.
     if (seen[index] == null) return;
     const previous = JSON.parse(seen[index]);
@@ -476,17 +477,14 @@ export function createHandler(resolve) {
     if (req.query?.job === "index") {
       if (!authorized(req, deps.secret)) return res.status(401).json({ error: "Unauthorized." });
       if (!deps.store || !deps.hypersync) return res.status(503).json({ error: "History indexing isn't configured on this server." });
-      const historyToken = lockToken();
-      if (!await deps.store.set("hist:lock", historyToken, { ex: 58, nx: true })) return res.status(202).json({ skipped: true });
+      // The Railway worker runs the index; this stays for a manual run when it is down.
       try {
-        const report = await indexHistory({
-          store: deps.store, hypersync: deps.hypersync, markets: await deps.markets(), deadline: Date.now() + 40_000,
+        const report = await indexWithLock({
+          store: deps.store, hypersync: deps.hypersync, markets: await deps.markets(), budgetMs: 40_000, lockSeconds: 58,
         });
-        return res.status(200).json(report);
+        return res.status(report.skipped ? 202 : 200).json(report);
       } catch (error) {
         return res.status(502).json({ error: "History could not be indexed.", detail: String(error?.message ?? error) });
-      } finally {
-        await release(deps.store, "hist:lock", historyToken);
       }
     }
 
@@ -630,7 +628,7 @@ let production;
 export default createHandler(() => (production ??= {
   store: redisStore(),
   apns: apnsClient(),
-  hypersync: hypersyncClient(),
+  hypersync: hypersyncClient({ token: indexToken() }),
   chain: chainReader(),
   markets: () => openMarkets(),
   quotes: (() => {

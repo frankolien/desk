@@ -10,7 +10,8 @@ export const MOVE_THRESHOLDS = [0.05, 0.1, 0.2];
 const LEVEL_QUIET_S = 6 * 3600;
 const MARK_TTL_S = 7 * 86400;
 
-export const markKey = (name) => `alerts:px:${name}`;
+/// Every market's last mark in one key: one read and one write a scan, not one per market.
+export const MARKS_KEY = "alerts:marks";
 export const levelKey = (name, level, direction) => `alerts:pxlevel:${name}:${level}:${direction}`;
 export const moveKey = (name, day, direction, threshold) => `alerts:pxmove:${name}:${day}:${direction}${Math.round(threshold * 100)}`;
 
@@ -118,17 +119,19 @@ export function wantsMarket(record, name) {
 /// threshold and direction.
 export async function priceDeliveries({ store, quotes, subscribers, now = Date.now() }) {
   if (!quotes?.length) return { deliveries: [], events: 0, changed: [] };
-  const names = quotes.map((q) => q.name);
-  const previous = await store.mget(names.map(markKey));
+  let stored = {};
+  try { stored = JSON.parse(await store.get(MARKS_KEY) ?? "{}") ?? {}; } catch { /* a baseline round */ }
+  // A market missing from one scan keeps its last mark for a week.
+  const previous = Object.fromEntries(Object.entries(stored).filter(([, last]) => now - (last?.at ?? 0) < MARK_TTL_S * 1000));
   const day = new Date(now).toISOString().slice(0, 10);
   const deliveries = [];
   let events = 0;
-  const marks = [];
+  const marks = { ...previous };
   // Subscribers whose targets fired, with the record they should be saved as.
   const changed = new Map();
-  for (const [index, quote] of quotes.entries()) {
-    marks.push([markKey(quote.name), JSON.stringify({ mark: quote.mark, at: now })]);
-    const last = previous[index] ? JSON.parse(previous[index]) : null;
+  for (const quote of quotes) {
+    marks[quote.name] = { mark: quote.mark, at: now };
+    const last = previous[quote.name] ?? null;
     // The first reading is the baseline; a day already half over is old news.
     if (!last) continue;
     for (const subscriber of subscribers) {
@@ -155,6 +158,6 @@ export async function priceDeliveries({ store, quotes, subscribers, now = Date.n
       }
     }
   }
-  await store.setMany(marks, MARK_TTL_S);
+  await store.set(MARKS_KEY, JSON.stringify(marks), { ex: MARK_TTL_S });
   return { deliveries, events, changed: [...changed] };
 }
