@@ -63,6 +63,7 @@ struct CopyTradeSheet: View {
         return cents > 0 ? String(format: "%.2f", cents / 100) : nil
     }
     @AppStorage("desk.lastCopyAmount") private var lastCopyAmount = ""
+    @AppStorage("desk.leverageExplainerSeen") private var leverageUnderstood = false
     private var settled: Bool { submitted && session.order.outcome == .settled }
     private var busyHere: Bool { submitted && session.isBusy }
     private var priceIsFresh: Bool { !market.freshness.freezesDigits }
@@ -109,10 +110,11 @@ struct CopyTradeSheet: View {
             }
 
             if !settled {
-                if quote != nil, priceIsFresh {
-                    Label("Face ID confirms this exact order after the hold.", systemImage: "faceid")
+                if let quote, priceIsFresh, leverage > 1, !leverageUnderstood {
+                    Text("At \(leverage)×, a \(String(format: "%.2f%%", Double(quote.liquidationDistanceMicros) / 10_000)) move against you closes it. No margin call.")
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .foregroundStyle(DeskColor.action.color)
+                        .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
                 HoldToConfirm(
@@ -358,6 +360,7 @@ struct CopyTradeSheet: View {
             protection: nil)
         submitted = true
         lastCopyAmount = amount
+        if leverage > 1 { leverageUnderstood = true }
         await session.place(draft, in: listed, origin: .copySheet(market: listed.id))
     }
 }

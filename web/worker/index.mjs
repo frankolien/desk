@@ -169,11 +169,13 @@ async function scanAlerts() {
 }
 
 let indexFailures = 0;
+const INDEX_CATCHUP_RETRY_MS = 60_000;
 /// Returns how long to wait before the next run: soon while catching up, longer and longer
 /// while HyperSync or Redis keeps refusing.
 async function traderIndex() {
   // Sharing the wallets' token means sharing their turn and their backoff too.
   if (!ownIndexToken && Date.now() < backoffUntil) return BACKOFF_MS;
+  const before = await store.get("hist:cursor").catch(() => null);
   try {
     const markets = await openMarkets();
     const run = () => indexWithLock({ store, hypersync: indexHypersync, markets, budgetMs: ownIndexToken ? 50_000 : 20_000, lockSeconds: INDEX_LOCK_S });
@@ -184,9 +186,12 @@ async function traderIndex() {
     console.log(`worker: trader index ${report.events} events, ${report.accounts} accounts, ${report.behind} blocks behind`);
     return report.behind > INDEX_CATCHUP_BLOCKS ? INDEX_CATCHUP_MS : INDEX_PAUSE_MS;
   } catch (error) {
-    indexFailures += 1;
+    // A run that saved pages before HyperSync refused is progress, not a failure to back off from.
+    const after = await store.get("hist:cursor").catch(() => null);
+    const advanced = after !== null && (before === null || Number(after) > Number(before));
+    indexFailures = advanced ? 0 : indexFailures + 1;
     if (!ownIndexToken && /429/.test(error.message)) backoffUntil = Date.now() + BACKOFF_MS;
-    const wait = indexBackoffMs(indexFailures);
+    const wait = advanced ? INDEX_CATCHUP_RETRY_MS : indexBackoffMs(indexFailures);
     console.error(`worker: trader index failed (${error.message}), trying again in ${Math.round(wait / 1000)} s`);
     return wait;
   }

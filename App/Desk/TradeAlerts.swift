@@ -136,6 +136,12 @@ final class TradeAlerts {
     /// Re-registers on launch and on every return to the foreground, which also refreshes
     /// the server's copy before it expires and catches up on anything unsynced.
     func resume() async {
+        // Before 1 Oct a missing setting meant on, so the server may still push prices to this
+        // install. Say off once, explicitly, so it stops.
+        if UserDefaults.standard.object(forKey: Self.pricesKey) == nil {
+            UserDefaults.standard.set(false, forKey: Self.pricesKey)
+            if deviceToken != nil || lastSyncedAt != nil { scheduleSync() }
+        }
         await refreshPermission()
         // A silent wake needs a token but no permission, so copying registers regardless.
         let wantsAlerts = !alerted.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty || !targets.isEmpty
@@ -246,6 +252,7 @@ final class TradeAlerts {
     /// left all of it in place and being renewed.
     func signOut() async {
         let hadSubscription = !alerted.isEmpty || !copying.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty || !targets.isEmpty
+            || deviceToken != nil || lastSyncedAt != nil
         alerted = []
         copying = []
         targets = []

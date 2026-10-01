@@ -189,20 +189,10 @@ struct TicketSheet: View {
                     VStack(spacing: 12) {
                         HStack(alignment: .top, spacing: 12) {
                             figure("Your margin", quote?.margin.display() ?? Unavailable.text)
-                            // A 1x long can't be liquidated; a 1x short can, if the price roughly doubles.
-                            if leverage == 1 && side == .up {
-                                // A default of 1× is invisible unless it is said out loud.
-                                figure("Liquidation", "None",
-                                       detail: "No leverage", tint: DeskColor.rise,
-                                       alignment: .trailing)
-                            } else {
-                                figure("Liquidation",
-                                       quote.map { liquidationText($0) } ?? Unavailable.text,
-                                       // An estimate, and said to be one: the real figure
-                                       // depends on the fill.
-                                       detail: quote.map { "est · \(percent($0.liquidationDistanceMicros)) away" },
-                                       tint: DeskColor.fall, alignment: .trailing)
-                            }
+                            figure("Liquidation",
+                                   quote.map { liquidationText($0) } ?? Unavailable.text,
+                                   detail: quote.map { "est · \(percent($0.liquidationDistanceMicros)) away" },
+                                   tint: DeskColor.fall, alignment: .trailing)
                         }
                         HStack(alignment: .top, spacing: 12) {
                             figure("Fee", quote?.fee.display(fractionDigits: 4) ?? Unavailable.text)

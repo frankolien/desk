@@ -132,6 +132,7 @@ final class CopyTrader {
         log = Self.load([CopyLogEntry].self, key: "desk.copy.log", network: network) ?? []
         open = Self.load([OpenCopy].self, key: "desk.copy.open", network: network) ?? []
         basket = Self.load(CopyBasket.self, key: "desk.copy.basket", network: network)
+        deferredCloses = Self.load([DeferredClose].self, key: "desk.copy.deferred", network: network) ?? []
         isPaused = AutoCopySwitch.isPaused
         stream.onMove = { [weak self] account in
             guard let self, self.accounts[account] != nil else { return }
@@ -323,7 +324,11 @@ final class CopyTrader {
     }
 
     /// Trader closes that came while the person's book was unread, closed once it is.
-    private var deferredCloses: [(trader: String, symbol: String, verb: String)] = []
+    /// Saved with the copies, so a relaunch or a network round trip still closes them.
+    private struct DeferredClose: Codable, Equatable { let trader: String; let symbol: String; let verb: String }
+    private var deferredCloses: [DeferredClose] = [] {
+        didSet { Self.save(deferredCloses, key: "desk.copy.deferred", network: network) }
+    }
 
     private func cycle(seenAt: Date, model: AppModel, market: MarketModel, session: TradingSession) async {
         await rotateBasketIfDue()
@@ -755,7 +760,7 @@ final class CopyTrader {
         }
         guard model.trading.positions.value != nil else {
             guard !deferredCloses.contains(where: { $0.trader == trader.lowercased() && $0.symbol == symbol }) else { return }
-            deferredCloses.append((trader.lowercased(), symbol, verb))
+            deferredCloses.append(DeferredClose(trader: trader.lowercased(), symbol: symbol, verb: verb))
             return note(.failed, "They \(verb), but Desk couldn't read your positions yet. It will close your copy once it can.")
         }
         guard let position = model.openPositions.first(where: { candidate in

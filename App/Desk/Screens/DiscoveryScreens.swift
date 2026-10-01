@@ -347,7 +347,7 @@ struct MarketSearchScreen: View {
                             }
                         }
                         .padding(.top, 12)
-                    } else if discovery.isLoading {
+                    } else if Showcase.spotTrading, discovery.isLoading {
                         HStack(spacing: 10) {
                             ProgressView()
                             Text(query.isEmpty ? "Finding what’s moving…" : "Searching across networks…")
@@ -356,7 +356,7 @@ struct MarketSearchScreen: View {
                         .foregroundStyle(DeskColor.nightMuted.color)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 28)
-                    } else if let error = discovery.errorText {
+                    } else if Showcase.spotTrading, let error = discovery.errorText {
                         ContentUnavailableView("Discovery unavailable", systemImage: "wifi.exclamationmark", description: Text(error))
                             .frame(minHeight: 150)
                     }
@@ -399,8 +399,8 @@ struct MarketSearchScreen: View {
                         .padding(.top, 20)
                     }
 
-                    Text("Perpl \(model.network.shortName.lowercased()) lists these \(market.allMarkets.count) perpetual markets. "
-                         + "Discovery tokens from other networks are separate from tradeable Perpl contracts.")
+                    Text("Perpl \(model.network.shortName.lowercased()) lists these \(market.allMarkets.count) perpetual markets."
+                         + (Showcase.spotTrading ? " Discovery tokens from other networks are separate from tradeable Perpl contracts." : ""))
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color.opacity(0.8))
                         .fixedSize(horizontal: false, vertical: true)
@@ -410,7 +410,7 @@ struct MarketSearchScreen: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 24)
             }
-            .refreshable { await discovery.refresh() }
+            .refreshable { if Showcase.spotTrading { await discovery.refresh() } }
             }
             .toolbar(.hidden, for: .navigationBar)
             // The field floats above the tab bar, where a thumb already is, rather than
@@ -451,8 +451,8 @@ struct MarketSearchScreen: View {
                     .navigationTransition(.zoom(sourceID: "spot-\(token.id)", in: navigationSpace))
                     .toolbar(.hidden, for: .tabBar)
             }
-            .task { await discovery.run() }
-            .task(id: query) { await discovery.search(query) }
+            .task { if Showcase.spotTrading { await discovery.run() } }
+            .task(id: query) { if Showcase.spotTrading { await discovery.search(query) } }
             .task(id: query) {
                 person = nil
                 nameWasNotFound = false
@@ -1351,8 +1351,12 @@ private struct SpotTokenDetailScreen: View {
                 Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
             }.perpSearchGlass(in: Circle())
             Spacer()
-            Button { tradeSide = "Buy" } label: { Text("Buy").frame(width: 78, height: 44) }.perpSearchGlass(in: Capsule())
-            Button { tradeSide = "Sell" } label: { Text("Sell").frame(width: 78, height: 44) }.perpSearchGlass(in: Capsule())
+            if Showcase.spotTrading {
+                Button { tradeSide = "Buy" } label: { Text("Buy").frame(width: 78, height: 44) }.perpSearchGlass(in: Capsule())
+                Button { tradeSide = "Sell" } label: { Text("Sell").frame(width: 78, height: 44) }.perpSearchGlass(in: Capsule())
+            } else {
+                Text("View only").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+            }
         }.font(.headline).foregroundStyle(.white)
     }
 }

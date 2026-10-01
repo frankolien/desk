@@ -24,6 +24,7 @@ final class AppModel {
     private(set) var address: EthereumAddress?
     private(set) var signInProblem: String?
     private(set) var isWorking = false
+    private(set) var isSwitchingNetwork = false
 
     /// Collateral held at the exchange, backing positions.
     ///
@@ -537,7 +538,8 @@ final class AppModel {
     func switchNetwork(to next: DeskNetwork) async -> Bool {
         guard next != network, !isWorking else { return false }
         isWorking = true
-        defer { isWorking = false }
+        isSwitchingNetwork = true
+        defer { isWorking = false; isSwitchingNetwork = false }
         balancePoller?.cancel()
         await trading.abandon()
         hasTradingAccount = false
@@ -1084,6 +1086,11 @@ final class AppModel {
         // subscription, the follow list, the nicknames, and the glance the widget draws.
         await TradeAlerts.shared.signOut()
         UserDefaults.standard.removeObject(forKey: "desk.followedTraders")
+        // The next account on this phone inherits none of this one's copying or tracking.
+        TrackedWallets.shared.forgetAll()
+        for key in UserDefaults.standard.dictionaryRepresentation().keys where key.hasPrefix("desk.copy.") {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
         AutoCopyGlance.forget()
         PortfolioGlance.forget()
         WidgetCenter.shared.reloadTimelines(ofKind: AutoCopyControl.widgetKind)

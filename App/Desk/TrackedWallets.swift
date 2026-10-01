@@ -76,6 +76,12 @@ final class TrackedWallets {
         (32...44).contains(address.count) && address.allSatisfy { Self.base58.contains($0) }
     }
 
+    /// On sign-out, after the alert subscription is gone, so nothing syncs.
+    func forgetAll() {
+        list = []
+        UserDefaults.standard.removeObject(forKey: Self.key)
+    }
+
     private func persist() {
         if let data = try? JSONEncoder().encode(list) { UserDefaults.standard.set(data, forKey: Self.key) }
         TradeAlerts.shared.trackingChanged()

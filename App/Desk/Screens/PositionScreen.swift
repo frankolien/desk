@@ -19,6 +19,7 @@ struct PositionScreen: View {
     @State private var tab: PositionTab = .positions
     /// Which position the screen is showing. Starts at the one that was tapped.
     @State private var focusedID: Int64?
+    @State private var focusedLong: Bool?
 
     private var activeID: Int64 { focusedID ?? position.positionID }
 
@@ -53,6 +54,11 @@ struct PositionScreen: View {
             }
             // Dismissal lives in the heading instead.
             .toolbar(.hidden, for: .navigationBar)
+            .onChange(of: isClosed) { _, closed in
+                guard closed else { return }
+                showsClose = false
+                showsProtection = false
+            }
             .sheet(isPresented: $showsClose) {
                 if let figures, let selected = market.market {
                     MarketCloseSheet(
@@ -184,6 +190,7 @@ struct PositionScreen: View {
                         figures: itsFigures, symbol: itsMarket.symbol, isStale: stale
                     ) {
                         focusedID = held.positionID
+                        focusedLong = held.side == .long
                         market.select(itsMarket)
                         Task { await session.selectMarket(itsMarket) }
                     }
@@ -461,7 +468,7 @@ struct PositionScreen: View {
                     .foregroundStyle(DeskColor.rise.color)
                 Text("Position closed")
                     .font(.system(size: 24, weight: .bold, design: .rounded))
-                Text("\(position.side == .long ? "Long" : "Short") \(market.symbol)")
+                Text("\((trade?.isLong ?? focusedLong ?? (position.side == .long)) ? "Long" : "Short") \(market.symbol)")
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
                 if let pnl {
@@ -469,7 +476,7 @@ struct PositionScreen: View {
                         .font(.system(size: 34, weight: .bold, design: .rounded).monospacedDigit())
                         .foregroundStyle((pnl.isNegative ? DeskColor.fall : DeskColor.rise).color)
                         .padding(.top, 6)
-                    Text("Realised, after fees and funding")
+                    Text("Realised PnL, as Perpl reports it")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
                 }
@@ -569,30 +576,52 @@ private struct MarketCloseSheet: View {
         }
     }
 
-    /// The average exit price in raw units: walked through Perpl's book up to the close's
-    /// slippage bound when the book is live, otherwise the mark.
-    private var exitRaw: Double? {
-        guard let closeSize else { return nil }
+    /// What the book holds for this close within its slippage bound; nil when the book isn't live.
+    private var bookFill: OrderBook.FillEstimate? {
+        guard let closeSize, let book, book.isReady, (book.spreadRaw ?? 1) > 0 else { return nil }
         let mark = Double(figures.mark.raw)
-        guard let book, book.isReady, (book.spreadRaw ?? 1) > 0 else { return mark }
         let selling = figures.side == .long
-        let bps = Double(min(50, market.maxMarketSlippageBps))
-        let bound = mark * (1 + (selling ? -bps : bps) / 10_000)
+        let bound = mark * (1 + (selling ? -slippageBps : slippageBps) / 10_000)
         return book.estimateFill(buying: !selling, sizeRaw: closeSize.raw,
-                                 limitRaw: Int64(bound.rounded(selling ? .up : .down))).averagePriceRaw ?? mark
+                                 limitRaw: Int64(bound.rounded(selling ? .up : .down)))
+    }
+
+    private var slippageBps: Double { Double(min(50, market.maxMarketSlippageBps)) }
+
+    /// The part that fills: all of it at the mark when there's no live book, otherwise only
+    /// what the book holds within the bound, since the rest is cancelled.
+    private var fillingRaw: Int64? {
+        guard let closeSize else { return nil }
+        guard let bookFill else { return closeSize.raw }
+        return bookFill.averagePriceRaw == nil ? closeSize.raw : bookFill.filledRaw
+    }
+
+    private var exitRaw: Double? {
+        guard closeSize != nil else { return nil }
+        return bookFill?.averagePriceRaw ?? Double(figures.mark.raw)
+    }
+
+    private var thinBookLine: String? {
+        guard let bookFill, let closeSize, !bookFill.isComplete else { return nil }
+        let limit = String(format: "%.2f%%", slippageBps / 100)
+        guard bookFill.averagePriceRaw != nil, let held = market.size(bookFill.filledRaw) else {
+            return "Nothing on the book within \(limit). This close may not fill."
+        }
+        return "Only \(held.display(fractionDigits: held.decimals)) of \(closeSize.display(fractionDigits: closeSize.decimals)) \(market.symbol) would close within \(limit). The rest stays open."
     }
 
     /// What closing this part returns, in AUSD: its share of the collateral plus the PnL
     /// at the estimated exit, less the taker fee.
     private var estimate: (back: Money?, pnl: Money?, fee: Money?, exit: String)? {
-        guard let closeSize, let exitRaw else { return nil }
+        guard let closeSize, let exitRaw, let fillingRaw else { return nil }
         let priceScale = pow(10, Double(figures.mark.decimals))
-        let size = Double(closeSize.raw) / pow(10, Double(closeSize.decimals))
+        let size = Double(fillingRaw) / pow(10, Double(closeSize.decimals))
         let exit = exitRaw / priceScale
         let entry = Double(figures.entry.raw) / pow(10, Double(figures.entry.decimals))
         let pnl = (figures.side == .long ? exit - entry : entry - exit) * size
         let fee = exit * size * Double(market.config.takerFeeMicros) / 1_000_000
-        let share = Double(figures.collateral.raw) / 1_000_000 * Double(percentage) / 100
+        let share = figures.size.raw > 0
+            ? Double(figures.collateral.raw) / 1_000_000 * Double(fillingRaw) / Double(figures.size.raw) : 0
         func money(_ value: Double) -> Money? { Money(raw: Int64((value * 1_000_000).rounded())) }
         let exitText = Price(raw: Int64(exitRaw.rounded()), decimals: figures.mark.decimals)?
             .display(fractionDigits: figures.mark.decimals) ?? Unavailable.text
@@ -635,7 +664,7 @@ private struct MarketCloseSheet: View {
             VStack(spacing: 10) {
                 ValueRow(label: "Closing", value: (closeSize?.display(fractionDigits: figures.size.decimals) ?? Unavailable.text) + " " + market.symbol)
                 ValueRow(label: "Est. exit", value: estimate?.exit ?? Unavailable.text,
-                         detail: book == nil ? "at mark" : "from the live book")
+                         detail: bookFill?.averagePriceRaw == nil ? "at mark" : "from the live book")
                 ValueRow(label: "PnL on this part",
                          value: estimate?.pnl.map { ($0.isNegative ? "" : "+") + $0.display() + " AUSD" } ?? Unavailable.text,
                          tint: estimate?.pnl?.isNegative == true ? DeskColor.fall : DeskColor.rise)
@@ -643,6 +672,13 @@ private struct MarketCloseSheet: View {
             }
             .padding(16).background(DeskColor.nightChip.color, in: RoundedRectangle(cornerRadius: 18))
             Spacer()
+            if let thinBookLine {
+                Text(thinBookLine)
+                    .font(DeskType.caption)
+                    .foregroundStyle(DeskColor.action.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if session.hasFailed, closingHere, let reason = session.statusText {
                 Text(reason)
                     .font(DeskType.caption)

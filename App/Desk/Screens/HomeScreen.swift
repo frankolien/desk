@@ -213,7 +213,10 @@ struct HomeScreen: View {
                 .padding(.top, 4)
                 .padding(.bottom, 116)
             }
-            .refreshable { await model.refreshBalances(); await market.refreshNow(); await spot.refresh() }
+            .refreshable {
+                await model.refreshBalances(); await market.refreshNow()
+                if Showcase.spotTrading { await spot.refresh() }
+            }
         }
         #if DEBUG
         .task {
@@ -251,7 +254,7 @@ struct HomeScreen: View {
             }
         }
         #endif
-        .task(id: model.address) { await spot.run(for: model.address) }
+        .task(id: model.address) { if Showcase.spotTrading { await spot.run(for: model.address) } }
         .task(id: model.address) {
             if let address = model.address { await IdentityDirectory.shared.resolve([address.checksummed]) }
         }
@@ -443,22 +446,28 @@ struct HomeScreen: View {
     }
 
     /// The change over the chosen window when the log has it; the open PnL otherwise.
+    /// AUSD, like the total above it, unless the display currency is USD.
+    private func captionMoney(_ money: Money) -> String {
+        guard DisplayCurrency.shared.code != "USD" else { return DisplayCurrency.shared.format(money, signed: true) }
+        return (money.isNegative ? "" : "+") + money.display() + " AUSD"
+    }
+
     private var portfolioCaption: some View {
         HStack(spacing: 6) {
             if hidesBalance {
                 Text("Hidden").foregroundStyle(DeskColor.nightMuted.color)
             } else if let change = chartChange {
-                Text(DisplayCurrency.shared.format(change.money, signed: true) + String(format: " (%+.2f%%)", change.percent))
+                Text(captionMoney(change.money) + String(format: " (%+.2f%%)", change.percent))
                     .foregroundStyle((change.money.isNegative ? DeskColor.fall : DeskColor.rise).color)
                 Text(showsLastActivity ? "last activity" : range.rawValue)
                     .foregroundStyle(DeskColor.nightMuted.color)
             } else if (usesPnLHistoryChart || usesTradeHistoryChart), let pnl = totalTradingPnL {
-                Text(DisplayCurrency.shared.format(pnl, signed: true))
+                Text(captionMoney(pnl))
                     .foregroundStyle((pnl.isNegative ? DeskColor.fall : DeskColor.rise).color)
                 Text(usesPnLHistoryChart ? "P&L history" : "trade history")
                     .foregroundStyle(DeskColor.nightMuted.color)
             } else if let pnl = totalPositionPnL {
-                Text(DisplayCurrency.shared.format(pnl, signed: true))
+                Text(captionMoney(pnl))
                     .foregroundStyle((pnl.isNegative ? DeskColor.fall : DeskColor.rise).color)
                 Text("open PnL").foregroundStyle(DeskColor.nightMuted.color)
             } else {
@@ -558,15 +567,17 @@ struct HomeScreen: View {
     /// a switch to mainnet lands here rather than back at onboarding.
     private var setupCard: some View {
         let mainnet = model.network.holdsRealFunds
+        let returning = model.hasDesk.value == true
         return Button(action: onSetup) {
             HStack(spacing: 12) {
                 DeskBrandMark(size: 34)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Start trading on \(model.network.shortName.lowercased())")
+                    Text(returning ? "Reconnect your desk on this iPhone" : "Start trading on \(model.network.shortName.lowercased())")
                         .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
-                    Text(mainnet ? "Send AUSD, or MON to swap, then open your Perpl account."
-                                 : "Get free test funds, then open your Perpl account.")
+                    Text(returning ? "Your Perpl account is still there. One Face ID adds a key for this phone."
+                         : mainnet ? "Send AUSD, or MON to swap, then open your Perpl account."
+                         : "Get free test funds, then open your Perpl account.")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
                         .fixedSize(horizontal: false, vertical: true)
@@ -590,7 +601,7 @@ struct HomeScreen: View {
     private var ledger: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(book == .open ? "Positions (\(positionContexts.count + spot.holdings.count))" : "Closed (\(model.closedTrades.count))")
+                Text(book == .open ? "Positions (\(positionContexts.count + (Showcase.spotTrading ? spot.holdings.count : 0)))" : "Closed (\(model.closedTrades.count))")
                     .font(.system(size: 17, weight: .bold, design: .rounded))
                     .foregroundStyle(DeskColor.nightText.color)
                 Spacer()
@@ -646,9 +657,18 @@ struct HomeScreen: View {
 
     /// An account whose book hasn't been read is not one with no positions; this says why.
     private var unreadBookLine: String? {
+        if !model.hasTradingAccount, model.hasDesk.value == true { return "Reconnect your desk to see your positions" }
         guard model.hasTradingAccount, model.trading.positions.value == nil else { return nil }
         if !model.isKeyUnlocked { return "Locked. Unlock to see your positions" }
         return model.trading.isConnecting ? "Reading your positions…" : "Can't reach Perpl. Retrying…"
+    }
+
+    private var unreadBookAction: () -> Void {
+        if !model.hasTradingAccount, model.hasDesk.value == true { return onSetup }
+        if model.hasTradingAccount, model.trading.positions.value == nil, !model.isKeyUnlocked {
+            return { Task { _ = await model.unlock() } }
+        }
+        return onTrade
     }
 
     @ViewBuilder
@@ -656,7 +676,8 @@ struct HomeScreen: View {
         let perps = filter == .tokens ? [] : positionContexts
         let tokens = filter == .perps || !Showcase.spotTrading ? [] : spot.holdings
         if perps.isEmpty && tokens.isEmpty {
-            emptyLine(filter == .tokens ? "No tokens bought through Desk yet" : unreadBookLine ?? "No open positions", action: onTrade)
+            emptyLine(filter == .tokens ? "No tokens bought through Desk yet" : unreadBookLine ?? "No open positions",
+                      action: unreadBookAction)
         } else {
             ForEach(perps) { position in
                 ledgerRow(

@@ -314,7 +314,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     const what = side === "buy"
       ? (amount > 0 ? `${fmtUsd(amount)} of ${symbol}` : symbol)
       : (amount > 0 ? `${fmtAmount(amount)} ${symbol}` : pct ? `${pct}% of your ${symbol}` : symbol);
-    handoff({ title: `${side === "buy" ? "Buy" : "Sell"} ${symbol} in Desk`, sub: `${side === "buy" ? "Buy" : "Sell"} ${what} on ${chainName}. Every order signs with Face ID in the app.` });
+    handoff({ title: `${side === "buy" ? "Buy" : "Sell"} ${symbol} in Desk`, sub: `${side === "buy" ? "Buy" : "Sell"} ${what} on ${chainName}. Scan to get Desk.` });
   });
   paintTicket();
 

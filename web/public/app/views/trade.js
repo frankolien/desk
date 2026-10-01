@@ -284,7 +284,7 @@ export default async function mount(el, params) {
       if (event.target.closest("#td-go")) {
         if (!connectedWallet()) { $("#connect").click(); return; }
         if (!(state.margin > 0)) { $("#td-amount", ticket).focus(); return; }
-        handoff({ title: `${cap(state.side)} ${m.name} in Desk`, sub: `${sentence()}. Scan to open the order in the app and sign it with Face ID.` });
+        handoff({ title: `${cap(state.side)} ${m.name} in Desk`, sub: `${sentence()}. Scan to get Desk and place it there.` });
       }
     });
     $("#td-amount", ticket).addEventListener("input", (event) => { state.margin = Number(String(event.target.value).replace(/[^0-9.]/g, "")) || 0; paintQuote(); });
@@ -431,7 +431,7 @@ export default async function mount(el, params) {
           <td><button class="btn btn-line btn-xs" data-follow="${esc(p.address)}">Follow</button></td>
         </tr>`).join("")}</tbody></table></div>
         <div class="card-foot"><span>Ranked by unrealised PnL on this market</span><span>${rows.length} of ${state.top.length} top traders</span></div>`;
-      pane.querySelectorAll("[data-follow]").forEach((b) => b.addEventListener("click", () => handoff({ title: "Follow in Desk", sub: "Following copies every move in the same block, with Face ID on each order." })));
+      pane.querySelectorAll("[data-follow]").forEach((b) => b.addEventListener("click", () => handoff({ title: "Follow in Desk", sub: "Following sends you an alert when they trade. Auto-Copy in Desk copies them under your rules." })));
       hydratePeople(pane);
       return;
     }

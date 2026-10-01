@@ -233,7 +233,7 @@ export default async function mount(el) {
     const follow = event.target.closest("[data-follow]");
     if (follow) {
       event.stopPropagation();
-      handoff({ title: `Follow ${nameOf(follow.dataset.follow)} in Desk`, sub: "Following copies every move in the same block, with Face ID on each order." });
+      handoff({ title: `Follow ${nameOf(follow.dataset.follow)} in Desk`, sub: "Following sends you an alert when they trade. Auto-Copy in Desk copies them under your rules." });
       return;
     }
     const sortBtn = event.target.closest("#tr-sort button");

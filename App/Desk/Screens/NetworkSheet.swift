@@ -7,6 +7,7 @@ struct NetworkSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var confirmsMainnet = false
+    @State private var busyNote: String?
 
     var body: some View {
         NavigationStack {
@@ -32,7 +33,7 @@ struct NetworkSheet: View {
                 }
             }
             .overlay {
-                if model.isWorking {
+                if model.isSwitchingNetwork {
                     VStack(spacing: 10) {
                         ProgressView()
                         Text("Switching network…").font(.footnote.weight(.semibold))
@@ -43,6 +44,15 @@ struct NetworkSheet: View {
             }
         }
         .preferredColorScheme(.dark)
+        .safeAreaInset(edge: .bottom) {
+            if let busyNote {
+                Text(busyNote)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 12)
+                    .task { try? await Task.sleep(for: .seconds(4)); self.busyNote = nil }
+            }
+        }
         .confirmationDialog("Switch to Monad mainnet?", isPresented: $confirmsMainnet, titleVisibility: .visible) {
             Button("Use real funds") { switchTo(.mainnet) }
             Button("Stay on testnet", role: .cancel) {}
@@ -90,7 +100,11 @@ struct NetworkSheet: View {
     private func switchTo(_ network: DeskNetwork) {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         Task {
-            if await model.switchNetwork(to: network) { dismiss() }
+            if await model.switchNetwork(to: network) {
+                dismiss()
+            } else {
+                busyNote = "Desk is finishing another step. Try again in a moment."
+            }
         }
     }
 }
