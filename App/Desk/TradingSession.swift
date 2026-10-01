@@ -71,16 +71,30 @@ final class TradingSession {
     /// listening the whole time.
     @ObservationIgnored private(set) var connectionEpoch = 0
 
-    /// Whether the last hand order on this market may still fill: in flight, retrying, or
-    /// with no answer heard.
-    func handOrderUnresolved(on marketID: UInt32) -> Bool {
-        guard orderMarket?.id == marketID else { return false }
-        if retryingUntil != nil { return true }
-        switch order.outcome {
-        case .sending?, .forwarded?, .expired?, .abandoned?: return true
-        default: return false
+    /// Hand orders per market that may still fill, by frame id and send time. Kept apart
+    /// from the screen's progress, which any sheet may clear.
+    @ObservationIgnored private var unresolvedHand: [UInt32: [Int64: ContinuousClock.Instant]] = [:]
+
+    /// Whether a hand order on this market may still fill. Perpl decides an order with a
+    /// fill, a cancel or a rejection; a failure stands once its retry window is long past;
+    /// an order never answered is let go after ten minutes.
+    func handOrderUnresolved(on marketID: UInt32) async -> Bool {
+        guard var pending = unresolvedHand[marketID], !pending.isEmpty else { return false }
+        for (id, sentAt) in pending {
+            let age = ContinuousClock.now - sentAt
+            let decided = switch await desk?.phase(of: id) {
+            case .settled?, .unfilled?, .rejected?: true
+            case .failed?: age > .seconds(30)
+            default: age > .seconds(600)
+            }
+            if decided { pending[id] = nil }
         }
+        unresolvedHand[marketID] = pending
+        return !pending.isEmpty
     }
+
+    /// Why saving a stop or take profit failed, for the sheet that asked.
+    private(set) var protectionProblem: String?
 
     /// Orders the person sent by hand, per market. Copy trading reads it to tell a
     /// position the person opened from one its own unanswered order opened.
@@ -180,6 +194,15 @@ final class TradingSession {
         await close()
         await retireDesk()
         orphanOrder()
+        // The book and the orders belonged to that desk's account. Kept, they read as the
+        // next account's until its own snapshot lands, and copies were reconciled against them.
+        positions = LastGood()
+        account = LastGood()
+        order.reset()
+        orderMarket = nil
+        orderOrigin = nil
+        handOrders = [:]
+        unresolvedHand = [:]
         credentials = nil
         desk = nil
         // Block numbers belong to a chain; another network's are tens of millions apart.
@@ -331,6 +354,7 @@ final class TradingSession {
                 }
             }
             let id = try await desk.place(draft, headBlock: headBlock, in: market)
+            unresolvedHand[market.id, default: [:]][id] = .now
             let before = order.outcome
             order.associate(id)
             if let current = await desk.phase(of: id) { order.apply(id: id, phase: current, fill: await desk.fill(of: id)) }
@@ -362,6 +386,7 @@ final class TradingSession {
             }
             let id = try await desk.closePosition(
                 position, size: size, slippageBps: slippageBps, headBlock: headBlock, in: market)
+            unresolvedHand[market.id, default: [:]][id] = .now
             let before = order.outcome
             order.associate(id)
             if let current = await desk.phase(of: id) { order.apply(id: id, phase: current, fill: await desk.fill(of: id)) }
@@ -409,10 +434,17 @@ final class TradingSession {
     func protectPosition(
         _ position: PerplPosition, stopLoss: Price?, takeProfit: Price?, slippageBps: Int, in market: Market
     ) async -> Bool {
-        localProblem = nil
+        protectionProblem = nil
         do {
             guard let desk else { throw OrderDesk.Failure.notEnrolled }
-            if !isConnected { try await connect() }
+            if !isConnected {
+                do {
+                    try await connect()
+                } catch {
+                    guard let unlock = onNeedsUnlock, await unlock() else { throw error }
+                    if !isConnected { try await connect() }
+                }
+            }
             try await desk.protectPosition(
                 position, stopLoss: stopLoss, takeProfit: takeProfit,
                 slippageBps: slippageBps, in: market)
@@ -420,12 +452,15 @@ final class TradingSession {
             return true
         } catch {
             Haptics.failure()
-            localProblem = Self.sentence(for: error)
+            protectionProblem = Self.sentence(for: error)
             return false
         }
     }
 
+    /// Clears a finished order from the screen. An order still in flight or retrying is
+    /// not this caller's to erase.
     func clear() {
+        guard !isBusy else { return }
         order.reset()
         localProblem = nil
         endRetrying()

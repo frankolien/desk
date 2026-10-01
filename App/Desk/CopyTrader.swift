@@ -613,13 +613,14 @@ final class CopyTrader {
                 .filter { $0.marketID == target.id && ($0.side == .long) == isLong }
                 .map { ($0.positionID, $0.sizeRaw) })
             let handOrders = session.handOrders[target.id] ?? 0
-            let handInFlight = session.handOrderUnresolved(on: target.id)
+            let handInFlight = await session.handOrderUnresolved(on: target.id)
             // Positions read without a live connection may predate what a reconnect shows.
             let snapshotIsLive = session.isConnected
             let epoch = session.connectionEpoch
             let frameID = try await session.placeCopy(plan.draft, in: target)
             var outcome = await settlement(of: frameID, session: session, retryBlocks: target.orderRetryBlocks, since: epoch)
-            guard !Task.isCancelled else { return }
+            // The order went out; whatever stopped this wait, the person hears about it.
+            guard !Task.isCancelled else { return note(.failed, "Perpl didn't confirm this copy. Check your \(symbol) position; Desk isn't tracking it.") }
             // Perpl never answered, or Desk stopped listening. A position that appears on
             // this side anyway is the order's fill, and its answer may land while that is
             // looked for.
@@ -638,7 +639,7 @@ final class CopyTrader {
                         outcome = nil
                     }
                 }
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled else { return note(.failed, "Perpl didn't confirm this copy. Check your \(symbol) position; Desk isn't tracking it.") }
             }
             switch outcome {
             case .settled:
@@ -696,10 +697,6 @@ final class CopyTrader {
                         adopted = (grown.positionID, grown.sizeRaw - (heldSizes[grown.positionID] ?? 0))
                     }
                 }
-                // "Nothing was opened" only when Desk listened throughout and nothing on
-                // this side moved; anything less is a position to check.
-                let provablyNothing = late == nil && changed.isEmpty && !byHand && snapshotIsLive
-                    && session.isConnected && session.connectionEpoch == epoch
                 if let adopted {
                     open.append(OpenCopy(
                         id: UUID(), trader: trader, marketID: target.id, symbol: symbol, isLong: isLong,
@@ -709,9 +706,9 @@ final class CopyTrader {
                     entry.detail += " · filled late"
                     record(entry)
                     onEvent?("Copied \(Self.name(for: trader)): \(label)")
-                } else if provablyNothing {
-                    note(.failed, "The order expired before it filled. Nothing was opened.")
                 } else {
+                    // Unanswered is not unfilled: orders carry no venue deadline, so this
+                    // one can still fill after the wait.
                     note(.failed, "Perpl didn't confirm this copy. Check your \(symbol) position; Desk isn't tracking it.")
                 }
             }

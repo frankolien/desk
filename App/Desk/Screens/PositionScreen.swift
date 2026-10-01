@@ -632,6 +632,13 @@ private struct PositionProtectionSheet: View {
                 .font(DeskType.caption).foregroundStyle(DeskColor.nightMuted.color)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Spacer()
+            if let problem = session.protectionProblem {
+                Text(problem)
+                    .font(DeskType.caption)
+                    .foregroundStyle(DeskColor.fall.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             Button {
                 Task {
                     let saved = await session.protectPosition(

@@ -49,7 +49,9 @@ struct CopyTradeSheet: View {
         _leverage = State(initialValue: max(1, intent.leverage))
     }
 
-    private var listed: Market? { market.market }
+    /// The trader's market only. If the selection moves elsewhere, the sheet stops pricing
+    /// rather than copy on a market its labels don't name.
+    private var listed: Market? { market.market.flatMap { $0.symbol == intent.market ? $0 : nil } }
     private var maxLeverage: Int { max(1, Int(listed?.config.maxLeverage ?? 1)) }
     private var tint: DeskRGB { intent.side.color }
     private var free: Money? { session.account.value?.free }

@@ -1184,6 +1184,7 @@ final class AppModel {
             record(snapshot.walletAUSD, into: &walletAUSD)
             record(snapshot.gas, into: &walletMON)
             record(snapshot.hasDesk, into: &hasDesk)
+            await resumeTradingIfFound(address)
         } catch {
             let reason = "Could not reach the exchange to find out which contracts to read."
             walletAUSD.recordFailure(reason)
@@ -1191,6 +1192,20 @@ final class AppModel {
             hasDesk.recordFailure(reason)
         }
     }
+
+    /// A desk the first read missed, found by a later one: trading picks up without a
+    /// second sign-in.
+    private func resumeTradingIfFound(_ address: EthereumAddress) async {
+        guard hasDesk.value == true, !hasTradingAccount, !isWorking, !isResumingTrading,
+              stage == .trading, let stored = apiKeys.load(for: address) else { return }
+        isResumingTrading = true
+        defer { isResumingTrading = false }
+        guard let configuration = try? network.perpl(),
+              let context = try? await PerplREST(configuration: configuration).context() else { return }
+        noteMinimumToOpen(context)
+        await enterTrading(stored, context: context)
+    }
+    private var isResumingTrading = false
 
     private func record<Value>(_ read: BalanceReader.Read<Value>, into slot: inout LastGood<Value>) {
         switch read {
