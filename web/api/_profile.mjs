@@ -21,6 +21,32 @@ export function profileMessage(address, timestamp) {
   return `Desk profile\n${String(address).toLowerCase()}\n${timestamp}`;
 }
 
+/// A different message from saving, so a save signature can never be replayed as a delete.
+export function deleteMessage(address, timestamp) {
+  return `Delete Desk profile\n${String(address).toLowerCase()}\n${timestamp}`;
+}
+
+/// Removes a wallet's profile, proven the same way a save is.
+export async function deleteProfile(store, body, { now = Date.now(), verify = verifyMessage } = {}) {
+  if (!store) return { status: 503, body: { error: "Profiles are not configured." } };
+  const address = String(body?.address ?? "");
+  if (!evmAddress(address)) return { status: 400, body: { error: "A wallet address is required." } };
+  const timestamp = Number(body?.timestamp);
+  if (!Number.isInteger(timestamp) || Math.abs(now - timestamp) > SIGNATURE_WINDOW_MS) {
+    return { status: 400, body: { error: "This request is too old. Try again." } };
+  }
+  const signature = String(body?.signature ?? "");
+  if (!/^0x[a-fA-F0-9]{130}$/.test(signature)) return { status: 400, body: { error: "A wallet signature is required." } };
+  let valid = false;
+  try {
+    valid = await verify({ address, message: deleteMessage(address, timestamp), signature });
+  } catch { valid = false; }
+  if (!valid) return { status: 401, body: { error: "That signature does not belong to this wallet." } };
+  await store.del(profileKey(address));
+  await store.del(`id:${address.toLowerCase()}`).catch(() => {});
+  return { status: 200, body: { deleted: true } };
+}
+
 export function cleanName(value) {
   const name = String(value ?? "").replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u202e]/g, "").replace(/\s+/g, " ").trim();
   return name.length > MAX_NAME ? name.slice(0, MAX_NAME).trim() : name;

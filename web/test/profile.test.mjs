@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { privateKeyToAccount } from "viem/accounts";
 
 import { describeIdentity } from "../api/_identity.mjs";
-import { cleanName, deskProfiles, imageType, profileMessage, readProfile, saveProfile } from "../api/_profile.mjs";
+import { cleanName, deleteMessage, deleteProfile, deskProfiles, imageType, profileMessage, readProfile, saveProfile } from "../api/_profile.mjs";
 import { memoryStore } from "../api/_store.mjs";
 
 const account = privateKeyToAccount("0x" + "11".repeat(32));
@@ -86,4 +86,21 @@ test("a save without a picture keeps the old one; an empty picture clears it", a
   store.values.delete(`profile:rate:${account.address.toLowerCase()}`);
   const cleared = await saveProfile(store, await signed({ name: "heli", image: "" }), { now: NOW + 2_000 });
   assert.equal(cleared.body.profile.avatar, null);
+});
+
+test("a profile is deleted only with a delete signature from its wallet", async () => {
+  const store = memoryStore();
+  assert.equal((await saveProfile(store, await signed(), { now: NOW })).status, 200);
+  assert.ok(await readProfile(store, account.address));
+
+  // A save signature replayed as a delete is refused.
+  const save = await signed();
+  const replay = await deleteProfile(store, { address: save.address, timestamp: save.timestamp, signature: save.signature }, { now: NOW });
+  assert.equal(replay.status, 401);
+  assert.ok(await readProfile(store, account.address));
+
+  const signature = await account.signMessage({ message: deleteMessage(account.address, NOW) });
+  const outcome = await deleteProfile(store, { address: account.address, timestamp: NOW, signature }, { now: NOW });
+  assert.equal(outcome.status, 200);
+  assert.equal(await readProfile(store, account.address), null);
 });

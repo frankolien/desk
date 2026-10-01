@@ -13,6 +13,8 @@ struct AccountScreen: View {
     @State private var showsNetwork = false
     @State private var showsCurrency = false
     @State private var showsNad = false
+    @State private var confirmsDelete = false
+    @State private var deleteProblem: String?
     @State private var perplPage: PerplPage?
     @State private var didCopyAddress = false
     @State private var nad = NadNamesModel()
@@ -285,6 +287,26 @@ struct AccountScreen: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background(Color.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            }
+
+            Button("Delete account", role: .destructive) { confirmsDelete = true }
+                .font(.footnote.weight(.semibold))
+                .disabled(model.isWorking)
+                .confirmationDialog("Delete your Desk account?", isPresented: $confirmsDelete, titleVisibility: .visible) {
+                    Button("Delete account", role: .destructive) {
+                        Task {
+                            deleteProblem = await model.deleteAccount()
+                            if deleteProblem == nil { dismiss() }
+                        }
+                    }
+                } message: {
+                    Text("Removes your Desk profile, alerts and this iPhone's keys. Your wallet and Perpl account live on-chain and stay; your passkey still opens them. Withdraw your AUSD first if you won't sign in again.")
+                }
+            if let deleteProblem {
+                Text(deleteProblem)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
             }
 
             VStack(spacing: 5) {

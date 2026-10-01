@@ -67,6 +67,10 @@ struct APIKeyStore: Sendable {
         }
     }
 
+    func delete(for address: EthereumAddress) {
+        SecItemDelete(baseQuery(for: address) as CFDictionary)
+    }
+
     private func baseQuery(for address: EthereumAddress) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: service,

@@ -5,7 +5,7 @@ import { MAX_ADDRESSES, NameLookupUnavailable, ensAddressReader, ensReader, look
 import { EXCHANGE_VIEWS } from "./_perpl-abi.mjs";
 import { DEFAULT_WINDOW, WINDOWS, cachedSignals } from "./_signals.mjs";
 import { redisStore } from "./_store.mjs";
-import { publicProfile, readProfile, saveProfile } from "./_profile.mjs";
+import { deleteProfile, publicProfile, readProfile, saveProfile } from "./_profile.mjs";
 import { isProfileHidden, report } from "./_moderation.mjs";
 import { cleanLabel, nameStatus, namesOf, registerRequest, setPrimaryCalldata, setRecordsCalldata } from "./_nad.mjs";
 
@@ -279,7 +279,9 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
     if (view === "profile") {
       res.setHeader("Cache-Control", "private, no-store");
       if (req.method === "POST") {
-        const outcome = await saveProfile(store, req.body ?? {});
+        const outcome = req.body?.action === "delete"
+          ? await deleteProfile(store, req.body)
+          : await saveProfile(store, req.body ?? {});
         return res.status(outcome.status).json(outcome.body);
       }
       const address = String(req.query.address ?? "");

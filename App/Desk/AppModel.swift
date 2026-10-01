@@ -1026,6 +1026,30 @@ final class AppModel {
     func clearWithdrawal() { withdrawal = .idle }
 
     /// Signs out: the key, the connection and the account on screen all go.
+    /// Removes what Desk keeps for this account: the public profile on its server (one
+    /// Face ID signature), the alert subscription and this iPhone's keys, then signs out.
+    /// The wallet and the Perpl account are on-chain and stay; the passkey still opens
+    /// them. Returns why it stopped, or nil once everything is gone.
+    func deleteAccount() async -> String? {
+        guard let address else { return nil }
+        let passkey = passkey
+        do {
+            try await DeskProfile.delete(address: address) { digest in
+                try await passkey.withKeys { wallet, _ in try WalletSigner.sign(digest: digest, with: wallet) }
+            }
+        } catch PasskeyFailure.cancelledByUser {
+            return "Nothing was deleted."
+        } catch DeskProfile.Failure.refused(let reason) {
+            return reason
+        } catch {
+            return "Desk's server couldn't be reached, so nothing was deleted. Try again."
+        }
+        for network in DeskNetwork.allCases { APIKeyStore.forNetwork(network).delete(for: address) }
+        for network in DeskNetwork.allCases { TradingKeyVault.forget(address: address, network: network.rawValue) }
+        await endSession()
+        return nil
+    }
+
     func endSession() async {
         if let address {
             TradingKeyVault.forget(address: address, network: network.rawValue)

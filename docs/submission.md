@@ -13,7 +13,7 @@ Face ID on this iPhone.
 - Chain: Monad. Exchange: Perpl. Collateral: AUSD. Credential: Mera passkeys.
 - Repository: this repo. Server: 12 Vercel functions in [`web/`](../web).
 - Tests: 535 Swift tests in 86 suites (`swift test --package-path DeskKit`, ~0.3 s once
-  built, no simulator) and 212 Node tests (`cd web && node --test`).
+  built, no simulator) and 213 Node tests (`cd web && node --test`).
 
 ---
 
