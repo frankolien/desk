@@ -8,6 +8,7 @@ struct TradingShell: View {
     @State private var market: MarketModel
     @State private var copier: CopyTrader
     @State private var glances = HomeGlancePublisher()
+    @State private var opensTopTraders = false
     /// The model's session, never one of our own. `openDesk` hands the enrolled key to
     /// `model.trading`, so a session created here would be a different object and the
     /// ticket would talk to one that had never been given a key.
@@ -58,6 +59,7 @@ struct TradingShell: View {
                     model: model, market: market, session: session, copier: copier,
                     onOrderFilled: orderFilled,
                     onOpenTraders: { tab = .signals },
+                    onOpenTopTraders: { opensTopTraders = true; tab = .signals },
                     onFund: { if model.hasTradingAccount { showsFunding = true } else { showsSetup = true } })
             }
 
@@ -70,7 +72,7 @@ struct TradingShell: View {
             Tab("Signals", systemImage: "antenna.radiowaves.left.and.right", value: .signals) {
                 SignalsScreen(
                     model: model, market: market, session: session, copier: copier,
-                    onOrderFilled: orderFilled)
+                    onOrderFilled: orderFilled, opensTop: $opensTopTraders)
             }
 
             Tab("Profile", systemImage: "person.crop.circle.fill", value: .home) {

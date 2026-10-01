@@ -9,6 +9,8 @@ struct SignalsScreen: View {
     let session: TradingSession
     let copier: CopyTrader
     let onOrderFilled: (Direction, String) -> Void
+    /// Set by Home's Top Traders link; the screen opens on that section and clears it.
+    @Binding var opensTop: Bool
 
     private enum Section: String, CaseIterable, Identifiable {
         case traders = "Following", top = "Top traders", watchlist = "Watchlist", market = "Market"
@@ -135,6 +137,11 @@ struct SignalsScreen: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
+            .onChange(of: opensTop, initial: true) { _, open in
+                guard open else { return }
+                section = .top
+                opensTop = false
+            }
             #if DEBUG
             // `-smart-money` opens the Smart money destination; `-track-demo` seeds a tracked wallet.
             .task {

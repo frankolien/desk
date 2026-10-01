@@ -21,6 +21,7 @@ struct MarketScreen: View {
     let copier: CopyTrader
     let onOrderFilled: (Direction, String) -> Void
     var onOpenTraders: () -> Void = {}
+    var onOpenTopTraders: () -> Void = {}
     var onFund: () -> Void = {}
 
     @State fileprivate var showsMarket = false
@@ -379,7 +380,7 @@ struct MarketScreen: View {
 
     private var topTraders: some View {
         VStack(alignment: .leading, spacing: 4) {
-            sectionLink("Top Traders", action: onOpenTraders)
+            sectionLink("Top Traders", action: onOpenTopTraders)
             if directory.top.isEmpty {
                 placeholderRows(3).padding(.top, 10)
             } else {
