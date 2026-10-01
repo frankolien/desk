@@ -132,6 +132,10 @@ public actor OrderTracker {
     /// Size, price and fee from the update that decided the order, when there was one.
     public func fill(of frameID: Int64) -> OrderFill? { entries[frameID]?.fill }
 
+    /// The block after which Desk stops waiting for this order. Desk's own timeout: orders
+    /// go out with `lb: 0`, so the venue enforces none, and its answer may still follow.
+    public func deadline(of frameID: Int64) -> Int64? { entries[frameID]?.deadlineBlock }
+
     public var pending: [Int64] {
         entries.filter { !$0.value.phase.isTerminal }.keys.sorted()
     }

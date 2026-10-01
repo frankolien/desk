@@ -212,3 +212,30 @@ struct OrderProgressLateFillTests {
         #expect(progress.fill == fill)
     }
 }
+
+@Suite("A local expiry is Desk's timeout, not the venue's answer")
+struct OrderProgressExpiryTests {
+    @Test("The venue's fill after a local expiry replaces it")
+    func fillAfterExpiry() {
+        var progress = OrderProgress()
+        progress.begin()
+        progress.associate(1)
+        progress.apply(id: 1, phase: .expired)
+        let fill = OrderFill(status: 4, originalRaw: 5, filledRaw: 5, priceRaw: 9, feeRaw: 1)
+        progress.apply(id: 1, phase: .settled, fill: fill)
+        #expect(progress.outcome == .settled)
+        #expect(progress.fill == fill)
+    }
+
+    @Test("A venue refusal after a local expiry replaces it; a stale sent never does")
+    func failureAfterExpiry() {
+        var progress = OrderProgress()
+        progress.begin()
+        progress.associate(1)
+        progress.apply(id: 1, phase: .expired)
+        progress.apply(id: 1, phase: .sent)
+        #expect(progress.outcome == .expired)
+        progress.apply(id: 1, phase: .failed(reason: 44, failure: 1))
+        #expect(progress.outcome == .failed(reason: 44, failure: 1))
+    }
+}

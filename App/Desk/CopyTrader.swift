@@ -606,9 +606,13 @@ final class CopyTrader {
         }
 
         do {
+            // Positions that existed before this copy can never be its fill.
+            let held = Set(model.openPositions.map(\.positionID))
             let frameID = try await session.placeCopy(plan.draft, in: target)
             switch await settlement(of: frameID, session: session) {
             case .settled:
+                // The venue confirmed this fill, so the position it landed in may be one the
+                // person already held on this side; it is attached either way.
                 let filled = await newPosition(marketID: target.id, isLong: side == .long, model: model)
                 // A market order can fill in part; the copy is the size that filled, and the
                 // margin behind it in the same proportion, so the exposure cap counts it right.
@@ -632,7 +636,19 @@ final class CopyTrader {
             case .rejected(let code, let subReason, let error):
                 note(.failed, error ?? TradingSession.reason(code: code, subReason: subReason))
             case .failed(let reason, let failure):
-                note(.failed, TradingSession.failure(reason: reason, failure: failure))
+                // Believed only after the order's wait; a position that appeared anyway is
+                // the venue's answer, and the copy is recorded rather than left untracked.
+                if let filled = await newPosition(marketID: target.id, isLong: side == .long, model: model, excluding: held) {
+                    open.append(OpenCopy(
+                        id: UUID(), trader: trader, marketID: target.id, symbol: symbol, isLong: side == .long,
+                        sizeRaw: plan.draft.size.raw, leverage: plan.leverage, margin: plan.margin,
+                        positionID: filled.positionID, openedAt: .now, theirEntry: theirs.entry))
+                    entry.detail += " · filled late"
+                    record(entry)
+                    onEvent?("Copied \(Self.name(for: trader)): \(label)")
+                } else {
+                    note(.failed, TradingSession.failure(reason: reason, failure: failure))
+                }
             case .unfilled:
                 note(.failed, "Not filled within the slippage limit. Nothing was opened.")
             default:
@@ -641,7 +657,7 @@ final class CopyTrader {
                 // is what keeps the open-copy limit, the exposure cap and closing with the
                 // trader true. Saying "nothing was opened" and walking away was a position
                 // the app then had no idea it held.
-                if let filled = await newPosition(marketID: target.id, isLong: side == .long, model: model) {
+                if let filled = await newPosition(marketID: target.id, isLong: side == .long, model: model, excluding: held) {
                     open.append(OpenCopy(
                         id: UUID(), trader: trader, marketID: target.id, symbol: symbol, isLong: side == .long,
                         sizeRaw: plan.draft.size.raw, leverage: plan.leverage, margin: plan.margin,
@@ -750,30 +766,30 @@ final class CopyTrader {
         }
     }
 
-    /// The order's final phase, or nil after twenty seconds without one.
     /// The order's outcome, or nil if the venue never decided it in twenty seconds.
     ///
-    /// A failure is held for three seconds before it is believed: Perpl lets a later
-    /// non-failure decide an order that first failed, and a copy that fills after its first
-    /// failure is a live position this loop would otherwise never track.
+    /// A failure is not believed while the order's own wait is still running: Perpl lets
+    /// a later non-failure decide an order that first failed, and a copy that fills after
+    /// its first failure is a live position this loop would otherwise never track. The
+    /// phase is read once more after the wait, so a fill that landed in its last moments
+    /// still counts.
     private func settlement(of frameID: Int64, session: TradingSession) async -> OrderPhase? {
-        var failure: OrderPhase?
-        var failurePolls = 0
+        var sawFailure = false
         for _ in 0..<80 {
             if let phase = await session.phase(of: frameID), phase.isTerminal {
                 guard case .failed = phase else { return phase }
-                failure = failure ?? phase
-                failurePolls += 1
-                if failurePolls >= 12 { return failure }
+                sawFailure = true
+                if await session.isPastDeadline(frameID) { break }
             }
             try? await Task.sleep(for: .milliseconds(250))
         }
-        return failure
+        guard sawFailure else { return nil }
+        return await session.phase(of: frameID)
     }
 
     /// The position a fill just opened, once the stream reports it.
-    private func newPosition(marketID: UInt32, isLong: Bool, model: AppModel) async -> PerplPosition? {
-        let tracked = Set(open.compactMap(\.positionID))
+    private func newPosition(marketID: UInt32, isLong: Bool, model: AppModel, excluding held: Set<Int64> = []) async -> PerplPosition? {
+        let tracked = Set(open.compactMap(\.positionID)).union(held)
         for _ in 0..<20 {
             if let found = model.openPositions
                 .filter({ $0.marketID == marketID && ($0.side == .long) == isLong && !tracked.contains($0.positionID) })

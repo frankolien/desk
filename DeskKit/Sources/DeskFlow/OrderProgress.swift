@@ -101,12 +101,14 @@ public struct OrderProgress: Sendable, Equatable {
             if self.fill == nil, let fill { self.fill = fill }
             return
         }
-        // Terminal outcomes never walk back, with one exception the venue documents: a
-        // failure is not final while a non-failure for the same order can still follow.
+        // Terminal outcomes never walk back, with two exceptions. A failure is not final
+        // while a non-failure for the same order can still follow, as the venue documents.
+        // And an expiry is Desk's own timeout, not the venue's — orders go out with no
+        // deadline — so the venue's answer, arriving late, replaces it.
         if outcome?.isTerminal == true {
-            guard case .failed = outcome else { return }
-            switch phase {
-            case .settled, .unfilled: break
+            switch (outcome, phase) {
+            case (.failed, .settled), (.failed, .unfilled): break
+            case (.expired, .settled), (.expired, .unfilled), (.expired, .failed): break
             default: return
             }
         }

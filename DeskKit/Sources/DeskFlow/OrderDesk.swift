@@ -341,6 +341,10 @@ public actor OrderDesk {
         await tracker.fill(of: frameID)
     }
 
+    public func deadline(of frameID: Int64) async -> Int64? {
+        await tracker.deadline(of: frameID)
+    }
+
     /// Every order one frame moved; an order update can carry several of ours at once.
     public func applyAll(_ frame: InboundFrame) async -> [Int64] {
         await tracker.applyAll(frame)

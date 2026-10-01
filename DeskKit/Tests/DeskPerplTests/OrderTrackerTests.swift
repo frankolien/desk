@@ -219,3 +219,17 @@ struct OrderStatusRulesTests {
         #expect(await tracker.phase(of: 2) == .settled)
     }
 }
+
+@Suite("Expiry is Desk's own timeout")
+struct OrderTrackerExpiryTests {
+    @Test("An update after a local expiry still decides the order, and the deadline is reported")
+    func updateAfterExpiry() async throws {
+        let tracker = OrderTracker()
+        try await tracker.track(frameID: 1, requestID: 1, deadlineBlock: 100)
+        #expect(await tracker.deadline(of: 1) == 100)
+        #expect(await tracker.expire(headBlock: 101) == [1])
+        await tracker.apply(try InboundFrame(payload: Data(#"{"mt":24,"d":[{"rq":1,"st":4,"os":5,"fs":5}]}"#.utf8)))
+        #expect(await tracker.phase(of: 1) == .settled)
+        #expect(await tracker.fill(of: 1)?.isComplete == true)
+    }
+}

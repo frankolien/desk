@@ -27,7 +27,8 @@ final class TradingSession {
         case .unfilled:
             (order.fill?.isClose == true ? "Not closed." : "Not filled.")
                 + " The price moved past your slippage limit before the order could match. Nothing changed."
-        case .expired: "The order expired before it reached the book. Nothing was filled."
+        case .expired:
+            "Perpl hasn't confirmed this order yet. Check your positions before sending another."
         case .abandoned:
             "The connection to Perpl dropped before the order settled. "
                 + "Check your position before sending another."
@@ -299,6 +300,13 @@ final class TradingSession {
 
     func fill(of frameID: Int64) async -> OrderFill? {
         await desk?.fill(of: frameID)
+    }
+
+    /// Whether Desk's own wait for this order is over: the head block has passed the
+    /// deadline it was tracked with. True for an order the desk no longer knows.
+    func isPastDeadline(_ frameID: Int64) async -> Bool {
+        guard let deadline = await desk?.deadline(of: frameID) else { return true }
+        return headBlock > deadline
     }
 
     func protectPosition(
