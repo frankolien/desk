@@ -74,6 +74,17 @@ struct HomeScreen: View {
         total.map { DisplayCurrency.shared.format($0) } ?? Unavailable.text
     }
 
+    /// AUSD first: it is the money the account holds. Another currency is a second line.
+    private var totalPrimary: String {
+        guard let total, DisplayCurrency.shared.code != "USD" else { return totalInCurrency }
+        return total.display() + " AUSD"
+    }
+
+    private var totalLocal: String? {
+        guard total != nil, DisplayCurrency.shared.code != "USD" else { return nil }
+        return "≈ " + totalInCurrency
+    }
+
     private var canWithdraw: Bool {
         !(model.collateral.value?.isZero ?? true) || !(model.walletAUSD.value?.isZero ?? true)
     }
@@ -399,11 +410,16 @@ struct HomeScreen: View {
                             HStack(spacing: 8) { ForEach(0..<5, id: \.self) { _ in Circle().fill(Color.white).frame(width: 11, height: 11) } }
                                 .frame(height: 40)
                         } else {
-                            AmountText(totalInCurrency, size: 36).contentTransition(.numericText())
+                            AmountText(totalPrimary, size: 36).contentTransition(.numericText())
                         }
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Total balance")
+                    if let totalLocal, !hidesBalance {
+                        Text(totalLocal)
+                            .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                    }
                     portfolioCaption
                 }
                 Spacer(minLength: 8)
