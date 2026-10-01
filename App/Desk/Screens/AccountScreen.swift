@@ -13,6 +13,7 @@ struct AccountScreen: View {
     @State private var showsNetwork = false
     @State private var showsCurrency = false
     @State private var showsNad = false
+    @State private var perplPage: PerplPage?
     @State private var didCopyAddress = false
     @State private var nad = NadNamesModel()
 
@@ -116,6 +117,29 @@ struct AccountScreen: View {
                                 title: "Security & privacy",
                                 subtitle: "Key locks after a short absence or when your phone locks"
                             )
+
+                            sectionDivider
+
+                            SettingsRow(
+                                icon: "key.horizontal.fill",
+                                tint: .orange,
+                                title: "Trading keys on Perpl",
+                                subtitle: "See or revoke the key Desk signs orders with",
+                                action: { perplPage = PerplPage(url: model.network.holdsRealFunds
+                                    ? "https://app.perpl.xyz/apikeys" : "https://testnet.perpl.xyz/apikeys") }
+                            )
+
+                            if model.network.holdsRealFunds {
+                                sectionDivider
+
+                                SettingsRow(
+                                    icon: "lifepreserver.fill",
+                                    tint: .red,
+                                    title: "Perpl Rescue",
+                                    subtitle: "Close and withdraw straight from the contracts if Perpl is down",
+                                    action: { perplPage = PerplPage(url: "https://recovery.perpl.xyz") }
+                                )
+                            }
                         }
 
                         settingsSection("ABOUT DESK") {
@@ -154,6 +178,9 @@ struct AccountScreen: View {
             }
         }
         .preferredColorScheme(.dark)
+        .sheet(item: $perplPage) { page in
+            if let url = URL(string: page.url) { InAppSafari(url: url).ignoresSafeArea() }
+        }
         .sheet(isPresented: $showsNad, onDismiss: { Task { if let address = model.address { await nad.load(address: address.checksummed) } } }) {
             NadNameSheet(model: model) { showsNad = false }
         }
@@ -309,6 +336,11 @@ struct AccountScreen: View {
     private var walletBalanceText: String {
         let amount = model.walletAUSD.value?.display() ?? "—"
         return "\(amount) AUSD wallet"
+    }
+
+    private struct PerplPage: Identifiable {
+        let url: String
+        var id: String { url }
     }
 
     private func contactSupport() {
