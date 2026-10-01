@@ -450,7 +450,8 @@ final class AppModel {
             // this screen is open, and opening with a stale cached zero produced the
             // contradictory “10,000 ready / deposit 0.00” state this guard replaces.
             await refreshBalances()
-            guard let deposit = walletAUSD.value else {
+            // A desk that already exists deposits nothing, so a failed wallet read cannot block a new key.
+            guard let deposit = walletAUSD.value ?? (hasDesk.value == true ? .zero : nil) else {
                 openingProblem = walletAUSD.lastFailure
                     ?? "Your AUSD balance is still loading. Try again in a moment."
                 return
@@ -471,7 +472,12 @@ final class AppModel {
                 addresses: addresses)
 
             let session = session
+            let vaultNetwork = network.rawValue
+            let expected = address
             let enrolled = try await passkey.withKeys { [weak self] wallet, tradingKeys in
+                // Another passkey picked at the prompt is another wallet. Opening its desk
+                // here would file its key under this account.
+                if let expected, wallet.address != expected { throw OpeningMismatch.differentWallet }
                 // A token lost to a reinstall or a wiped keychain can never be reissued for
                 // the same key, so enrolment moves on to the next derived key inside this
                 // one prompt. The on-chain steps before it check themselves first.
@@ -484,7 +490,11 @@ final class AppModel {
                     report: { progress in
                         Task { @MainActor in self?.openingStep = progress }
                     })
-                await session.open(try tradingKeys.key(at: opened.index))
+                let enrolledKey = try tradingKeys.key(at: opened.index)
+                // Enrolment can move past the key sign-in sealed. The vault has to hold this one,
+                // or the next launch unlocks a key Perpl no longer accepts.
+                TradingKeyVault.seal(enrolledKey, address: wallet.address, network: vaultNetwork)
+                await session.open(enrolledKey)
                 return APIKeyStore.Stored(apiKey: opened.apiKey, tradingIndex: opened.index)
             }
             if let address { try apiKeys.save(enrolled.apiKey, tradingIndex: enrolled.tradingIndex, for: address) }
@@ -522,8 +532,10 @@ final class AppModel {
     /// Moves the whole app to another network: balances, account, positions, sockets and
     /// the enrolled key all belong to one exchange, so none of them is carried across.
     /// The address is the same on both, so no new passkey is involved.
-    func switchNetwork(to next: DeskNetwork) async {
-        guard next != network, !isWorking else { return }
+    /// False when nothing switched: the same network, or Desk busy with another step.
+    @discardableResult
+    func switchNetwork(to next: DeskNetwork) async -> Bool {
+        guard next != network, !isWorking else { return false }
         isWorking = true
         defer { isWorking = false }
         balancePoller?.cancel()
@@ -542,13 +554,14 @@ final class AppModel {
         fundingProblem = nil
         openingProblem = nil
         needsManualFaucet = false
-        guard let address else { return }
+        guard let address else { return true }
         await refreshBalances()
         startPollingBalances()
         if hasDesk.value == true, let stored = apiKeys.load(for: address),
            let context = try? await PerplREST(configuration: network.perpl()).context() {
             await enterTrading(stored, context: context)
         }
+        return true
         // A switch never moves the screen. Without an account on this network, Home and
         // Perps offer to open one where the person already is.
     }
@@ -651,6 +664,8 @@ final class AppModel {
 
     /// How much more AUSD the wallet needs before a desk can open; nil once it has enough.
     var ausdShortfall: Money? {
+        // An account that already exists on Perpl needs a new key, not a deposit.
+        guard hasDesk.value != true else { return nil }
         let held = walletAUSD.value ?? .zero
         guard held < minimumToOpenDesk, let short = Money(raw: minimumToOpenDesk.raw - held.raw) else { return nil }
         return short
@@ -794,8 +809,13 @@ final class AppModel {
 
     /// The sentence a failed opening shows. Never the underlying error's text: a
     /// transport error can carry a URL and a URL can carry a key.
+    enum OpeningMismatch: Error { case differentWallet }
+
     static func openingSentence(for error: any Error) -> String {
         switch error {
+        case OpeningMismatch.differentWallet:
+            return "That passkey belongs to a different wallet. Choose the one you signed in with."
+
         case OpeningSequence.Failure.belowMinimum(let deposit, let minimum):
             return "Perpl needs at least \(minimum.display()) AUSD to open a desk, and "
                 + "this would deposit \(deposit.display())."
@@ -1198,11 +1218,15 @@ final class AppModel {
     private func resumeTradingIfFound(_ address: EthereumAddress) async {
         guard hasDesk.value == true, !hasTradingAccount, !isWorking,
               stage == .trading, let stored = apiKeys.load(for: address) else { return }
-        // Held like every other way into trading, so Open desk and a network switch wait.
-        isWorking = true
-        defer { isWorking = false }
+        let network = network
         guard let configuration = try? network.perpl(),
               let context = try? await PerplREST(configuration: configuration).context() else { return }
+        // The fetch can take a while; only a resume still wanted, on the same account and
+        // network, goes on. Held like every other way into trading, but only from here, so
+        // a slow fetch never blocks Open desk or a network switch.
+        guard self.network == network, self.address == address, !hasTradingAccount, !isWorking else { return }
+        isWorking = true
+        defer { isWorking = false }
         noteMinimumToOpen(context)
         await enterTrading(stored, context: context)
     }

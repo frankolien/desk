@@ -119,7 +119,9 @@ struct AddFundsSheet: View {
                     .foregroundStyle(.secondary)
             }
         } else {
-            action(model.isWorking ? "Opening your desk…" : "Open desk with \(wallet.display()) AUSD",
+            action(model.hasDesk.value == true
+                   ? (model.isWorking ? "Reconnecting your desk…" : "Reconnect your desk")
+                   : (model.isWorking ? "Opening your desk…" : "Open desk with \(wallet.display()) AUSD"),
                    enabled: !model.isWorking, busy: model.isWorking) {
                 Task { await model.openDesk() }
             }

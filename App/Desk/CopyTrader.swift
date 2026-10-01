@@ -322,6 +322,9 @@ final class CopyTrader {
         }
     }
 
+    /// Trader closes that came while the person's book was unread, closed once it is.
+    private var deferredCloses: [(trader: String, symbol: String, verb: String)] = []
+
     private func cycle(seenAt: Date, model: AppModel, market: MarketModel, session: TradingSession) async {
         await rotateBasketIfDue()
         guard !traders.isEmpty || !open.isEmpty else { return }
@@ -345,6 +348,14 @@ final class CopyTrader {
         reconcileLive(model: model)
         backfillRealised(model: model)
         priceShadows(marks)
+        if model.trading.positions.value != nil, !deferredCloses.isEmpty {
+            let due = deferredCloses
+            deferredCloses = []
+            for close in due {
+                await closeCopy(trader: close.trader, symbol: close.symbol, because: close.verb,
+                                mark: marks[close.symbol] ?? 0, model: model, market: market, session: session)
+            }
+        }
 
         for trader in traders {
             guard let after = books[trader.id] else { continue }
@@ -734,15 +745,32 @@ final class CopyTrader {
                                 kind: kind, detail: detail, leverage: copy.leverage, margin: copy.margin, pnl: pnl))
         }
         let side: Side = copy.isLong ? .long : .short
-        // An unread book is not an empty one: the copy stays until a read book lacks it.
+        // An unread book is not an empty one. Desk tries to read it, and if it can't yet,
+        // the close waits for the first cycle that can rather than being lost.
+        if model.trading.positions.value == nil {
+            try? await session.connect()
+            for _ in 0..<12 where model.trading.positions.value == nil {
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
         guard model.trading.positions.value != nil else {
-            return note(.failed, "They \(verb), but Desk hasn't read your positions yet. Your copy is still open; close it from Perps.")
+            guard !deferredCloses.contains(where: { $0.trader == trader.lowercased() && $0.symbol == symbol }) else { return }
+            deferredCloses.append((trader.lowercased(), symbol, verb))
+            return note(.failed, "They \(verb), but Desk couldn't read your positions yet. It will close your copy once it can.")
         }
         guard let position = model.openPositions.first(where: { candidate in
             copy.positionID.map { candidate.positionID == $0 } ?? (candidate.marketID == copy.marketID && candidate.side == side)
         }) else {
             open.removeAll { $0.id == copy.id }
-            return note(.protected, "Already closed on Perpl before they \(verb).")
+            let entryID = UUID()
+            let pnl = copy.positionID
+                .flatMap { id in model.closedTrades.first { $0.positionID == id }?.realisedPnLRaw }
+                .map { Double($0) / 1_000_000 }
+            if pnl == nil, let id = copy.positionID { pendingRealised[entryID] = id }
+            record(CopyLogEntry(id: entryID, date: .now, trader: trader, symbol: symbol, isLong: copy.isLong,
+                                kind: .protected, detail: "Already closed on Perpl before they \(verb).",
+                                leverage: copy.leverage, margin: copy.margin, pnl: pnl))
+            return
         }
         guard model.isKeyUnlocked else {
             return note(.failed, "They \(verb), but Desk was locked. Your copy is still open; close it from Perps.")

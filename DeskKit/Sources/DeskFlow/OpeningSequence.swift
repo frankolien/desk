@@ -154,32 +154,34 @@ public actor OpeningSequence {
     }
 
     /// Every on-chain step before enrolment, each skipped when the chain says it is done.
+    ///
+    /// The account is looked for first. One that exists already holds its collateral at
+    /// the exchange, so a new phone with an empty wallet goes straight to a fresh key.
     private func prepare(
         wallet: WalletKey,
         deposit: Money,
         forwardingKnownEnabled: Bool,
         report: @Sendable (Progress) -> Void
     ) async throws {
-        guard deposit.raw >= addresses.minimumToOpen.raw else {
-            throw Failure.belowMinimum(deposit: deposit, minimum: addresses.minimumToOpen)
-        }
-        let held = try await walletAUSD(of: wallet.address)
-        guard held.raw >= deposit.raw else {
-            throw Failure.insufficientCollateral(held: held, needed: deposit)
-        }
-
-        if try await allowance(owner: wallet.address).raw >= deposit.raw {
-            report(Progress(step: .approve, outcome: .alreadySatisfied))
-        } else {
-            try await run(
-                .approve, from: wallet, to: addresses.collateralToken,
-                data: try Calldata.approve(spender: addresses.exchange, amount: deposit),
-                report: report)
-        }
-
         if try await hasAccount(wallet.address) {
+            report(Progress(step: .approve, outcome: .alreadySatisfied))
             report(Progress(step: .createAccount, outcome: .alreadySatisfied))
         } else {
+            guard deposit.raw >= addresses.minimumToOpen.raw else {
+                throw Failure.belowMinimum(deposit: deposit, minimum: addresses.minimumToOpen)
+            }
+            let held = try await walletAUSD(of: wallet.address)
+            guard held.raw >= deposit.raw else {
+                throw Failure.insufficientCollateral(held: held, needed: deposit)
+            }
+            if try await allowance(owner: wallet.address).raw >= deposit.raw {
+                report(Progress(step: .approve, outcome: .alreadySatisfied))
+            } else {
+                try await run(
+                    .approve, from: wallet, to: addresses.collateralToken,
+                    data: try Calldata.approve(spender: addresses.exchange, amount: deposit),
+                    report: report)
+            }
             try await run(
                 .createAccount, from: wallet, to: addresses.exchange,
                 data: try Calldata.createAccount(amount: deposit), report: report)

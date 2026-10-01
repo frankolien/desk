@@ -90,8 +90,7 @@ struct NetworkSheet: View {
     private func switchTo(_ network: DeskNetwork) {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         Task {
-            await model.switchNetwork(to: network)
-            dismiss()
+            if await model.switchNetwork(to: network) { dismiss() }
         }
     }
 }

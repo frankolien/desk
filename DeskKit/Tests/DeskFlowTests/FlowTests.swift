@@ -14,13 +14,18 @@ final class RoutingTransport: HTTPTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var routes: [String: [HTTPResponse]]
     private var seen: [(path: String, body: Data)] = []
+    /// When set, an unrouted `eth_sendRawTransaction` answers with the hash of what was
+    /// sent, the way a node does, so a flow can send for real and wait on its receipt.
+    private let echoesSentTransactions: Bool
 
     init(_ routes: [String: [String]]) {
         self.routes = routes.mapValues { $0.map { HTTPResponse(status: 200, body: Data($0.utf8)) } }
+        self.echoesSentTransactions = false
     }
 
-    init(responses: [String: [HTTPResponse]]) {
+    init(responses: [String: [HTTPResponse]], echoesSentTransactions: Bool = false) {
         self.routes = responses
+        self.echoesSentTransactions = echoesSentTransactions
     }
 
     var requests: [(path: String, body: Data)] { lock.withLock { seen } }
@@ -44,6 +49,14 @@ final class RoutingTransport: HTTPTransport, @unchecked Sendable {
                 key = path
             }
             guard var queued = routes[key], !queued.isEmpty else {
+                if echoesSentTransactions, key == "eth_sendRawTransaction",
+                   let body = request.httpBody,
+                   let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+                   let raw = (object["params"] as? [String])?.first {
+                    let hash = Keccak.hash(Data(hex: String(raw.dropFirst(2))))
+                        .map { String(format: "%02x", $0) }.joined()
+                    return HTTPResponse(status: 200, body: Data(#"{"jsonrpc":"2.0","id":1,"result":"0x\#(hash)"}"#.utf8))
+                }
                 return HTTPResponse(status: 404, body: Data(#"{"error":"no route for \#(key)"}"#.utf8))
             }
             let next = queued.removeFirst()
@@ -56,6 +69,13 @@ final class RoutingTransport: HTTPTransport, @unchecked Sendable {
 private func payloadJSON() throws -> Data {
     let url = try #require(Bundle.module.url(forResource: "EnrolmentPayload", withExtension: "json"))
     return try Data(contentsOf: url)
+}
+
+/// The recorded payload, asking `signer` to sign instead of the wallet it was captured for.
+private func payloadJSON(for signer: EthereumAddress) throws -> Data {
+    let recorded = String(decoding: try payloadJSON(), as: UTF8.self)
+    return Data(recorded.replacingOccurrences(
+        of: "0x50B240678777451BEfd67B7e8c3b4366482ba8F9", with: signer.checksummed).utf8)
 }
 
 private let signerAddress = EthereumAddress(bytes: Data(hex: "50b240678777451befd67b7e8c3b4366482ba8f9"))!
@@ -338,9 +358,17 @@ struct OpeningSequenceTests {
         }
     }
 
-    @Test("A deposit under the exchange's own minimum never reaches the chain")
+    private let noAccount = #"{"jsonrpc":"2.0","id":1,"error":{"code":3,"message":"execution reverted","data":"0x"}}"#
+
+    private func methods(_ transport: RoutingTransport) -> [String] {
+        transport.requests.compactMap {
+            (try? JSONSerialization.jsonObject(with: $0.body) as? [String: Any])?["method"] as? String
+        }
+    }
+
+    @Test("A new account under the exchange's own minimum is refused before anything is signed")
     func belowMinimum() async throws {
-        let transport = RoutingTransport([:])
+        let transport = RoutingTransport(["eth_call": [noAccount]])
         let deposit = try #require(Money(text: "50"))
         await #expect(throws: OpeningSequence.Failure.belowMinimum(
             deposit: deposit, minimum: try #require(Money(text: "100")))) {
@@ -348,18 +376,72 @@ struct OpeningSequenceTests {
                 wallet: try wallet(), trading: try TradingKey(seed: SecureBytes(Data(repeating: 1, count: 32))),
                 deposit: deposit, label: "desk")
         }
-        #expect(transport.requests.isEmpty)
+        #expect(methods(transport) == ["eth_call"])
     }
 
     @Test("A balance short of the deposit is caught before any gas is spent")
     func insufficientBalance() async throws {
-        let transport = RoutingTransport(["eth_call": [#"{"jsonrpc":"2.0","id":1,"result":"\#(word(50_000_000))"}"#]])
-        await #expect(throws: (any Error).self) {
+        let transport = RoutingTransport(["eth_call": [
+            noAccount, #"{"jsonrpc":"2.0","id":1,"result":"\#(word(50_000_000))"}"#,
+        ]])
+        let needed = try #require(Money(text: "100"))
+        await #expect(throws: OpeningSequence.Failure.insufficientCollateral(
+            held: try #require(Money(text: "50")), needed: needed)) {
             try await sequence(transport).open(
                 wallet: try wallet(),
                 trading: try TradingKey(seed: SecureBytes(Data(repeating: 1, count: 32))),
-                deposit: try #require(Money(text: "100")), label: "desk")
+                deposit: needed, label: "desk")
         }
+        #expect(methods(transport) == ["eth_call", "eth_call"])
+    }
+
+    @Test("An existing account on a new phone skips the minimum and enrols a fresh key")
+    func existingAccountReenrols() async throws {
+        // The old phone's key is registered and its token is gone, so Perpl refuses index 2.
+        let owner = try wallet()
+        let payload = HTTPResponse(status: 200, body: try payloadJSON(for: owner.address))
+        func ok(_ result: String) -> HTTPResponse {
+            HTTPResponse(status: 200, body: Data(#"{"jsonrpc":"2.0","id":1,"result":\#(result)}"#.utf8))
+        }
+        let transport = RoutingTransport(responses: [
+            "eth_call": [ok("\"\(word(7))\"")],
+            "eth_estimateGas": [ok("\"0x12ad0\"")],
+            "eth_getBlockByNumber": [ok(#"{"baseFeePerGas":"0x174876e800"}"#)],
+            "eth_getTransactionCount": [ok("\"0x5\"")],
+            "eth_getTransactionReceipt": [ok(#"{"status":"0x1","gasUsed":"0x5208","blockNumber":"0x10"}"#)],
+            "/api/v1/api-key/payload": [payload, payload],
+            "/api/v1/api-key/enroll": [
+                HTTPResponse(status: 409, body: Data(#"{"error":"Conflict"}"#.utf8)),
+                HTTPResponse(status: 200, body: Data(#"{"api_key":"pk_new_phone"}"#.utf8)),
+            ],
+        ], echoesSentTransactions: true)
+        let reports = ProgressLog()
+
+        let opened = try await sequence(transport).open(
+            wallet: owner,
+            tradingKeys: { try TradingKey(seed: SecureBytes(Data(repeating: UInt8($0), count: 32))) },
+            indices: 2..<10, deposit: .zero, label: "desk",
+            report: { reports.append($0) })
+
+        #expect(opened.index == 3)
+        #expect(opened.apiKey.withValue { $0 } == "pk_new_phone")
+        // One account read, no balance or allowance read, and forwarding is the only send.
+        #expect(methods(transport).filter { $0 == "eth_call" }.count == 1)
+        #expect(methods(transport).filter { $0 == "eth_sendRawTransaction" }.count == 1)
+        let estimated = try #require(transport.requests.compactMap {
+            try? JSONSerialization.jsonObject(with: $0.body) as? [String: Any]
+        }.first { $0["method"] as? String == "eth_estimateGas" })
+        let call = try #require((estimated["params"] as? [[String: Any]])?.first)
+        let forwarding = "0x" + Calldata.allowOrderForwarding(true).map { String(format: "%02x", $0) }.joined()
+        #expect(call["data"] as? String == forwarding)
+        #expect(reports.steps == [
+            .init(step: .approve, outcome: .alreadySatisfied),
+            .init(step: .createAccount, outcome: .alreadySatisfied),
+            .init(step: .allowOrderForwarding, outcome: .started),
+            .init(step: .allowOrderForwarding, outcome: .finished),
+            .init(step: .enrol, outcome: .started),
+            .init(step: .enrol, outcome: .finished),
+        ])
     }
 
     @Test("A revert from getAccountByAddr means no desk, not an error")
@@ -393,6 +475,14 @@ struct OpeningSequenceTests {
     }
 }
 
+private final class ProgressLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var seen: [OpeningSequence.Progress] = []
+
+    var steps: [OpeningSequence.Progress] { lock.withLock { seen } }
+
+    func append(_ progress: OpeningSequence.Progress) { lock.withLock { seen.append(progress) } }
+}
 
 extension Data {
     init(hex: String) {

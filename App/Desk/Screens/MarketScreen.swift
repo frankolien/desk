@@ -197,6 +197,7 @@ struct MarketScreen: View {
 
     /// Wallet AUSD is not tradable until a desk exists; the line says how far off that is.
     private var walletCaption: String {
+        if model.hasDesk.value == true { return "In wallet · reconnect your desk to trade" }
         if let short = model.ausdShortfall {
             return short == model.minimumToOpenDesk
                 ? "In wallet · \(model.minimumToOpenDesk.display(fractionDigits: 0)) AUSD opens a desk"
