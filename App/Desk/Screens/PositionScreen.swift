@@ -20,8 +20,16 @@ struct PositionScreen: View {
     /// Which position the screen is showing. Starts at the one that was tapped.
     @State private var focusedID: Int64?
 
+    private var activeID: Int64 { focusedID ?? position.positionID }
+
+    /// The live position, so a partial close shows the size that is left.
     private var active: PerplPosition {
-        model.openPositions.first { $0.positionID == focusedID } ?? position
+        model.openPositions.first { $0.positionID == activeID } ?? position
+    }
+
+    /// Gone from a book that has been read: closed, by the person or by Perpl.
+    private var isClosed: Bool {
+        model.trading.positions.value != nil && !model.openPositions.contains { $0.positionID == activeID }
     }
 
     private var others: [PerplPosition] {
@@ -41,15 +49,15 @@ struct PositionScreen: View {
         NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
-                if let figures { content(figures) } else { unavailable }
+                if isClosed { closedView } else if let figures { content(figures) } else { unavailable }
             }
             // Dismissal lives in the heading instead.
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showsClose) {
                 if let figures, let selected = market.market {
                     MarketCloseSheet(
-                        position: active, figures: figures, market: selected,
-                        session: session) { showsClose = false }
+                        position: active, figures: figures, market: selected, session: session,
+                        book: market.book.isReady ? market.book : nil) { showsClose = false }
                 }
             }
             .sheet(isPresented: $showsProtection) {
@@ -65,6 +73,10 @@ struct PositionScreen: View {
                 if ProcessInfo.processInfo.arguments.contains("-open-share") {
                     try? await Task.sleep(for: .seconds(2))
                     showsShare = true
+                }
+                if ProcessInfo.processInfo.arguments.contains("-open-close") {
+                    try? await Task.sleep(for: .seconds(2))
+                    showsClose = true
                 }
             }
             #endif
@@ -438,6 +450,43 @@ struct PositionScreen: View {
         .deskGlass(interactive: true, in: Capsule())
     }
 
+    private var closedView: some View {
+        let trade = model.closedTrades.first { $0.positionID == activeID }
+        let pnl = trade?.realisedPnLRaw.flatMap { Money(raw: $0) }
+        return VStack(alignment: .leading, spacing: 0) {
+            heading
+            VStack(alignment: .leading, spacing: 10) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 30, weight: .bold))
+                    .foregroundStyle(DeskColor.rise.color)
+                Text("Position closed")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                Text("\(position.side == .long ? "Long" : "Short") \(market.symbol)")
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                if let pnl {
+                    Text((pnl.isNegative ? "" : "+") + pnl.display() + " AUSD")
+                        .font(.system(size: 34, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle((pnl.isNegative ? DeskColor.fall : DeskColor.rise).color)
+                        .padding(.top, 6)
+                    Text("Realised, after fees and funding")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+            }
+            .padding(.top, 36)
+            Spacer()
+            Button { dismiss() } label: {
+                Text("Done").font(DeskType.label).frame(maxWidth: .infinity).frame(height: 52)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(DeskColor.nightChip.color)
+        }
+        .foregroundStyle(DeskColor.nightText.color)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
+    }
+
     private var unavailable: some View {
         ContentUnavailableView("Position unavailable", systemImage: "chart.xyaxis.line",
             description: Text("Waiting for the authenticated Perpl position stream."))
@@ -509,6 +558,7 @@ private struct MarketCloseSheet: View {
     let figures: PositionFigures
     let market: Market
     let session: TradingSession
+    var book: OrderBook?
     let onDone: () -> Void
     @State private var percentage = 100
 
@@ -519,19 +569,49 @@ private struct MarketCloseSheet: View {
         }
     }
 
-    private var closeNotional: Money? {
-        closeSize.flatMap { Money.notional(price: figures.mark, size: $0, rounding: .towardZero) }
+    /// The average exit price in raw units: walked through Perpl's book up to the close's
+    /// slippage bound when the book is live, otherwise the mark.
+    private var exitRaw: Double? {
+        guard let closeSize else { return nil }
+        let mark = Double(figures.mark.raw)
+        guard let book, book.isReady, (book.spreadRaw ?? 1) > 0 else { return mark }
+        let selling = figures.side == .long
+        let bps = Double(min(50, market.maxMarketSlippageBps))
+        let bound = mark * (1 + (selling ? -bps : bps) / 10_000)
+        return book.estimateFill(buying: !selling, sizeRaw: closeSize.raw,
+                                 limitRaw: Int64(bound.rounded(selling ? .up : .down))).averagePriceRaw ?? mark
     }
+
+    /// What closing this part returns, in AUSD: its share of the collateral plus the PnL
+    /// at the estimated exit, less the taker fee.
+    private var estimate: (back: Money?, pnl: Money?, fee: Money?, exit: String)? {
+        guard let closeSize, let exitRaw else { return nil }
+        let priceScale = pow(10, Double(figures.mark.decimals))
+        let size = Double(closeSize.raw) / pow(10, Double(closeSize.decimals))
+        let exit = exitRaw / priceScale
+        let entry = Double(figures.entry.raw) / pow(10, Double(figures.entry.decimals))
+        let pnl = (figures.side == .long ? exit - entry : entry - exit) * size
+        let fee = exit * size * Double(market.config.takerFeeMicros) / 1_000_000
+        let share = Double(figures.collateral.raw) / 1_000_000 * Double(percentage) / 100
+        func money(_ value: Double) -> Money? { Money(raw: Int64((value * 1_000_000).rounded())) }
+        let exitText = Price(raw: Int64(exitRaw.rounded()), decimals: figures.mark.decimals)?
+            .display(fractionDigits: figures.mark.decimals) ?? Unavailable.text
+        return (money(share + pnl - fee), money(pnl), money(fee), exitText)
+    }
+
+    private var closingHere: Bool { session.orderOrigin == .close(market: position.marketID) }
 
     var body: some View {
         VStack(spacing: 20) {
             Capsule().fill(DeskColor.nightMuted.color.opacity(0.5)).frame(width: 44, height: 5)
-            Text("Market Close").font(DeskType.title)
+            Text("Close \(figures.side == .long ? "Long" : "Short") \(market.symbol)").font(DeskType.title)
             VStack(spacing: 8) {
-                Text("Close size").font(DeskType.caption).foregroundStyle(DeskColor.nightMuted.color)
-                Text(closeNotional.map { "$" + $0.display() } ?? Unavailable.text)
-                    .font(.system(size: 42, weight: .bold, design: .rounded).monospacedDigit())
-                Text("\(percentage)% of \(figures.side == .long ? "Long" : "Short") \(market.symbol)")
+                Text("You get back").font(DeskType.caption).foregroundStyle(DeskColor.nightMuted.color)
+                Text(estimate?.back.map { "≈ " + $0.display() + " AUSD" } ?? Unavailable.text)
+                    .font(.system(size: 38, weight: .bold, design: .rounded).monospacedDigit())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                Text("\(percentage)% of the position")
                     .font(DeskType.caption).foregroundStyle(DeskColor.nightMuted.color)
             }
             .frame(maxWidth: .infinity).padding(.vertical, 28)
@@ -553,20 +633,28 @@ private struct MarketCloseSheet: View {
             }
 
             VStack(spacing: 10) {
-                ValueRow(label: "Position size", value: figures.size.display(fractionDigits: figures.size.decimals) + " " + market.symbol)
-                ValueRow(label: "Closing", value: closeSize?.display(fractionDigits: figures.size.decimals) ?? Unavailable.text)
-                ValueRow(label: "Mark", value: figures.mark.display(fractionDigits: figures.mark.decimals))
+                ValueRow(label: "Closing", value: (closeSize?.display(fractionDigits: figures.size.decimals) ?? Unavailable.text) + " " + market.symbol)
+                ValueRow(label: "Est. exit", value: estimate?.exit ?? Unavailable.text,
+                         detail: book == nil ? "at mark" : "from the live book")
+                ValueRow(label: "PnL on this part",
+                         value: estimate?.pnl.map { ($0.isNegative ? "" : "+") + $0.display() + " AUSD" } ?? Unavailable.text,
+                         tint: estimate?.pnl?.isNegative == true ? DeskColor.fall : DeskColor.rise)
+                ValueRow(label: "Fee", value: estimate?.fee.map { $0.display() + " AUSD" } ?? Unavailable.text)
             }
             .padding(16).background(DeskColor.nightChip.color, in: RoundedRectangle(cornerRadius: 18))
             Spacer()
-            if session.hasFailed, session.orderOrigin == .close(market: position.marketID), let reason = session.statusText {
+            if session.hasFailed, closingHere, let reason = session.statusText {
                 Text(reason)
                     .font(DeskType.caption)
                     .foregroundStyle(DeskColor.fall.color)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Button {
+            HoldToConfirm(
+                title: session.isBusy && closingHere ? "Closing…" : "Hold to close \(percentage)%",
+                tint: DeskColor.fall,
+                isEnabled: closeSize != nil && !session.isBusy
+            ) {
                 guard let closeSize else { return }
                 Task {
                     await session.closePosition(
@@ -574,11 +662,7 @@ private struct MarketCloseSheet: View {
                         slippageBps: min(50, market.maxMarketSlippageBps), in: market)
                     if !session.hasFailed { onDone() }
                 }
-            } label: {
-                Text(session.isBusy ? "Closing…" : "Close \(percentage)%")
-                    .font(DeskType.label).frame(maxWidth: .infinity).frame(height: 52)
             }
-            .buttonStyle(.borderedProminent).tint(DeskColor.fall.color).disabled(session.isBusy)
         }
         .padding(20).foregroundStyle(DeskColor.nightText.color).background(DeskColor.night.color)
         .presentationDetents([.large]).presentationDragIndicator(.hidden)
@@ -968,9 +1052,7 @@ private struct TradeShareCard: View {
                             .foregroundStyle(Color.white.opacity(0.56))
                     }
                     Spacer()
-                    Image(systemName: "qrcode")
-                        .resizable().interpolation(.none).frame(width: 88, height: 88)
-                        .foregroundStyle(.white)
+                    AddressQR(address: "https://trydesk.trade/app/trade/\(symbol)", size: 80, label: "Code to open \(symbol) on Desk")
                 }
                 .padding(.top, 34)
             }

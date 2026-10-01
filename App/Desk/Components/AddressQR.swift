@@ -6,6 +6,7 @@ import UIKit
 struct AddressQR: View {
     let address: String
     var size: CGFloat = 168
+    var label = "Wallet address code"
 
     private var image: UIImage? {
         let filter = CIFilter.qrCodeGenerator()
@@ -30,6 +31,6 @@ struct AddressQR: View {
                     .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
-        .accessibilityLabel("Wallet address code")
+        .accessibilityLabel(label)
     }
 }

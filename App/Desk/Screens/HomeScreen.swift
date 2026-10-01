@@ -206,7 +206,8 @@ struct HomeScreen: View {
         }
         #if DEBUG
         .task {
-            if ProcessInfo.processInfo.arguments.contains("-open-share") {
+            let arguments = ProcessInfo.processInfo.arguments
+            if arguments.contains("-open-share") || arguments.contains("-open-close") {
                 try? await Task.sleep(for: .seconds(2))
                 selectedPosition = model.openPositions.first
             }
