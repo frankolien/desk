@@ -82,9 +82,11 @@ struct AccountScreen: View {
                                 icon: "bell.badge.fill",
                                 tint: .purple,
                                 title: "Price alerts",
-                                subtitle: "Levels broken, 5% days",
-                                value: TradeAlerts.shared.priceAlerts ? "On" : "Off",
-                                action: { Task { await TradeAlerts.shared.setPriceAlerts(!TradeAlerts.shared.priceAlerts) } }
+                                subtitle: TradeAlerts.shared.permission == .denied
+                                    ? "Notifications are off for Desk in Settings" : "Levels broken, 5% days",
+                                toggle: Binding(
+                                    get: { TradeAlerts.shared.priceAlerts && TradeAlerts.shared.permission == .allowed },
+                                    set: { on in Task { await TradeAlerts.shared.setPriceAlerts(on) } })
                             )
 
                             sectionDivider
@@ -105,19 +107,10 @@ struct AccountScreen: View {
                                 tint: .indigo,
                                 title: "Face ID trading key",
                                 subtitle: model.isKeyUnlocked
-                                    ? "Unlocked on this device"
-                                    : "Locked — unlock before trading",
+                                    ? "Unlocked. Locks with your phone or after a short absence"
+                                    : "Locked. Unlock before trading",
                                 value: model.isKeyUnlocked ? "Lock" : "Unlock",
                                 action: toggleTradingKey
-                            )
-
-                            sectionDivider
-
-                            SettingsRow(
-                                icon: "lock.shield.fill",
-                                tint: .cyan,
-                                title: "Security & privacy",
-                                subtitle: "Key locks after a short absence or when your phone locks"
                             )
 
                             if Showcase.perplSiteLinks {
@@ -161,7 +154,8 @@ struct AccountScreen: View {
                                 icon: "info.circle.fill",
                                 tint: .blue,
                                 title: "About Desk",
-                                subtitle: "Fast, self-custodial trading"
+                                subtitle: "trydesk.trade",
+                                action: { perplPage = PerplPage(url: "https://trydesk.trade") }
                             )
                         }
 
@@ -189,6 +183,7 @@ struct AccountScreen: View {
             NadNameSheet(model: model) { showsNad = false }
         }
         .task(id: model.address) { if let address = model.address { await nad.load(address: address.checksummed) } }
+        .task { await TradeAlerts.shared.refreshPermission() }
         #if DEBUG
         .task { if ProcessInfo.processInfo.arguments.contains("-open-nad") { showsNad = true } }
         #endif
@@ -360,6 +355,7 @@ private struct SettingsRow: View {
     var subtitle: String?
     var value: String?
     var action: (() -> Void)?
+    var toggle: Binding<Bool>?
 
     var body: some View {
         Group {
@@ -406,6 +402,10 @@ private struct SettingsRow: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.trailing)
                     .lineLimit(2)
+            }
+
+            if let toggle {
+                Toggle(title, isOn: toggle).labelsHidden()
             }
 
             if action != nil {

@@ -79,9 +79,9 @@ final class TradeAlerts {
         guard let data = UserDefaults.standard.data(forKey: "desk.alerts.targets") else { return [] }
         return (try? JSONDecoder().decode([PriceTarget].self, from: data)) ?? []
     }()
-    /// Levels broken and big days on every Perpl market. On unless switched off.
-    private(set) var priceAlerts = UserDefaults.standard.object(forKey: "desk.alerts.prices") == nil
-        || UserDefaults.standard.bool(forKey: "desk.alerts.prices")
+    /// Levels broken and big days on every Perpl market. Off until switched on: a push for
+    /// every market is noise to most people and costs the server on every scan.
+    private(set) var priceAlerts = UserDefaults.standard.bool(forKey: "desk.alerts.prices")
     private static let nicknameKey = "desk.traderNicknames"
     private static let primerKey = "desk.alertsPrimerShown"
     private static let endpoint = URL(string: "https://web-lovat-nine-49.vercel.app/api/alerts")!
