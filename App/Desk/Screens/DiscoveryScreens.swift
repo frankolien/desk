@@ -323,7 +323,7 @@ struct MarketSearchScreen: View {
                     .scrollClipDisabled()
                     .padding(.top, 12)
 
-                    if !spotResults.isEmpty {
+                    if Showcase.spotTrading && !spotResults.isEmpty {
                         HStack {
                             Text(query.isEmpty ? "Trending coins" : "Coins")
                                 .font(.system(size: 18, weight: .bold, design: .rounded))

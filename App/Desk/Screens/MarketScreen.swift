@@ -49,7 +49,7 @@ struct MarketScreen: View {
                         header.padding(.horizontal, 16)
                         if !Self.tradersOnly {
                             hotMarkets.padding(.top, 10)
-                            if !discovery.trending.isEmpty {
+                            if Showcase.spotTrading && !discovery.trending.isEmpty {
                                 TrendingTicker(tokens: Array(discovery.trending.prefix(10)), sparklines: sparklines) { token in
                                     openToken = .init(chainIndex: token.chainIndex, contract: token.contract, symbol: token.symbol)
                                 }
@@ -61,7 +61,9 @@ struct MarketScreen: View {
                             liveTrades.padding(.top, 32).padding(.horizontal, 16)
                             topTraders.padding(.top, 32).padding(.horizontal, 16)
                         }
-                        newsSection.padding(.top, 32).padding(.horizontal, 16)
+                        if Showcase.news {
+                            newsSection.padding(.top, 32).padding(.horizontal, 16)
+                        }
                     }
                     .padding(.top, 8)
                     .padding(.bottom, 116)
@@ -102,8 +104,8 @@ struct MarketScreen: View {
                     .toolbar(.hidden, for: .tabBar)
             }
             .task { await directory.run() }
-            .task { await discovery.run() }
-            .task { await news.run() }
+            .task { if Showcase.spotTrading { await discovery.run() } }
+            .task { if Showcase.news { await news.run() } }
             .task(id: discovery.trending.prefix(10).map(\.id).joined(separator: ",")) {
                 await sparklines.load(discovery.trending)
             }
@@ -254,7 +256,7 @@ struct MarketScreen: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("Explore Markets")
             HStack(spacing: 8) {
-                ForEach(Shelf.allCases) { item in
+                ForEach(Shelf.allCases.filter { Showcase.spotTrading || $0 != .trending }) { item in
                     Button {
                         UISelectionFeedbackGenerator().selectionChanged()
                         withAnimation(.snappy(duration: 0.2)) { shelf = item }
@@ -311,7 +313,7 @@ struct MarketScreen: View {
     @ViewBuilder
     private var watchlistRows: some View {
         let perps = market.allMarkets.filter { savedMarketIDs.contains($0.id) }
-        let spot = SpotWatchlistStorage.decode(savedSpotData)
+        let spot = Showcase.spotTrading ? SpotWatchlistStorage.decode(savedSpotData) : []
         if perps.isEmpty && spot.isEmpty {
             Text("Star a market to keep it here.")
                 .font(.system(size: 14, weight: .medium, design: .rounded))
@@ -719,7 +721,9 @@ struct PerpDetailScreen: View {
                     priceRow.padding(.top, 26)
                     chart.padding(.top, 20)
                     ranges.padding(.top, 16)
-                    MarketChatPreview(chat: chat) { showsChat = true }.padding(.top, 26)
+                    if Showcase.marketChat {
+                        MarketChatPreview(chat: chat) { showsChat = true }.padding(.top, 26)
+                    }
                     tabs.padding(.top, 26)
                     switch tab {
                     case .book:

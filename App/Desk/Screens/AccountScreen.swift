@@ -53,15 +53,17 @@ struct AccountScreen: View {
                             )
                         }
 
-                        settingsSection("IDENTITY") {
-                            SettingsRow(
-                                icon: "at",
-                                tint: .purple,
-                                title: "Nad name",
-                                subtitle: nad.primary == nil ? "Show, set and manage your .nad identity" : "Primary name on Monad",
-                                value: nad.primary,
-                                action: { showsNad = true }
-                            )
+                        if Showcase.nadNames {
+                            settingsSection("IDENTITY") {
+                                SettingsRow(
+                                    icon: "at",
+                                    tint: .purple,
+                                    title: "Nad name",
+                                    subtitle: nad.primary == nil ? "Show, set and manage your .nad identity" : "Primary name on Monad",
+                                    value: nad.primary,
+                                    action: { showsNad = true }
+                                )
+                            }
                         }
 
                         settingsSection("PREFERENCES") {
@@ -118,6 +120,7 @@ struct AccountScreen: View {
                                 subtitle: "Key locks after a short absence or when your phone locks"
                             )
 
+                            if Showcase.perplSiteLinks {
                             sectionDivider
 
                             SettingsRow(
@@ -128,8 +131,9 @@ struct AccountScreen: View {
                                 action: { perplPage = PerplPage(url: model.network.holdsRealFunds
                                     ? "https://app.perpl.xyz/apikeys" : "https://testnet.perpl.xyz/apikeys") }
                             )
+                            }
 
-                            if model.network.holdsRealFunds {
+                            if Showcase.perplSiteLinks && model.network.holdsRealFunds {
                                 sectionDivider
 
                                 SettingsRow(

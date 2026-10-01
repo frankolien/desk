@@ -304,8 +304,32 @@ final class TradingSession {
         // let a later `connect()` start a second `desk.open`, and the loser of that race left
         // an authenticated socket with nobody reading its frames.
         defer { if connectionID == id { connecting = nil } }
-        try await attempt.value
+        do {
+            try await attempt.value
+        } catch {
+            if connectionID == id { keepTrying() }
+            throw error
+        }
     }
+
+    var isConnecting: Bool { connecting != nil }
+
+    /// After a failed or dropped connection, tries again with backoff while there is a desk
+    /// to connect. Nothing else reconnects on its own, so without this the book stayed
+    /// unread and copies couldn't close until the person happened to trade. A lock stops it.
+    private func keepTrying() {
+        guard reconnecting == nil else { return }
+        reconnecting = Task { [weak self] in
+            var delay = Duration.seconds(2)
+            while !Task.isCancelled {
+                try? await Task.sleep(for: delay)
+                guard let self, !Task.isCancelled, self.credentials != nil, !self.isConnected else { break }
+                do { try await self.connect(); break } catch { delay = min(delay * 2, .seconds(60)) }
+            }
+            self?.reconnecting = nil
+        }
+    }
+    private var reconnecting: Task<Void, Never>?
 
     func reconnect() async {
         guard credentials != nil else { return }
@@ -318,6 +342,8 @@ final class TradingSession {
     }
 
     func close() async {
+        reconnecting?.cancel()
+        reconnecting = nil
         if retryingUntil != nil { retryUnheard = true }
         connectionEpoch += 1
         connectionID = UUID()
@@ -562,6 +588,7 @@ final class TradingSession {
         guard id == connectionID else { return }
         isConnected = false
         connectionEpoch += 1
+        keepTrying()
         if retryingUntil != nil { retryUnheard = true }
         account.recordFailure("The Perpl account stream disconnected.")
         positions.recordFailure("The Perpl position stream disconnected.")

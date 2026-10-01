@@ -606,7 +606,7 @@ struct HomeScreen: View {
                 .padding(2)
                 .background(Color.white.opacity(0.07), in: Capsule())
             }
-            if book == .open {
+            if book == .open && Showcase.spotTrading {
                 HStack(spacing: 8) {
                     ForEach(Filter.allCases) { item in
                         Button {
@@ -635,15 +635,19 @@ struct HomeScreen: View {
         }
     }
 
+    /// An account whose book hasn't been read is not one with no positions; this says why.
+    private var unreadBookLine: String? {
+        guard model.hasTradingAccount, model.trading.positions.value == nil else { return nil }
+        if !model.isKeyUnlocked { return "Locked. Unlock to see your positions" }
+        return model.trading.isConnecting ? "Reading your positions…" : "Can't reach Perpl. Retrying…"
+    }
+
     @ViewBuilder
     private var openRows: some View {
         let perps = filter == .tokens ? [] : positionContexts
-        let tokens = filter == .perps ? [] : spot.holdings
+        let tokens = filter == .perps || !Showcase.spotTrading ? [] : spot.holdings
         if perps.isEmpty && tokens.isEmpty {
-            // An account whose book hasn't been read yet is not one with no positions.
-            let unread = filter != .tokens && model.hasTradingAccount && model.trading.positions.value == nil
-            emptyLine(filter == .tokens ? "No tokens bought through Desk yet"
-                      : unread ? "Reading your positions…" : "No open positions", action: onTrade)
+            emptyLine(filter == .tokens ? "No tokens bought through Desk yet" : unreadBookLine ?? "No open positions", action: onTrade)
         } else {
             ForEach(perps) { position in
                 ledgerRow(

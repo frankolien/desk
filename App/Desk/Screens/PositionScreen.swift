@@ -123,7 +123,7 @@ struct PositionScreen: View {
 
     private var tabStrip: some View {
         HStack(spacing: 0) {
-            ForEach(PositionTab.allCases) { item in
+            ForEach(PositionTab.allCases.filter { Showcase.openOrders || $0 != .orders }) { item in
                 Button { withAnimation(.easeOut(duration: 0.18)) { tab = item } } label: {
                     Text(title(for: item))
                         .font(.system(size: 13, weight: tab == item ? .bold : .medium, design: .rounded))

@@ -13,6 +13,7 @@ struct SignalsScreen: View {
     private enum Section: String, CaseIterable, Identifiable {
         case traders = "Following", top = "Top traders", watchlist = "Watchlist", market = "Market"
         var id: String { rawValue }
+        static var shown: [Section] { Showcase.signalsExtras ? allCases : [.traders, .top] }
     }
 
 
@@ -77,6 +78,7 @@ struct SignalsScreen: View {
                                           onOpen: { selectedFollowingTrade = $0 })
                                 .padding(.bottom, 130)
                         case .top:
+                            if Showcase.smartMoney {
                             Button { showsSmartMoney = true } label: {
                                 HStack(spacing: 12) {
                                     Image(systemName: "waveform.path.ecg").font(.system(size: 19, weight: .semibold))
@@ -97,6 +99,7 @@ struct SignalsScreen: View {
                             }
                             .buttonStyle(.plain)
                             .padding(.top, 20)
+                            }
                             TradersFeed(content: .top, directory: directory, copier: copier, onOpenCopying: { showsCopying = true },
                                         onSelect: { selectedTrader = $0 },
                                         onOpenTracked: { selectedTrackedWallet = $0 },
@@ -390,7 +393,7 @@ struct SignalsScreen: View {
         if #available(iOS 26.0, *) {
             GlassEffectContainer(spacing: 0) {
                 HStack(spacing: 0) {
-                    ForEach(Section.allCases) { item in
+                    ForEach(Section.shown) { item in
                         Button { select(item) } label: {
                             sectionLabel(item)
                         }
@@ -406,7 +409,7 @@ struct SignalsScreen: View {
             }
         } else {
             HStack(spacing: 0) {
-                ForEach(Section.allCases) { item in
+                ForEach(Section.shown) { item in
                     Button { select(item) } label: {
                         sectionLabel(item)
                             .background(section == item ? Color.white.opacity(0.24) : .clear, in: Capsule())
