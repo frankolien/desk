@@ -12,6 +12,7 @@ final class MarketModel {
     struct Quote: Sendable, Hashable {
         let markRaw: Int64
         let previousRaw: Int64
+        var receivedAt = ContinuousClock.now
     }
     struct Candle: Decodable, Sendable, Hashable {
         let t: Int64
@@ -176,7 +177,9 @@ final class MarketModel {
         // the new market's own previous mark.
         history = []
         lastCandleFetch = nil
-        applyQuote(for: selected)
+        // A flowing stream vouches for a quiet market's last price; without it the quote
+        // is only as fresh as when it arrived.
+        applyQuote(for: selected, at: statesFlowing ? .now : quotes[selected.id]?.receivedAt ?? .now)
         book.reset()
         Task { await refreshCandles() }
         Task { await syncLiveSubscriptions() }
@@ -317,11 +320,17 @@ final class MarketModel {
             allMarkets = context.markets.filter(\.config.isOpen)
             // Alerts need symbols for the watchlist's ids without a model of their own.
             UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: allMarkets.map { (String($0.id), $0.symbol) }), forKey: "desk.marketSymbols")
-            for item in allMarkets where quotes[item.id] == nil {
+            // The stream keeps quotes current while it flows; otherwise the context does.
+            for item in allMarkets where quotes[item.id] == nil || !statesFlowing {
                 quotes[item.id] = Quote(markRaw: item.state.markRaw, previousRaw: item.state.previousRaw)
             }
-            mark.record(price, serverTimestampMilliseconds: market.state.observedAt.timestampMilliseconds)
-            record(market: market, price: price)
+            // The context is cached for seconds at the edge; a flowing stream's price is newer.
+            if statesFlowing, mark.hasValue {
+                mark.noteSuccess()
+            } else {
+                mark.record(price, serverTimestampMilliseconds: market.state.observedAt.timestampMilliseconds)
+                record(market: market, price: price)
+            }
             if lastCandleFetch.map({ Date().timeIntervalSince($0) > 45 }) ?? true {
                 await refreshCandles()
             }
@@ -435,7 +444,7 @@ final class MarketModel {
     private func restampQuietMark() {
         guard statesFlowing, quotes[marketID] != nil, unchangedIsDue(marketID),
               let selected = allMarkets.first(where: { $0.id == marketID }) else { return }
-        applyQuote(for: selected, fromStream: true)
+        applyQuote(for: selected, at: .now)
     }
 
     private func noteHead(_ block: Int64) {
@@ -511,7 +520,7 @@ final class MarketModel {
                 ?? raw
             quotes[id] = Quote(markRaw: raw, previousRaw: previous)
             if id == marketID, let selected = allMarkets.first(where: { $0.id == id }) {
-                applyQuote(for: selected, fromStream: true)
+                applyQuote(for: selected, at: .now)
             }
         }
     }
@@ -524,11 +533,12 @@ final class MarketModel {
         return true
     }
 
-    /// A stream price leaves the context poll's failure count alone, so its backoff holds.
-    private func applyQuote(for selected: Market, fromStream: Bool = false) {
+    /// A quote's price, stamped at `instant`. It leaves the context poll's failure count
+    /// alone, so that poll's backoff holds.
+    private func applyQuote(for selected: Market, at instant: ContinuousClock.Instant) {
         let raw = quotes[selected.id]?.markRaw ?? selected.state.markRaw
         guard let price = selected.price(raw) else { return }
-        if fromStream { mark.restamp(price) } else { mark.record(price) }
+        mark.restamp(price, at: instant)
         record(market: selected, price: price)
         isLoadingFirstValue = false
     }

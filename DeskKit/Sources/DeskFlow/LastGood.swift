@@ -41,6 +41,12 @@ public struct LastGood<Value: Sendable>: Sendable {
         observation = Observed(value, receivedAt: instant, serverTimestampMilliseconds: nil)
     }
 
+    /// The polled source answered, but a second source holds a newer value.
+    public mutating func noteSuccess() {
+        consecutiveFailures = 0
+        lastFailure = nil
+    }
+
     public mutating func recordFailure(_ reason: String) {
         consecutiveFailures += 1
         lastFailure = reason

@@ -23,6 +23,23 @@ struct OrderProgressTests {
         #expect(progress.outcome == .settled)
     }
 
+    @Test("A failure Desk stopped listening to becomes unknown; a settled order does not")
+    func failureUnheard() {
+        var progress = OrderProgress()
+        progress.begin()
+        progress.associate(1)
+        progress.apply(id: 1, phase: .failed(reason: 36, failure: 7))
+        progress.failureUnheard()
+        #expect(progress.outcome == .abandoned)
+
+        var filled = OrderProgress()
+        filled.begin()
+        filled.associate(2)
+        filled.apply(id: 2, phase: .settled)
+        filled.failureUnheard()
+        #expect(filled.outcome == .settled)
+    }
+
     @Test("Several early updates replay in the order they arrived")
     func replayInOrder() {
         var progress = OrderProgress()

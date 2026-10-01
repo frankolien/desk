@@ -608,7 +608,12 @@ final class CopyTrader {
         do {
             // Positions that existed before this copy can never be its fill.
             let held = Set(model.openPositions.map(\.positionID))
+            let isLong = side == .long
+            let heldSizes = Dictionary(uniqueKeysWithValues: model.openPositions
+                .filter { $0.marketID == target.id && ($0.side == .long) == isLong }
+                .map { ($0.positionID, $0.sizeRaw) })
             let handOrders = session.handOrders[target.id] ?? 0
+            let handInFlight = session.isBusy && session.orderMarketID == target.id
             let frameID = try await session.placeCopy(plan.draft, in: target)
             var outcome = await settlement(of: frameID, session: session, retryBlocks: target.orderRetryBlocks)
             // Perpl never answered. A position that appears on this side anyway is the
@@ -617,8 +622,12 @@ final class CopyTrader {
             switch outcome {
             case .settled?, .unfilled?, .rejected?, .failed?: break
             default:
-                late = await newPosition(marketID: target.id, isLong: side == .long, model: model, excluding: held)
+                late = await newPosition(marketID: target.id, isLong: isLong, model: model, excluding: held)
                 outcome = await session.phase(of: frameID)
+                // A first failure that only now arrived gets its retry window too.
+                if case .failed? = outcome {
+                    outcome = await settlement(of: frameID, session: session, retryBlocks: target.orderRetryBlocks)
+                }
             }
             switch outcome {
             case .settled:
@@ -656,19 +665,33 @@ final class CopyTrader {
                 // is what keeps the open-copy limit, the exposure cap and closing with the
                 // trader true. Saying "nothing was opened" and walking away was a position
                 // the app then had no idea it held.
-                // Only a position no hand order could have opened, and no larger than this
-                // order, is taken as its fill; anything else is the person's own trade.
+                // Only a fill no hand order could explain, no larger than this order, is
+                // taken as its own: a new position, or growth of one already held on this
+                // side, where Perpl merges fills. Anything else is the person's own trade.
                 let planned = plan.draft.size.raw
-                if let filled = late, (session.handOrders[target.id] ?? 0) == handOrders, filled.sizeRaw <= planned {
+                let byHand = handInFlight || (session.handOrders[target.id] ?? 0) != handOrders
+                let grown = model.openPositions.first { position in
+                    guard let before = heldSizes[position.positionID] else { return false }
+                    return position.sizeRaw > before && position.sizeRaw - before <= planned
+                }
+                var adopted: (positionID: Int64, sizeRaw: Int64)?
+                if !byHand {
+                    if let late, late.sizeRaw <= planned {
+                        adopted = (late.positionID, late.sizeRaw)
+                    } else if let grown {
+                        adopted = (grown.positionID, grown.sizeRaw - (heldSizes[grown.positionID] ?? 0))
+                    }
+                }
+                if let adopted {
                     open.append(OpenCopy(
-                        id: UUID(), trader: trader, marketID: target.id, symbol: symbol, isLong: side == .long,
-                        sizeRaw: filled.sizeRaw, leverage: plan.leverage,
-                        margin: planned > 0 ? plan.margin * Double(filled.sizeRaw) / Double(planned) : plan.margin,
-                        positionID: filled.positionID, openedAt: .now, theirEntry: theirs.entry))
+                        id: UUID(), trader: trader, marketID: target.id, symbol: symbol, isLong: isLong,
+                        sizeRaw: adopted.sizeRaw, leverage: plan.leverage,
+                        margin: planned > 0 ? plan.margin * Double(adopted.sizeRaw) / Double(planned) : plan.margin,
+                        positionID: adopted.positionID, openedAt: .now, theirEntry: theirs.entry))
                     entry.detail += " · filled late"
                     record(entry)
                     onEvent?("Copied \(Self.name(for: trader)): \(label)")
-                } else if late != nil {
+                } else if late != nil || grown != nil || !session.isConnected {
                     note(.failed, "Perpl didn't confirm this copy. Check your \(symbol) position; Desk isn't tracking it.")
                 } else {
                     note(.failed, "The order expired before it filled. Nothing was opened.")
@@ -772,28 +795,32 @@ final class CopyTrader {
     }
 
     /// The order's phase once the venue has decided it, or its last phase after twenty
-    /// seconds of waiting.
+    /// seconds without an answer.
     ///
     /// A failure is held until the order's deadline and a full retry window from when it
     /// was first seen have both passed, because a later non-failure still decides the
     /// order. A local expiry is only Desk's own timeout, and orders carry no venue
     /// deadline, so it is waited out to the end.
     private func settlement(of frameID: Int64, session: TradingSession, retryBlocks: UInt32) async -> OrderPhase? {
-        var failedAt: Int64?
-        for _ in 0..<80 {
+        let start = ContinuousClock.now
+        var failedAt: (block: Int64, at: ContinuousClock.Instant)?
+        while true {
             switch await session.phase(of: frameID) {
             case .settled?, .unfilled?, .rejected?: return await session.phase(of: frameID)
             case .failed?:
-                let seen = failedAt ?? session.headBlock
+                let seen = failedAt ?? (session.headBlock, .now)
                 failedAt = seen
-                if await session.isPastDeadline(frameID), session.headBlock > seen + Int64(retryBlocks) {
+                let windowPassed = await session.isPastDeadline(frameID)
+                    && session.headBlock > seen.block + Int64(retryBlocks)
+                // Counted from the failure, not the send, in case the head stops arriving.
+                if windowPassed || ContinuousClock.now - seen.at > .seconds(12) {
                     return await session.phase(of: frameID)
                 }
-            default: break
+            default:
+                if ContinuousClock.now - start > .seconds(20) { return await session.phase(of: frameID) }
             }
             try? await Task.sleep(for: .milliseconds(250))
         }
-        return await session.phase(of: frameID)
     }
 
     /// The position a fill just opened, once the stream reports it.

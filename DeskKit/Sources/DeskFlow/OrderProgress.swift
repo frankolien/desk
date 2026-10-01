@@ -132,6 +132,13 @@ public struct OrderProgress: Sendable, Equatable {
         outcome = .abandoned
     }
 
+    /// A first failure Perpl could still have overturned while Desk wasn't listening:
+    /// nobody knows what happened to the order.
+    public mutating func failureUnheard() {
+        guard case .failed = outcome else { return }
+        outcome = .abandoned
+    }
+
     /// A failure raised before the order reached the desk at all.
     public mutating func failLocally() {
         outcome = .rejected(code: 0, subReason: nil, error: nil)

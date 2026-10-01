@@ -32,6 +32,16 @@ struct LastGoodTests {
         #expect(held.consecutiveFailures == 0)
     }
 
+    @Test("A success note clears the failures and keeps the newer value")
+    func noteSuccessKeepsValue() {
+        var held = LastGood<Money>()
+        held.restamp(Money(text: "5")!)
+        held.recordFailure("context 503")
+        held.noteSuccess()
+        #expect(held.consecutiveFailures == 0)
+        #expect(held.value?.text == "5.000000")
+    }
+
     @Test("A failure cannot reach the value it failed to replace")
     func failureKeepsValue() {
         // A trading app that shows a zero position during a reconnect is a trading app

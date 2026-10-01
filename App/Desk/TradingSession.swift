@@ -51,6 +51,12 @@ final class TradingSession {
     /// failure. The ticket stays busy until then, so a second order can't double the first.
     private(set) var retryingUntil: Int64?
     private var retryBackstop: Task<Void, Never>?
+    /// The socket went away during the retry wait, so Perpl's retry could have filled
+    /// unheard.
+    private var retryUnheard = false
+
+    /// The market of the order in flight or last sent by hand.
+    var orderMarketID: UInt32? { orderMarket?.id }
 
     /// Orders the person sent by hand, per market. Copy trading reads it to tell a
     /// position the person opened from one its own unanswered order opened.
@@ -122,14 +128,25 @@ final class TradingSession {
 
     func adopt(apiKey: APIKey, session: SigningSession, market: Market) {
         credentials = PerplCredentials(apiKey: apiKey, session: session)
-        desk = OrderDesk(socket: network.tradingSocket(), market: market)
+        desk = OrderDesk(socket: network.tradingSocket(), market: market, firstFrameID: frameSeed)
         self.market = market
+    }
+
+    /// Where the next desk's frame ids start: past every id an earlier desk used, so an
+    /// answer still owed to an order of the old desk can't be read as a new order's.
+    private var frameSeed: Int64 = 1
+
+    private func retireDesk() async {
+        guard let desk else { return }
+        frameSeed = max(frameSeed, await desk.upcomingFrameID)
+        await desk.close()
     }
 
     /// Forgets the enrolled key along with the socket, for a switch to another network
     /// whose exchange has never seen that key.
     func abandon() async {
         await close()
+        await retireDesk()
         credentials = nil
         desk = nil
         // Block numbers belong to a chain; another network's are tens of millions apart.
@@ -137,19 +154,33 @@ final class TradingSession {
         endRetrying()
     }
 
-    /// Rebuilds the order desk for the instrument the person selected. Market discovery
-    /// and order construction now share the same Perpl market instead of every row
-    /// eventually submitting BTC.
+    /// Points the order desk at the instrument the person selected. Within one exchange
+    /// instance the desk keeps its socket and every order it follows, so a copy or a
+    /// retry in flight still hears its answer; another instance needs a new desk.
     func selectMarket(_ market: Market) async {
         guard credentials != nil else { return }
+        if let desk, await desk.retarget(market) {
+            self.market = market
+            startClean()
+            if !isConnected { try? await connect() }
+            return
+        }
         watching?.cancel()
-        await desk?.close()
-        desk = OrderDesk(socket: network.tradingSocket(), market: market)
+        if retryingUntil != nil { retryUnheard = true }
+        await retireDesk()
+        desk = OrderDesk(socket: network.tradingSocket(), market: market, firstFrameID: frameSeed)
         self.market = market
-        // A finished order belongs to the market it was sent on; the next screen starts clean.
-        if order.outcome?.isTerminal == true { order.reset(); localProblem = nil; endRetrying() }
+        startClean()
         isConnected = false
         try? await connect()
+    }
+
+    /// A finished order belongs to the market it was sent on; the next screen starts
+    /// clean. One Perpl may still retry is not finished.
+    private func startClean() {
+        guard order.outcome?.isTerminal == true, retryingUntil == nil else { return }
+        order.reset()
+        localProblem = nil
     }
 
     func noteHeadBlock(_ block: Int64) {
@@ -218,6 +249,7 @@ final class TradingSession {
     }
 
     func close() async {
+        if retryingUntil != nil { retryUnheard = true }
         connectionID = UUID()
         connecting?.cancel()
         connecting = nil
@@ -393,9 +425,13 @@ final class TradingSession {
     private func endRetrying() {
         retryBackstop?.cancel()
         retryBackstop = nil
+        let unheard = retryUnheard
+        retryUnheard = false
         guard retryingUntil != nil else { return }
         retryingUntil = nil
-        if case .failed = order.outcome { Haptics.failure() }
+        guard case .failed = order.outcome else { return }
+        if unheard { order.failureUnheard() }
+        Haptics.failure()
     }
 
     private func record(_ event: OrderDesk.Event) {
@@ -426,6 +462,7 @@ final class TradingSession {
     private func socketEnded(id: UUID) {
         guard id == connectionID else { return }
         isConnected = false
+        if retryingUntil != nil { retryUnheard = true }
         account.recordFailure("The Perpl account stream disconnected.")
         positions.recordFailure("The Perpl position stream disconnected.")
         order.connectionLost()

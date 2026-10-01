@@ -33,6 +33,8 @@ struct TicketSheet: View {
     @State private var handledFill = false
     /// Set once this sheet sends an order, so a fill from an earlier one is never shown here.
     @State private var submitted = false
+    /// Opened while an earlier order was still in flight; its fill is shown here.
+    @State private var watchingEarlier = false
     @State private var showsProtection = false
 
     private var quote: OrderQuote? {
@@ -350,7 +352,7 @@ struct TicketSheet: View {
             // The one place the venue's own vocabulary is worth showing, because
             // "forwarded" is a real state a user can be stuck in and a spinner is not an
             // explanation.
-            if session.isBusy || (submitted && session.order.outcome == .settled), let status = session.statusText {
+            if session.isBusy || ((submitted || watchingEarlier) && session.order.outcome == .settled), let status = session.statusText {
                 Text(status)
                     .font(DeskType.caption)
                     .foregroundStyle(session.order.outcome == .settled ? DeskColor.rise.color : DeskColor.nightMuted.color)
@@ -362,12 +364,13 @@ struct TicketSheet: View {
         }
         .padding(.bottom, 8)
         .background(DeskColor.night.color)
+        .interactiveDismissDisabled(session.isBusy)
         .onAppear {
-            // An earlier order's outcome is not this ticket's.
-            if !session.isBusy { session.clear() }
+            // An earlier order's outcome is not this ticket's, unless it is still in flight.
+            if session.isBusy { watchingEarlier = true } else { session.clear() }
         }
         .onChange(of: session.order.outcome) { _, outcome in
-            guard outcome == .settled, submitted, !handledFill else { return }
+            guard outcome == .settled, submitted || watchingEarlier, !handledFill else { return }
             handledFill = true
             Task { @MainActor in
                 // Leave the venue's confirmation visible for a beat before returning to

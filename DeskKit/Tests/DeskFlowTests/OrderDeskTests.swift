@@ -58,6 +58,12 @@ private func market() throws -> Market {
     return try #require(context.market(id: 16))
 }
 
+private func market(id: UInt32) throws -> Market {
+    let url = try #require(Bundle.module.url(forResource: "Context-testnet", withExtension: "json"))
+    let context = try JSONDecoder().decode(PerplContext.self, from: Data(contentsOf: url))
+    return try #require(context.market(id: id))
+}
+
 private func credentials() -> PerplCredentials {
     .init(apiKey: APIKey("pk_test"), signer: PerplSigner(seed: SecureBytes(Data(repeating: 9, count: 32))))
 }
@@ -320,6 +326,31 @@ struct OrderDeskTests {
         #expect(await subject.deadline(of: frameID) == 1_022)
         #expect(await subject.expire(headBlock: 1_022).isEmpty)
         #expect(await subject.expire(headBlock: 1_023) == [frameID])
+    }
+
+    @Test("Switching market keeps the socket, the orders being followed and the numbering")
+    func retargetKeepsOrders() async throws {
+        let channel = ScriptedChannel(inbound: [snapshot])
+        let subject = try desk(channel)
+        try await subject.open(credentials: credentials())
+        let first = try await subject.place(try draft(), headBlock: 1_000)
+
+        #expect(await subject.retarget(try market(id: 32)))
+        #expect(await subject.phase(of: first) != nil, "the BTC order is still followed")
+        #expect(await subject.upcomingFrameID == first + 1)
+    }
+
+    @Test("A new desk can continue an earlier desk's numbering")
+    func continuesNumbering() async throws {
+        let channel = ScriptedChannel(inbound: [snapshot])
+        let url = try #require(URL(string: "wss://testnet.perpl.xyz/ws/v1/trading"))
+        let subject = OrderDesk(
+            socket: PerplSocket(
+                url: url, chainID: 10143, makeChannel: { _ in channel },
+                heartbeatInterval: .seconds(30), now: { Date(timeIntervalSince1970: 1_789_300_800) }),
+            market: try market(), firstFrameID: 40)
+        try await subject.open(credentials: credentials())
+        #expect(try await subject.place(try draft(), headBlock: 1_000) == 40)
     }
 
     /// Reconnecting reseeds from the venue's counter rather than carrying ours across,

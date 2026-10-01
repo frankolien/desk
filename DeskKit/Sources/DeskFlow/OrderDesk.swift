@@ -70,7 +70,7 @@ public actor OrderDesk {
     }
 
     private let socket: PerplSocket
-    private let market: Market
+    private var market: Market
     private var counter: RequestCounter?
     private let tracker = OrderTracker()
     private var account: UInt32?
@@ -80,9 +80,23 @@ public actor OrderDesk {
     /// and unique within a connection.
     private var nextFrameID: Int64 = 1
 
-    public init(socket: PerplSocket, market: Market) {
+    /// `firstFrameID` continues an earlier desk's numbering, so an answer still owed to
+    /// that desk's order can never be read as one of this desk's.
+    public init(socket: PerplSocket, market: Market, firstFrameID: Int64 = 1) {
         self.socket = socket
         self.market = market
+        nextFrameID = max(1, firstFrameID)
+    }
+
+    /// The id the next order will carry.
+    public var upcomingFrameID: Int64 { nextFrameID }
+
+    /// Makes another market of the same exchange instance the default, keeping the socket
+    /// and every order still being followed. False for a market on another instance.
+    public func retarget(_ next: Market) -> Bool {
+        guard next.instanceID == market.instanceID else { return false }
+        market = next
+        return true
     }
 
     public var accountID: UInt32? { account }
