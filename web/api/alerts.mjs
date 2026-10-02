@@ -699,6 +699,7 @@ export function createHandler(resolve) {
       apns.close();
       confirmed = result.status === 200;
       if (confirmed) environment = result.environment ?? environment;
+      else console.warn(`alerts: confirmation refused, ${result.status || "no answer"} ${result.reason ?? ""} (${result.environment})`);
       if (!confirmed && !known) {
         await store.set(`alerts:confirm:${id}`, "failed", { ex: 60 }).catch(() => {});
         return res.status(400).json({ error: UNREACHABLE });

@@ -87,7 +87,13 @@ export function apnsClient({
     /// A token refused as the wrong environment (sandbox vs production) is retried once against the other.
     async send({ token, environment }, payload, options) {
       const first = environment === "production" ? "production" : "sandbox";
-      const result = await post(first, token, payload, options);
+      let result = await post(first, token, payload, options);
+      // No answer at all is a dropped connection, not a refusal: one more try on a fresh one.
+      if (result.status === 0) {
+        sessions.get(first)?.destroy();
+        sessions.delete(first);
+        result = await post(first, token, payload, options);
+      }
       if (result.reason !== "BadDeviceToken") return { ...result, environment: first };
       const other = first === "production" ? "sandbox" : "production";
       const retried = await post(other, token, payload, options);
