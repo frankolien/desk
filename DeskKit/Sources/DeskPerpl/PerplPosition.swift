@@ -27,6 +27,9 @@ public struct PerplPosition: Decodable, Sendable, Hashable {
     public let realisedPnLRaw: Int64?
     public let realisedFundingRaw: Int64?
     public let statusCode: Int
+    /// From `at`, the block and time of the row; absent on frames that omit it.
+    public let updatedBlock: Int64?
+    public let updatedAt: Date?
 
     public var side: Side { sideCode == 2 ? .short : .long }
 
@@ -52,6 +55,12 @@ public struct PerplPosition: Decodable, Sendable, Hashable {
         case realisedPnL = "dpnl"
         case realisedFunding = "fnd"
         case status = "st"
+        case stamp = "at"
+    }
+
+    private struct Stamp: Decodable {
+        let b: Int64?
+        let t: Int64?
     }
 
     public init(from decoder: any Decoder) throws {
@@ -73,6 +82,26 @@ public struct PerplPosition: Decodable, Sendable, Hashable {
         realisedPnLRaw = try? box.decodeWireInt(.realisedPnL)
         realisedFundingRaw = try? box.decodeWireInt(.realisedFunding)
         statusCode = (try? box.decode(Int.self, forKey: .status)) ?? 0
+        let stamp = try? box.decode(Stamp.self, forKey: .stamp)
+        updatedBlock = stamp?.b
+        updatedAt = stamp?.t.map { Date(timeIntervalSince1970: Double($0) / 1000) }
+    }
+}
+
+/// `GET /v1/trading/position-history`, newest first, paged by the opaque `np` cursor.
+public struct PositionHistoryPage: Decodable, Sendable {
+    public let positions: [PerplPosition]
+    public let nextPage: String?
+
+    enum CodingKeys: String, CodingKey {
+        case positions = "d"
+        case nextPage = "np"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        positions = try box.decodeIfPresent([PerplPosition].self, forKey: .positions) ?? []
+        nextPage = (try? box.decode(String.self, forKey: .nextPage)).flatMap { $0.isEmpty ? nil : $0 }
     }
 }
 

@@ -6,6 +6,7 @@ import DeskMoney
 import DeskPerpl
 import Foundation
 import Observation
+import Security
 import WidgetKit
 import UIKit
 
@@ -81,8 +82,10 @@ final class AppModel {
     private let session = SigningSession()
     private let passkey: any PasskeyService
     private var apiKeys: APIKeyStore { APIKeyStore.forNetwork(network) }
-    private(set) var network: DeskNetwork = DeskNetwork(
-        rawValue: UserDefaults.standard.string(forKey: "desk.network") ?? "") ?? .testnet
+    private(set) var network: DeskNetwork = NetworkChoice.saved ?? .testnet
+    /// False on a fresh install until the wallet is known, so a mainnet desk reopens on mainnet.
+    private var networkIsSettled = NetworkChoice.saved != nil
+    private var historyRefilled: Set<String> = []
     private var balancePoller: Task<Void, Never>?
     private var balances: BalanceReader?
     private(set) var mainnetMON = LastGood<NativeAmount>()
@@ -95,8 +98,10 @@ final class AppModel {
            index + 1 < ProcessInfo.processInfo.arguments.count,
            let chosen = DeskNetwork(rawValue: ProcessInfo.processInfo.arguments[index + 1]) {
             network = chosen
+            networkIsSettled = true
         }
         #endif
+        if !networkIsSettled, let last = passkey.lastSeenAddress { settleNetwork(NetworkChoice.likely(for: last)) }
         trading.network = network
         trading.onAccount = { [weak self] account in
             guard let free = account.free else { return }
@@ -292,13 +297,17 @@ final class AppModel {
         signInProblem = nil
         defer { isWorking = false }
         do {
-            let store = apiKeys
+            let settled = networkIsSettled
+            let current = network
+            let tradingIndex: @Sendable (EthereumAddress) -> UInt32 = { address in
+                APIKeyStore.forNetwork(settled ? current : NetworkChoice.likely(for: address)).tradingIndex(for: address)
+            }
             // Read before deriving: `derive` records the address it derived, so reading after
             // would compare it against itself and the guard could never fire.
             let lastSeen = passkey.lastSeenAddress
             let keys = creating
-                ? try await passkey.createAccounts(tradingIndex: { store.tradingIndex(for: $0) })
-                : try await passkey.deriveAccounts(tradingIndex: { store.tradingIndex(for: $0) })
+                ? try await passkey.createAccounts(tradingIndex: tradingIndex)
+                : try await passkey.deriveAccounts(tradingIndex: tradingIndex)
             // The address guard runs before any balance is shown: a synced passkey can derive another
             // address on a second device, and showing that account's zero would read as theft.
             let verdict = AddressGuard.check(derived: keys.address, against: lastSeen)
@@ -307,9 +316,10 @@ final class AppModel {
                     + "Your funds are safe — do not continue until this is sorted."
                 return
             }
+            if !settled { settleNetwork(NetworkChoice.likely(for: keys.address)) }
             address = keys.address
             await session.open(keys.trading)
-            sessionTradingIndex = store.tradingIndex(for: keys.address)
+            sessionTradingIndex = apiKeys.tradingIndex(for: keys.address)
             isKeyUnlocked = true
             TradingKeyVault.seal(keys.trading, address: keys.address, network: network.rawValue)
             try await arrive(at: keys.address)
@@ -402,6 +412,26 @@ final class AppModel {
         stage = .trading
         await refreshBalances()
         try? await trading.connect()
+        Task { await refillClosedTrades() }
+    }
+
+    private func settleNetwork(_ chosen: DeskNetwork) {
+        networkIsSettled = true
+        guard chosen != network else { return }
+        network = chosen
+        trading.network = chosen
+    }
+
+    /// The phone's list of closed positions goes with the app; Perpl keeps the real one.
+    private func refillClosedTrades() async {
+        guard let address else { return }
+        let network = network
+        let key = "\(network.rawValue):\(address.checksummed)"
+        guard !historyRefilled.contains(key) else { return }
+        let closed = await trading.closedHistory()
+        guard !closed.isEmpty, self.network == network, self.address == address else { return }
+        historyRefilled.insert(key)
+        ClosedPositionsStore.shared.record(closed, network: network.rawValue, address: address.checksummed)
     }
 
     @discardableResult
@@ -414,8 +444,9 @@ final class AppModel {
         await trading.abandon()
         hasTradingAccount = false
         network = next
+        networkIsSettled = true
         trading.network = next
-        UserDefaults.standard.set(next.rawValue, forKey: "desk.network")
+        NetworkChoice.save(next)
         balances = nil
         collateral = LastGood()
         walletAUSD = LastGood()
@@ -1057,6 +1088,43 @@ final class AppModel {
             addresses: try ExchangeAddresses(context: await rest.context(), pinnedTo: network))
         balances = reader
         return reader
+    }
+}
+
+/// UserDefaults is wiped with the app; the Keychain copy outlives a reinstall.
+enum NetworkChoice {
+    private static let defaultsKey = "desk.network"
+    private static var item: [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: "com.opia.desk.network",
+         kSecAttrAccount as String: "choice"]
+    }
+
+    static var saved: DeskNetwork? {
+        if let text = UserDefaults.standard.string(forKey: defaultsKey) { return DeskNetwork(rawValue: text) }
+        var query = item
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return DeskNetwork(rawValue: String(decoding: data, as: UTF8.self))
+    }
+
+    static func save(_ network: DeskNetwork) {
+        UserDefaults.standard.set(network.rawValue, forKey: defaultsKey)
+        let data = Data(network.rawValue.utf8)
+        guard SecItemUpdate(item as CFDictionary, [kSecValueData as String: data] as CFDictionary) == errSecItemNotFound
+        else { return }
+        var added = item
+        added[kSecValueData as String] = data
+        added[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(added as CFDictionary, nil)
+    }
+
+    /// With no choice saved, a wallet that enrolled on mainnet is a mainnet desk.
+    static func likely(for address: EthereumAddress) -> DeskNetwork {
+        APIKeyStore.forNetwork(.mainnet).load(for: address) != nil ? .mainnet : .testnet
     }
 }
 

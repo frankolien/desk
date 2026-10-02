@@ -251,6 +251,26 @@ final class TradingSession {
 
     var isConnecting: Bool { connecting != nil }
 
+    /// Closed positions as Perpl recorded them, newest first, at most five pages. Signed with the
+    /// key already in memory; an empty answer means none could be read, not that none exist.
+    func closedHistory() async -> [PerplPosition] {
+        guard let credentials, let configuration = try? network.perpl() else { return [] }
+        let rest = PerplREST(configuration: configuration)
+        await rest.adopt(credentials)
+        var rows: [PerplPosition] = []
+        var cursor: String?
+        for _ in 0..<5 {
+            var query = [(name: "count", value: "100")]
+            if let cursor { query.append((name: "page", value: cursor)) }
+            guard let endpoint = try? PerplEndpoint(method: .get, path: "/v1/trading/position-history", query: query),
+                  let page = try? await rest.signedJSON(endpoint, as: PositionHistoryPage.self) else { break }
+            rows += page.positions
+            guard let next = page.nextPage, next != cursor else { break }
+            cursor = next
+        }
+        return PositionBook.closedRows(in: rows)
+    }
+
     private func keepTrying() {
         guard reconnecting == nil else { return }
         reconnecting = Task { [weak self] in

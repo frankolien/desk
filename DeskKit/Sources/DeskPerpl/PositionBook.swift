@@ -26,4 +26,20 @@ public enum PositionBook {
         }
         return result
     }
+
+    /// A position can appear more than once in history. Only rows the venue marks Closed,
+    /// Liquidated, Deleveraged or Unwound end one; the latest such row per position is kept.
+    public static func closedRows(in history: [PerplPosition]) -> [PerplPosition] {
+        var latest: [Int64: PerplPosition] = [:]
+        var order: [Int64] = []
+        for row in history where (2...5).contains(row.statusCode) && !row.isOpen {
+            guard let kept = latest[row.positionID] else {
+                latest[row.positionID] = row
+                order.append(row.positionID)
+                continue
+            }
+            if (row.updatedBlock ?? 0) > (kept.updatedBlock ?? 0) { latest[row.positionID] = row }
+        }
+        return order.compactMap { latest[$0] }
+    }
 }

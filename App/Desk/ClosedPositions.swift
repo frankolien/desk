@@ -70,7 +70,7 @@ final class ClosedPositionsStore {
                 let refreshed = ClosedTrade(position: position, closedAt: known[index].closedAt)
                 if refreshed != known[index] { known[index] = refreshed; changed = true }
             } else {
-                known.append(ClosedTrade(position: position))
+                known.append(ClosedTrade(position: position, closedAt: position.updatedAt ?? .now))
                 changed = true
             }
         }

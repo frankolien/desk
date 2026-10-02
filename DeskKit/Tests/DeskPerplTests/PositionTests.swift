@@ -250,3 +250,48 @@ struct PositionBookTests {
         #expect(merged.contains { $0.positionID == 3 })
     }
 }
+
+@Suite("Position history")
+struct PositionHistoryTests {
+    private func row(pid: Int, status: Int, exit: Int64?, block: Int64, size: Int64 = 1_000_000) -> String {
+        var fields = [
+            #""at":{"b":\#(block),"t":1790000000000}"#, #""mkt":16"#, #""acc":42"#, #""pid":"\#(pid)""#,
+            #""sd":1"#, #""c":"10000000""#, #""ep":1000000"#, #""s":\#(size)"#, #""lv":500"#,
+            #""efs":"0""#, #""xfs":"0""#, #""fee":"0""#, #""st":\#(status)"#,
+        ]
+        if let exit { fields.append(#""xp":\#(exit)"#) }
+        return "{\(fields.joined(separator: ","))}"
+    }
+
+    @Test("A page decodes its rows, their stamp and the next cursor")
+    func decodesPage() throws {
+        let json = #"{"d":[\#(row(pid: 7, status: 2, exit: 1_100_000, block: 90))],"np":"abc"}"#
+        let page = try JSONDecoder().decode(PositionHistoryPage.self, from: Data(json.utf8))
+        #expect(page.positions.count == 1)
+        #expect(page.nextPage == "abc")
+        #expect(page.positions[0].updatedBlock == 90)
+        #expect(page.positions[0].updatedAt == Date(timeIntervalSince1970: 1_790_000_000))
+    }
+
+    @Test("The last page has no cursor")
+    func lastPage() throws {
+        let page = try JSONDecoder().decode(PositionHistoryPage.self, from: Data(#"{"d":[],"np":""}"#.utf8))
+        #expect(page.positions.isEmpty)
+        #expect(page.nextPage == nil)
+    }
+
+    @Test("Only ended positions are kept, once each, at their latest row")
+    func closedRows() throws {
+        let json = "[" + [
+            row(pid: 9, status: 1, exit: nil, block: 120),
+            row(pid: 7, status: 2, exit: 1_100_000, block: 100),
+            row(pid: 7, status: 2, exit: 1_200_000, block: 110),
+            row(pid: 8, status: 3, exit: 900_000, block: 80),
+            row(pid: 6, status: 1, exit: 1_050_000, block: 70, size: 500_000),
+        ].joined(separator: ",") + "]"
+        let rows = try JSONDecoder().decode([PerplPosition].self, from: Data(json.utf8))
+        let closed = PositionBook.closedRows(in: rows)
+        #expect(closed.map(\.positionID) == [7, 8])
+        #expect(closed.first?.exitRaw == 1_200_000)
+    }
+}
