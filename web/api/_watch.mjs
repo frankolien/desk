@@ -10,6 +10,9 @@ const DUST = 1e-9;
 export const seenKey = (address) => `alerts:seen:${isSolanaAddress(address) ? address : address.toLowerCase()}`;
 export const walletCountKey = (id, hour) => `alerts:wcount:${id}:${hour}`;
 export const walletDigestKey = (id) => `alerts:wdigest:${id}`;
+export const movesKey = (address) => `alerts:moves:${address.toLowerCase()}`;
+export const MOVES_KEPT = 20;
+export const MOVES_TTL_S = 14 * 86_400;
 
 export const shortAddress = (address) => `${address.slice(0, 6)}…${address.slice(-4)}`;
 

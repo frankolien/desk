@@ -82,13 +82,14 @@ and `api/_history.mjs`:
 | --- | --- | --- | --- |
 | Wallet rotation | `WORKER_PAUSE_MS`, 90 s | 4, plus 2 for each wallet it indexes (up to 12 a round; each wallet at most once every 5 minutes) | 26,880 once 12 or more wallets are tracked |
 | Fast lane | `WORKER_FAST_MS`, 12 s | 1 for each wallet with pushes, plus a write for it every 2 minutes; the list of those wallets is read once a minute | 1,440, plus about 7,900 for each wallet with pushes |
-| Alerts scan | `WORKER_SCAN_MS`, 60 s | 5 with no subscriptions; otherwise 10, plus 1 per followed or copied trader, plus 2 if any wallet has pushes | 7,200 with no subscriptions |
+| Alerts scan | `WORKER_SCAN_MS`, 60 s | 5 with no subscriptions; otherwise 10, plus 1 per followed or copied trader whose position sizes changed (an unchanged one is rewritten every 5 minutes), plus 2 if any wallet has pushes, plus 1 read and 1 write per trader that moved, plus 1 for the deposit cursor when a deposit arrives (otherwise every 10 minutes) | 7,200 with no subscriptions |
 | Trader index | `WORKER_INDEX_MS`, 15 min | about 10, plus 1 per shard it touched (up to 16) and 1 per account that closed a trade | roughly 2,000 to 4,000 |
 
 Today `GET /api/v1/stats` reports 65 tracked wallets and one alert subscription. If that
 subscription follows five traders and has pushes on for three wallets, the worker spends
-about 80,000 commands a day: 26,880 rotation, 25,200 fast lane, 24,480 scan and about
-3,000 index. That is about 2.4 million a month, nearly five times the free tier. With no
+about 74,000 commands a day: 26,880 rotation, 25,200 fast lane, 18,720 scan and about
+3,000 index. That is about 2.2 million a month, over four times the free tier. A wallet
+followed in Signals is also followed as a Perpl trader, so each one adds about 290 a day. With no
 subscriptions at all it is still about 38,000 a day. While the trader index is catching up
 (more than 1,500 blocks behind) it runs again 15 s after each run instead of every 15
 minutes, which can cost more than everything else together until it reaches the tip.
@@ -110,6 +111,16 @@ Everything else that uses Redis comes on top. Each `/api/v1` request costs 3 or 
 for its rate limit and counter, and a `/status` tab left open polls health every 2 minutes
 at about ten commands a poll, about 7,000 a day. So those values fit only while API traffic
 stays low; upgrading the plan is the real fix. The Upstash console shows commands per day.
+
+## HyperSync budget
+
+The free tier allows 30 requests a minute, shared by the wallet rotation, the fast lane,
+the trader index and deposit alerts. Deposit alerts make one query per network per scan,
+and only while some subscription names its Desk wallet: two a minute at the default scan.
+They read `HYPERSYNC_INDEX_TOKEN` (or `HYPERSYNC_TOKEN`) on Vercel. The cursor lives in
+`alerts:rx`; when it is missing or over an hour old the next scan restarts at the tip with
+one height request and sends nothing. A query that fails or takes over 8 s keeps the cursor,
+skips deposits for that scan, and shows in `railway logs` as `worker: scan skipped receipts …`.
 
 ## Health checks: `GET /api/v1/health` (page: `/status`)
 

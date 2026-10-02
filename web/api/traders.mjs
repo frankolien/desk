@@ -171,11 +171,12 @@ export function chainReader(rpcURL = process.env.MONAD_MAINNET_RPC || "https://r
   };
 }
 
-/// A wallet with no Perpl account reverts; a chain that would not answer throws otherwise.
-/// Only the second must stop auto-copy from diffing, or a failed read closes every copy.
-export function isRevert(error) {
+/// Only a real revert means no Perpl account; viem also names a -32603 internal error a revert.
+/// Anything else is a failed read, or auto-copy and alerts would see an empty book.
+export function noAccount(error) {
   for (let cause = error; cause; cause = cause.cause) {
-    if (cause.name === "ContractFunctionRevertedError" || cause.name === "ExecutionRevertedError") return true;
+    const data = typeof cause.data === "string" ? cause.data : cause.data?.message;
+    if (cause.code === 3 || /execution reverted/i.test(`${cause.details ?? cause.message ?? ""} ${data ?? ""}`)) return true;
   }
   return false;
 }
@@ -185,7 +186,7 @@ async function trader(chain, book, address) {
   try {
     account = await chain.accountByAddress(address);
   } catch (error) {
-    if (isRevert(error)) return null;
+    if (noAccount(error)) return null;
     return { unreadable: true };
   }
   if (!account || account.accountId === 0n) return null;

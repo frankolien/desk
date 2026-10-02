@@ -73,7 +73,7 @@
       </nav>
 
       <div class="page-prose">
-        <p><em>Effective 1 October 2026.</em></p>
+        <p><em>Effective 2 October 2026.</em></p>
 
         <h2 id="short">The short version</h2>
         <p>The app has no passwords and no analytics. Your keys are made and kept on your iPhone. Our server learns only what it needs to send the push notifications you ask for, the public wallet addresses you look at, and the public name and picture of your Desk profile, if you set one. Signing out deletes your alert subscription from the server. Delete account in Settings also deletes your profile. The one exception to &ldquo;no tracking&rdquo; is the X ad pixel on this site&rsquo;s home page, described below.</p>
@@ -91,6 +91,7 @@
           <li>A random install secret the app generated, which is how the phone proves a later request is its own. It is not derived from your wallet or your device.</li>
           <li>The Apple push token for this install, so we can send the notification.</li>
           <li>The trader addresses you follow and the names you gave them, the traders you copy with away copying on, the wallet addresses you track with their names and minimums, the market symbols on your watchlist, whether price alerts are on, and any price targets you set.</li>
+          <li>Your own Desk wallet address, when deposit alerts are on. It is stored with your push token so Desk can tell you when MON or AUSD arrives in your wallet. The Deposit alerts switch in Settings turns this off, and the address is removed on the next sync.</li>
         </ul>
         <p>This is stored for sixty days from the last time the app refreshed it, in a Redis database hosted by Upstash through Vercel. It is deleted when you sign out, delete your account, or turn everything off. It is never sold, shared or used for anything but sending the pushes you asked for.</p>
         <p>If you set up a Desk profile, the server keeps the name and picture you chose, linked to your wallet address, in the same database. A profile is public: anyone who opens your wallet in Desk can see it. It is kept until you delete it with Delete account in Settings. Signing out does not delete it.</p>
@@ -104,7 +105,7 @@
           <li><strong>Perpl</strong>, the exchange on Monad, receives the orders you sign and your wallet address. Trades settle on the Monad blockchain, where they are public and permanent.</li>
           <li><strong>Monad RPC nodes</strong> receive your address to read balances and positions, and your signed transactions to send them.</li>
           <li><strong>OKX, 0x and Relay</strong> receive token addresses, and your wallet address when quoting a swap or reading what you hold.</li>
-          <li><strong>Etherscan and Envio HyperSync</strong> receive a wallet address to read its history.</li>
+          <li><strong>Etherscan and Envio HyperSync</strong> receive a wallet address to read its history. When deposit alerts are on, HyperSync also receives your Desk wallet address to see what arrives in it.</li>
           <li><strong>Nad Name Service, nad.fun, ENS, Neynar (Farcaster) and Bonfida (Solana names)</strong> receive wallet addresses to look up public names and pictures.</li>
           <li><strong>CoinGecko and OKX image servers</strong> serve token logos; like any image, they see your IP address.</li>
           <li><strong>Apple</strong> receives push notifications addressed to your device token.</li>
@@ -123,9 +124,9 @@
 
         <h2 id="rights">Your choices</h2>
         <ul>
-          <li><strong>Sign out</strong> in the app: the server deletes your alert subscription, with your push token, followed traders, tracked wallets and watchlist. This phone clears your followed traders, copy settings and tracked wallets. Your Desk profile stays.</li>
-          <li><strong>Delete account</strong> in Settings: the server deletes your Desk profile and your alert subscription, and this iPhone forgets its keys. Your wallet and Perpl account live on the blockchain and stay, and your passkey still opens them.</li>
-          <li><strong>Turn off alerts, tracking or away copying</strong> and the matching data is removed from the server on the next sync.</li>
+          <li><strong>Sign out</strong> in the app: the server deletes your alert subscription, with your push token, your Desk wallet address, followed traders, tracked wallets and watchlist. This phone clears your followed traders, copy settings and tracked wallets. Your Desk profile stays.</li>
+          <li><strong>Delete account</strong> in Settings: the server deletes your Desk profile and your alert subscription, with your Desk wallet address, and this iPhone forgets its keys. Your wallet and Perpl account live on the blockchain and stay, and your passkey still opens them.</li>
+          <li><strong>Turn off alerts, deposit alerts, tracking or away copying</strong> and the matching data is removed from the server on the next sync.</li>
           <li><strong>Block the X pixel</strong> with any content blocker. The site works the same without it.</li>
           <li><strong>Ask us</strong> to delete a waitlist email or anything else, through the contact on the <a href="/support">support page</a>.</li>
         </ul>

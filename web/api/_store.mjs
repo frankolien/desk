@@ -43,7 +43,7 @@ export function redisStore({
     expire: (key, seconds) => command("EXPIRE", key, String(seconds)),
     async setMany(entries, ex) {
       if (!entries.length) return;
-      const results = await call("/pipeline", entries.map(([key, value]) => ["SET", key, value, "EX", String(ex)]));
+      const results = await call("/pipeline", entries.map(([key, value, ttl]) => ["SET", key, value, "EX", String(ttl ?? ex)]));
       if (results.some((entry) => entry.error)) throw new Error("redis pipeline");
     },
     lpush: (key, value) => command("LPUSH", key, value),

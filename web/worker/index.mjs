@@ -147,8 +147,13 @@ async function scanAlerts() {
   if (!response.ok) throw new Error(`scan ${response.status}`);
   const body = await response.json();
   const round = body.rounds?.[0];
-  const sent = (round?.sent ?? 0) + (round?.wallets?.sent ?? 0) + (round?.prices?.sent ?? 0);
-  if (sent) console.log(`worker: scan sent ${sent} (traders ${round.sent ?? 0}, wallets ${round.wallets?.sent ?? 0}, prices ${round.prices?.sent ?? 0})`);
+  const sent = round?.sent ?? 0;
+  if (sent) {
+    const parts = { wallets: round.wallets?.sent ?? 0, prices: round.prices?.sent ?? 0, receipts: round.receipts?.sent ?? 0 };
+    const traders = sent - parts.wallets - parts.prices - parts.receipts;
+    console.log(`worker: scan sent ${sent} (traders ${traders}, wallets ${parts.wallets}, prices ${parts.prices}, receipts ${parts.receipts})`);
+  }
+  if (round?.errors?.length) console.error(`worker: scan skipped ${round.errors.join("; ")}`);
 }
 
 let indexFailures = 0;

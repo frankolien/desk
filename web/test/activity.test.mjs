@@ -108,3 +108,24 @@ test("following feed distinguishes healthy indexing and push scans from a missin
   assert.deepEqual(feed.pending, []);
   assert.deepEqual(feed.stale, []);
 });
+
+test("following feed returns each followed wallet's Perpl moves, newest first, twenty each within fourteen days", async () => {
+  const store = memoryStore();
+  const now = Date.now();
+  const move = (time, kind, market = "ETH") => ({
+    wallet: ME, venue: "perpl", time, kind, market, marketId: 20, side: "long", leverage: 4, entry: "1847.99", value: "1200", previousValue: null,
+  });
+  const many = Array.from({ length: 25 }, (_, index) => move(now - (index + 1) * 60_000, "closed"));
+  await store.set(`alerts:moves:${ME}`, JSON.stringify(many));
+  await store.set(`alerts:moves:${OTHER}`, JSON.stringify([
+    { ...move(now - 30_000, "reduced", "BTC"), wallet: OTHER, previousValue: "2400" },
+    move(now - 15 * 86_400_000, "opened"),
+    move(now - 1_000, "bogus"),
+  ]));
+  const feed = await followingFeed(store, [ME, OTHER, SOLANA], now);
+  assert.equal(feed.perps.length, 21);
+  assert.deepEqual(feed.perps[0], { ...move(now - 30_000, "reduced", "BTC"), wallet: OTHER, previousValue: "2400" });
+  assert.equal(feed.perps.filter((row) => row.wallet === ME).length, 20);
+  assert.ok(feed.perps.every((row, index) => index === 0 || feed.perps[index - 1].time >= row.time));
+  assert.deepEqual((await followingFeed(memoryStore(), [SOLANA], now)).perps, []);
+});

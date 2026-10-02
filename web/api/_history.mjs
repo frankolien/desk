@@ -308,8 +308,8 @@ export function hypersyncClient({ token = process.env.HYPERSYNC_TOKEN, url = "ht
   if (!token) return null;
   const headers = { "content-type": "application/json", authorization: `Bearer ${token.trim()}` };
   return {
-    async height() {
-      const response = await fetchImpl(`${url}/height`, { headers });
+    async height({ signal } = {}) {
+      const response = await fetchImpl(`${url}/height`, { headers, signal });
       if (!response.ok) throw new Error(`hypersync ${response.status}`);
       return Number((await response.json()).height);
     },
@@ -333,8 +333,8 @@ export function hypersyncClient({ token = process.env.HYPERSYNC_TOKEN, url = "ht
         nextBlock: Number(body.next_block),
       };
     },
-    async raw(query) {
-      const response = await fetchImpl(`${url}/query`, { method: "POST", headers, body: JSON.stringify(query) });
+    async raw(query, { signal } = {}) {
+      const response = await fetchImpl(`${url}/query`, { method: "POST", headers, body: JSON.stringify(query), signal });
       if (!response.ok) throw new Error(`hypersync ${response.status}`);
       const body = await response.json();
       const batches = Array.isArray(body.data) ? body.data : [body.data ?? {}];

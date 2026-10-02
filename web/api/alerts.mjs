@@ -6,15 +6,17 @@ import { TRACKED_KEY, URGENT_KEY, WATCHED_KEY, ledgerKey } from "./_ledger.mjs";
 import { createMarkets } from "./_markets.mjs";
 import { MAX_TARGETS, parseTargets, priceDeliveries } from "./_prices.mjs";
 import { clientIp } from "./_ratelimit.mjs";
+import { CURSOR_TTL_S, HYPERSYNC_URLS, RX_KEY, faucetSender, parseMe, receiptScan, skipList } from "./_receipts.mjs";
 import { redisStore } from "./_store.mjs";
 import {
-  DEFAULT_MIN_USD, DIGEST_WINDOW_S, MAX_WALLETS, WALLET_PUSH_CAP, newestMarker, seenKey, walletCountKey, walletDigestKey,
-  walletEvents, walletPayload,
+  DEFAULT_MIN_USD, DIGEST_WINDOW_S, MAX_WALLETS, MOVES_KEPT, MOVES_TTL_S, WALLET_PUSH_CAP, movesKey, newestMarker, seenKey,
+  walletCountKey, walletDigestKey, walletEvents, walletPayload,
 } from "./_watch.mjs";
 import { isSolanaAddress } from "./_chains.mjs";
-import { chainReader, describePosition, openMarkets, perpIdsFromBitmap } from "./traders.mjs";
+import { chainReader, describePosition, noAccount, openMarkets, perpIdsFromBitmap } from "./traders.mjs";
 
-export const MAX_TRADERS = 20;
+export const MAX_TRADERS = 20 + MAX_WALLETS;
+const MAX_COPIED = 20;
 export const WAITLIST_KEY = "waitlist:emails";
 export const MAX_SUBSCRIPTIONS = 5_000;
 const MAX_SCANNED = 300;
@@ -23,14 +25,18 @@ export const WAKE_CAP = 12;
 export const wakeCountKey = (id, hour) => `alerts:wakes:${id}:${hour}`;
 const MAX_EVENTS_PER_TRADER = 4;
 const SUBSCRIPTION_TTL = 60 * 24 * 3600;
-const SNAPSHOT_TTL = 7 * 24 * 3600;
+// Freshness comes from `at`; the key outlives an outage so a held book is never re-sent as opens.
+const SNAPSHOT_TTL = 7 * 86400;
+const SNAPSHOT_FRESH_MS = 20 * 60_000;
+const SNAPSHOT_REFRESH_MS = 5 * 60_000;
 const SEEN_TTL = 30 * 24 * 3600;
 const ROUND_INTERVAL_MS = 14_000;
 const MAX_ROUNDS = 4;
 const SUBSCRIPTIONS = "alerts:subs";
 
 const subscriptionKey = (id) => `alerts:sub:${id}`;
-const snapshotKey = (address) => `alerts:snap:${address}`;
+// {at, book} lives under a new prefix: the previous deployment reads alerts:snap: as a bare book.
+const snapshotKey = (address) => `alerts:snap2:${address}`;
 
 export const subscriptionId = (install) => createHash("sha256").update(`desk-alerts:${install}`).digest("hex");
 
@@ -44,9 +50,11 @@ export function parseSubscription(body) {
   if (!Array.isArray(traders) || traders.length > MAX_TRADERS || !traders.every(validAddress)) {
     return { error: `Up to ${MAX_TRADERS} trader addresses are allowed.` };
   }
-  if (copying != null && (!Array.isArray(copying) || copying.length > MAX_TRADERS || !copying.every(validAddress))) {
-    return { error: `Up to ${MAX_TRADERS} copied addresses are allowed.` };
+  if (copying != null && (!Array.isArray(copying) || copying.length > MAX_COPIED || !copying.every(validAddress))) {
+    return { error: `Up to ${MAX_COPIED} copied addresses are allowed.` };
   }
+  const own = parseMe(body.me);
+  if (own.error) return { error: own.error };
   const watched = priceMarkets == null ? [] : parseMarkets(priceMarkets);
   if (!watched) return { error: "priceMarkets must be up to 20 market symbols." };
   const tracked = wallets == null ? [] : parseWallets(wallets);
@@ -74,6 +82,8 @@ export function parseSubscription(body) {
       prices: prices !== false,
       priceMarkets: watched,
       targets: wanted,
+      me: own.me,
+      moves: Number.isSafeInteger(body.moves) && body.moves > 0 ? body.moves : 0,
     },
     wantsPrices: prices === true || wanted.length > 0,
   };
@@ -128,8 +138,9 @@ export function tradeEvents(before, after) {
   for (const [id, now] of Object.entries(after)) {
     const was = before[id];
     if (!was) events.push({ kind: "opened", position: now });
-    else if (was.side !== now.side) events.push({ kind: "flipped", position: now });
+    else if (was.side !== now.side) events.push({ kind: "flipped", position: now, previous: was });
     else if (Number(was.size) > 0 && Number(now.size) >= Number(was.size) * 1.1) events.push({ kind: "added", position: now, previous: was });
+    else if (Number(now.size) > 0 && Number(now.size) <= Number(was.size) * 0.75) events.push({ kind: "reduced", position: now, previous: was });
   }
   for (const [id, was] of Object.entries(before)) {
     if (!after[id]) events.push({ kind: "closed", position: was });
@@ -187,17 +198,22 @@ export function alertPayload(address, name, event) {
       title = `${who} added to their ${position.market} ${side}`;
       body = `${compactDollars(event.previous.value)} → ${compactDollars(position.value)} at ${lev}. Tap to copy.`;
       break;
+    case "reduced":
+      title = `${who} trimmed their ${position.market} ${side}`;
+      body = `${compactDollars(event.previous.value)} → ${compactDollars(position.value)}${lev ? ` at ${lev}` : ""}.`;
+      break;
     default:
       title = `${who} closed their ${position.market} ${side}`;
       body = `Entered at ${priceText(position.entry)}. Last seen at ${compactDollars(position.pnl)} open PnL.`;
   }
+  const quiet = event.kind === "closed" || event.kind === "reduced";
   return {
     aps: {
       alert: { title, body },
       sound: "default",
       "thread-id": `trader-${address}`,
-      category: event.kind === "closed" ? "desk.trade.closed" : "desk.trade",
-      "relevance-score": event.kind === "closed" ? 0.4 : 0.8,
+      category: quiet ? "desk.trade.closed" : "desk.trade",
+      "relevance-score": quiet ? 0.4 : 0.8,
     },
     desk: {
       type: "trade",
@@ -209,15 +225,68 @@ export function alertPayload(address, name, event) {
       leverage: position.leverage,
       entry: position.entry,
       value: position.value,
+      ...(event.previous ? { previousValue: event.previous.value } : {}),
       observedAt: Date.now(),
     },
   };
 }
 
+const VERBS = { opened: "opened", flipped: "flipped", added: "added to", reduced: "trimmed", closed: "closed" };
+const andList = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+
+export function movesSentence(events, limit = 4) {
+  const groups = new Map();
+  let listed = 0;
+  let more = false;
+  for (const { kind, position } of events) {
+    const markets = groups.get(kind) ?? [];
+    if (markets.includes(position.market)) continue;
+    if (listed === limit) { more = true; continue; }
+    markets.push(position.market);
+    groups.set(kind, markets);
+    listed += 1;
+  }
+  const parts = [...groups];
+  if (more) parts.at(-1)[1].push("more");
+  const text = parts.map(([kind, markets]) => `${VERBS[kind] ?? kind} ${andList(markets)}`).join(", ");
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
+}
+
+export function summaryPayload(address, name, events) {
+  const who = name || shortAddress(address);
+  return {
+    aps: {
+      alert: { title: `${who} made ${events.length} more moves`, body: movesSentence(events) },
+      sound: "default",
+      "thread-id": `trader-${address}`,
+      category: "desk.trade.closed",
+      "relevance-score": 0.4,
+    },
+    desk: {
+      type: "trade", event: "summary", trader: address, count: events.length,
+      markets: [...new Set(events.map((event) => event.position.market))], observedAt: Date.now(),
+    },
+  };
+}
+
+export const feedRow = (address, event, time) => ({
+  wallet: address, venue: "perpl", time, kind: event.kind, market: event.position.market, marketId: event.position.marketId,
+  side: event.position.side, leverage: event.position.leverage ?? null, entry: event.position.entry ?? null,
+  value: event.position.value ?? null, previousValue: event.previous?.value ?? null,
+});
+
+export const NO_ACCOUNT = Object.freeze({});
+
 /// One trader's book, keyed by market, or null when it could not be read. An unreadable
 /// book is never treated as empty, because that would announce closes that did not happen.
 export async function readBook(chain, markets, address) {
-  const account = await chain.accountByAddress(address);
+  let account;
+  try {
+    account = await chain.accountByAddress(address);
+  } catch (error) {
+    if (noAccount(error)) return NO_ACCOUNT;
+    throw error;
+  }
   if (!account || account.accountId === 0n) return null;
   const ids = perpIdsFromBitmap(account.positions).filter((id) => markets.has(id));
   const found = await Promise.all(ids.map((id) => chain.openPosition(id, account.accountId)));
@@ -323,11 +392,31 @@ async function walletDeliveries({ store, watchers, now }) {
   return { deliveries, markers, events };
 }
 
-export async function scan({ store, chain, apns, markets, quotes = [], now = Date.now() }) {
-  const ids = await store.smembers(SUBSCRIPTIONS);
-  if (ids.length === 0) return { subscriptions: 0, traders: 0, sent: 0, wallets: { watched: 0, events: 0, sent: 0 }, prices: { events: 0, sent: 0 } };
+function storedBook(raw) {
+  if (raw == null) return null;
+  let value;
+  try { value = JSON.parse(raw); } catch { return null; }
+  return value && Number.isFinite(value.at) && value.book && typeof value.book === "object" ? value : null;
+}
 
-  const records = await store.mget(ids.map(subscriptionKey));
+const PRIORITY = { opened: 0, flipped: 1, added: 2, closed: 3, reduced: 4 };
+const byPriority = (events) => [...events].sort((a, b) => PRIORITY[a.kind] - PRIORITY[b.kind]);
+
+const shape = (book) => JSON.stringify(Object.entries(book).map(([id, position]) => [id, position.side, position.size]));
+
+const sentCount = (results, deliveries, part) =>
+  results.filter((result, index) => deliveries[index].part === part && result.status === 200).length;
+
+export async function scan({
+  store, chain, apns, markets, quotes = [], sources = {}, skip = skipList(), receiptTimeoutMs, now = Date.now(),
+}) {
+  const ids = await store.smembers(SUBSCRIPTIONS);
+  if (ids.length === 0) {
+    return { subscriptions: 0, traders: 0, sent: 0, wallets: { watched: 0, events: 0, sent: 0 }, prices: { events: 0, sent: 0 }, receipts: { events: 0, sent: 0 } };
+  }
+
+  const records = await store.mget([...ids.map(subscriptionKey), RX_KEY]);
+  const rxCursor = records.pop();
   const expired = [];
   const followers = new Map();
   const watchers = new Map();
@@ -344,6 +433,12 @@ export async function scan({ store, chain, apns, markets, quotes = [], now = Dat
       watchers.set(wallet.address, [...(watchers.get(wallet.address) ?? []), { id, record, wallet }]);
     }
   });
+
+  const errors = [];
+  const report = (part) => (error) => { errors.push(`${part}: ${error?.message ?? error}`); };
+  const receipts = receiptScan({ sources, skip, subscribers: everyone, stored: rxCursor, now, timeoutMs: receiptTimeoutMs })
+    .catch((error) => { report("receipts")(error); return { deliveries: [], events: 0, errors: [] }; });
+
   await store.srem(SUBSCRIPTIONS, ...expired);
   await store.set(WATCHED_KEY, JSON.stringify([...watchers.keys()]), { ex: 900 }).catch(() => {});
 
@@ -352,43 +447,81 @@ export async function scan({ store, chain, apns, markets, quotes = [], now = Dat
   const books = await inBatches(addresses, 20, (address) => readBook(chain, markets, address).catch(() => null));
 
   const snapshots = [];
+  const moves = [];
   const deliveries = [];
   const wakes = [];
   addresses.forEach((address, index) => {
     const book = books[index];
     if (!book) return;
-    snapshots.push([snapshotKey(address), JSON.stringify(book)]);
-    if (previous[index] == null) return;
-    const events = tradeEvents(JSON.parse(previous[index]), book).slice(0, MAX_EVENTS_PER_TRADER);
+    const stored = storedBook(previous[index]);
+    // Whatever its age: a stale book with positions must not become an empty baseline on a misread revert.
+    if (book === NO_ACCOUNT && stored && Object.keys(stored.book).length) return;
+    const before = stored && now - stored.at < SNAPSHOT_FRESH_MS ? stored : null;
+    if (!before || shape(before.book) !== shape(book) || now - before.at >= SNAPSHOT_REFRESH_MS) {
+      snapshots.push([snapshotKey(address), JSON.stringify({ at: now, book })]);
+    }
+    if (!before) return;
+    const events = byPriority(tradeEvents(before.book, book));
+    if (events.length === 0) return;
+    moves.push({ address, events });
+    const told = events.length > MAX_EVENTS_PER_TRADER ? events.slice(0, MAX_EVENTS_PER_TRADER - 1) : events;
+    const classic = events.filter((event) => event.kind !== "reduced").slice(0, MAX_EVENTS_PER_TRADER);
     for (const { id, record } of followers.get(address)) {
-      for (const event of events) {
-        if (record.traders.includes(address)) {
-          deliveries.push({ id, record, payload: alertPayload(address, record.names?.[address], event),
+      if (record.traders.includes(address)) {
+        // Builds that send moves: 2 handle trims and the summary; older ones keep the first four other moves.
+        const current = record.moves >= 2;
+        for (const event of current ? told : classic) {
+          deliveries.push({ id, record, part: "traders", payload: alertPayload(address, record.names?.[address], event),
             collapseId: `${address.slice(2, 14)}-${event.position.marketId}-${event.kind}` });
         }
-        if (record.copying?.includes(address) && event.kind !== "added") {
-          wakes.push({ id, record, payload: wakePayload(address, event),
-            collapseId: `wake-${address.slice(2, 14)}`, background: true });
+        if (current && told.length < events.length) {
+          deliveries.push({ id, record, part: "traders", payload: summaryPayload(address, record.names?.[address], events.slice(told.length)),
+            collapseId: `${address.slice(2, 14)}-summary` });
         }
+      }
+      if (!record.copying?.includes(address)) continue;
+      for (const event of classic) {
+        if (event.kind === "added") continue;
+        wakes.push({ id, record, part: "traders", payload: wakePayload(address, event),
+          collapseId: `wake-${address.slice(2, 14)}`, background: true });
       }
     }
   });
   for (const wake of wakes) {
-    if (await withinWakeBudget(store, wake.id, now)) deliveries.push(wake);
+    if (await withinWakeBudget(store, wake.id, now).catch(() => true)) deliveries.push(wake);
   }
-  // Saved before anything is sent, so a scan that dies mid-delivery cannot repeat itself.
-  await store.setMany(snapshots, SNAPSHOT_TTL);
 
-  const tracked = await walletDeliveries({ store, watchers, now });
-  await store.setMany(tracked.markers, SEEN_TTL);
-  const traderDeliveries = deliveries.length;
-  deliveries.push(...tracked.deliveries);
-  const walletDeliveriesCount = tracked.deliveries.length;
-  const priced = await priceDeliveries({ store, quotes, subscribers: everyone, now });
-  deliveries.push(...priced.deliveries);
+  let feed = [];
+  if (moves.length) {
+    const stored = await store.mget(moves.map(({ address }) => movesKey(address))).catch(report("moves"));
+    if (stored) {
+      feed = moves.map(({ address, events }, index) => {
+        let kept = [];
+        try { kept = JSON.parse(stored[index] ?? "[]"); } catch {}
+        const rows = events.map((event) => feedRow(address, event, now));
+        return [movesKey(address), JSON.stringify([...rows, ...(Array.isArray(kept) ? kept : [])].slice(0, MOVES_KEPT)), MOVES_TTL_S];
+      });
+    }
+  }
+  const rx = await receipts;
+  const cursor = rx.due ? [[RX_KEY, JSON.stringify(rx.next), CURSOR_TTL_S]] : [];
+  // One write before any send: a scan cut off mid-delivery never repeats a push, one that fails here loses nothing.
+  await store.setMany([...snapshots, ...feed, ...cursor], SNAPSHOT_TTL);
+  errors.push(...rx.errors);
+  deliveries.push(...rx.deliveries.map((delivery) => ({ ...delivery, part: "receipts" })));
+
+  const tracked = await walletDeliveries({ store, watchers, now })
+    .then(async (found) => { await store.setMany(found.markers, SEEN_TTL); return found; })
+    .catch((error) => { report("wallets")(error); return { deliveries: [], events: 0 }; });
+  deliveries.push(...tracked.deliveries.map((delivery) => ({ ...delivery, part: "wallets" })));
+
+  const priced = await priceDeliveries({ store, quotes, subscribers: everyone, now })
+    .catch((error) => { report("prices")(error); return { deliveries: [], events: 0, changed: [] }; });
+  deliveries.push(...priced.deliveries.map((delivery) => ({ ...delivery, part: "prices" })));
 
   const results = await inBatches(deliveries, 10, ({ record, payload, collapseId, background }) =>
     apns.send(record, payload, { collapseId, background }));
+
   const dead = new Set();
   const moved = new Map();
   results.forEach((result, index) => {
@@ -412,16 +545,39 @@ export async function scan({ store, chain, apns, markets, quotes = [], now = Dat
     traders: addresses.length,
     sent: results.filter((result) => result.status === 200).length,
     failed: results.filter((result) => result.status !== 200).length,
-    wallets: {
-      watched: watchers.size,
-      events: tracked.events,
-      sent: results.slice(traderDeliveries, traderDeliveries + walletDeliveriesCount).filter((result) => result.status === 200).length,
-    },
-    prices: {
-      events: priced.events,
-      sent: results.slice(traderDeliveries + walletDeliveriesCount).filter((result) => result.status === 200).length,
-    },
+    wallets: { watched: watchers.size, events: tracked.events, sent: sentCount(results, deliveries, "wallets") },
+    prices: { events: priced.events, sent: sentCount(results, deliveries, "prices") },
+    receipts: { events: rx.events, sent: sentCount(results, deliveries, "receipts") },
+    ...(errors.length ? { errors } : {}),
   };
+}
+
+const DEPOSITS_ON = { title: "Deposit alerts are on", body: "You'll hear when MON or AUSD lands in your Desk wallet." };
+
+function confirmationAlert(record) {
+  const first = record.traders[0];
+  const copied = record.copying.length;
+  const tracked = record.wallets;
+  if (first) {
+    const who = record.names[first] || shortAddress(first);
+    return {
+      title: "Trade alerts are on",
+      body: record.traders.length === 1
+        ? `You'll hear the moment ${who} opens, adds to or closes a position.`
+        : `You'll hear the moment any of your ${record.traders.length} traders opens, adds to or closes a position.`,
+    };
+  }
+  if (copied) return { title: "Away copying is on", body: `Desk will wake to copy ${copied === 1 ? "your trader" : `your ${copied} traders`} while it's closed.` };
+  if (record.me) return DEPOSITS_ON;
+  if (tracked.length) {
+    return {
+      title: "Wallet alerts are on",
+      body: tracked.length === 1
+        ? `You'll hear when ${tracked[0].name || shortAddress(tracked[0].address)} trades on ${isSolanaAddress(tracked[0].address) ? "Solana" : "Monad"}.`
+        : `You'll hear when any of your ${tracked.length} tracked wallets trades.`,
+    };
+  }
+  return { title: "Price alerts are on", body: "You'll hear when Bitcoin, Monad or a market on your watchlist breaks a level or moves 5% in a day." };
 }
 
 function authorized(req, secret) {
@@ -466,7 +622,7 @@ export function createHandler(resolve) {
         for (let round = 0; round < rounds; round += 1) {
           if (round > 0) await deps.sleep(ROUND_INTERVAL_MS);
           const quotes = deps.quotes ? await deps.quotes().catch(() => []) : [];
-          const report = await scan({ store, chain: deps.chain, apns, markets, quotes });
+          const report = await scan({ store, chain: deps.chain, apns, markets, quotes, sources: deps.receipts, skip: deps.skip });
           reports.push(report);
           if (report.subscriptions === 0) break;
         }
@@ -517,7 +673,8 @@ export function createHandler(resolve) {
     if (parsed.error) return res.status(400).json({ error: parsed.error });
     const { id, record, wantsPrices } = parsed;
 
-    if (record.traders.length === 0 && record.copying.length === 0 && record.wallets.length === 0 && record.targets.length === 0 && !wantsPrices) {
+    if (record.traders.length === 0 && record.copying.length === 0 && record.wallets.length === 0 && record.targets.length === 0
+        && !wantsPrices && !record.me) {
       await store.del(subscriptionKey(id));
       await store.srem(SUBSCRIPTIONS, id);
       return res.status(200).json({ traders: 0 });
@@ -531,30 +688,10 @@ export function createHandler(resolve) {
     // so each seat costs an attacker a real device.
     let confirmed = false;
     let environment = record.environment;
-    const announcing = !known || body.confirm === true;
-    if (announcing && await store.set(`alerts:confirm:${id}`, "1", { ex: 60, nx: true })) {
-      const first = record.traders[0];
-      const who = first ? (record.names[first] || shortAddress(first)) : null;
-      const copied = record.copying.length;
-      const tracked = record.wallets;
+    const depositsOn = Boolean(known) && Boolean(record.me) && !safeJSON(known)?.me;
+    if ((!known || depositsOn) && await store.set(`alerts:confirm:${id}`, "1", { ex: 60, nx: true })) {
       const result = await apns.send(record, {
-        aps: {
-          alert: {
-            title: first ? "Trade alerts are on" : copied ? "Away copying is on" : tracked.length ? "Wallet alerts are on" : "Price alerts are on",
-            body: !first && !copied && !tracked.length
-              ? "You'll hear when Bitcoin, Monad or a market on your watchlist breaks a level or moves 5% in a day."
-              : !first && !copied
-              ? (tracked.length === 1
-                ? `You'll hear when ${tracked[0].name || shortAddress(tracked[0].address)} trades on ${isSolanaAddress(tracked[0].address) ? "Solana" : "Monad"}.`
-                : `You'll hear when any of your ${tracked.length} tracked wallets trades.`)
-              : !first
-              ? `Desk will wake to copy ${copied === 1 ? "your trader" : `your ${copied} traders`} while it's closed.`
-              : record.traders.length === 1
-                ? `You'll hear the moment ${who} opens, adds to or closes a position.`
-                : `You'll hear the moment any of your ${record.traders.length} traders opens, adds to or closes a position.`,
-          },
-          sound: "default",
-        },
+        aps: { alert: depositsOn ? DEPOSITS_ON : confirmationAlert(record), sound: "default" },
         desk: { type: "confirmation" },
       });
       apns.close();
@@ -585,6 +722,11 @@ export default createHandler(() => (production ??= {
   store: redisStore(),
   apns: apnsClient(),
   hypersync: hypersyncClient({ token: indexToken() }),
+  receipts: {
+    mainnet: hypersyncClient({ token: indexToken(), url: HYPERSYNC_URLS.mainnet }),
+    testnet: hypersyncClient({ token: indexToken(), url: HYPERSYNC_URLS.testnet }),
+  },
+  skip: skipList([faucetSender()]),
   chain: chainReader(),
   markets: () => openMarkets(),
   quotes: (() => {

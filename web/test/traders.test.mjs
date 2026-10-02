@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { createPublicClient, custom, parseAbi } from "viem";
+
 import {
-  aggregateMarket, createHandler, describePosition, formatFixed, perpIdsFromBitmap, rankTraders,
+  aggregateMarket, createHandler, describePosition, formatFixed, noAccount, perpIdsFromBitmap, rankTraders,
 } from "../api/traders.mjs";
 
 const BTC = { id: 1, name: "BTC", config: { is_open: true, price_decimals: 1, size_decimals: 5 } };
@@ -98,24 +100,35 @@ test("a followed wallet shows its live positions, and an unknown one shows none"
   assert.deepEqual(result.body.traders[1], { address: other, accountId: null, positions: [] });
 });
 
-test("a wallet with no Perpl account is flat; a chain that will not answer is unreadable", async () => {
-  const revert = Object.assign(new Error("reverted"), {
-    name: "ContractFunctionExecutionError",
-    cause: Object.assign(new Error("reverted"), { name: "ContractFunctionRevertedError" }),
-  });
-  const chain = {
-    async accountByAddress(address) {
-      throw address === ALICE ? revert : new Error("fetch failed");
+/// The real viem path: each address gets its RPC error back through readContract.
+function rpcChain(errors) {
+  const abi = parseAbi(["function getAccountByAddr(address) view returns (uint256)"]);
+  return {
+    accountByAddress(address) {
+      const client = createPublicClient({ transport: custom({ async request() { throw errors[address]; } }, { retryCount: 0 }) });
+      return client.readContract({ address: "0x34B6552d57a35a1D042CcAe1951BD1C370112a6F", abi, functionName: "getAccountByAddr", args: [address] });
     },
     async openPosition() { return null; },
   };
-  const other = "0x1111111111111111111111111111111111111111";
+}
+
+test("a wallet with no Perpl account is flat; an internal RPC error or a chain that will not answer is unreadable", async () => {
+  const internal = "0x1111111111111111111111111111111111111111";
+  const offline = "0x2222222222222222222222222222222222222222";
+  const chain = rpcChain({
+    [ALICE]: { code: 3, message: "execution reverted", data: "0x03a0e277" },
+    [internal]: { code: -32603, message: "internal error" },
+    [offline]: new Error("fetch failed"),
+  });
   const result = await createHandler({ chain, fetchImpl: context })(
-    { method: "GET", query: { view: "following", addresses: `${ALICE},${other}` } }, recorder());
+    { method: "GET", query: { view: "following", addresses: `${ALICE},${internal},${offline}` } }, recorder());
   assert.equal(result.status, 200);
   assert.equal(result.body.traders[0].unreadable, undefined);
   assert.deepEqual(result.body.traders[0].positions, []);
   assert.equal(result.body.traders[1].unreadable, true);
+  assert.equal(result.body.traders[2].unreadable, true);
+  assert.equal(noAccount(await chain.accountByAddress(internal).catch((error) => error)), false);
+  assert.equal(noAccount({ code: -32603, message: "execution reverted" }), true);
 });
 
 test("a trader whose book could not be read is marked unreadable, never flat", async () => {

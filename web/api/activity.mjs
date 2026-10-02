@@ -3,6 +3,7 @@ import { walletResource } from "./_wallet-resource.mjs";
 import { postMessage, readRoom } from "./_chat.mjs";
 import { act, authorized, overview, report } from "./_moderation.mjs";
 import { HEARTBEAT_KEY, QUOTE_SYMBOLS, ledgerKey, TRACKED_KEY, URGENT_KEY } from "./_ledger.mjs";
+import { MOVES_KEPT, movesKey } from "./_watch.mjs";
 
 const ETHERSCAN = "https://api.etherscan.io/v2/api";
 
@@ -21,11 +22,29 @@ const COUNTERPARTIES = {
 const validAddress = (value) => /^0x[a-fA-F0-9]{40}$/.test(value);
 const validSolana = (value) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
 
+const PERP_KINDS = new Set(["opened", "added", "reduced", "flipped", "closed"]);
+
+export function perpMoves(wallet, raw, now) {
+  let rows;
+  try { rows = JSON.parse(raw ?? "[]"); } catch { return []; }
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .filter((row) => Number.isFinite(row?.time) && row.time <= now + 60_000 && row.time >= now - 14 * 86_400_000 && PERP_KINDS.has(row.kind))
+    .slice(0, MOVES_KEPT)
+    .map((row) => ({
+      wallet, venue: "perpl", time: row.time, kind: row.kind, market: row.market, marketId: row.marketId, side: row.side,
+      leverage: row.leverage ?? null, entry: row.entry ?? null, value: row.value ?? null, previousValue: row.previousValue ?? null,
+    }));
+}
+
 export async function followingFeed(store, addresses, now = Date.now()) {
+  const evm = addresses.filter((address) => address.startsWith("0x"));
   const [values, service] = await Promise.all([
-    store.mget(addresses.map(ledgerKey)),
+    store.mget([...addresses.map(ledgerKey), ...evm.map(movesKey)]),
     store.mget([HEARTBEAT_KEY, "alerts:lastScan"]).catch(() => [null, null]),
   ]);
+  const perps = evm.flatMap((address, index) => perpMoves(address, values[addresses.length + index], now))
+    .sort((a, b) => b.time - a.time);
   let trackedCount = await store.scard(TRACKED_KEY);
   const pending = [];
   const stale = [];
@@ -62,7 +81,7 @@ export async function followingFeed(store, addresses, now = Date.now()) {
   let workerAt = null;
   try { workerAt = JSON.parse(service[0])?.at ?? null; } catch { /* no heartbeat */ }
   const scanAt = service[1] ? Date.parse(service[1]) : null;
-  return { events: events.slice(0, 80), pending, stale, observedAt: now,
+  return { events: events.slice(0, 80), perps, pending, stale, observedAt: now,
     sync: {
       workerDelayed: !Number.isFinite(workerAt) || now - workerAt > 10 * 60_000,
       pushDelayed: !Number.isFinite(scanAt) || now - scanAt > 15 * 60_000,
