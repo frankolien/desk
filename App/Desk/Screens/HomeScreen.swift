@@ -112,7 +112,10 @@ struct HomeScreen: View {
         model.address.flatMap { IdentityDirectory.shared.name(for: $0.checksummed) }
     }
 
-    private var followingCount: Int { UserDefaults.standard.stringArray(forKey: "desk.followedTraders")?.count ?? 0 }
+    private var followingCount: Int {
+        let traders = UserDefaults.standard.stringArray(forKey: TraderDirectory.storageKey) ?? []
+        return Set(traders.map { $0.lowercased() }).union(TrackedWallets.shared.list.map(\.id)).count
+    }
 
     private var sinceText: String {
         guard firstOpened > 0 else { return "" }

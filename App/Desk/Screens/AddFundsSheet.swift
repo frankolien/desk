@@ -38,6 +38,7 @@ struct AddFundsSheet: View {
                 option(symbol: "qrcode", title: "Receive AUSD",
                        detail: mainnet ? "From any wallet or exchange on Monad" : "Send test AUSD to this wallet") {
                     withAnimation(.snappy(duration: 0.25)) { showsReceive.toggle() }
+                    if showsReceive { Task { await TradeAlerts.shared.askForDeposits() } }
                 }
                 if showsReceive, let address = model.address { receive(address.checksummed) }
                 if model.network.hasFaucet {
@@ -77,7 +78,11 @@ struct AddFundsSheet: View {
         .onDisappear { model.clearDeposit() }
         .onChange(of: model.hasTradingAccount) { _, ready in
             guard ready else { return }
-            Task { try? await Task.sleep(for: .milliseconds(700)); dismiss() }
+            Task {
+                try? await Task.sleep(for: .milliseconds(700))
+                dismiss()
+                await TradeAlerts.shared.askForDeposits()
+            }
         }
         .sheet(isPresented: $showsSwap) {
             SwapSheet(model: model) { showsSwap = false }
@@ -185,7 +190,8 @@ struct AddFundsSheet: View {
             }
             .buttonStyle(.plain)
             .deskGlass(interactive: true, in: Capsule())
-            Text(mainnet ? "AUSD or MON on Monad mainnet only." : "Monad testnet only.")
+            Text((mainnet ? "AUSD or MON on Monad mainnet only." : "Monad testnet only.")
+                 + (TradeAlerts.shared.sendsDeposits ? " Desk will tell you when it lands." : ""))
                 .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
         }

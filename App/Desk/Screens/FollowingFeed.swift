@@ -19,6 +19,72 @@ struct FollowingTrade: Codable, Identifiable, Sendable {
     var isBuy: Bool { side == "buy" }
 }
 
+struct FollowingPerp: Codable, Identifiable, Sendable {
+    enum Kind: String, Codable, Sendable { case opened, added, reduced, flipped, closed }
+
+    let wallet: String
+    let time: Double
+    let kind: Kind
+    let market: String
+    let marketId: Int?
+    let side: String
+    let leverage: Double?
+    let entry: Double?
+    let value: Double?
+    let previousValue: Double?
+
+    var id: String { "\(wallet):\(market):\(kind.rawValue):\(Int(time))" }
+    var isLong: Bool { side == "long" }
+
+    private enum CodingKeys: String, CodingKey { case wallet, time, kind, market, marketId, side, leverage, entry, value, previousValue }
+
+    init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        wallet = try box.decode(String.self, forKey: .wallet)
+        kind = try box.decode(Kind.self, forKey: .kind)
+        market = try box.decode(String.self, forKey: .market)
+        side = try box.decode(String.self, forKey: .side)
+        guard let time = Self.number(box, .time), time > 0, time < 1e15, !market.isEmpty, side == "long" || side == "short" else {
+            throw DecodingError.dataCorruptedError(forKey: .time, in: box, debugDescription: "Incomplete perps row")
+        }
+        self.time = time
+        marketId = Self.number(box, .marketId).flatMap { Int(exactly: $0) }
+        leverage = Self.number(box, .leverage).flatMap { $0 > 0 && $0 < 10_000 ? $0 : nil }
+        entry = Self.number(box, .entry)
+        value = Self.number(box, .value)
+        previousValue = Self.number(box, .previousValue)
+    }
+
+    private static func number(_ box: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> Double? {
+        if let number = try? box.decode(Double.self, forKey: key) { return number }
+        return (try? box.decode(String.self, forKey: key)).flatMap(Double.init)
+    }
+}
+
+enum FollowingItem: Identifiable {
+    case spot(FollowingTrade)
+    case perp(FollowingPerp)
+
+    var id: String {
+        switch self {
+        case .spot(let trade): "spot:" + trade.id
+        case .perp(let move): "perp:" + move.id
+        }
+    }
+
+    var time: Double {
+        switch self {
+        case .spot(let trade): trade.time
+        case .perp(let move): move.time
+        }
+    }
+}
+
+private struct Lossy<Value: Decodable>: Decodable {
+    let value: Value?
+    init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
+}
+
 @MainActor
 @Observable
 final class FollowingFeedModel {
@@ -31,15 +97,18 @@ final class FollowingFeedModel {
         let pending: [String]
         let stale: [String]?
         let sync: Sync?
+        let perps: [Lossy<FollowingPerp>]?
     }
     private struct CachedFeed: Codable {
         let events: [FollowingTrade]
         let pending: [String]
         let stale: [String]
         let savedAt: Date
+        var perps: [FollowingPerp]?
     }
 
     private(set) var events: [FollowingTrade] = []
+    private(set) var perps: [FollowingPerp] = []
     private(set) var pending: [String] = []
     private(set) var stale: [String] = []
     private(set) var loaded = false
@@ -57,9 +126,13 @@ final class FollowingFeedModel {
         return "Updated " + formatter.localizedString(for: lastUpdated, relativeTo: .now)
     }
 
+    var items: [FollowingItem] {
+        (events.map(FollowingItem.spot) + perps.map(FollowingItem.perp)).sorted { $0.time > $1.time }
+    }
+
     func run(addresses: [String]) async {
         guard !addresses.isEmpty else {
-            events = []; pending = []; stale = []; loaded = true; problem = nil; sync = nil
+            events = []; perps = []; pending = []; stale = []; loaded = true; problem = nil; sync = nil
             return
         }
         prepare(addresses: addresses)
@@ -71,7 +144,7 @@ final class FollowingFeedModel {
 
     func load(addresses: [String]) async {
         guard !addresses.isEmpty else {
-            events = []; pending = []; stale = []; loaded = true; problem = nil; sync = nil
+            events = []; perps = []; pending = []; stale = []; loaded = true; problem = nil; sync = nil
             return
         }
         prepare(addresses: addresses)
@@ -89,6 +162,7 @@ final class FollowingFeedModel {
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
             let feed = try JSONDecoder().decode(Response.self, from: data)
             events = feed.events
+            perps = feed.perps?.compactMap(\.value) ?? []
             pending = feed.pending
             stale = feed.stale ?? []
             sync = feed.sync
@@ -98,10 +172,11 @@ final class FollowingFeedModel {
             persist(addresses: addresses)
         } catch {
             guard !Task.isCancelled else { return }
-            problem = events.isEmpty
+            let empty = events.isEmpty && perps.isEmpty
+            problem = empty
                 ? "Following activity couldn’t be loaded. Pull down to retry."
                 : "Live refresh failed. Showing your last saved activity."
-            isShowingCached = !events.isEmpty
+            isShowingCached = !empty
         }
         loaded = true
     }
@@ -111,6 +186,7 @@ final class FollowingFeedModel {
         guard key != activeKey else { return }
         activeKey = key
         events = []
+        perps = []
         pending = []
         stale = []
         sync = nil
@@ -121,6 +197,7 @@ final class FollowingFeedModel {
               let cached = try? JSONDecoder().decode(CachedFeed.self, from: data)
         else { return }
         events = cached.events
+        perps = cached.perps ?? []
         pending = cached.pending
         stale = cached.stale
         lastUpdated = cached.savedAt
@@ -129,7 +206,7 @@ final class FollowingFeedModel {
     }
 
     private func persist(addresses: [String]) {
-        let cache = CachedFeed(events: events, pending: pending, stale: stale, savedAt: .now)
+        let cache = CachedFeed(events: events, pending: pending, stale: stale, savedAt: .now, perps: perps)
         if let data = try? JSONEncoder().encode(cache) {
             UserDefaults.standard.set(data, forKey: cacheKey(addresses))
         }
@@ -146,6 +223,7 @@ struct FollowingFeed: View {
     let name: (String) -> String
     let onAdd: () -> Void
     let onOpen: (FollowingTrade) -> Void
+    let onOpenPerp: (FollowingPerp) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -183,7 +261,7 @@ struct FollowingFeed: View {
                         .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
                     guideStep("1", "Follow a wallet you want to learn from")
-                    guideStep("2", "Desk confirms its buys and sells on-chain")
+                    guideStep("2", "Desk shows their trades on Monad and their perps on Perpl")
                     guideStep("3", "Inspect the movement, then decide whether to trade")
                     Button(action: onAdd) {
                         Label("Follow your first wallet", systemImage: "plus")
@@ -203,12 +281,12 @@ struct FollowingFeed: View {
                     ForEach(0..<3, id: \.self) { SkeletonRow(widthFraction: 0.85 - Double($0) * 0.15) }
                 }
                 .padding(.top, 14)
-            } else if model.events.isEmpty {
+            } else if model.items.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("No confirmed movements yet")
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
-                    Text("Desk will keep this feed ready and add the next confirmed buy or sell from a wallet you track.")
+                    Text("Desk shows their trades on Monad and, with alerts on, their perps moves on Perpl.")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
                         .fixedSize(horizontal: false, vertical: true)
@@ -216,8 +294,13 @@ struct FollowingFeed: View {
                 .padding(.top, 14)
             } else {
                 LazyVStack(spacing: 0) {
-                    ForEach(model.events) { trade in
-                        FollowingTradeRow(trade: trade, walletName: name(trade.wallet)) { onOpen(trade) }
+                    ForEach(model.items) { item in
+                        switch item {
+                        case .spot(let trade):
+                            FollowingTradeRow(trade: trade, walletName: name(trade.wallet)) { onOpen(trade) }
+                        case .perp(let move):
+                            FollowingPerpRow(move: move, walletName: name(move.wallet)) { onOpenPerp(move) }
+                        }
                     }
                 }
             }
@@ -418,6 +501,97 @@ private struct FollowingTradeRow: View {
                                 .foregroundStyle(trade.isBuy ? DeskColor.rise.color : DeskColor.fall.color)
                             Text("\(trade.value.formatted(.currency(code: "USD").precision(.fractionLength(2)))) \(trade.symbol)")
                                 .foregroundStyle(DeskColor.nightText.color)
+                        }
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        Text(detail)
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+            }
+            .padding(.vertical, 15)
+            .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.1)).frame(height: 1) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(DeskPressStyle())
+    }
+}
+
+private struct FollowingPerpRow: View {
+    let move: FollowingPerp
+    let walletName: String
+    let onOpen: () -> Void
+
+    private var tint: Color {
+        switch move.kind {
+        case .closed, .reduced: DeskColor.nightMuted.color
+        default: (move.isLong ? DeskColor.rise : DeskColor.fall).color
+        }
+    }
+
+    private var verb: String {
+        switch move.kind {
+        case .opened: "Opened"
+        case .added: "Added to"
+        case .reduced: "Trimmed"
+        case .flipped: "Flipped to"
+        case .closed: "Closed"
+        }
+    }
+
+    private var subject: String {
+        let leverage = TraderFormat.leverage(move.leverage)
+        let levered = leverage.isEmpty ? "\(move.side) \(move.market)" : "\(leverage) \(move.side) \(move.market)"
+        let value = move.value.map { TraderFormat.compact($0) }
+        let change = move.previousValue.map { TraderFormat.compact($0) }.flatMap { from in value.map { "\(from) → \($0)" } } ?? value
+        switch move.kind {
+        case .opened, .flipped: return value.map { "\(levered) · \($0)" } ?? levered
+        case .added, .reduced: return change.map { "\(move.market) \(move.side) · \($0)" } ?? "\(move.market) \(move.side)"
+        case .closed: return "\(move.market) \(move.side)"
+        }
+    }
+
+    private var detail: String {
+        var parts = ["\(move.market)-PERP"]
+        if let entry = move.entry, entry > 0 { parts.append("Entry \(TraderFormat.price(String(entry)))") }
+        return parts.joined(separator: " · ")
+    }
+
+    private var timeLabel: String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: Date(timeIntervalSince1970: move.time / 1_000), relativeTo: .now)
+    }
+
+    var body: some View {
+        Button(action: onOpen) {
+            VStack(alignment: .leading, spacing: 13) {
+                HStack(spacing: 10) {
+                    TraderAvatar(address: move.wallet, size: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(walletName).font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DeskColor.nightText.color).lineLimit(1)
+                        Text("Following · Perpl")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                    }
+                    Spacer(minLength: 4)
+                    Text(timeLabel)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+                HStack(spacing: 12) {
+                    MarketTokenLogo(symbol: move.market, size: 40)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 4) {
+                            Text(verb).foregroundStyle(tint)
+                            Text(subject).foregroundStyle(DeskColor.nightText.color)
                         }
                         .font(.system(size: 15, weight: .bold, design: .rounded))
                         .lineLimit(1).minimumScaleFactor(0.8)

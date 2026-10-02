@@ -40,7 +40,7 @@ struct AlertsPrimerSheet: View {
                 .multilineTextAlignment(.center)
                 .padding(.top, 26)
 
-            Text("Desk watches \(name) on Perpl and tells you when they open, add to or close a position. Tap the alert to copy it with your own key.")
+            Text("Desk watches \(name) on Perpl and tells you when they open, add to, trim or close a position. Tap the alert to copy it with your own key.")
                 .font(.system(size: 15, weight: .regular, design: .rounded))
                 .foregroundStyle(Color.white.opacity(0.6))
                 .multilineTextAlignment(.center)
@@ -116,7 +116,7 @@ struct TradeAlertSheet: View {
     private var livePosition: TraderPosition? {
         live?.positions.first { $0.market.caseInsensitiveCompare(alert.market) == .orderedSame }
     }
-    private var closedSince: Bool { loaded && alert.canCopy && livePosition?.side != alert.side }
+    private var closedSince: Bool { loaded && alert.event != .closed && livePosition?.side != alert.side }
     private var sideTint: DeskRGB { alert.isLong ? DeskColor.rise : DeskColor.fall }
 
     private var headline: String {
@@ -124,8 +124,15 @@ struct TradeAlertSheet: View {
         case .opened: "Opened a \(alert.side)"
         case .flipped: "Flipped to \(alert.side)"
         case .added: "Added to their \(alert.side)"
+        case .reduced: "Trimmed their \(alert.side)"
         case .closed: "Closed their \(alert.side)"
         }
+    }
+
+    private var sizeChange: String? {
+        guard alert.event == .added || alert.event == .reduced,
+              let from = alert.previousValue.flatMap(Double.init), let to = Double(alert.value) else { return nil }
+        return "\(TraderFormat.compact(from)) → \(TraderFormat.compact(to))"
     }
 
     /// The market's move since their entry, signed for their side: positive is working.
@@ -161,6 +168,9 @@ struct TradeAlertSheet: View {
                         Text("\(alert.isLong ? "Long" : "Short") \(TraderFormat.leverage(alert.leverage))")
                             .fontWeight(.semibold)
                             .foregroundStyle(sideTint.color)
+                    }
+                    if let sizeChange {
+                        GlassRow(alert.event == .reduced ? "Trimmed" : "Added", value: sizeChange)
                     }
                     GlassRow("Their entry", value: TraderFormat.price(alert.entry))
                     GlassRow("Mark now", value: livePosition.map { TraderFormat.price($0.mark) } ?? (loaded ? Unavailable.text : "…"))

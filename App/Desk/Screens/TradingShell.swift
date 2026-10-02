@@ -140,12 +140,20 @@ struct TradingShell: View {
         }
         .onChange(of: TradeAlerts.shared.opened, initial: true) { _, opened in
             guard opened != nil else { return }
-            showsAccount = false
-            showsFunding = false
-            showsNetwork = false
-            showsActivity = false
-            showsWithdraw = false
+            closeSheets()
             tab = .signals
+        }
+        .onChange(of: TradeAlerts.shared.openedTrader, initial: true) { _, trader in
+            guard trader != nil else { return }
+            closeSheets()
+            tab = .signals
+        }
+        .onChange(of: TradeAlerts.shared.opensProfile, initial: true) { _, opens in
+            guard opens else { return }
+            TradeAlerts.shared.opensProfile = false
+            closeSheets()
+            tab = .home
+            Task { await model.refreshBalances() }
         }
         #if DEBUG
         .task {
@@ -198,6 +206,14 @@ struct TradingShell: View {
         }
         .animation(.snappy(duration: 0.28), value: fillConfirmation)
         .animation(.snappy(duration: 0.28), value: Connectivity.shared.isOnline)
+    }
+
+    private func closeSheets() {
+        showsAccount = false
+        showsFunding = false
+        showsNetwork = false
+        showsActivity = false
+        showsWithdraw = false
     }
 
     private func orderFilled(_ side: Direction, _ symbol: String) {

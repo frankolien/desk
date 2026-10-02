@@ -25,6 +25,7 @@ struct SignalsScreen: View {
     @State private var copyOrder: CopyIntent?
     @State private var pendingCopy: CopyIntent?
     @State private var unlistedMarket: String?
+    @State private var unlistedIsCopy = true
     @State private var tradeAlert: TradeAlert?
     @State private var showsCopying = false
     @State private var afterAlert: (() -> Void)?
@@ -75,7 +76,8 @@ struct SignalsScreen: View {
                                           addresses: TrackedWallets.shared.list.map(\.address),
                                           name: followingName,
                                           onAdd: { showsTrackNew = true },
-                                          onOpen: { selectedFollowingTrade = $0 })
+                                          onOpen: { selectedFollowingTrade = $0 },
+                                          onOpenPerp: { openPerpMarket($0.market) })
                                 .padding(.bottom, 130)
                         case .top:
                             if Showcase.smartMoney {
@@ -151,10 +153,10 @@ struct SignalsScreen: View {
             }
             #endif
             .sheet(item: $trackedEditing) { wallet in
-                TrackWalletSheet(existing: wallet).fittedSheet().presentationDragIndicator(.visible)
+                TrackWalletSheet(existing: wallet, directory: directory).fittedSheet().presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showsTrackNew) {
-                TrackWalletSheet(existing: nil).fittedSheet().presentationDragIndicator(.visible)
+                TrackWalletSheet(existing: nil, directory: directory).fittedSheet().presentationDragIndicator(.visible)
             }
             .sheet(item: $selectedFollowingTrade) { trade in
                 FollowingTradeDetailSheet(
@@ -226,6 +228,7 @@ struct SignalsScreen: View {
             await followingFeed.run(addresses: addresses)
         }
         .task(id: TrackedWallets.shared.list.map(\.id).joined(separator: ",")) {
+            if directory.reloadFollowed() { await directory.refreshFollowing() }
             await IdentityDirectory.shared.resolve(TrackedWallets.shared.list.map(\.address))
         }
         #if DEBUG
@@ -284,6 +287,19 @@ struct SignalsScreen: View {
                 }
             }
         }
+        .onChange(of: TradeAlerts.shared.openedTrader, initial: true) { _, opened in
+            guard let opened else { return }
+            TradeAlerts.shared.openedTrader = nil
+            section = .traders
+            tradeAlert = nil
+            copyOrder = nil
+            pendingCopy = nil
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(450))
+                selectedTrader = directory.following.first { $0.id == opened.lowercased() }
+                    ?? TraderSnapshot(accountId: nil, address: opened, pnl: nil, balance: nil, positions: [])
+            }
+        }
         .sheet(item: $tradeAlert, onDismiss: {
             afterAlert?()
             afterAlert = nil
@@ -335,13 +351,28 @@ struct SignalsScreen: View {
         )) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("\(unlistedMarket ?? "This market") isn't listed on Perpl \(model.network.shortName.lowercased()), so it can't be copied here.")
+            Text("\(unlistedMarket ?? "This market") isn't listed on Perpl \(model.network.shortName.lowercased())"
+                 + (unlistedIsCopy ? ", so it can't be copied here." : "."))
         }
     }
 
     private func copy(_ position: TraderPosition) {
         copy(market: position.market, isLong: position.isLong, leverage: position.leverage,
              trader: selectedTrader?.address ?? "", entry: position.entry, pnlPercent: position.pnlPercent)
+    }
+
+    private func openPerpMarket(_ symbol: String) {
+        Task { @MainActor in
+            for _ in 0..<40 where market.allMarkets.isEmpty { try? await Task.sleep(for: .milliseconds(250)) }
+            guard let entry = market.allMarkets.first(where: { $0.symbol.caseInsensitiveCompare(symbol) == .orderedSame }) else {
+                unlistedIsCopy = false
+                unlistedMarket = symbol
+                return
+            }
+            market.select(entry)
+            await session.selectMarket(entry)
+            showsMarket = true
+        }
     }
 
     private func followingName(_ address: String) -> String {
@@ -362,6 +393,7 @@ struct SignalsScreen: View {
         guard let target = market.allMarkets.first(where: {
             $0.symbol.caseInsensitiveCompare(symbol) == .orderedSame
         }) else {
+            unlistedIsCopy = true
             unlistedMarket = symbol
             return
         }

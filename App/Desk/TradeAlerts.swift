@@ -5,7 +5,7 @@ import UIKit
 import UserNotifications
 
 struct TradeAlert: Identifiable, Hashable, Sendable {
-    enum Event: String, Sendable { case opened, flipped, added, closed }
+    enum Event: String, Sendable { case opened, flipped, added, reduced, closed }
 
     let event: Event
     let trader: String
@@ -14,26 +14,28 @@ struct TradeAlert: Identifiable, Hashable, Sendable {
     let leverage: Double?
     let entry: String
     let value: String
+    var previousValue: String? = nil
     let observedAt: Date
 
     var id: String { "\(trader)-\(market)-\(event.rawValue)-\(observedAt.timeIntervalSince1970)" }
     var isLong: Bool { side == "long" }
-    var canCopy: Bool { event != .closed }
+    var canCopy: Bool { event == .opened || event == .flipped || event == .added }
 
     init?(userInfo: [AnyHashable: Any]) {
         guard let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "trade",
               let event = (desk["event"] as? String).flatMap(Event.init(rawValue:)),
-              let trader = desk["trader"] as? String,
-              let market = desk["market"] as? String,
-              let side = desk["side"] as? String else { return nil }
+              let trader = desk["trader"] as? String, !trader.isEmpty,
+              let market = desk["market"] as? String, !market.isEmpty,
+              let side = desk["side"] as? String, side == "long" || side == "short" else { return nil }
         self.init(event: event, trader: trader, market: market, side: side,
-                  leverage: (desk["leverage"] as? NSNumber)?.doubleValue,
-                  entry: desk["entry"] as? String ?? "", value: desk["value"] as? String ?? "",
-                  observedAt: (desk["observedAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) } ?? .now)
+                  leverage: Self.number(desk["leverage"]).flatMap { $0 > 0 && $0 < 10_000 ? $0 : nil },
+                  entry: Self.text(desk["entry"]) ?? "", value: Self.text(desk["value"]) ?? "",
+                  previousValue: Self.text(desk["previousValue"]),
+                  observedAt: Self.number(desk["observedAt"]).map { Date(timeIntervalSince1970: $0 / 1000) } ?? .now)
     }
 
     init(event: Event, trader: String, market: String, side: String, leverage: Double?,
-         entry: String, value: String, observedAt: Date) {
+         entry: String, value: String, previousValue: String? = nil, observedAt: Date) {
         self.event = event
         self.trader = trader
         self.market = market
@@ -41,7 +43,18 @@ struct TradeAlert: Identifiable, Hashable, Sendable {
         self.leverage = leverage
         self.entry = entry
         self.value = value
+        self.previousValue = previousValue
         self.observedAt = observedAt
+    }
+
+    private static func number(_ raw: Any?) -> Double? {
+        if let number = raw as? NSNumber { return number.doubleValue }
+        return (raw as? String).flatMap(Double.init)
+    }
+
+    private static func text(_ raw: Any?) -> String? {
+        if let text = raw as? String { return text }
+        return (raw as? NSNumber)?.stringValue
     }
 }
 
@@ -57,11 +70,15 @@ final class TradeAlerts {
     var problem: String?
     var opened: TradeAlert?
     var openedToCopy = false
+    var openedTrader: String?
+    var opensProfile = false
 
     private var deviceToken: String?
     private var confirmOnSync = false
     private var syncTask: Task<Void, Never>?
-    private var needsSync = false
+    @ObservationIgnored private var needsSync = UserDefaults.standard.bool(forKey: "desk.alerts.needsSync") {
+        didSet { if needsSync != oldValue { UserDefaults.standard.set(needsSync, forKey: Self.dirtyKey) } }
+    }
     private var registrationRetry: Task<Void, Never>?
 
     private static let storageKey = "desk.alertedTraders"
@@ -72,10 +89,20 @@ final class TradeAlerts {
         return (try? JSONDecoder().decode([PriceTarget].self, from: data)) ?? []
     }()
     private(set) var priceAlerts = UserDefaults.standard.bool(forKey: "desk.alerts.prices")
+    private static let depositsKey = "desk.alerts.deposits"
+    private(set) var depositAlerts = UserDefaults.standard.object(forKey: "desk.alerts.deposits") as? Bool ?? true
+    private static let dirtyKey = "desk.alerts.needsSync"
+    private static let mutedMigratedKey = "desk.alerts.mutedMigrated"
+    private static let sentMeKey = "desk.alerts.sentMe"
     private static let nicknameKey = "desk.traderNicknames"
     private static let primerKey = "desk.alertsPrimerShown"
     private static let endpoint = URL(string: "https://web-lovat-nine-49.vercel.app/api/alerts")!
     private static let tokenKey = "desk.alertsDeviceToken"
+    private static let mutedKey = "desk.alerts.muted"
+    private static let meKey = "desk.alerts.me"
+    private(set) var muted: [String] = UserDefaults.standard.stringArray(forKey: "desk.alerts.muted") ?? []
+    private(set) var me: String? = UserDefaults.standard.string(forKey: "desk.alerts.me")
+    var sendsDeposits: Bool { me != nil && depositAlerts && permission == .allowed }
 
     nonisolated static let copyAction = "desk.copy"
     nonisolated static let viewAction = "desk.view"
@@ -101,6 +128,7 @@ final class TradeAlerts {
         UNUserNotificationCenter.current().setNotificationCategories([
             UNNotificationCategory(identifier: "desk.trade", actions: [copy, view, mute], intentIdentifiers: []),
             UNNotificationCategory(identifier: "desk.trade.closed", actions: [view, mute], intentIdentifiers: []),
+            UNNotificationCategory(identifier: "desk.receipt", actions: [], intentIdentifiers: []),
         ])
     }
 
@@ -113,6 +141,56 @@ final class TradeAlerts {
         alerted.contains { $0.caseInsensitiveCompare(address) == .orderedSame }
     }
 
+    func isMuted(_ address: String) -> Bool {
+        muted.contains { $0.caseInsensitiveCompare(address) == .orderedSame }
+    }
+
+    private func setMuted(_ address: String, _ on: Bool) {
+        guard isMuted(address) != on else { return }
+        if on { muted.append(address) } else { muted.removeAll { $0.caseInsensitiveCompare(address) == .orderedSame } }
+        UserDefaults.standard.set(muted, forKey: Self.mutedKey)
+    }
+
+    func signedIn(as address: String) {
+        let key = address.lowercased()
+        guard key != me else { return }
+        me = key
+        UserDefaults.standard.set(key, forKey: Self.meKey)
+        confirmOnSync = true
+        Task {
+            await refreshPermission()
+            if permission == .allowed { UIApplication.shared.registerForRemoteNotifications() }
+            scheduleSync()
+        }
+    }
+
+    func askForDeposits() async {
+        guard me != nil, depositAlerts else { return }
+        let center = UNUserNotificationCenter.current()
+        if await center.notificationSettings().authorizationStatus == .notDetermined {
+            _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+        }
+        await refreshPermission()
+        guard permission == .allowed else { return }
+        alertFollowed()
+        UIApplication.shared.registerForRemoteNotifications()
+        scheduleSync()
+    }
+
+    private func alertFollowed() {
+        let followed = UserDefaults.standard.stringArray(forKey: TraderDirectory.storageKey) ?? []
+        var missing: [String] = []
+        for address in followed + TrackedWallets.shared.list.map(\.address)
+        where TrackedWallets.isEVM(address) && !isOn(for: address) && !isMuted(address)
+            && !missing.contains(where: { $0.caseInsensitiveCompare(address) == .orderedSame }) {
+            missing.append(address)
+        }
+        guard !missing.isEmpty else { return }
+        alerted.append(contentsOf: missing)
+        persist()
+        needsSync = true
+    }
+
     func refreshPermission() async {
         let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
         permission = switch status {
@@ -120,6 +198,8 @@ final class TradeAlerts {
         case .denied: .denied
         default: .allowed
         }
+        // The server keeps the deposit address only while this phone can show the push.
+        if sendsDeposits != UserDefaults.standard.bool(forKey: Self.sentMeKey), deviceToken != nil { scheduleSync() }
     }
 
     func resume() async {
@@ -129,11 +209,19 @@ final class TradeAlerts {
             UserDefaults.standard.set(false, forKey: Self.pricesKey)
             if deviceToken != nil || lastSyncedAt != nil { scheduleSync() }
         }
+        if !UserDefaults.standard.bool(forKey: Self.mutedMigratedKey) {
+            // Before the muted list, a followed trader with no alerts had its bell turned off.
+            let followed = UserDefaults.standard.stringArray(forKey: TraderDirectory.storageKey) ?? []
+            for trader in followed where !isOn(for: trader) { setMuted(trader, true) }
+            UserDefaults.standard.set(true, forKey: Self.mutedMigratedKey)
+        }
         await refreshPermission()
+        if permission == .allowed { alertFollowed() }
         let wantsAlerts = !alerted.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty || !targets.isEmpty
+            || (me != nil && depositAlerts)
+        if needsSync, deviceToken != nil { scheduleSync() }
         guard (permission == .allowed && wantsAlerts) || !copying.isEmpty else { return }
         UIApplication.shared.registerForRemoteNotifications()
-        if needsSync, deviceToken != nil { scheduleSync() }
     }
 
     @discardableResult
@@ -148,6 +236,23 @@ final class TradeAlerts {
         }
         priceAlerts = on
         UserDefaults.standard.set(on, forKey: Self.pricesKey)
+        if on { UIApplication.shared.registerForRemoteNotifications() }
+        scheduleSync()
+        return true
+    }
+
+    @discardableResult
+    func setDepositAlerts(_ on: Bool) async -> Bool {
+        if on {
+            let center = UNUserNotificationCenter.current()
+            if await center.notificationSettings().authorizationStatus == .notDetermined {
+                _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+            }
+            await refreshPermission()
+            guard permission == .allowed else { return false }
+        }
+        depositAlerts = on
+        UserDefaults.standard.set(on, forKey: Self.depositsKey)
         if on { UIApplication.shared.registerForRemoteNotifications() }
         scheduleSync()
         return true
@@ -193,6 +298,7 @@ final class TradeAlerts {
 
     @discardableResult
     func turnOn(for address: String) async -> Bool {
+        setMuted(address, false)
         let center = UNUserNotificationCenter.current()
         if await center.notificationSettings().authorizationStatus == .notDetermined {
             _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
@@ -208,7 +314,8 @@ final class TradeAlerts {
         return true
     }
 
-    func turnOff(for address: String) {
+    func turnOff(for address: String, muting: Bool = false) {
+        setMuted(address, muting)
         guard isOn(for: address) else { return }
         alerted.removeAll { $0.caseInsensitiveCompare(address) == .orderedSame }
         persist()
@@ -216,23 +323,29 @@ final class TradeAlerts {
     }
 
     func mute(_ address: String) async {
+        setMuted(address, true)
         guard isOn(for: address) else { return }
         alerted.removeAll { $0.caseInsensitiveCompare(address) == .orderedSame }
         persist()
+        // A cold launch from the push hasn't read the permission yet; without it the sync drops `me`.
+        await refreshPermission()
         syncTask?.cancel()
         await sync()
     }
 
     func signOut() async {
         let hadSubscription = !alerted.isEmpty || !copying.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty || !targets.isEmpty
-            || deviceToken != nil || lastSyncedAt != nil
+            || deviceToken != nil || lastSyncedAt != nil || me != nil
         alerted = []
+        muted = []
+        me = nil
         copying = []
         targets = []
         persistTargets()
         AutoCopyAway.isOn = false
         persist()
         syncTask?.cancel()
+        needsSync = false
         if hadSubscription, let install = InstallSecret.value() {
             var request = URLRequest(url: Self.endpoint)
             request.httpMethod = "POST"
@@ -245,7 +358,9 @@ final class TradeAlerts {
         problem = nil
         opened = nil
         openedToCopy = false
-        for key in [Self.storageKey, Self.nicknameKey, Self.tokenKey, Self.primerKey, Self.copyingKey] {
+        openedTrader = nil
+        opensProfile = false
+        for key in [Self.storageKey, Self.nicknameKey, Self.tokenKey, Self.primerKey, Self.copyingKey, Self.mutedKey, Self.meKey, Self.sentMeKey] {
             UserDefaults.standard.removeObject(forKey: key)
         }
         deviceToken = nil
@@ -254,9 +369,11 @@ final class TradeAlerts {
     func didRegister(deviceToken data: Data) {
         registrationRetry?.cancel()
         let token = data.map { String(format: "%02x", $0) }.joined()
+        let current = token == deviceToken && !needsSync
+            && lastSyncedAt.map { Date.now.timeIntervalSince($0) < 12 * 3600 } == true
         deviceToken = token
         UserDefaults.standard.set(token, forKey: Self.tokenKey)
-        scheduleSync()
+        if !current { scheduleSync() }
     }
 
     func didFailToRegister() {
@@ -329,30 +446,38 @@ final class TradeAlerts {
     }
 
     private func sync() async {
-        guard let deviceToken, let install = InstallSecret.value() else { return }
         needsSync = true
+        guard let deviceToken, let install = InstallSecret.value() else { return }
         let nicknames = UserDefaults.standard.dictionary(forKey: Self.nicknameKey) as? [String: String] ?? [:]
         let traders = alerted.map { $0.lowercased() }
+        var names: [String: String] = [:]
+        for trader in traders {
+            let name = nicknames[trader].flatMap { $0.isEmpty ? nil : $0 } ?? TrackedWallets.shared.wallet(for: trader)?.name
+            if let name, !name.isEmpty { names[trader] = name }
+        }
         let confirm = confirmOnSync
         let sentTargets = targets
+        let sentMe = sendsDeposits ? me : nil
         #if DEBUG
         let environment = "sandbox"
         #else
         let environment = "production"
         #endif
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "install": install,
             "token": deviceToken,
             "environment": environment,
             "traders": traders,
-            "names": nicknames.filter { traders.contains($0.key) },
+            "names": names,
             "copying": copying,
             "wallets": TrackedWallets.shared.payload,
             "prices": priceAlerts,
             "priceMarkets": Self.watchlistSymbols,
             "targets": sentTargets.map { ["market": $0.market, "price": $0.price, "direction": $0.direction.rawValue] as [String: Any] },
             "confirm": confirm,
+            "moves": 2,
         ]
+        if let sentMe { body["me"] = ["address": sentMe, "networks": ["mainnet", "testnet"]] }
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -375,6 +500,7 @@ final class TradeAlerts {
         if !fired.isEmpty { targets.removeAll { fired.contains($0) }; persistTargets() }
         needsSync = false
         problem = nil
+        UserDefaults.standard.set(sentMe != nil, forKey: Self.sentMeKey)
         lastSyncedAt = .now
         UserDefaults.standard.set(lastSyncedAt, forKey: Self.lastSyncKey)
     }
@@ -489,11 +615,29 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
             await MainActor.run { TokenOpenRequest.shared.open(.init(chainIndex: chainIndex, contract: token, symbol: symbol)) }
             return
         }
+        if let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "receipt" {
+            await MainActor.run {
+                guard TradeAlerts.shared.me != nil else { return }
+                TradeAlerts.shared.opensProfile = true
+            }
+            return
+        }
+        let action = response.actionIdentifier
+        if let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "trade",
+           desk["event"] as? String == "summary" {
+            guard let trader = desk["trader"] as? String, !trader.isEmpty,
+                  await TradeAlerts.shared.isOn(for: trader) else { return }
+            if action == TradeAlerts.muteAction {
+                await TradeAlerts.shared.mute(trader)
+            } else {
+                await MainActor.run { TradeAlerts.shared.openedTrader = trader }
+            }
+            return
+        }
         guard let alert = TradeAlert(userInfo: userInfo) else { return }
         // A trader this phone does not follow came from no subscription it made; showing it
         // would put a stranger's position beside a Copy button.
         guard await TradeAlerts.shared.isOn(for: alert.trader) else { return }
-        let action = response.actionIdentifier
         if action == TradeAlerts.muteAction {
             await TradeAlerts.shared.mute(alert.trader)
             return

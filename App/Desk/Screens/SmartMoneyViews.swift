@@ -181,17 +181,21 @@ private struct SignalRow: View {
 
 struct TrackWalletSheet: View {
     let existing: TrackedWallet?
+    let directory: TraderDirectory
     @Environment(\.dismiss) private var dismiss
     @State private var address = ""
     @State private var name = ""
     @State private var minUsd: Double = 250
     @State private var firstBuysOnly = false
     @State private var problem: String?
+    @State private var saving = false
+    @State private var alertsOff = false
 
     private static let minimums: [Double] = [50, 250, 1_000, 5_000]
 
-    init(existing: TrackedWallet?) {
+    init(existing: TrackedWallet?, directory: TraderDirectory) {
         self.existing = existing
+        self.directory = directory
         _address = State(initialValue: existing?.address ?? "")
         _name = State(initialValue: existing?.name ?? "")
         _minUsd = State(initialValue: existing?.minUsd ?? 250)
@@ -261,11 +265,12 @@ struct TrackWalletSheet: View {
             if let problem {
                 Text(problem).font(.system(size: 12, weight: .medium, design: .rounded)).foregroundStyle(DeskColor.fall.color)
             }
+            if alertsOff { NotificationsOffLine() }
 
             HStack(spacing: 10) {
                 if existing != nil {
                     Button(role: .destructive) {
-                        TrackedWallets.shared.untrack(address)
+                        directory.unfollowWallet(address)
                         dismiss()
                     } label: {
                         Text("Stop tracking").frame(maxWidth: .infinity).frame(height: 50)
@@ -274,10 +279,11 @@ struct TrackWalletSheet: View {
                     .foregroundStyle(DeskColor.fall.color)
                     .background(DeskColor.fall.color.opacity(0.12), in: Capsule())
                 }
-                Button(action: save) {
-                    Text(existing == nil ? "Track" : "Save").frame(maxWidth: .infinity).frame(height: 50)
+                Button { alertsOff ? dismiss() : save() } label: {
+                    Text(alertsOff ? "Done" : (existing == nil ? "Track" : "Save")).frame(maxWidth: .infinity).frame(height: 50)
                 }
                 .buttonStyle(.plain)
+                .disabled(saving)
                 .foregroundStyle(DeskColor.onAction.color)
                 .background(DeskColor.action.color, in: Capsule())
             }
@@ -305,6 +311,12 @@ struct TrackWalletSheet: View {
         TrackedWallets.shared.track(trimmed, name: name)
         TrackedWallets.shared.update(TrackedWallet(address: trimmed, name: String(name.prefix(24)), minUsd: minUsd, firstBuysOnly: firstBuysOnly))
         Task { await IdentityDirectory.shared.resolve([trimmed]) }
-        dismiss()
+        saving = true
+        Task {
+            await directory.follow(trimmed)
+            await TradeAlerts.shared.refreshPermission()
+            saving = false
+            if TradeAlerts.shared.permission == .denied { alertsOff = true } else { dismiss() }
+        }
     }
 }

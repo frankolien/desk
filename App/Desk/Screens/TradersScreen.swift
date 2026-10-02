@@ -85,14 +85,17 @@ final class TraderDirectory {
     private(set) var following: [TraderSnapshot] = []
     private(set) var followed: [String]
     private(set) var nicknames: [String: String]
+    private(set) var withoutAccount: Set<String>
 
-    private static let storageKey = "desk.followedTraders"
+    static let storageKey = "desk.followedTraders"
+    static let withoutAccountKey = "desk.followedWithoutPerpl"
     private static let nicknameKey = "desk.traderNicknames"
     private static let endpoint = "https://web-lovat-nine-49.vercel.app/api/traders"
 
     init() {
         followed = UserDefaults.standard.stringArray(forKey: Self.storageKey) ?? []
         nicknames = UserDefaults.standard.dictionary(forKey: Self.nicknameKey) as? [String: String] ?? [:]
+        withoutAccount = Set(UserDefaults.standard.stringArray(forKey: Self.withoutAccountKey) ?? [])
     }
 
     func name(for address: String) -> String {
@@ -112,26 +115,73 @@ final class TraderDirectory {
         followed.contains { $0.caseInsensitiveCompare(address) == .orderedSame }
     }
 
+    func hasNoPerplAccount(_ address: String) -> Bool { withoutAccount.contains(address.lowercased()) }
+
     func toggle(_ address: String) {
+        reloadFollowed()
         if isFollowing(address) {
-            followed.removeAll { $0.caseInsensitiveCompare(address) == .orderedSame }
-            following.removeAll { $0.id == address.lowercased() }
-            TradeAlerts.shared.turnOff(for: address)
-            TrackedWallets.shared.untrack(address)
-        } else {
-            guard followed.count < 20 else { return }
-            guard TrackedWallets.shared.isTracking(address) || !TrackedWallets.shared.isFull else { return }
+            unfollow(address)
+        } else if startFollowing(address) {
+            Task { await turnOnAlerts(address) }
+        }
+    }
+
+    /// A wallet followed from Signals is tracked with perps alerts, outside the 20 trader slots.
+    @discardableResult
+    func follow(_ address: String, name: String = "") async -> Bool {
+        guard TrackedWallets.isEVM(address),
+              TrackedWallets.shared.isTracking(address) || TrackedWallets.shared.track(address, name: name) else { return false }
+        return await turnOnAlerts(address)
+    }
+
+    func unfollowWallet(_ address: String) {
+        TrackedWallets.shared.untrack(address)
+        reloadFollowed()
+        if !isFollowing(address) { TradeAlerts.shared.turnOff(for: address) }
+    }
+
+    private func startFollowing(_ address: String) -> Bool {
+        reloadFollowed()
+        guard TrackedWallets.isEVM(address) else { return false }
+        if !isFollowing(address) {
+            guard followed.count < 20 else { return false }
             followed.append(address)
             if let known = top.first(where: { $0.id == address.lowercased() }) { following.append(known) }
-            TrackedWallets.shared.track(address, name: nicknames[address.lowercased()] ?? "")
-            Task {
-                if await TradeAlerts.shared.turnOn(for: address), !isFollowing(address) {
-                    TradeAlerts.shared.turnOff(for: address)
-                }
-            }
+            UserDefaults.standard.set(followed, forKey: Self.storageKey)
+            Task { await refreshFollowing() }
         }
+        TrackedWallets.shared.track(address, name: nicknames[address.lowercased()] ?? "")
+        return true
+    }
+
+    @discardableResult
+    private func turnOnAlerts(_ address: String) async -> Bool {
+        let on = await TradeAlerts.shared.turnOn(for: address)
+        reloadFollowed()
+        if on, !isFollowing(address), !TrackedWallets.shared.isTracking(address) {
+            TradeAlerts.shared.turnOff(for: address)
+            return false
+        }
+        return on
+    }
+
+    func unfollow(_ address: String) {
+        reloadFollowed()
+        followed.removeAll { $0.caseInsensitiveCompare(address) == .orderedSame }
+        following.removeAll { $0.id == address.lowercased() }
         UserDefaults.standard.set(followed, forKey: Self.storageKey)
-        Task { await refreshFollowing() }
+        TradeAlerts.shared.turnOff(for: address)
+        TrackedWallets.shared.untrack(address)
+    }
+
+    /// Other screens keep their own directory, so the saved list is the truth.
+    @discardableResult
+    func reloadFollowed() -> Bool {
+        let saved = UserDefaults.standard.stringArray(forKey: Self.storageKey) ?? []
+        guard saved != followed else { return false }
+        followed = saved
+        following.removeAll { !isFollowing($0.address) }
+        return true
     }
 
     func run() async {
@@ -166,6 +216,14 @@ final class TraderDirectory {
         guard !followed.isEmpty else { following = []; return }
         guard let traders = await fetch(["view": "following", "addresses": followed.joined(separator: ",")]) else { return }
         following = traders.filter { isFollowing($0.address) }
+        var without = withoutAccount.intersection(followed.map { $0.lowercased() })
+        for trader in following where trader.unreadable != true {
+            if trader.accountId == nil { without.insert(trader.id) } else { without.remove(trader.id) }
+        }
+        if without != withoutAccount {
+            withoutAccount = without
+            UserDefaults.standard.set(Array(without), forKey: Self.withoutAccountKey)
+        }
         Task { await IdentityDirectory.shared.resolve(traders.map(\.address)) }
     }
 
@@ -420,7 +478,9 @@ struct TradersFeed: View {
     let onAdd: () -> Void
     @State private var sort: LeaderSort = .openPnL
 
-    private var trackedOnly: [TrackedWallet] { TrackedWallets.shared.list.filter { !directory.isFollowing($0.address) } }
+    private var trackedOnly: [TrackedWallet] {
+        TrackedWallets.shared.list.filter { !directory.isFollowing($0.address) || directory.hasNoPerplAccount($0.address) }
+    }
 
     private var sortedTop: [TraderSnapshot] {
         let top = directory.top
@@ -455,8 +515,9 @@ struct TradersFeed: View {
     }
 
     private var followedSnapshots: [TraderSnapshot] {
-        directory.followed.map { address in
-            directory.following.first { $0.id == address.lowercased() }
+        directory.followed.compactMap { address in
+            if directory.hasNoPerplAccount(address), TrackedWallets.shared.isTracking(address) { return nil }
+            return directory.following.first { $0.id == address.lowercased() }
                 ?? TraderSnapshot(accountId: nil, address: address, pnl: nil, balance: nil, positions: [])
         }
     }
@@ -469,12 +530,14 @@ struct TradersFeed: View {
                     .padding(.bottom, 24)
             }
             let tracked = trackedOnly
-            header("Following", trailing: directory.followed.isEmpty && tracked.isEmpty ? "Traders and wallets" : "\(directory.followed.count + tracked.count)")
+            let traders = followedSnapshots
+            header("Following", trailing: traders.isEmpty && tracked.isEmpty ? "Traders and wallets" : "\(traders.count + tracked.count)")
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    ForEach(followedSnapshots) { trader in
+                    ForEach(traders) { trader in
                         FollowedCard(trader: trader, name: directory.name(for: trader.address),
-                                     isAlerting: TradeAlerts.shared.isOn(for: trader.address)) { onSelect(trader) }
+                                     isAlerting: TradeAlerts.shared.isOn(for: trader.address),
+                                     noAccount: directory.hasNoPerplAccount(trader.address)) { onSelect(trader) }
                     }
                     ForEach(tracked) { wallet in
                         TrackedCard(wallet: wallet, onTap: { onOpenTracked(wallet) }, onEdit: { onEditTracked(wallet) })
@@ -486,12 +549,12 @@ struct TradersFeed: View {
                                 .foregroundStyle(DeskColor.nightText.color)
                                 .frame(width: 36, height: 36)
                                 .background(Color.white.opacity(0.1), in: Circle())
-                            Text(directory.followed.isEmpty && tracked.isEmpty ? "Follow a wallet" : "Add")
+                            Text(traders.isEmpty && tracked.isEmpty ? "Follow a wallet" : "Add")
                                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                                 .foregroundStyle(DeskColor.nightText.color)
                                 .lineLimit(1)
                         }
-                        .frame(width: directory.followed.isEmpty && tracked.isEmpty ? 138 : 84, height: 98)
+                        .frame(width: traders.isEmpty && tracked.isEmpty ? 138 : 84, height: 98)
                         .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
@@ -582,6 +645,7 @@ private struct FollowedCard: View {
     let trader: TraderSnapshot
     let name: String
     let isAlerting: Bool
+    var noAccount = false
     let onTap: () -> Void
 
     var body: some View {
@@ -602,8 +666,10 @@ private struct FollowedCard: View {
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
                         .lineLimit(1)
-                    Text(trader.pnl == nil ? "Loading" : TraderFormat.compact(trader.pnl.flatMap(Double.init), signed: true))
+                    Text(trader.pnl == nil ? (noAccount ? "Not on Perpl yet" : "Loading") : TraderFormat.compact(trader.pnl.flatMap(Double.init), signed: true))
                         .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .foregroundStyle(trader.pnl == nil ? DeskColor.nightMuted.color
                                          : (trader.isProfit ? DeskColor.rise : DeskColor.fall).color)
                 }
@@ -844,7 +910,7 @@ struct TraderProfileScreen: View {
     private func toggleAlerts() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         if alerting {
-            withAnimation(.snappy(duration: 0.2)) { alerts.turnOff(for: trader.address) }
+            withAnimation(.snappy(duration: 0.2)) { alerts.turnOff(for: trader.address, muting: true) }
         } else if alerts.permission == .denied {
             showsNotificationsOff = true
         } else if !alerts.hasSeenPrimer {
@@ -910,6 +976,10 @@ struct TraderProfileScreen: View {
                 }
             }
             .padding(.top, 12)
+
+            if following && alerts.permission == .denied {
+                NotificationsOffLine().padding(.top, 12)
+            }
         }
     }
 
@@ -1193,5 +1263,21 @@ private struct ProfilePositionCard: View {
                 .minimumScaleFactor(0.75)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct NotificationsOffLine: View {
+    var body: some View {
+        Button {
+            if let url = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(url) }
+        } label: {
+            Label("Turn on notifications in Settings to get alerts.", systemImage: "bell.slash")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(DeskColor.nightMuted.color)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

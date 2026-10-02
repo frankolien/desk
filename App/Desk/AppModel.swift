@@ -273,6 +273,7 @@ final class AppModel {
     }
 
     private func arrive(at address: EthereumAddress) async throws {
+        TradeAlerts.shared.signedIn(as: address.checksummed)
         await refreshBalances()
         startPollingBalances()
         if hasDesk.value == true, let stored = apiKeys.load(for: address) {
@@ -903,7 +904,8 @@ final class AppModel {
         openingProblem = nil
         needsManualFaucet = false
         await TradeAlerts.shared.signOut()
-        UserDefaults.standard.removeObject(forKey: "desk.followedTraders")
+        UserDefaults.standard.removeObject(forKey: TraderDirectory.storageKey)
+        UserDefaults.standard.removeObject(forKey: TraderDirectory.withoutAccountKey)
         // The next account on this phone inherits none of this one's copying or tracking.
         TrackedWallets.shared.forgetAll()
         for key in UserDefaults.standard.dictionaryRepresentation().keys where key.hasPrefix("desk.copy.") {

@@ -94,6 +94,19 @@ struct AccountScreen: View {
                             sectionDivider
 
                             SettingsRow(
+                                icon: "arrow.down.circle.fill",
+                                tint: .green,
+                                title: "Deposit alerts",
+                                subtitle: TradeAlerts.shared.permission == .denied
+                                    ? "Notifications are off for Desk in Settings" : "When MON or AUSD lands in your wallet",
+                                toggle: Binding(
+                                    get: { TradeAlerts.shared.depositAlerts && TradeAlerts.shared.permission == .allowed },
+                                    set: { on in Task { await TradeAlerts.shared.setDepositAlerts(on) } })
+                            )
+
+                            sectionDivider
+
+                            SettingsRow(
                                 icon: "network",
                                 tint: model.network.holdsRealFunds ? .orange : .purple,
                                 title: "Network",

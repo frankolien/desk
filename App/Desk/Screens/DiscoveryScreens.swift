@@ -2337,10 +2337,15 @@ private struct WalletProfileScreen: View {
                         Spacer(minLength: 8)
                         if isEVM || isSolana {
                             action(tracked == nil ? "Follow" : "Following", symbol: nil) {
-                                if identity?.perplAccount != nil, perplDirectory.isFollowing(wallet.address) == (tracked != nil) {
-                                    perplDirectory.toggle(wallet.address)
-                                } else if tracked == nil {
+                                if tracked == nil {
                                     TrackedWallets.shared.track(wallet.address, name: identity?.name ?? "")
+                                    if isEVM { Task { await perplDirectory.follow(wallet.address) } }
+                                } else if isEVM {
+                                    if perplDirectory.isFollowing(wallet.address) {
+                                        perplDirectory.unfollow(wallet.address)
+                                    } else {
+                                        perplDirectory.unfollowWallet(wallet.address)
+                                    }
                                 } else {
                                     TrackedWallets.shared.untrack(wallet.address)
                                 }
@@ -2354,6 +2359,10 @@ private struct WalletProfileScreen: View {
                             }
                         }
                     }.padding(.top, 20)
+
+                    if tracked != nil, TradeAlerts.shared.permission == .denied {
+                        NotificationsOffLine().padding(.top, 10)
+                    }
 
                     if identity?.source != "sns", let status = statusLine {
                         Button { statusAction() } label: { statusLabel(status) }
@@ -2384,7 +2393,10 @@ private struct WalletProfileScreen: View {
             Button("Save") {
                 let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
                 if let tracked { TrackedWallets.shared.update(TrackedWallet(address: tracked.address, name: String(trimmed.prefix(24)), minUsd: tracked.minUsd, firstBuysOnly: tracked.firstBuysOnly)) }
-                else { TrackedWallets.shared.track(wallet.address, name: trimmed) }
+                else {
+                    TrackedWallets.shared.track(wallet.address, name: trimmed)
+                    if isEVM { Task { await perplDirectory.follow(wallet.address, name: trimmed) } }
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -2394,6 +2406,7 @@ private struct WalletProfileScreen: View {
             await IdentityDirectory.shared.resolve([wallet.address])
             await loadResource()
         }
+        .task { await TradeAlerts.shared.refreshPermission() }
         .task(id: profileReady) {
             guard profileReady, resource?.ledger.status == "indexing" else { return }
             try? await Task.sleep(for: .seconds(8))
