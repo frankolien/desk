@@ -592,6 +592,8 @@ function safeJSON(text) {
   try { return JSON.parse(text); } catch { return null; }
 }
 
+const UNREACHABLE = "This iPhone couldn't be reached by Apple, so alerts weren't saved.";
+
 export function createHandler(resolve) {
   return async function handler(req, res) {
     const deps = resolve();
@@ -698,10 +700,18 @@ export function createHandler(resolve) {
       confirmed = result.status === 200;
       if (confirmed) environment = result.environment ?? environment;
       if (!confirmed && !known) {
-        return res.status(400).json({ error: "This iPhone couldn't be reached by Apple, so alerts weren't saved." });
+        await store.set(`alerts:confirm:${id}`, "failed", { ex: 60 }).catch(() => {});
+        return res.status(400).json({ error: UNREACHABLE });
       }
     } else if (!known) {
-      return res.status(429).json({ error: "Trade alerts are still being set up. Try again in a moment." });
+      // A follow and a bell tap sync seconds apart; wait for the first to confirm rather than refuse.
+      if (await store.get(`alerts:confirm:${id}`) === "failed") return res.status(400).json({ error: UNREACHABLE });
+      let settled = null;
+      for (let attempt = 0; attempt < 10 && !settled; attempt += 1) {
+        await deps.sleep(500);
+        settled = await store.get(subscriptionKey(id));
+      }
+      if (!settled) return res.status(429).json({ error: "Trade alerts are still being set up. Try again in a moment." });
     }
 
     await store.set(subscriptionKey(id), JSON.stringify({ ...record, environment }), { ex: SUBSCRIPTION_TTL });

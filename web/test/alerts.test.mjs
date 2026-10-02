@@ -132,6 +132,31 @@ test("a subscription is only stored once Apple accepts a push for its token", as
   assert.equal(await store.scard("alerts:subs"), 0);
 });
 
+test("a second sync while the first is still confirming waits for it instead of failing", async () => {
+  const store = memoryStore();
+  const id = subscriptionId(INSTALL);
+  await store.set(`alerts:confirm:${id}`, "1", { ex: 60 });
+  let naps = 0;
+  const sleep = async () => {
+    naps += 1;
+    // The first request lands its subscription while the second waits.
+    if (naps === 2) await store.set(`alerts:sub:${id}`, JSON.stringify({ traders: [] }));
+  };
+  const handler = createHandler(() => ({ store, apns: fakeAPNs(), chain: fakeChain({}), markets: async () => markets, secret: "s3cret", sleep }));
+  const second = await handler({ method: "POST", query: {}, body: subscribe() }, recorder());
+  assert.equal(second.status, 200);
+  assert.equal(JSON.parse(await store.get(`alerts:sub:${id}`)).traders.length, 1);
+});
+
+test("a retry after Apple refused the confirmation says so, not that alerts are still being set up", async () => {
+  const store = memoryStore();
+  const handler = createHandler(() => ({ store, apns: fakeAPNs({ status: 400, reason: "BadDeviceToken" }), chain: fakeChain({}), markets: async () => markets, secret: "s3cret", sleep: async () => {} }));
+  assert.equal((await handler({ method: "POST", query: {}, body: subscribe() }, recorder())).status, 400);
+  const retry = await handler({ method: "POST", query: {}, body: subscribe() }, recorder());
+  assert.equal(retry.status, 400);
+  assert.match(retry.body.error, /couldn't be reached by Apple/);
+});
+
 test("the scan budget is shared between subscriptions, not taken first-come", () => {
   const flood = Array.from({ length: 30 }, (_, index) => `0x${String(index).padStart(40, "a")}`);
   const followers = new Map();

@@ -483,10 +483,12 @@ final class TradeAlerts {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         var answer: (Data, URLResponse)?
-        for attempt in 0..<3 {
+        for attempt in 0..<4 {
             if attempt > 0 { try? await Task.sleep(for: .seconds(attempt * 3)) }
             guard !Task.isCancelled else { return }
             answer = try? await URLSession.shared.data(for: request)
+            // 429 means a first registration is still confirming; it settles within seconds.
+            if let (_, response) = answer, (response as? HTTPURLResponse)?.statusCode == 429, attempt < 3 { continue }
             if answer != nil { break }
         }
         guard let (data, response) = answer else { return }
