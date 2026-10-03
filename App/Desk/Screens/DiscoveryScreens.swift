@@ -799,7 +799,7 @@ private struct MarketRow: View {
         HStack(spacing: 8) {
             Button(action: onOpen) {
                 HStack(spacing: 13) {
-                    MarketTokenLogo(symbol: market.symbol, size: 38)
+                    MarketTokenLogo(symbol: market.symbol, size: 38, venue: true)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 7) {
@@ -862,7 +862,7 @@ private struct SearchMarketCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                MarketTokenLogo(symbol: market.symbol, size: 44)
+                MarketTokenLogo(symbol: market.symbol, size: 44, venue: true)
                 Spacer()
                 if let change = model.changePercent(for: market) {
                     Text(String(format: "%+.2f%%", change))

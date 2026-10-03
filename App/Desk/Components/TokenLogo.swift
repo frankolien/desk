@@ -82,6 +82,8 @@ struct MarketTokenLogo: View {
     let symbol: String
     var size: CGFloat = 38
     var remoteURL: URL? = nil
+    /// Marks a Perpl market, the way an exchange badge sits on a coin.
+    var venue = false
 
     static func artworkURL(for symbol: String) -> URL? {
         let address = switch symbol.uppercased() {
@@ -111,7 +113,33 @@ struct MarketTokenLogo: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        .accessibilityLabel(symbol)
+        .overlay(alignment: .bottomTrailing) {
+            if venue, size >= 26 { PerplBadge(size: max(12, size * 0.38)).offset(x: size * 0.06, y: size * 0.06) }
+        }
+        .accessibilityLabel(venue ? "\(symbol) on Perpl" : symbol)
+    }
+}
+
+/// Perpl's mark, three bars, in violet on a dark disc.
+struct PerplBadge: View {
+    let size: CGFloat
+
+    var body: some View {
+        Canvas { context, canvas in
+            let unit = canvas.width / 32
+            let bars = [CGRect(x: 4, y: 0, width: 5.71, height: 31),
+                        CGRect(x: 15.79, y: 15.44, width: 5.71, height: 15.56),
+                        CGRect(x: 21.51, y: 0, width: 5.71, height: 15.44)]
+            for bar in bars {
+                let scaled = CGRect(x: bar.minX * unit, y: bar.minY * unit, width: bar.width * unit, height: bar.height * unit)
+                context.fill(Path(scaled), with: .color(Color(red: 0.545, green: 0.361, blue: 0.965)))
+            }
+        }
+        .frame(width: size * 0.5, height: size * 0.5)
+        .frame(width: size, height: size)
+        .background(Color(red: 0.086, green: 0.078, blue: 0.094), in: Circle())
+        .overlay(Circle().stroke(Color.black, lineWidth: max(1, size * 0.1)))
+        .accessibilityHidden(true)
     }
 }
 

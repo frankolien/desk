@@ -125,7 +125,7 @@ struct TicketSheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         HStack(spacing: 9) {
-                            MarketTokenLogo(symbol: market?.symbol ?? "", size: 30)
+                            MarketTokenLogo(symbol: market?.symbol ?? "", size: 30, venue: true)
                             Text(side.word())
                                 .font(DeskType.title)
                                 .foregroundStyle(side.color.color)

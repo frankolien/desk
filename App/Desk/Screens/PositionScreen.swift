@@ -495,7 +495,7 @@ private struct ClosedPositionRow: View {
 
     var body: some View {
         HStack(spacing: 11) {
-            MarketTokenLogo(symbol: symbol, size: 30)
+            MarketTokenLogo(symbol: symbol, size: 30, venue: true)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {

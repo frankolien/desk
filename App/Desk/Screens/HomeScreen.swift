@@ -651,7 +651,7 @@ struct HomeScreen: View {
         } else {
             ForEach(perps) { position in
                 ledgerRow(
-                    mark: { MarketTokenLogo(symbol: position.market.symbol, size: 40) },
+                    mark: { MarketTokenLogo(symbol: position.market.symbol, size: 40, venue: true) },
                     title: "\(position.figures.side == .long ? "Long" : "Short") \(position.market.symbol) · \(position.figures.leverageHundredths / 100)×",
                     subtitle: positionSubtitle(position.figures),
                     value: hidesBalance ? "•••••" : (position.figures.unrealisedPnL.isNegative ? "" : "+") + position.figures.unrealisedPnL.display() + " AUSD",

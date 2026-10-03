@@ -495,7 +495,7 @@ private struct PerpMarketRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            MarketTokenLogo(symbol: market.symbol, size: 38)
+            MarketTokenLogo(symbol: market.symbol, size: 38, venue: true)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(market.symbol)
@@ -817,7 +817,7 @@ struct PerpDetailScreen: View {
             .buttonStyle(DeskPressStyle())
             .foregroundStyle(DeskColor.nightMuted.color)
 
-            MarketTokenLogo(symbol: market.symbol, size: 30)
+            MarketTokenLogo(symbol: market.symbol, size: 30, venue: true)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(market.symbol)
@@ -889,7 +889,7 @@ struct PerpDetailScreen: View {
             .buttonStyle(DeskPressStyle())
             .foregroundStyle(DeskColor.nightMuted.color)
 
-            MarketTokenLogo(symbol: market.symbol, size: 46)
+            MarketTokenLogo(symbol: market.symbol, size: 46, venue: true)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
                     Text(market.symbol)
