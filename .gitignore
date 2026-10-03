@@ -88,3 +88,11 @@ scratch/
 
 brandkit
 .env*
+
+# Local marketing work, kept out of the repo
+Branding/desk-launch-30s-v1-poster.jpg
+Branding/desk-launch-30s-v1.mp4
+Branding/launch-overlays/
+Branding/olien2.mp4
+docs/marketing-plan.md
+tools/render-marketing-overlays.py
