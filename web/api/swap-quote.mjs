@@ -135,59 +135,72 @@ async function zeroXQuote({ chainIndex, amount, fromTokenAddress, toTokenAddress
   };
 }
 
-/// MON → AUSD on Monad mainnet. Bounded by construction: the wallet sells its native token,
-/// so nothing is approved and a bad route can take at most the MON sent with the call.
+/// MON → AUSD on Monad mainnet, and back. Selling MON is bounded by construction: nothing is
+/// approved and a bad route can take at most the MON sent with the call. Selling AUSD
+/// approves exactly the typed amount to the holder, so that is the most a bad route can take.
 export const MONAD = "143";
 export const AUSD = "0x00000000efe302beaa2b3e6e1b18d08d69a9012a";
 export const NATIVE_MON = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 export const ALLOWANCE_HOLDER = "0x0000000000001ff3684f28c67538d4d072c22734";
 const SWAP_SLIPPAGE_BPS = "100";
+export const SWAP_SIDES = {
+  MON: { sellToken: NATIVE_MON, buyToken: AUSD, sellDecimals: 18, buyDecimals: 6, buys: "AUSD" },
+  AUSD: { sellToken: AUSD, buyToken: NATIVE_MON, sellDecimals: 6, buyDecimals: 18, buys: "MON" },
+};
 
 /// The rule the app applies before signing, applied here too so a changed 0x answer is
-/// refused at the edge instead of reaching a phone.
-export function swapTransaction(quote, wei) {
+/// refused at the edge instead of reaching a phone. Selling MON, the call carries exactly the
+/// typed amount; selling AUSD, it carries nothing, since the AUSD moves by approval.
+export function swapTransaction(quote, raw, sell = "MON") {
+  const side = SWAP_SIDES[sell];
   const tx = quote?.transaction;
-  if (!tx || quote.liquidityAvailable === false) return null;
+  if (!side || !tx || quote.liquidityAvailable === false) return null;
   const to = String(tx.to ?? "").toLowerCase();
   const data = String(tx.data ?? "").toLowerCase();
+  const value = String(tx.value ?? "0");
   const ok = to === ALLOWANCE_HOLDER
     && /^0x[0-9a-f]{8,}$/.test(data)
-    && String(tx.value) === wei
-    && String(quote.sellAmount) === wei
+    && value === (sell === "MON" ? raw : "0")
+    && String(quote.sellAmount) === raw
     && /^\d+$/.test(String(quote.buyAmount ?? "")) && quote.buyAmount !== "0"
     && /^\d+$/.test(String(quote.minBuyAmount ?? ""))
-    && String(quote.buyToken ?? AUSD).toLowerCase() === AUSD
-    && String(quote.sellToken ?? NATIVE_MON).toLowerCase() === NATIVE_MON;
-  return ok ? { chainId: Number(MONAD), to: tx.to, data: tx.data, value: String(tx.value) } : null;
+    && String(quote.buyToken ?? side.buyToken).toLowerCase() === side.buyToken
+    && String(quote.sellToken ?? side.sellToken).toLowerCase() === side.sellToken;
+  return ok ? { chainId: Number(MONAD), to: tx.to, data: tx.data, value } : null;
 }
 
-export function summarizeSwap(quote, transaction, wei) {
+export function summarizeSwap(quote, transaction, raw, sell = "MON") {
+  const side = SWAP_SIDES[sell];
   return {
     observedAt: Date.now(),
-    pay: { amount: readableUnits(wei, 18), wei, symbol: "MON" },
+    pay: { amount: readableUnits(raw, side.sellDecimals), ...(sell === "MON" ? { wei: raw } : { raw }), symbol: sell },
     receive: {
-      amount: readableUnits(quote.buyAmount, 6),
-      minimum: readableUnits(quote.minBuyAmount, 6),
-      symbol: "AUSD",
+      amount: readableUnits(quote.buyAmount, side.buyDecimals),
+      minimum: readableUnits(quote.minBuyAmount, side.buyDecimals),
+      symbol: side.buys,
     },
     feeMON: readableUnits(String(quote.totalNetworkFee ?? "0"), 18),
     sources: Array.isArray(quote.route?.fills)
       ? [...new Set(quote.route.fills.map((fill) => fill.source).filter(Boolean))] : [],
     transaction,
+    // The approval the app makes first when selling AUSD: the holder, for exactly this much.
+    ...(sell === "AUSD" ? { approval: { token: AUSD, spender: ALLOWANCE_HOLDER, amount: raw } } : {}),
   };
 }
 
 async function swap(req, res) {
   const user = String(req.query.user || "");
-  const wei = baseUnits(String(req.query.amount || ""), 18);
-  if (!/^0x[a-fA-F0-9]{40}$/.test(user)) {
+  const sell = String(req.query.sell || "MON").toUpperCase();
+  const side = SWAP_SIDES[sell];
+  if (!side || !/^0x[a-fA-F0-9]{40}$/.test(user)) {
     return res.status(400).json({ error: "Valid quote parameters required", reason: "invalid" });
   }
+  const wei = baseUnits(String(req.query.amount || ""), side.sellDecimals);
   if (!wei || wei === "0") return res.status(400).json({ error: "Enter a valid amount", reason: "invalid" });
   if (!zeroXConfigured()) return res.status(503).json({ error: "No quote provider is configured for this chain.", reason: "unavailable" });
 
   const params = new URLSearchParams({
-    chainId: MONAD, sellToken: NATIVE_MON, buyToken: AUSD, sellAmount: wei,
+    chainId: MONAD, sellToken: side.sellToken, buyToken: side.buyToken, sellAmount: wei,
     taker: user, slippageBps: SWAP_SLIPPAGE_BPS,
   });
   let quote;
@@ -203,13 +216,13 @@ async function swap(req, res) {
     return res.status(502).json({ error: "The quote service could not be reached.", reason: "unreachable" });
   }
   if (quote.liquidityAvailable === false) {
-    return res.status(422).json({ error: "There is not enough AUSD liquidity for this amount.", reason: "no-liquidity" });
+    return res.status(422).json({ error: `There is not enough ${side.buys} liquidity for this amount.`, reason: "no-liquidity" });
   }
-  const transaction = swapTransaction(quote, wei);
+  const transaction = swapTransaction(quote, wei, sell);
   if (!transaction) {
     return res.status(422).json({ error: "This route needs a transaction Desk does not sign.", reason: "unsupported-route" });
   }
-  return res.status(200).json(summarizeSwap(quote, transaction, wei));
+  return res.status(200).json(summarizeSwap(quote, transaction, wei, sell));
 }
 
 export default async function handler(req, res) {
