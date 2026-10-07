@@ -366,6 +366,8 @@ function startWallet() {
     else if (event.target.closest("a")) menu.hidden = true;
   });
   onSession(() => { paintWalletButton(); document.dispatchEvent(new CustomEvent("session", { detail: session() })); });
+  // A page that needs the keys (the ticket, a Close button) asks for the passkey this way.
+  document.addEventListener("desk:unlock", () => { if (wallet?.via === "passkey" || !wallet) { if (!wallet) open(); passkeyFlow("signin"); } });
   if (new URLSearchParams(location.search).get("signin")) setTimeout(open, 300);
 
   /// The passkey ceremony, then the keys into memory, then the account on screen. A browser
@@ -377,7 +379,9 @@ function startWallet() {
       const { prf } = kind === "create" ? await createPasskey("Desk") : await signInWithPasskey();
       const current = unlockWithPRF(prf);
       prf.fill(0);
-      adopt(current.address, "passkey");
+      // Unlocking the account already on screen stays on the page; a new account lands on its portfolio.
+      if (wallet?.address?.toLowerCase() === current.address.toLowerCase()) { setWallet({ ...wallet, via: "passkey", at: Date.now() }); close(); }
+      else adopt(current.address, "passkey");
       toast({ title: kind === "create" ? "Your account is open" : "Signed in", sub: `${short(current.address)} · keys stay in this tab until you lock` });
     } catch (error) {
       if (error instanceof PasskeyError && error.code === "origin") {

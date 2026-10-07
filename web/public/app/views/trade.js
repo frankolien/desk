@@ -1,5 +1,8 @@
-import { $, $$, MARKET_LOGOS, ago, api, dirClass, esc, fmtAmount, fmtCompact, fmtPct, fmtPrice, fmtUsd, handoff, head, hydratePeople, connectedWallet, chartOptions, candleOptions, volumeColor, chartLegend, chartCountdown, identity, knownIdentity, logo, markets, navigate, person, poll, short } from "../app.js";
+import { $, $$, MARKET_LOGOS, ago, api, dirClass, esc, fmtAmount, fmtCompact, fmtPct, fmtPrice, fmtUsd, handoff, head, hydratePeople, connectedWallet, chartOptions, candleOptions, volumeColor, chartLegend, chartCountdown, identity, knownIdentity, logo, markets, navigate, person, poll, short, toast } from "../app.js";
 import { estimateFill, watchBook } from "../book.js";
+import { isUnlocked, onSession, session } from "../session.js";
+import { PerplError, accountFor, context as perplContext, describePositions, ensureKey, exchangeOf, marketOf, placeOrder, positions as perplPositions, storedKey, wallet as perplWallet } from "../perpl.js";
+import { ausdBalance, deposit as chainDeposit, explorerTx, hasAccount, openDesk } from "../chain.js";
 
 const BOOK_LEVELS = 9;
 
@@ -67,6 +70,19 @@ const CSS = `
 .td-news-item:hover b { color: var(--brand); }
 .td-news-item span { font-size: 11px; color: var(--muted); font-weight: 600; }
 .td-keys { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+.td-status { font-size: 12.5px; font-weight: 600; line-height: 1.45; color: var(--text-2); display: flex; gap: 8px; align-items: flex-start; }
+.td-status.err { color: var(--fall); } .td-status.ok { color: var(--rise); }
+.td-status .spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--text); animation: tdSpin .8s linear infinite; flex: none; margin-top: 3px; }
+@keyframes tdSpin { to { transform: rotate(360deg); } }
+.td-desk .row-kv { display: flex; justify-content: space-between; font-size: 12.5px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.td-desk .row-kv:last-of-type { border-bottom: 0; }
+.td-desk .row-kv span { color: var(--muted); }
+.td-steps { display: grid; gap: 6px; margin-top: 10px; font-size: 12px; }
+.td-steps div { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.td-steps .dot { width: 7px; height: 7px; box-shadow: none; background: var(--faint); }
+.td-steps .done .dot { background: var(--rise); } .td-steps .done { color: var(--text); }
+.td-steps .sending .dot { background: var(--amber, #e0a52a); } .td-steps .sending { color: var(--text); }
+.td-steps a { color: var(--brand); text-decoration: none; font-weight: 700; }
 .td-keys kbd { font: 700 10px/1 var(--mono, ui-monospace, monospace); padding: 3px 5px; border-radius: 5px; background: var(--chip); color: var(--muted); border: 1px solid var(--line); }
 .td-live { display: inline-flex; align-items: center; gap: 8px; margin-left: 14px; vertical-align: middle; }
 .td-live .spark { width: 84px; height: 26px; overflow: visible; }
@@ -96,6 +112,7 @@ export default async function mount(el, params) {
     ring: [], lastCandle: null, candles: [], legend: null, countdown: null, faces: [], showFaces: localStorage.getItem("desk.web.chartfaces") !== "off",
     positions: null, positionsFor: null, news: null, tp: 0, sl: 0,
     book: null, bookStop: null, bookFallback: null,
+    acct: null, acctBusy: false, trading: null, desk: { open: false, amount: "", busy: false, steps: [], error: null, hash: null },
   };
 
   let rows = markets();
@@ -155,6 +172,7 @@ export default async function mount(el, params) {
   stops.push(poll(loadNews, 300_000));
   loadTop();
   startBook();
+  startAccount();
 
   return () => { stops.forEach((stop) => stop()); state.bookStop?.(); state.bookFallback?.(); state.chart?.remove(); };
 
@@ -190,6 +208,7 @@ export default async function mount(el, params) {
       </section>
       <aside class="stack" style="gap:16px">
         <div class="card card-pad td-ticket stack" id="td-ticket"></div>
+        <div class="card card-pad td-desk" id="td-desk" hidden></div>
         <div class="card card-pad" id="td-book"></div>
         <div class="card card-pad td-crowd" id="td-crowdcard"></div>
         <div class="card card-pad" id="td-market"></div>
@@ -281,6 +300,13 @@ export default async function mount(el, params) {
   }
 
   function myPosition() {
+    if (unlockedPasskey() && state.acct?.positions) {
+      const live = state.acct.positions.find((p) => p.market === state.market.name);
+      if (!live) return null;
+      const mark = state.market.mark;
+      const pnl = (mark - live.entry) * live.size * (live.side === "long" ? 1 : -1);
+      return { side: live.side, leverage: live.leverage, pnl, pnlPercent: live.collateral ? (pnl / live.collateral) * 100 : null };
+    }
     return state.positions?.find((p) => p.market === state.market.name) ?? null;
   }
 
@@ -341,7 +367,8 @@ export default async function mount(el, params) {
       <div class="cell td-summary" id="td-quote"></div>
       <div class="td-sentence" id="td-sentence"></div>
       <button class="btn btn-lg btn-block ${state.side === "long" ? "btn-rise" : "btn-fall"}" id="td-go"></button>
-      <div class="note" style="text-align:center;font-size:11px">Signs with Face ID in the app. Nothing on the web can move money.</div>
+      <div class="td-status" id="td-status" hidden></div>
+      <div class="note" style="text-align:center;font-size:11px" id="td-note">Signs with Face ID in the app. Nothing on the web can move money.</div>
       <div class="td-keys"><kbd>L</kbd><kbd>S</kbd><span class="note" style="font-size:10px">side</span><kbd>1</kbd>–<kbd>9</kbd><span class="note" style="font-size:10px">leverage</span><kbd>P</kbd><span class="note" style="font-size:10px">positions</span></div>`;
     const ticket = $("#td-ticket", root);
     ticket.addEventListener("click", (event) => {
@@ -356,11 +383,7 @@ export default async function mount(el, params) {
       if (quick) { state.margin = Number(quick.dataset.quick); $("#td-amount", ticket).value = state.margin; paintQuote(); return; }
       const lev = event.target.closest("[data-lev]");
       if (lev) { setLeverage(Number(lev.dataset.lev)); return; }
-      if (event.target.closest("#td-go")) {
-        if (!connectedWallet()) { $("#connect").click(); return; }
-        if (!(state.margin > 0)) { $("#td-amount", ticket).focus(); return; }
-        handoff({ title: `${cap(state.side)} ${m.name} in Desk`, sub: `${sentence()}. Scan to get Desk and place it there.` });
-      }
+      if (event.target.closest("#td-go")) onGo();
     });
     $("#td-amount", ticket).addEventListener("input", (event) => { state.margin = Number(String(event.target.value).replace(/[^0-9.]/g, "")) || 0; paintQuote(); });
     $("#td-tp", ticket).addEventListener("input", (event) => { state.tp = Number(String(event.target.value).replace(/[^0-9.]/g, "")) || 0; paintQuote(); });
@@ -421,17 +444,16 @@ export default async function mount(el, params) {
     const q = quote();
     const box = $("#td-quote", root); const line = $("#td-sentence", root); const go = $("#td-go", root);
     if (!box) return;
-    const connected = Boolean(connectedWallet());
-    go.className = `btn btn-lg btn-block ${!connected ? "btn-primary" : state.side === "long" ? "btn-rise" : "btn-fall"}`;
-    go.textContent = connected ? `${cap(state.side)} ${m.name} in Desk` : "Connect wallet";
-    if (!connected) go.disabled = false;
+    const mode = tradeMode();
+    go.className = `btn btn-lg btn-block ${mode.tone === "side" ? (state.side === "long" ? "btn-rise" : "btn-fall") : mode.tone === "primary" ? "btn-primary" : "btn-line"}`;
+    go.textContent = mode.label;
+    go.disabled = Boolean(mode.disabled) || (mode.needsSize && !q);
+    const note = $("#td-note", root); if (note) note.textContent = mode.note;
     if (!q) {
       box.innerHTML = `<div><span>Size</span><b>—</b></div><div><span>Entry</span><b class="num">${fmtPrice(m.mark, m.priceDecimals)}</b></div><div><span>Liquidation</span><b>—</b></div><div><span>Fee</span><b class="muted">${(m.takerFee / 1e4).toFixed(3)}% taker</b></div>`;
       line.textContent = "";
-      go.disabled = !connected;
       return;
     }
-    go.disabled = false;
     box.innerHTML = `
       <div><span>Size</span><b class="num">${fmtAmount(q.notional, 2)} AUSD <span class="muted">· ${fmtAmount(q.size, m.sizeDecimals)} ${esc(m.name)}</span></b></div>
       <div><span>Entry</span><b class="num">${fmtPrice(m.mark, m.priceDecimals)}</b></div>
@@ -550,6 +572,260 @@ export default async function mount(el, params) {
     if (state.tab === "positions") paintTab();
   }
 
+  // --- trading from this tab
+
+  // Hoisted: paint() runs before this point in mount() and the ticket asks straight away.
+  function unlockedPasskey() { return connectedWallet()?.via === "passkey" && isUnlocked(); }
+
+  /// What the big button does right now, in one place.
+  function tradeMode() {
+    const m = state.market;
+    const wallet = connectedWallet();
+    if (!wallet) return { label: "Connect wallet", tone: "primary", note: "Sign in with your passkey to trade here, or watch an address." };
+    if (wallet.via !== "passkey") return { label: `${cap(state.side)} ${m.name} in Desk`, tone: "side", needsSize: true, note: "A watched or browser wallet cannot sign here. The order is placed in the app." };
+    if (!isUnlocked()) return { label: "Unlock to trade", tone: "primary", note: "Your keys left this tab. Unlock with your passkey to sign orders." };
+    if (state.trading?.busy) return { label: state.trading.label ?? "Working…", tone: "side", disabled: true, note: "Signed by the key derived from your passkey, in this tab." };
+    if (!state.acct) return { label: state.acctBusy ? "Reading your desk…" : "Set up trading here", tone: "primary", disabled: state.acctBusy, note: state.acctBusy ? "Asking Perpl about your account." : "One step: this browser's key is registered with Perpl, signed by your wallet. Nothing is deposited." };
+    if (state.acct.error) return { label: "Try again", tone: "primary", note: "Perpl didn't answer. The reason is above; try again in a moment." };
+    if (!state.acct.account) return { label: "Open your desk", tone: "primary", note: "Three transactions from your wallet: approve, create the account with a deposit, allow order forwarding." };
+    return { label: `${cap(state.side)} ${m.name}`, tone: "side", needsSize: true, note: "Signed by the key derived from your passkey, in this tab. Market order, immediate or cancel." };
+  }
+
+  function status(text, kind = "", { spin = false } = {}) {
+    const el = $("#td-status", root); if (!el) return;
+    el.hidden = !text;
+    el.className = `td-status ${kind}`;
+    el.innerHTML = text ? `${spin ? `<i class="spin"></i>` : ""}<span>${text}</span>` : "";
+  }
+
+  function startAccount() {
+    stops.push(onSession(() => { state.acct = null; state.trading = null; paintQuote(); paintDesk(); if (state.tab === "positions") paintTab(); if (unlockedPasskey()) refreshAccount({ enrol: false }); }));
+    const onWalletChange = () => { state.acct = null; paintDesk(); if (unlockedPasskey()) refreshAccount({ enrol: false }); };
+    document.addEventListener("wallet", onWalletChange);
+    stops.push(() => document.removeEventListener("wallet", onWalletChange));
+    if (unlockedPasskey()) refreshAccount({ enrol: false });
+    stops.push(poll(async () => { if (unlockedPasskey() && state.acct?.account && !state.trading?.busy) await refreshAccount({ enrol: false, quiet: true }); }, 10_000));
+  }
+
+  /// Reads the desk behind the unlocked passkey: the exchange, the account on this market's
+  /// instance and its open positions. Without a stored key nothing is read unless `enrol`.
+  async function refreshAccount({ enrol = false, quiet = false } = {}) {
+    if (!unlockedPasskey()) return;
+    const address = session().address;
+    if (!storedKey(address) && !enrol) { state.acct = null; paintQuote(); paintDesk(); return; }
+    if (!quiet) { state.acctBusy = true; paintQuote(); }
+    try {
+      const ctx = await perplContext();
+      const exchange = exchangeOf(ctx);
+      const market = marketOf(ctx, state.market.name);
+      let walletAusd = null;
+      try { walletAusd = await ausdBalance(exchange.token, address); } catch {}
+      // Perpl enrols a key only for a wallet with an account, so the chain is asked first; a
+      // wallet without one gets the opening form, which enrols after the account exists.
+      if (!storedKey(address) && !(await hasAccount(exchange.exchange, address))) {
+        state.acct = { ctx, exchange, market, creds: null, snapshot: null, account: null, positions: [], walletAusd, at: Date.now(), error: null };
+        state.desk.open = true;
+        if (!quiet) status("");
+        return;
+      }
+      const creds = await ensureKey({ onEnrolling: (index) => status(`Registering this browser's key with Perpl${index ? ` (key ${index + 1})` : ""}…`, "", { spin: true }) });
+      const snapshot = await perplWallet(creds);
+      const account = accountFor(snapshot, market.instanceId);
+      const positions = account ? describePositions(await perplPositions(creds), ctx) : [];
+      state.acct = { ctx, exchange, market, creds, snapshot, account, positions, walletAusd, at: Date.now(), error: null };
+      if (!quiet) status("");
+    } catch (error) {
+      if (!quiet) { state.acct = { error: error instanceof PerplError ? error.message : `Setting up stopped: ${error.shortMessage ?? error.message}`, account: null, positions: null }; status(state.acct.error, "err"); }
+    } finally {
+      state.acctBusy = false;
+      paintQuote(); paintYours(); paintDesk();
+      if (state.tab === "positions") paintTab();
+    }
+  }
+
+  async function onGo() {
+    const mode = tradeMode();
+    const wallet = connectedWallet();
+    if (!wallet) { $("#connect").click(); return; }
+    if (wallet.via !== "passkey") {
+      if (!(state.margin > 0)) { $("#td-amount", root).focus(); return; }
+      handoff({ title: `${cap(state.side)} ${state.market.name} in Desk`, sub: `${sentence()}. Scan to get Desk and place it there.` });
+      return;
+    }
+    if (!isUnlocked()) { document.dispatchEvent(new CustomEvent("desk:unlock")); return; }
+    if (!state.acct || state.acct.error) { await refreshAccount({ enrol: true }); return; }
+    if (!state.acct.account) { state.desk.open = true; paintDesk(); $("#td-desk", root)?.scrollIntoView({ behavior: "smooth", block: "center" }); return; }
+    if (mode.needsSize && !(state.margin > 0)) { $("#td-amount", root).focus(); return; }
+    await placeFromTicket();
+  }
+
+  /// The order the ticket describes, signed here and forwarded, then the positions watched
+  /// until the fill shows. Perpl fills an immediate-or-cancel order at once or not at all.
+  async function placeFromTicket() {
+    const q = quote(); if (!q) return;
+    const { market, account, creds } = state.acct;
+    const sizeRaw = BigInt(Math.floor(q.size * 10 ** market.sizeDecimals));
+    if (sizeRaw <= 0n) { status("That size rounds to nothing at this market's lot size.", "err"); return; }
+    const leverageHundredths = Math.round(state.leverage * 100);
+    if (leverageHundredths > market.maxLeverageHundredths) { status(`This market allows ${market.maxLeverageHundredths / 100}× at most.`, "err"); return; }
+    const slippageBps = Math.min(50, market.maxSlippageBps);
+    const before = state.acct.positions.find((p) => p.marketId === market.id);
+    state.trading = { busy: true, label: "Signing…" }; paintQuote();
+    status("Signing the order with your trading key…", "", { spin: true });
+    try {
+      await placeOrder(creds, { account, market, kind: "open", side: state.side, sizeRaw, leverageHundredths, slippageBps });
+      state.trading.label = "Forwarded…"; paintQuote();
+      status("Forwarded to Perpl. Watching your positions…", "", { spin: true });
+      const filled = await waitForChange((rows) => {
+        const now = rows.find((p) => p.marketId === market.id);
+        return now && (!before || now.sizeRaw !== before.sizeRaw || now.side !== before.side) ? now : null;
+      });
+      if (filled) {
+        status(`Filled. ${cap(filled.side)} ${fmtAmount(filled.size, market.sizeDecimals)} ${market.symbol} at ${fmtPrice(filled.entry, market.priceDecimals)}.`, "ok");
+        toast({ title: `${cap(filled.side)} ${market.symbol} filled`, sub: `${fmtAmount(filled.size, market.sizeDecimals)} ${market.symbol} at ${fmtPrice(filled.entry, market.priceDecimals)} · ${state.leverage}×` });
+        state.margin = 0; const amount = $("#td-amount", root); if (amount) amount.value = "";
+      } else {
+        status("Perpl accepted the order but no fill has shown yet. Within the slippage bound it fills at once or not at all; check Positions in a moment.", "");
+      }
+      loadPositions();
+    } catch (error) {
+      status(error instanceof PerplError ? error.message : `The order did not go through: ${error.message}`, "err");
+    } finally {
+      state.trading = null; paintQuote();
+    }
+  }
+
+  /// Polls Perpl's positions for up to twelve seconds until `pick` returns a row.
+  async function waitForChange(pick) {
+    const { ctx, creds } = state.acct;
+    for (let i = 0; i < 12; i++) {
+      await new Promise((r) => setTimeout(r, 1_000));
+      try {
+        const rows = describePositions(await perplPositions(creds), ctx);
+        state.acct.positions = rows;
+        if (state.tab === "positions") paintTab();
+        paintYours();
+        const hit = pick(rows);
+        if (hit !== null && hit !== undefined && hit !== false) return hit;
+      } catch {}
+    }
+    return null;
+  }
+
+  async function closeLive(position) {
+    if (!unlockedPasskey() || !state.acct?.account || state.trading?.busy) return;
+    const { market: current, account, creds, ctx } = state.acct;
+    const market = marketOf(ctx, position.market);
+    const slippageBps = Math.min(50, market.maxSlippageBps);
+    state.trading = { busy: true, label: "Closing…" }; paintQuote();
+    status(`Closing ${position.side} ${position.market}…`, "", { spin: true });
+    try {
+      await placeOrder(creds, { account, market, kind: "close", side: position.side, sizeRaw: position.sizeRaw, slippageBps });
+      const gone = await waitForChange((rows) => { const now = rows.find((p) => p.id === position.id); return !now || now.sizeRaw < position.sizeRaw ? true : null; });
+      status(gone ? `${cap(position.side)} ${position.market} closed.` : "Perpl accepted the close but the position still shows. Check again in a moment.", gone ? "ok" : "");
+      if (gone) toast({ title: `${position.market} closed`, sub: `${fmtAmount(position.size, market.sizeDecimals)} ${position.market}` });
+      loadPositions();
+    } catch (error) {
+      status(error instanceof PerplError ? error.message : `The close did not go through: ${error.message}`, "err");
+    } finally {
+      state.trading = null; paintQuote();
+      void current;
+    }
+  }
+
+  function paintLivePositions(pane) {
+    const rows = [...state.acct.positions].sort((a, b) => (b.market === state.market.name) - (a.market === state.market.name));
+    if (!rows.length) { pane.innerHTML = `<div class="empty">Your desk has no open positions on Perpl.</div>`; return; }
+    const markOf = (name) => state.rows.find((r) => r.name === name)?.mark ?? null;
+    pane.innerHTML = `<div class="table-wrap"><table class="table table-compact"><thead><tr><th class="left">Market</th><th class="left">Side</th><th>Size</th><th>Entry</th><th>Mark</th><th>Collateral</th><th>PnL</th><th></th></tr></thead><tbody>
+      ${rows.map((p) => { const mark = markOf(p.market); const pnl = mark == null ? null : (mark - p.entry) * p.size * (p.side === "long" ? 1 : -1); return `<tr ${p.market === state.market.name ? 'style="background:rgba(131,110,249,.06)"' : ""}>
+        <td><div class="token">${logo(MARKET_LOGOS[p.market], p.market, 24)}<div class="name"><b>${esc(p.market)}</b></div></div></td>
+        <td class="left"><span class="side-chip ${p.side}">${p.side} ${p.leverage}×</span></td>
+        <td class="num">${fmtAmount(p.size, p.sizeDecimals)} ${esc(p.market)}</td>
+        <td class="num">${fmtPrice(p.entry, p.priceDecimals)}</td>
+        <td class="num">${mark == null ? "—" : fmtPrice(mark, p.priceDecimals)}</td>
+        <td class="num">${fmtUsd(p.collateral)}</td>
+        <td class="num ${pnl == null ? "muted" : dirClass(pnl)}">${pnl == null ? "—" : fmtUsd(pnl, { sign: true })}${pnl != null && p.collateral ? `<div style="font-size:11px">${fmtPct(pnl / p.collateral)}</div>` : ""}</td>
+        <td><button class="btn btn-line btn-xs" data-close="${esc(p.id)}" ${state.trading?.busy ? "disabled" : ""}>Close</button></td>
+      </tr>`; }).join("")}</tbody></table></div>
+      <div class="card-foot"><span>Your desk on Perpl, read with your own key · closes sign here</span><span>${rows.length} open</span></div>`;
+    pane.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => { const p = state.acct.positions.find((x) => x.id === b.dataset.close); if (p) closeLive(p); }));
+  }
+
+  /// The desk card: balance and Add funds once a desk exists; the opening steps before it.
+  function paintDesk() {
+    const host = $("#td-desk", root); if (!host) return;
+    if (!unlockedPasskey() || !state.acct || state.acct.error) { host.hidden = true; host.innerHTML = ""; return; }
+    const { account, exchange, walletAusd } = state.acct;
+    const d = state.desk;
+    const dec = exchange.tokenDecimals;
+    const fmtRaw = (raw) => (raw == null ? "—" : fmtAmount(Number(raw) / 10 ** dec, 2));
+    const steps = (names) => `<div class="td-steps">${names.map(([key, label]) => { const step = d.steps.find((s) => s.key === key); return `<div class="${step?.state ?? ""}"><i class="dot"></i><span>${label}</span>${step?.hash ? `<a href="${explorerTx(step.hash)}" target="_blank" rel="noopener">receipt</a>` : ""}</div>`; }).join("")}</div>`;
+    host.hidden = false;
+    if (!account) {
+      const minimum = Number(exchange.minAccountOpenRaw) / 10 ** dec;
+      host.innerHTML = `<div class="row-between"><h3>Open your desk</h3><span class="eyebrow">${fmtRaw(walletAusd)} AUSD in wallet</span></div>
+        <p class="note" style="margin:8px 0 10px">Your wallet funds a Perpl account in three transactions you sign here: approve, create the account with a deposit (at least ${fmtAmount(minimum, 2)} AUSD), allow order forwarding. Gas is paid in MON.</p>
+        <label class="field"><input id="td-desk-amount" inputmode="decimal" placeholder="${fmtAmount(minimum, 2)}" value="${esc(d.amount)}" autocomplete="off"><span class="unit">AUSD</span></label>
+        <button class="btn btn-primary btn-block" id="td-desk-open" style="margin-top:10px" ${d.busy ? "disabled" : ""}>${d.busy ? "Opening…" : "Open desk"}</button>
+        ${d.steps.length ? steps([["approve", "Approve AUSD for the exchange"], ["create", "Create the account and deposit"], ["forwarding", "Allow order forwarding"], ["enrol", "Register this browser's key"]]) : ""}
+        ${d.error ? `<div class="td-status err" style="margin-top:8px"><span>${esc(d.error)}</span></div>` : ""}`;
+      $("#td-desk-amount", host).addEventListener("input", (e) => { d.amount = e.target.value; });
+      $("#td-desk-open", host).addEventListener("click", openDeskFlow);
+      return;
+    }
+    host.innerHTML = `<div class="row-between"><h3>Your desk</h3><span class="eyebrow">Perpl #${account.id}</span></div>
+      <div class="row-kv"><span>In trading</span><b class="num">${fmtRaw(account.balanceRaw)} AUSD</b></div>
+      <div class="row-kv"><span>In wallet</span><b class="num">${fmtRaw(walletAusd)} AUSD</b></div>
+      <div class="row-kv"><span>Order forwarding</span><b>${account.forwarding ? "on" : "off"}</b></div>
+      <div class="row" style="gap:6px;margin-top:10px"><label class="field" style="flex:1"><input id="td-desk-amount" inputmode="decimal" placeholder="Amount" value="${esc(d.amount)}" autocomplete="off"><span class="unit">AUSD</span></label><button class="btn btn-line" id="td-desk-deposit" ${d.busy ? "disabled" : ""}>${d.busy ? "Adding…" : "Add funds"}</button></div>
+      ${d.steps.length ? steps([["approve", "Approve AUSD for the exchange"], ["deposit", "Deposit"]]) : ""}
+      ${d.error ? `<div class="td-status err" style="margin-top:8px"><span>${esc(d.error)}</span></div>` : ""}
+      <div class="note" style="margin-top:8px">Withdrawals are made in the app for now.</div>`;
+    $("#td-desk-amount", host).addEventListener("input", (e) => { d.amount = e.target.value; });
+    $("#td-desk-deposit", host).addEventListener("click", depositFlow);
+  }
+
+  function parseAusd(text, decimals) { const value = Number(String(text).replace(/[^0-9.]/g, "")); return value > 0 ? BigInt(Math.round(value * 10 ** decimals)) : 0n; }
+  function stepReport() { return (key, stateName, hash) => { const d = state.desk; const found = d.steps.find((s) => s.key === key); if (found) { found.state = stateName; if (hash) found.hash = hash; } else d.steps.push({ key, state: stateName, hash }); paintDesk(); }; }
+
+  async function openDeskFlow() {
+    const d = state.desk; const { exchange } = state.acct; const s = session(); if (!s) return;
+    const depositRaw = parseAusd(d.amount, exchange.tokenDecimals);
+    if (depositRaw < exchange.minAccountOpenRaw) { d.error = `The deposit must be at least ${fmtAmount(Number(exchange.minAccountOpenRaw) / 10 ** exchange.tokenDecimals, 2)} AUSD.`; paintDesk(); return; }
+    d.busy = true; d.error = null; d.steps = []; paintDesk();
+    try {
+      await openDesk({ account: s.wallet.account, exchange: exchange.exchange, token: exchange.token, depositRaw, report: stepReport() });
+      stepReport()("enrol", "sending");
+      await ensureKey();
+      stepReport()("enrol", "done");
+      toast({ title: "Your desk is open", sub: `${fmtAmount(Number(depositRaw) / 10 ** exchange.tokenDecimals, 2)} AUSD in trading` });
+      await refreshAccount({ enrol: true });
+    } catch (error) {
+      d.error = error instanceof PerplError ? error.message : error.shortMessage ?? error.message;
+    } finally {
+      d.busy = false; paintDesk();
+    }
+  }
+
+  async function depositFlow() {
+    const d = state.desk; const { exchange } = state.acct; const s = session(); if (!s) return;
+    const amountRaw = parseAusd(d.amount, exchange.tokenDecimals);
+    if (amountRaw <= 0n) { d.error = "Enter an amount."; paintDesk(); return; }
+    if (amountRaw < exchange.minDepositRaw) { d.error = `Perpl's minimum deposit is ${fmtAmount(Number(exchange.minDepositRaw) / 10 ** exchange.tokenDecimals, 2)} AUSD.`; paintDesk(); return; }
+    d.busy = true; d.error = null; d.steps = []; paintDesk();
+    try {
+      const hash = await chainDeposit({ account: s.wallet.account, exchange: exchange.exchange, token: exchange.token, amountRaw, report: stepReport() });
+      toast({ title: "Deposit sent", sub: `${fmtAmount(Number(amountRaw) / 10 ** exchange.tokenDecimals, 2)} AUSD · ${hash.slice(0, 10)}…` });
+      d.amount = "";
+      await refreshAccount({ enrol: false, quiet: true });
+    } catch (error) {
+      d.error = error.shortMessage ?? error.message;
+    } finally {
+      d.busy = false; paintDesk();
+    }
+  }
+
   function paintMarketCard() {
     const m = state.market;
     $("#td-market", root).innerHTML = `<h3 style="margin-bottom:12px">Market</h3><div class="td-kv">
@@ -596,6 +872,7 @@ export default async function mount(el, params) {
     const m = state.market;
     if (state.tab === "positions") {
       const wallet = connectedWallet();
+      if (wallet?.via === "passkey" && isUnlocked() && state.acct?.positions) { paintLivePositions(pane); return; }
       if (!wallet) {
         pane.innerHTML = `<div class="empty">Connect a wallet, or watch an address, and its open positions on Perpl show here, with the chart still on screen.<br><button class="btn btn-line btn-xs" id="td-pos-connect" style="margin-top:12px">Connect</button></div>`;
         $("#td-pos-connect", pane)?.addEventListener("click", () => $("#connect").click());
