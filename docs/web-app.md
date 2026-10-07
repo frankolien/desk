@@ -5,6 +5,25 @@ discovery, the same traders and wallets as the iPhone app, read from the same fu
 The web does not sign. Every order still happens in the app with Face ID; the web hands
 the order over with the market, side, size and leverage already chosen.
 
+## Sign in
+
+The passkey is the account, on the web as in the app. **Sign in with your passkey** runs the
+WebAuthn ceremony against the app's relying party, `desk-trading-opia.vercel.app`, with the PRF
+extension evaluated over Mera's salt; the 32 bytes that come back are BIP-39 entropy, the
+wallet is secp256k1 at `m/44'/60'/0'/0/0` and the trading key is Ed25519 at
+`m/44'/501'/{index}'/0'` by SLIP-10, exactly as `DeskAuth` derives them (`web/test/keys.test.mjs`
+pins both to the same vectors). `trydesk.trade` may use that relying party because it publishes
+`/.well-known/webauthn` naming this origin (WebAuthn related origins); a browser without that
+support is sent to the relying party's own origin, where the same page runs.
+
+The keys live in memory for the tab and nothing else: fifteen minutes idle, closing the tab or
+**Lock** in the wallet menu wipes them, and the pill's dot shows which state they are in. The
+address stays known so the page still reads as that wallet while locked. **Create an account**
+makes the passkey here; on an iPhone with the same iCloud account the app then signs in with it.
+
+The cryptography (`@noble`, `@scure`, a slice of viem) is bundled once into
+`public/app/vendor/desk-crypto.js` from `tools/crypto-entry.mjs`; the command is in that file.
+
 ## Reference
 
 The structure follows Nova (`nov.ag`), read from its shipped bundle:
