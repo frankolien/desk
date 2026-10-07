@@ -42,3 +42,37 @@ HOW IT IS BUILT
 A SwiftUI app and a local Swift package with seven targets whose boundaries carry meaning: the money arithmetic has no network by construction, chain, auth, Perpl and the copy engine are separate. The server is eleven Vercel functions and one Railway worker: market data, swaps, trader indexing, alerts to phones through Apple and to browsers through their push services. 542 Swift tests and 265 Node tests. Secrets exist only in the server's environment; nothing sensitive ships in the app. The repository is public; the TestFlight build is open.
 
 Built for Monad Metropolis for Agora's Best Mobile Trading App on Monad, Perpl's Best Use of Perpl's API, and Mera, with passkeys as the only credential.
+
+---
+
+# Submission form · Go-to-market and user acquisition
+
+Plain text for the form's "go-to-market and user acquisition strategy" field. Paste as is.
+
+---
+
+FIRST USERS
+
+Three groups, in order. First, the traders already on Perpl's leaderboard. Desk reads every one of them off the exchange contract, scores them on their own record and lets other people follow and copy them. Nobody has to submit anything to appear, so the product has something to say to each of them on day one: here is your record, ranked. Second, the people who follow those traders on X and Discord, and Monad-native traders who want perps on a phone without a seed phrase, a wallet app or an extension. Third, people already holding AUSD or MON who have not traded perps because the setup was the obstacle: Face ID, one deposit, and the desk is open.
+
+HOW WE REACH THEM
+
+The trader loop. Each leaderboard trader gets a message with their own numbers, specific and respectful: where they rank this week, on what, with no ask beyond a look. Winning traders share a page that says they are winning. Their followers install Desk, follow them, copy them in shadow, and produce share cards: any open position renders a card over the user's own photo with a QR that opens Desk. Every card is an ad that a trader posted, not us. Per-trader public pages with a live record and a Copy on Desk button are the next build, and the loop is designed around them.
+
+Perpl's community. Desk is not a competing exchange; it is a native mobile client and a discovery and copy layer that sends orders to Perpl and brings it new traders, which makes a repost from Perpl rational. Perpl's points snapshot lands weekly, so a weekly "what Desk sees on Perpl" post with live numbers from our public API is a natural cadence. Perpl's X replies and tournament threads are where the first twenty traders to contact are found, five a day, by hand.
+
+Monad's channels. Monad Ecosystem and Monad Developers amplify working apps with a native clip and a TestFlight link, so the launch post is a thirty-second recording of the real thing: Face ID, a fill on mainnet, a trader copied in shadow. A tester request in the developer Discord, under its rules. A listing on the Monad App Hub. A newsletter pitch once there is tester evidence to show.
+
+The browser as the front door. trydesk.trade needs no install: the live leaderboard, the order book and a trader's page are a link away, which is what gets shared and what search finds. The same passkey signs in there, and browser push alerts make the site a retention channel of its own: follow a trader in the browser, and the browser hears when they trade. A QR on the site hands off to the phone.
+
+WHAT WE MEASURE
+
+TestFlight installs from people who trade, completed shadow-copy sessions, share cards posted by real testers, and reposts from Monad or Perpl. Followers and impressions are diagnostics, not goals.
+
+THE LINES WE KEEP
+
+Perps are leveraged, so nothing we post implies returns: "copy the traders who are winning" describes a leaderboard, not a promise. A shadow result is always called a shadow result. No fabricated testimonials, no paid engagement, no cards with someone's photo unless they posted it themselves. Regions Perpl does not serve are not targeted.
+
+SEQUENCE
+
+During Metropolis: the TestFlight build, the launch thread, the first trader outreach, and the demo recorded on mainnet with real money. Through judging: weekly Perpl snapshots, cards from testers, the App Hub listing. After: App Store release, per-trader public pages, and the share-card loop running on its own.
