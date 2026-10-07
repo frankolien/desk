@@ -52,6 +52,19 @@ const CSS = `
 .td-kv span { color: var(--muted); }
 .td-bigpos { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
 .td-mobile-pick { display: none; }
+.td-list-h { font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); padding: 8px 12px 4px; }
+.td-yours { margin-top: 8px; }
+.td-yours .chip { height: 26px; font-size: 11px; font-weight: 700; cursor: pointer; }
+.td-tpsl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
+.td-tpsl .field { min-width: 0; }
+.td-tpsl .field input { font-size: 13px; width: 100%; }
+.td-news-item { display: grid; gap: 3px; padding: 10px 0; border-top: 1px solid var(--line); color: inherit; text-decoration: none; }
+.td-news-item:first-of-type { border-top: 0; padding-top: 4px; }
+.td-news-item b { font-size: 13px; line-height: 1.35; font-weight: 600; }
+.td-news-item:hover b { color: var(--brand); }
+.td-news-item span { font-size: 11px; color: var(--muted); font-weight: 600; }
+.td-keys { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+.td-keys kbd { font: 700 10px/1 var(--mono, ui-monospace, monospace); padding: 3px 5px; border-radius: 5px; background: var(--chip); color: var(--muted); border: 1px solid var(--line); }
 .td-live { display: inline-flex; align-items: center; gap: 8px; margin-left: 14px; vertical-align: middle; }
 .td-live .spark { width: 84px; height: 26px; overflow: visible; }
 .td-live .halo { transform-box: fill-box; transform-origin: center; animation: tdHalo 1.6s ease-out infinite; }
@@ -78,6 +91,7 @@ export default async function mount(el, params) {
     market: null, rows: [], bar: "15m", side: "long", margin: 0, leverage: 3, tab: "crowd",
     chart: null, series: null, volume: null, markLine: null, crowd: null, top: null, watched: watched(), lastBar: null,
     ring: [], lastCandle: null, candles: [], legend: null, countdown: null, faces: [], showFaces: localStorage.getItem("desk.web.chartfaces") !== "off",
+    positions: null, positionsFor: null, news: null, tp: 0, sl: 0,
   };
 
   let rows = markets();
@@ -113,12 +127,28 @@ export default async function mount(el, params) {
   };
   document.addEventListener("marks", onMarks);
   stops.push(() => document.removeEventListener("marks", onMarks));
-  const onWallet = () => paintQuote();
+  const onWallet = () => { state.positions = null; state.positionsFor = null; paintQuote(); paintYours(); loadPositions(); if (state.tab === "positions") paintTab(); };
   document.addEventListener("wallet", onWallet);
   stops.push(() => document.removeEventListener("wallet", onWallet));
 
+  // Keys work anywhere on the page except inside a field: L and S pick the side, 1–9 the leverage.
+  const onKey = (event) => {
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const target = event.target;
+    if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+    const key = event.key.toLowerCase();
+    if (key === "l" || key === "s") { setSide(key === "l" ? "long" : "short"); event.preventDefault(); return; }
+    if (/^[1-9]$/.test(key)) { setLeverage(Number(key)); event.preventDefault(); return; }
+    if (key === "0") { setLeverage(10); event.preventDefault(); return; }
+    if (key === "p") { setTab("positions"); event.preventDefault(); }
+  };
+  document.addEventListener("keydown", onKey);
+  stops.push(() => document.removeEventListener("keydown", onKey));
+
   stops.push(poll(loadCandles, 15_000));
   stops.push(poll(loadCrowd, 30_000));
+  stops.push(poll(loadPositions, 10_000));
+  stops.push(poll(loadNews, 300_000));
   loadTop();
 
   return () => { stops.forEach((stop) => stop()); state.chart?.remove(); };
@@ -145,6 +175,7 @@ export default async function mount(el, params) {
         </div>
         <div class="card">
           <div class="tabs td-tabs" id="td-tabs">
+            <button data-tab="positions">Positions</button>
             <button aria-selected="true" data-tab="crowd">Crowd</button>
             <button data-tab="top">Top traders</button>
             ${SPOT[m.name] ? `<button data-tab="trades">Trades</button>` : ""}
@@ -156,12 +187,14 @@ export default async function mount(el, params) {
         <div class="card card-pad td-ticket stack" id="td-ticket"></div>
         <div class="card card-pad td-crowd" id="td-crowdcard"></div>
         <div class="card card-pad" id="td-market"></div>
+        <div class="card card-pad" id="td-news"></div>
       </aside>`;
     paintList();
     paintHead();
     paintTicket();
     paintMarketCard();
     paintCrowdCard();
+    paintNews();
     paintTab();
     buildChart();
 
@@ -173,9 +206,7 @@ export default async function mount(el, params) {
     });
     $("#td-tabs", root).addEventListener("click", (event) => {
       const b = event.target.closest("[data-tab]"); if (!b) return;
-      state.tab = b.dataset.tab;
-      $$("[data-tab]", root).forEach((x) => x.setAttribute("aria-selected", String(x === b)));
-      paintTab();
+      setTab(b.dataset.tab);
     });
     $("#td-pick", root).addEventListener("click", () => $("#search-open").click());
     $("#td-facetoggle", root).addEventListener("click", (event) => {
@@ -188,12 +219,17 @@ export default async function mount(el, params) {
 
   function paintList() {
     const host = $("#td-list", root); if (!host) return;
-    host.innerHTML = `<div class="card-head" style="padding:12px 14px"><h3>Perps</h3><span class="eyebrow">AUSD</span></div><div style="padding:6px">${state.rows.map((m) => `
+    const row = (m) => `
       <a class="row-m" href="/app/trade/${esc(m.name)}" data-link aria-current="${m.name === state.market.name}">
         ${logo(MARKET_LOGOS[m.name], m.name, 24)}
         <div class="n"><b>${esc(m.name)}</b><span>UP TO ${m.maxLeverage}×</span></div>
         <div class="p"><b class="num">${fmtPrice(m.mark, m.priceDecimals)}</b><small class="num ${dirClass(m.change)}">${fmtPct(m.change)}</small></div>
-      </a>`).join("")}</div>`;
+      </a>`;
+    const watching = state.rows.filter((m) => state.watched.has(m.name));
+    const rest = state.rows.filter((m) => !state.watched.has(m.name));
+    host.innerHTML = `<div class="card-head" style="padding:12px 14px"><h3>Perps</h3><span class="eyebrow">AUSD</span></div><div style="padding:6px">${
+      watching.length ? `<div class="td-list-h">Watching</div>${watching.map(row).join("")}<div class="td-list-h">All perps</div>` : ""
+    }${rest.map(row).join("")}</div>`;
   }
 
   function paintHead() {
@@ -205,6 +241,7 @@ export default async function mount(el, params) {
         <div>
           <h1>${esc(m.name)} <span class="chip chip-brand" style="height:22px;font-size:11px">PERP · ${m.maxLeverage}×</span></h1>
           <div class="sub muted"><span>Perpl · Monad</span><span>·</span><span>settles in AUSD</span></div>
+          <div class="td-yours" id="td-yours" hidden></div>
         </div>
       </div>
       <div class="stats">
@@ -221,7 +258,35 @@ export default async function mount(el, params) {
       localStorage.setItem("desk.web.perps", JSON.stringify([...state.watched]));
       button.setAttribute("aria-pressed", String(state.watched.has(m.name)));
       button.style.color = state.watched.has(m.name) ? "var(--amber)" : "";
+      paintList();
     });
+    paintYours();
+  }
+
+  /// The connected wallet's own position on this market, as one line under the title.
+  function paintYours() {
+    const host = $("#td-yours", root); if (!host) return;
+    const mine = myPosition();
+    if (!mine) { host.hidden = true; host.innerHTML = ""; return; }
+    const pnl = Number(mine.pnl);
+    host.hidden = false;
+    host.innerHTML = `<button class="chip" id="td-yours-chip"><span class="side-chip ${mine.side}">${mine.side} ${mine.leverage ?? "—"}×</span>&nbsp;your position · <b class="num ${dirClass(pnl)}">${fmtUsd(pnl, { sign: true })}</b>&nbsp;<span class="muted">(${fmtPct((mine.pnlPercent ?? 0) / 100)})</span></button>`;
+    $("#td-yours-chip", host).addEventListener("click", () => setTab("positions"));
+  }
+
+  function myPosition() {
+    return state.positions?.find((p) => p.market === state.market.name) ?? null;
+  }
+
+  function setTab(name) {
+    state.tab = name;
+    $$("[data-tab]", root).forEach((x) => x.setAttribute("aria-selected", String(x.dataset.tab === name)));
+    paintTab();
+  }
+
+  function setSide(side) {
+    const button = $(`[data-side="${side}"]`, root);
+    if (button && state.side !== side) button.click();
   }
 
   function refreshMark(was) {
@@ -260,10 +325,18 @@ export default async function mount(el, params) {
         <input class="range" id="td-lev" type="range" min="1" max="${m.maxLeverage}" step="1" value="${state.leverage}" style="--fill:${fill(state.leverage, m.maxLeverage)}">
         <div class="lev">${levChips(m.maxLeverage).map((l) => `<button class="chip" data-lev="${l}" aria-pressed="${l === state.leverage}">${l}×</button>`).join("")}</div>
       </div>
+      <div>
+        <div class="label"><span>Take profit / Stop loss</span><span>optional · price</span></div>
+        <div class="td-tpsl">
+          <label class="field"><input id="td-tp" inputmode="decimal" placeholder="TP" value="${state.tp || ""}" autocomplete="off"></label>
+          <label class="field"><input id="td-sl" inputmode="decimal" placeholder="SL" value="${state.sl || ""}" autocomplete="off"></label>
+        </div>
+      </div>
       <div class="cell td-summary" id="td-quote"></div>
       <div class="td-sentence" id="td-sentence"></div>
       <button class="btn btn-lg btn-block ${state.side === "long" ? "btn-rise" : "btn-fall"}" id="td-go"></button>
-      <div class="note" style="text-align:center;font-size:11px">Signs with Face ID in the app. Nothing on the web can move money.</div>`;
+      <div class="note" style="text-align:center;font-size:11px">Signs with Face ID in the app. Nothing on the web can move money.</div>
+      <div class="td-keys"><kbd>L</kbd><kbd>S</kbd><span class="note" style="font-size:10px">side</span><kbd>1</kbd>–<kbd>9</kbd><span class="note" style="font-size:10px">leverage</span><kbd>P</kbd><span class="note" style="font-size:10px">positions</span></div>`;
     const ticket = $("#td-ticket", root);
     ticket.addEventListener("click", (event) => {
       const side = event.target.closest("[data-side]");
@@ -284,6 +357,8 @@ export default async function mount(el, params) {
       }
     });
     $("#td-amount", ticket).addEventListener("input", (event) => { state.margin = Number(String(event.target.value).replace(/[^0-9.]/g, "")) || 0; paintQuote(); });
+    $("#td-tp", ticket).addEventListener("input", (event) => { state.tp = Number(String(event.target.value).replace(/[^0-9.]/g, "")) || 0; paintQuote(); });
+    $("#td-sl", ticket).addEventListener("input", (event) => { state.sl = Number(String(event.target.value).replace(/[^0-9.]/g, "")) || 0; paintQuote(); });
     $("#td-lev", ticket).addEventListener("input", (event) => setLeverage(Number(event.target.value)));
     paintQuote();
   }
@@ -311,11 +386,27 @@ export default async function mount(el, params) {
     return { notional, fee, size, liquidation: Math.max(0, liquidation), distance, total: margin + fee };
   }
 
+  /// What a take profit or stop at `price` would return on the margin, or why it cannot: a
+  /// long's stop sits below the mark and above liquidation, a take profit above the mark.
+  function exit(kind, price, q) {
+    const m = state.market;
+    if (!(price > 0) || !q) return null;
+    const long = state.side === "long";
+    const above = price > m.mark;
+    if (kind === "tp" && above === !long) return { error: long ? "Take profit sits above the entry" : "Take profit sits below the entry" };
+    if (kind === "sl" && above === long) return { error: long ? "Stop sits below the entry" : "Stop sits above the entry" };
+    if (kind === "sl" && (long ? price <= q.liquidation : price >= q.liquidation)) return { error: "Stop sits past liquidation" };
+    const pnl = (long ? price - m.mark : m.mark - price) * q.size - q.fee;
+    return { pnl, onMargin: pnl / state.margin, move: Math.abs(price - m.mark) / m.mark };
+  }
+
   function sentence() {
     const m = state.market;
     const q = quote(); if (!q) return "";
     const parts = [`${cap(state.side)} ${m.name} ${state.leverage}×`, `${fmtAmount(state.margin, 2)} AUSD margin`, `~${fmtAmount(q.notional, 2)} AUSD size`];
     if (state.leverage > 1) parts.push(`liq ${fmtPrice(q.liquidation, m.priceDecimals)} (${fmtPct(q.distance, { sign: false, digits: 1 })} away)`);
+    const tp = exit("tp", state.tp, q); if (tp && !tp.error) parts.push(`TP ${fmtPrice(state.tp, m.priceDecimals)} (${fmtPct(tp.onMargin)})`);
+    const sl = exit("sl", state.sl, q); if (sl && !sl.error) parts.push(`SL ${fmtPrice(state.sl, m.priceDecimals)} (${fmtPct(sl.onMargin)})`);
     return parts.join(" · ");
   }
 
@@ -340,8 +431,47 @@ export default async function mount(el, params) {
       <div><span>Entry</span><b class="num">${fmtPrice(m.mark, m.priceDecimals)}</b></div>
       <div><span>Liquidation</span><b class="num ${state.side === "long" ? "down" : "up"}">${fmtPrice(q.liquidation, m.priceDecimals)} <span class="muted">· ${fmtPct(q.distance, { sign: false, digits: 1 })} away</span></b></div>
       <div><span>Fee</span><b class="num">${fmtAmount(q.fee, 2)} AUSD <span class="muted">· ${(m.takerFee / 1e4).toFixed(3)}%</span></b></div>
-      <div><span>Total</span><b class="num">${fmtAmount(q.total, 2)} AUSD</b></div>`;
+      <div><span>Total</span><b class="num">${fmtAmount(q.total, 2)} AUSD</b></div>
+      ${exitRow("Take profit", exit("tp", state.tp, q))}
+      ${exitRow("Stop loss", exit("sl", state.sl, q))}`;
     line.textContent = sentence();
+  }
+
+  function exitRow(label, result) {
+    if (!result) return "";
+    if (result.error) return `<div><span>${label}</span><b class="muted">${esc(result.error)}</b></div>`;
+    return `<div><span>${label}</span><b class="num ${dirClass(result.pnl)}">${fmtUsd(result.pnl, { sign: true })} <span class="muted">· ${fmtPct(result.onMargin)} on margin · ${fmtPct(result.move, { sign: false, digits: 1 })} move</span></b></div>`;
+  }
+
+  /// Headlines that mention this market, newest first.
+  function paintNews() {
+    const host = $("#td-news", root); if (!host) return;
+    const m = state.market;
+    if (!state.news) { host.innerHTML = `<h3>News</h3><div class="skel" style="margin-top:12px"></div><div class="skel" style="margin-top:8px;width:70%"></div>`; return; }
+    const items = state.news.slice(0, 5);
+    if (!items.length) { host.innerHTML = `<h3>News</h3><div class="note" style="margin-top:8px">Nothing about ${esc(m.name)} in the last few hours.</div>`; return; }
+    host.innerHTML = `<div class="row-between"><h3>News</h3><span class="eyebrow">${esc(m.name)}</span></div><div style="margin-top:6px">${items.map((n) => `
+      <a class="td-news-item" href="${esc(n.url)}" target="_blank" rel="noopener noreferrer"><b>${esc(n.title)}</b><span>${esc(n.source)} · ${ago(Number(n.publishedAt))}</span></a>`).join("")}</div>`;
+  }
+
+  async function loadNews() {
+    try { state.news = (await api(`/api/market-snapshot?view=news&symbols=${encodeURIComponent(state.market.name)}`, { ttl: 120_000 })).items ?? []; }
+    catch { state.news = state.news ?? []; }
+    paintNews();
+  }
+
+  /// The connected or watched wallet's open positions on Perpl, read off the exchange contract.
+  async function loadPositions() {
+    const wallet = connectedWallet();
+    if (!wallet || !/^0x[0-9a-fA-F]{40}$/.test(wallet.address)) { state.positions = null; state.positionsFor = null; paintYours(); return; }
+    try {
+      const out = await api(`/api/traders?view=trader&address=${encodeURIComponent(wallet.address)}`, { ttl: 8_000 });
+      const found = out.traders?.[0];
+      state.positions = found?.unreadable ? state.positions ?? [] : (found?.positions ?? []);
+      state.positionsFor = wallet.address;
+    } catch { state.positions = state.positions ?? []; }
+    paintYours();
+    if (state.tab === "positions") paintTab();
   }
 
   function paintMarketCard() {
@@ -388,6 +518,33 @@ export default async function mount(el, params) {
   function paintTab() {
     const pane = $("#td-tabpane", root); if (!pane) return;
     const m = state.market;
+    if (state.tab === "positions") {
+      const wallet = connectedWallet();
+      if (!wallet) {
+        pane.innerHTML = `<div class="empty">Connect a wallet, or watch an address, and its open positions on Perpl show here, with the chart still on screen.<br><button class="btn btn-line btn-xs" id="td-pos-connect" style="margin-top:12px">Connect</button></div>`;
+        $("#td-pos-connect", pane)?.addEventListener("click", () => $("#connect").click());
+        return;
+      }
+      if (!state.positions || state.positionsFor !== wallet.address) { pane.innerHTML = skeletonRows(3); loadPositions(); return; }
+      const rows = [...state.positions].sort((a, b) => (b.market === m.name) - (a.market === m.name) || Number(b.value) - Number(a.value));
+      if (!rows.length) { pane.innerHTML = `<div class="empty">${esc(short(wallet.address))} has no open positions on Perpl.</div>`; return; }
+      const decimals = (name) => state.rows.find((r) => r.name === name) ?? { priceDecimals: 2, sizeDecimals: 4 };
+      pane.innerHTML = `<div class="table-wrap"><table class="table table-compact"><thead><tr><th class="left">Market</th><th class="left">Side</th><th>Size</th><th>Entry</th><th>Mark</th><th>Value</th><th>PnL</th><th></th></tr></thead><tbody>
+        ${rows.map((p) => { const d = decimals(p.market); const pnl = Number(p.pnl); return `<tr class="link" data-market="${esc(p.market)}" ${p.market === m.name ? 'style="background:rgba(131,110,249,.06)"' : ""}>
+          <td><div class="token">${logo(MARKET_LOGOS[p.market], p.market, 24)}<div class="name"><b>${esc(p.market)}</b></div></div></td>
+          <td class="left"><span class="side-chip ${p.side}">${p.side} ${p.leverage ?? "—"}×</span></td>
+          <td class="num">${fmtAmount(Number(p.size), d.sizeDecimals)} ${esc(p.market)}</td>
+          <td class="num">${fmtPrice(Number(p.entry), d.priceDecimals)}</td>
+          <td class="num">${fmtPrice(Number(p.mark), d.priceDecimals)}</td>
+          <td class="num">${fmtUsd(p.value, { compact: true })}</td>
+          <td class="num ${dirClass(pnl)}">${fmtUsd(pnl, { sign: true })}<div style="font-size:11px">${p.pnlPercent == null ? "" : fmtPct(p.pnlPercent / 100)}</div></td>
+          <td><button class="btn btn-line btn-xs" data-manage="${esc(p.market)}">Manage in Desk</button></td>
+        </tr>`; }).join("")}</tbody></table></div>
+        <div class="card-foot"><span>${esc(short(wallet.address))} · read off the exchange contract every 10 s</span><span>${rows.length} open</span></div>`;
+      pane.querySelectorAll("tr[data-market]").forEach((tr) => tr.addEventListener("click", (event) => { if (!event.target.closest("button")) navigate(`/app/trade/${tr.dataset.market}`); }));
+      pane.querySelectorAll("[data-manage]").forEach((b) => b.addEventListener("click", () => handoff({ title: `Manage ${b.dataset.manage} in Desk`, sub: "Closing, stops and take profits are signed with Face ID in the app. Scan to open Desk." })));
+      return;
+    }
     if (state.tab === "crowd") {
       if (!state.crowd) { pane.innerHTML = skeletonRows(3); return; }
       const rows = [...state.crowd].sort((a, b) => (b.market === m.name) - (a.market === m.name) || (Number(b.longValue) + Number(b.shortValue)) - (Number(a.longValue) + Number(a.shortValue)));
