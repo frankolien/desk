@@ -1,15 +1,33 @@
 # Demo video: script and shot list
 
-Target: **about four minutes**, four and a half with a live alert. Screen recording from a real
-iPhone on **Monad mainnet**, plus one screen recording from a Mac for the browser segment, voice-over
-recorded afterwards. You start signed in, with your desk already funded: the video introduces Desk,
+The form caps the technical demo at **three minutes** and Agora's bounty video at **two**.
+The script below is the master shot list, about four and a half minutes of material; record it
+all, then cut twice as the *Cuts* section says. Screen recording from a real iPhone on **Monad
+mainnet**, plus one screen recording from a Mac for the browser segment, voice-over recorded
+afterwards. You start signed in, with your desk already funded: the video introduces Desk,
 shows your balance and explains how a new person funds and opens a desk, then trades, closes,
 follows and copies, follows a wallet off a token's tape, swaps AUSD back to MON, reads the market,
 opens the same desk in a browser, and withdraws. Every amount is real, and the recording doubles
 as the proof that Desk works on mainnet.
 
-If the submission form caps the video at three minutes: cut *Read the room*, keep the browser
-segment to the sign-in, the book and one order, and drop the optional pickups.
+## Cuts
+
+**Technical demo, under 3:00.** Introduction 0:20 · Your balance 0:25 · Place a trade 0:30 ·
+Manage and close 0:25 · Follow and copy, trimmed to the sheet, Follow and the hub card 0:25 ·
+Tokens and the wallet behind a buy, trimmed to the tape, Follow and the alert line 0:20 · The
+browser, trimmed to the sign-in, the AUSD in the desk, the book and the drawer 0:25 · Take the
+money out 0:10. Leave out the swap back, Read the room and the live alert; if the cut lands under
+2:50, the swap's SWAPPED receipt fits as a five-second insert after the tokens.
+
+**Agora bounty video, under 2:00.** It must show a passkey sign-in, an AUSD balance being funded
+or viewed, and a trade on Perpl. Passkey sign-in pickup 0:10 · Your balance 0:25 · Place a trade
+0:30 · Manage and close 0:20 · The browser sign-in with the same passkey and the AUSD in the desk
+0:20 · Take the money out 0:10. For the pickup, lock Desk in Settings, sign out, and record the
+Welcome screen: Face ID, and Home appears with your balance. One line of voice: "Face ID is the
+account. A passkey derives the wallet and the key that signs orders; there is no seed phrase."
+
+**Pitch video, under 2:00.** Separate script in `pitch-video.md`; it reuses the Home and
+leaderboard shots and otherwise is you talking.
 
 ## Before recording
 
