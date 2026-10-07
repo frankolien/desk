@@ -96,14 +96,34 @@ export function signedHeaders({ apiKey, tradingSeed, chainId, method, target, bo
 export async function enrolmentSignatures(typedData, { wallet, trading, chainId }) {
   const { domain, types, primaryType, message } = typedData;
   if (Number(domain?.chainId) !== Number(chainId)) throw new Error("Perpl's payload names another chain");
-  const text = JSON.stringify(message).toLowerCase();
-  if (!text.includes(wallet.address.toLowerCase())) throw new Error("Perpl's payload names another wallet");
-  if (!text.includes(hex.encode(trading.publicKey))) throw new Error("Perpl's payload names another key");
+  const text = JSON.stringify(message);
+  if (!text.toLowerCase().includes(wallet.address.toLowerCase())) throw new Error("Perpl's payload names another wallet");
+  // Perpl writes the key into the message as unpadded base64url; a hex spelling is accepted too.
+  const keyForms = [base64urlnopad.encode(trading.publicKey), hex.encode(trading.publicKey), `0x${hex.encode(trading.publicKey)}`];
+  if (!keyForms.some((form) => text.includes(form))) throw new Error("Perpl's payload names another key");
   const cleanTypes = Object.fromEntries(Object.entries(types).filter(([name]) => name !== "EIP712Domain"));
-  const digest = hashTypedData({ domain, types: cleanTypes, primaryType, message });
+  // Perpl writes integers as hex strings ("0x8f", "0x1a115347e6a"); the hash takes bigints.
+  const digest = hashTypedData({
+    domain: { ...domain, ...(domain.chainId != null ? { chainId: toBigInt(domain.chainId) } : {}) },
+    types: cleanTypes, primaryType, message: integersAsBigInt(cleanTypes, primaryType, message),
+  });
   const signature = await wallet.account.sign({ hash: digest });
   const pop = toHex(ed25519.sign(fromHex(digest), trading.seed));
   return { signature, pop, digest };
+}
+
+function toBigInt(value) { return typeof value === "bigint" ? value : BigInt(value); }
+
+/// Every int/uint field of `primaryType` (and of the structs it nests) as a bigint.
+function integersAsBigInt(types, primaryType, message) {
+  const fields = types[primaryType] ?? [];
+  const out = { ...message };
+  for (const { name, type } of fields) {
+    if (!(name in out) || out[name] == null) continue;
+    if (/^u?int\d*$/.test(type)) out[name] = toBigInt(out[name]);
+    else if (types[type] && typeof out[name] === "object") out[name] = integersAsBigInt(types, type, out[name]);
+  }
+  return out;
 }
 
 export const keccak = keccak_256;
