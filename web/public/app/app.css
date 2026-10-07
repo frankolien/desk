@@ -497,3 +497,9 @@ h3 { font-size: 14px; font-weight: 700; }
 .person-row .meta { grid-column: 1 / -1; display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
 .person-foot { display: flex; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--line); }
 .person-foot .btn { flex: 1; }
+
+/* Sign-in rows carry one line of explanation; the pill shows whether the keys are in memory. */
+.connect-row .name span { display: block; font-size: 11px; font-weight: 600; color: var(--muted); margin-top: 2px; }
+.wallet-pill .key { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.wallet-pill .key.on { background: var(--rise); box-shadow: 0 0 0 3px rgba(47, 214, 123, .15); }
+.wallet-pill .key.off { background: var(--faint); }

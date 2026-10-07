@@ -1,3 +1,6 @@
+import { PasskeyError, RP_ORIGIN, createPasskey, passkeysAvailable, signInWithPasskey } from "./passkey.js";
+import { isUnlocked, lock, onSession, session, unlockWithPRF } from "./session.js";
+
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 export const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -333,7 +336,13 @@ function paintWalletButton() {
     ? `<span class="logo logo-28"><img src="${esc(id.avatar)}" alt="" referrerpolicy="no-referrer" data-fallback></span>`
     : `<span class="logo logo-28" style="background:linear-gradient(135deg,hsl(${hue(wallet.address)} 60% 45%),hsl(${(hue(wallet.address) + 40) % 360} 60% 30%))"></span>`;
   button.className = "wallet-pill";
-  button.innerHTML = `${face}${id?.name ? `<span>${esc(id.name)}</span>` : `<span class="addr">${esc(short(wallet.address))}</span>`}<svg width="14" height="14" style="color:var(--muted);transform:rotate(90deg)"><use href="#i-chevron"/></svg>`;
+  const key = wallet.via === "passkey" ? `<i class="key ${isUnlocked() ? "on" : "off"}" title="${isUnlocked() ? "Keys in memory. Lock from the menu." : "Locked. Unlock with your passkey to trade."}"></i>` : "";
+  button.innerHTML = `${face}${id?.name ? `<span>${esc(id.name)}</span>` : `<span class="addr">${esc(short(wallet.address))}</span>`}${key}<svg width="14" height="14" style="color:var(--muted);transform:rotate(90deg)"><use href="#i-chevron"/></svg>`;
+  const menu = $("#wallet-menu");
+  if (menu) {
+    $("[data-lock]", menu).hidden = !(wallet.via === "passkey" && isUnlocked());
+    $("[data-unlock]", menu).hidden = !(wallet.via === "passkey" && !isUnlocked());
+  }
   if (!id) identity(wallet.address).then((found) => { if (found && wallet) paintWalletButton(); });
 }
 
@@ -351,9 +360,35 @@ function startWallet() {
   });
   document.addEventListener("click", (event) => { if (!event.target.closest("#wallet-menu")) menu.hidden = true; });
   menu.addEventListener("click", (event) => {
-    if (event.target.closest("[data-disconnect]")) { setWallet(null); menu.hidden = true; }
+    if (event.target.closest("[data-disconnect]")) { lock("disconnect"); setWallet(null); menu.hidden = true; }
+    else if (event.target.closest("[data-lock]")) { lock(); menu.hidden = true; }
+    else if (event.target.closest("[data-unlock]")) { menu.hidden = true; passkeyFlow("signin"); }
     else if (event.target.closest("a")) menu.hidden = true;
   });
+  onSession(() => { paintWalletButton(); document.dispatchEvent(new CustomEvent("session", { detail: session() })); });
+  if (new URLSearchParams(location.search).get("signin")) setTimeout(open, 300);
+
+  /// The passkey ceremony, then the keys into memory, then the account on screen. A browser
+  /// that will not use Desk's passkey from this origin is sent to the relying party's own.
+  async function passkeyFlow(kind) {
+    if (!passkeysAvailable()) { note.textContent = "This browser has no passkeys. Use Desk on your iPhone, or Safari and Chrome on a Mac."; return; }
+    note.textContent = kind === "create" ? "Creating your passkey…" : "Waiting for your passkey…";
+    try {
+      const { prf } = kind === "create" ? await createPasskey("Desk") : await signInWithPasskey();
+      const current = unlockWithPRF(prf);
+      prf.fill(0);
+      adopt(current.address, "passkey");
+      toast({ title: kind === "create" ? "Your account is open" : "Signed in", sub: `${short(current.address)} · keys stay in this tab until you lock` });
+    } catch (error) {
+      if (error instanceof PasskeyError && error.code === "origin") {
+        note.innerHTML = `This browser only uses Desk's passkey on its home address. <a href="${RP_ORIGIN}${location.pathname}?signin=1" style="text-decoration:underline">Continue there</a>.`;
+        sheet.hidden = false;
+        return;
+      }
+      note.textContent = error instanceof PasskeyError ? error.message : "The passkey step didn't finish.";
+      sheet.hidden = false;
+    }
+  }
   document.addEventListener("click", (event) => { if (!sheet.hidden && !event.target.closest("#connect-sheet, #connect")) close(); });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !sheet.hidden) close(); });
 
@@ -366,9 +401,16 @@ function startWallet() {
   sheet.addEventListener("click", async (event) => {
     const row = event.target.closest("[data-connect]");
     if (!row) return;
-    if (row.dataset.connect === "desk" || row.dataset.connect === "create") {
+    if (row.dataset.connect === "passkey") { await passkeyFlow("signin"); return; }
+    if (row.dataset.connect === "create") {
+      if (passkeysAvailable()) { await passkeyFlow("create"); return; }
       close();
-      handoff({ title: row.dataset.connect === "create" ? "Create your account in Desk" : "Desk on iPhone", sub: "Your account lives in the app and signs with Face ID. Scan to get Desk." });
+      handoff({ title: "Create your account in Desk", sub: "Your account is a passkey. Scan to get Desk and make it there." });
+      return;
+    }
+    if (row.dataset.connect === "desk") {
+      close();
+      handoff({ title: "Desk on iPhone", sub: "The same passkey signs in here and in the app. Scan to get Desk." });
       return;
     }
     if (row.dataset.connect === "watch") {
