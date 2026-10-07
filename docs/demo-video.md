@@ -1,10 +1,15 @@
 # Demo video: script and shot list
 
-Target: **about 3 minutes**, screen recording from a real iPhone on **Monad mainnet**, voice-over
-recorded afterwards. You start signed in, with your desk already funded: the video introduces
-Desk, shows your balance and explains how a new person funds and opens a desk, then trades,
-closes, follows and copies, and withdraws. Every amount is real, and the recording doubles as
-the proof that Desk works on mainnet.
+Target: **about four minutes**, four and a half with a live alert. Screen recording from a real
+iPhone on **Monad mainnet**, plus one screen recording from a Mac for the browser segment, voice-over
+recorded afterwards. You start signed in, with your desk already funded: the video introduces Desk,
+shows your balance and explains how a new person funds and opens a desk, then trades, closes,
+follows and copies, follows a wallet off a token's tape, swaps AUSD back to MON, reads the market,
+opens the same desk in a browser, and withdraws. Every amount is real, and the recording doubles
+as the proof that Desk works on mainnet.
+
+If the submission form caps the video at three minutes: cut *Read the room*, keep the browser
+segment to the sign-in, the book and one order, and drop the optional pickups.
 
 ## Before recording
 
@@ -12,9 +17,23 @@ the proof that Desk works on mainnet.
   real money.
 - **Money.** You're already signed in with a funded mainnet desk. Keep at least 60 AUSD in
   trading for the trade (50 AUSD at 5x is a comfortable size) and a little MON for fees.
+- **Wallet AUSD for the swap back.** The swap back sells AUSD from the *wallet*, not from the desk.
+  Keep 15–20 AUSD in the wallet (withdraw a little from trading beforehand if it is all in there)
+  and about 0.05 MON, which pays the approval and the swap.
+- **A token with a live tape.** On Search > Trending, pick a Monad token whose Trades tab moves,
+  and note its name. The tokens segment and the swap segment both use it.
+- **The build.** The TestFlight build archived on 7 October or later: it has the trader sheets,
+  the Your desk sheet on the chart, the alert line on a followed wallet, the swap switch and the
+  in-app news page.
+- **Mac for the browser segment.** Safari on a Mac signed into the same iCloud account as the
+  iPhone, so the passkey is there. Allow notifications for trydesk.trade when Safari asks; check
+  System Settings > Notifications > Safari is on beforehand. One window at about 1280 wide,
+  bookmarks bar hidden, recorded with Cmd-Shift-5. Open trydesk.trade/app and reload it right
+  before the take, so the sign-in happens on camera. **Rehearse the browser order once off
+  camera**: the web order path has been exercised end to end only with test accounts.
 - **Deposit push (optional).** To show "You received", send yourself a small top-up of AUSD from
-  another wallet during the session, with the new TestFlight build, notifications and Deposit
-  alerts on. If you skip it, drop the line that mentions it.
+  another wallet during the session, with notifications and Deposit alerts on. If you skip it, drop
+  the line that mentions it.
 - **Face ID on the ticket.** It only shows when Desk is locked. Lock Desk in Settings right before
   the trade take. Never cut in a prompt from another take.
 - **Copying.** Before the copy section, set one top trader to Auto-Copy in **Shadow**, so the hub
@@ -27,6 +46,9 @@ the proof that Desk works on mainnet.
 
 ## The script
 
+The first four sections are recorded. Their voice-over lines below carry two small additions
+for the new features; the shots stand as they are, with one optional pickup.
+
 ### 0:00–0:20 · Introduction
 
 **Shot:** the iPhone home screen. Tap Desk. Face ID unlocks it. Home with live prices moving and
@@ -34,7 +56,8 @@ the Hot Markets cards. A slow scroll down the markets.
 
 > "This is Desk, a native iPhone app for trading perpetuals on Monad. Every trade runs on Perpl,
 > AUSD is the only money you see, and Mera's passkeys turn Face ID into your key. No seed phrase,
-> no wallet app. Everything you're about to see is on Monad mainnet, with real money."
+> no wallet app. Everything you're about to see is on Monad mainnet, with real money. And at the
+> end, the same account opens in a browser."
 
 ### 0:20–0:45 · Your balance, and how a new person gets started
 
@@ -43,8 +66,9 @@ opens the address and QR, and Swap MON for AUSD shows if you hold spare MON. Clo
 
 > "I've already funded my desk, so this is my balance, in AUSD. If you're new, Add funds is where
 > you start. Receive gives you an address to send AUSD to, from an exchange or any wallet, or you
-> can swap MON you already hold. Then Open desk sets up your Perpl account under one Face ID: it
-> approves the AUSD, creates the account, deposits it, and adds the key that signs your orders."
+> can swap MON you already hold, and later swap back the other way. Then Open desk sets up your
+> Perpl account under one Face ID: it approves the AUSD, creates the account, deposits it, and adds
+> the key that signs your orders."
 
 *Optional, if you capture the top-up push:* "And Desk tells you the moment money lands."
 
@@ -66,16 +90,22 @@ shows the AUSD you get back. Hold. "Position closed" with the realised PnL.
 > checkout too: this is the AUSD I get back, after the fee. Hold. Closed, and that's my realised
 > result, exactly as Perpl reports it."
 
-### 1:40–2:20 · Follow and copy
+*Optional pickup, five seconds, to splice before Close:* on the BTC chart, tap the briefcase in
+the trade bar. **Your desk** slides up over the chart with the position; the **Your position**
+strip sits under the chart. "My whole desk is a tap away on the chart. Nothing takes me off the
+market."
+
+### 1:40–2:15 · Follow and copy
 
 **Shot:** Signals > Top traders.
 
 > "These are real traders on Perpl mainnet, ranked live."
 
-**Shot:** open a trader with a high score and plenty of trades.
+**Shot:** tap a trader with a high score and plenty of trades. The profile slides up as a sheet
+over the list.
 
-> "Each one is scored out of a hundred on their record. Win rate, profit factor, drawdown, and
-> how many trades it's based on."
+> "Each one is scored out of a hundred on their record: win rate, profit factor, drawdown, and how
+> many trades it's based on. They open over the page, so I never lose my place."
 
 **Shot:** tap Follow.
 
@@ -90,40 +120,101 @@ shows the AUSD you get back. Hold. "Position closed" with the realised PnL.
 
 > "And the hub keeps score: my result, my win rate, and how fast each copy filled."
 
-### 2:20–2:35 · A live alert (only if captured for real)
+### 2:15–2:45 · Tokens, and the people buying them
 
-**Shot:** the trade alert on the Lock Screen. Press and hold, Copy Trade. Desk opens on the ticket.
-Face ID, hold, filled. Then the Live Activity, tap Pause.
+**Shot:** Search > Trending > the token you picked. The Trades tab: buys and sells arriving.
+
+> "Desk trades tokens too, bought with MON. This is the live tape for one of them: real buys and
+> sells on Monad, as they happen."
+
+**Shot:** tap a buyer. Their wallet profile opens: what it holds, its PnL, its trades. Tap Follow.
+It reads Following, and the bell line appears under it: **Alerts on · swaps over $250, every Perpl
+move**. Tap the line, pick $50, save; the line now says $50.
+
+> "Tap a buyer and you get the wallet: what it holds and what it has done. Follow it, and Desk
+> tells me when it trades again: token swaps over the size I choose, and every move it makes on
+> Perpl."
+
+### 2:45–3:05 · MON when you need it
+
+**Shot:** back on the token, tap Buy. Type more than your MON: **Not enough MON on Monad mainnet**,
+and under it **Swap AUSD for MON**. Tap it. The swap sheet opens on AUSD → MON. Type 10. The quote:
+you receive, at least, network fee. Hold. Face ID. "Approving AUSD for the swap", "Swapping", then
+**SWAPPED** with the MON received. Done; the buy ticket now quotes.
+
+> "Tokens need MON and I'd moved everything into AUSD for the desk, so Desk swaps back. Ten AUSD.
+> It approves exactly ten to the router and not a cent more, checks the route on Monad before
+> anything is signed, and Face ID signs. There's my MON, and the buy goes through."
+
+*Optional:* complete the token buy if the MON covers it. Relay fills in about a minute; cut the
+wait.
+
+### 3:05–3:20 · Read the room
+
+**Shot:** Home > BTC > the News tab. Tap a headline: the story opens as a page inside Desk, with
+the markets it mentions as chips. Back. The Chat tab, with a message or two in the room.
+
+> "Every market has its news, and a story opens inside Desk, never in Safari. And a room, for the
+> people in the same trade."
+
+### 3:20–4:00 · The same desk, in a browser
+
+**Shot (Mac):** Safari on trydesk.trade/app. Connect wallet > **Sign in with your passkey** > Touch
+ID. The address pill shows the same address as the phone. Portfolio: **In trading**, **Wallet
+AUSD**, and the AUSD row **In your desk · Perpl**. Back to BTC: the order book beside the chart,
+streaming. In the Crowd table, click a trader: the drawer opens over the page; **Follow**. The
+bell: **Turn on alerts**; Safari asks; the **Trade alerts are on** notification lands. The ticket:
+**Set up trading here**, Touch ID, then a small long. Filled; the position appears under the
+chart.
+
+**Shot (iPhone):** Your desk on the chart, with the same position.
+
+> "The same passkey signs into a browser, on a Mac. Same address, same desk, the AUSD I hold in
+> trading right there. The live order book sits beside the chart. Traders open in a drawer over
+> the page, I can follow them here too, and the browser gets the same alerts the phone does. And I
+> can trade: this browser registers its own key with Perpl, signed by my wallet, and a small long
+> fills. On the phone, it's already in my desk."
+
+### 4:00–4:15 · A live alert (only if captured for real)
+
+**Shot:** the trade alert on the iPhone Lock Screen. Press and hold, Copy Trade. Desk opens on the
+ticket. Face ID, hold, filled. Then the Live Activity, tap Pause. Or the same alert landing on the
+Mac during the browser take.
 
 > "A trader I follow just opened a position. Copy Trade opens Desk with the trade ready. Face ID,
 > hold, and it's mine. And I can pause copying right from my Lock Screen."
 
 If no real alert arrived during the session, cut this section and give its time to the others.
 
-### 2:35–2:50 · Take the money out
+### 4:15–4:30 · Take the money out
 
 **Shot:** Profile > Withdraw. The step list, Face ID, the receipt with its explorer link. Open the
 link on MonadVision for a second. End on the AUSD balance in the wallet.
 
 > "And the money comes back out. Withdraw shows every step, and each one has a receipt on Monad's
-> explorer. That's Desk: perps on Monad, settled in AUSD, from your iPhone."
+> explorer. That's Desk: perps on Monad, settled in AUSD, from your iPhone, or your browser."
 
 ## Rules for the cut
 
 - No title cards longer than a second, and no music that fights the voice.
 - Every claim on screen must be visibly happening. Say "mainnet" and "real money" where they
   apply, call a shadow copy a shadow copy, and never stage or fake a push.
-- Keep one unbroken shot of a real order filling. That is the proof.
+- Keep one unbroken shot of a real order filling. That is the proof. The browser order is a second
+  one; keep it unbroken too.
+- The browser segment is its own recording: one window size throughout, no speed-up, and the
+  passkey prompt on camera.
 - End on the app, not a logo.
 
 ## Stills to capture while recording
 
 For the submission form and the README, in this order: Home with live prices, Profile with the
-AUSD balance, the BTC ticket with Est. fill, the Filled receipt, Position closed, a trader profile with its
-score, and the Withdraw receipt. Add the Lock Screen alert only if it was captured live.
+AUSD balance, the BTC ticket with Est. fill, the Filled receipt, Position closed, a trader sheet
+over the chart with its score, the token tape, the wallet profile with the alert line, the swap
+receipt, the browser with the book and a trader in the drawer, the browser notification, and the
+Withdraw receipt. Add the Lock Screen alert only if it was captured live.
 
 ## After recording
 
-Copy the explorer links of the trade, the close and the withdrawal into `docs/submission.md` under
-"What is real", with their dates. Add your earlier deposit and Open desk from Profile's activity,
-so the whole mainnet loop is on record.
+Copy the explorer links of the trade, the close, the swap, the browser order and the withdrawal
+into `docs/submission.md` under "What is real", with their dates. Add your earlier deposit and Open
+desk from Profile's activity, so the whole mainnet loop is on record.
