@@ -31,7 +31,7 @@ Chain is Monad, collateral is AUSD, and perps are the first page.
 
 | Route | Page | Source |
 |---|---|---|
-| `/app`, `/app/trade/:market` | Trade. Market list on the left, chart in the middle, ticket on the right. Below the chart: Crowd, Trades, Top traders. | `/api/v1/markets`, `/api/v1/markets/{m}/candles`, `/api/traders?view=crowd`, `?view=top`, `/api/market-snapshot` |
+| `/app`, `/app/trade/:market` | Trade. Market list on the left (watched markets first), chart in the middle, ticket on the right with News under it. Below the chart: Positions (the connected or watched wallet's open Perpl positions, this market first, Manage in Desk on each row), Crowd, Top traders, Trades. When the wallet holds this market, a line under the title says so with the PnL. | `/api/v1/markets`, `/api/v1/markets/{m}/candles`, `/api/traders?view=trader`, `?view=crowd`, `?view=top`, `/api/market-snapshot`, `?view=news` |
 | `/app/markets` | Perps table and Trending spot table with sparklines, risk chip, Trade button. Right rail: Signals. Footer: crowd lean bar. | `/api/v1/markets`, `/api/token-discovery`, `/api/traders?view=signals`, `?view=crowd` |
 | `/app/token/:chainIndex/:address` | Token page: header stats, chart, Trades and Holders with names and faces, Buy/Sell panel, Risk card. | `/api/token-details`, `?view=risk`, `/api/market-snapshot`, `/api/traders?view=identity` |
 | `/app/traders` | Leaderboard with names, open positions, PnL; Follow opens the app. | `/api/traders?view=top`, `?view=identity` |
@@ -50,6 +50,14 @@ size · liq 77,220 (5.0% away)`. Maths is the app's `OrderQuote` in floating poi
 - liquidation (long) = entry − backing / size + entry × 100 / maintenanceMargin
 - liquidation (short) = entry + backing / size − entry × 100 / maintenanceMargin
 - distance = 1 / leverage − 100 / maintenanceMargin
+
+An optional take profit and stop loss, as prices. Each is checked against the side and the
+liquidation price before anything is shown (a long's stop sits below the mark and above
+liquidation, its take profit above the mark); a valid one reads as the return on margin and the
+move it needs, and both ride along in the sentence.
+
+Keys work anywhere outside a field: `L` and `S` pick the side, `1`–`9` the leverage, `P` the
+Positions tab.
 
 The confirm is **Trade in Desk**: on iPhone it opens the App Store listing, on desktop a
 QR to it. Nothing on the web can move money.
@@ -91,6 +99,8 @@ answers most of it:
 | Spot prices for a table or a token | `/api/token-details?view=prices&tokens=…` (one OKX call for 20 tokens, 3 s cache) | 4 s |
 | A token's tape | `/api/market-snapshot?…&limit=100`, 3 s cache | 5 s |
 | Candles | `/api/v1/markets/{m}/candles`, `/api/market-snapshot` | 15 s, with the last bar following ticks in between |
+| The wallet's positions | `/api/traders?view=trader&address=…`, private cache | 10 s |
+| News for the market | `/api/market-snapshot?view=news&symbols=…`, 5 min CDN cache | 5 min |
 
 Faces on charts: the Token page draws the last 60 trades at their price and bar, buys
 ringed green and sells red, with the trader's name and face where one is known; the
