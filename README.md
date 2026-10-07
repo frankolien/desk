@@ -45,6 +45,13 @@ Monad* and Perpl's *Best Use of Perpl's API*. Swift 6, SwiftUI, iOS 18.4+, iPhon
 - **It doesn't leave the phone** — Portfolio, Watchlist and Auto-Copy widgets; a Live
   Activity with a working pause in the Dynamic Island; a Control Center toggle; Siri.
 - **Share the result** — a position card over your own photo, with a code that opens Desk.
+- **Trade tokens too** — Trending coins on Search, across Monad and the EVM chains Relay
+  reaches, bought with MON from the same key; token pages with holders, trades, who got in
+  first, and a risk card. EVM only: Solana is not offered anywhere.
+- **Follow wallets, not only traders** — a wallet's token moves and its perps on Perpl in
+  one feed, with alerts, and a Watchlist and Market view on Signals.
+- **Talk in the market, read the news** — a chat room per market, and headlines that
+  mention a market. A story opens as a page inside Desk, never in Safari.
 
 ## Security, in one paragraph
 

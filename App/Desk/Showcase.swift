@@ -1,15 +1,14 @@
 import Foundation
 
-/// Each flag hides one entry point and keeps its code; `-show-everything` brings them all back.
+/// Every surface is on. The flags stay as names so a screen can still ask, and so one of
+/// them can be turned off again in one place if a mainnet test says it must.
 enum Showcase {
-    private static let everything = ProcessInfo.processInfo.arguments.contains("-show-everything")
-
-    static let nadNames = everything
-    static let spotTrading = everything
-    static let smartMoney = everything
-    static let marketChat = everything
-    static let perplSiteLinks = everything
-    static let signalsExtras = everything
-    static let openOrders = everything
-    static let news = everything
+    static let nadNames = true
+    static let spotTrading = true
+    static let smartMoney = true
+    static let marketChat = true
+    static let perplSiteLinks = true
+    static let signalsExtras = true
+    static let openOrders = true
+    static let news = true
 }

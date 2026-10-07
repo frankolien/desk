@@ -105,8 +105,7 @@ final class IdentityDirectory {
         for raw in addresses {
             let address = key(for: raw)
             let evm = address.count == 42 && address.hasPrefix("0x")
-            guard (evm || TrackedWallets.isSolana(address)), seen.insert(address).inserted,
-                  !inFlight.contains(address) else { continue }
+            guard evm, seen.insert(address).inserted, !inFlight.contains(address) else { continue }
             if !fresh, let at = fetchedAt[address], now.timeIntervalSince(at) < Self.maxAge { continue }
             wanted.append(address)
         }
@@ -147,46 +146,17 @@ final class IdentityDirectory {
         let chain: String?
     }
 
-    private struct SNSResponse: Decodable {
-        let s: String
-        let result: String?
-    }
-
-    private func lookupSNS(_ query: String) async -> NameResult {
-        let name = query.lowercased().hasSuffix(".solana")
-            ? String(query.dropLast(".solana".count)) + ".sol" : query
-        guard let url = URL(string: "https://sdk-proxy-v2.sns.id/resolve/")?.appendingPathComponent(name) else {
-            return .unavailable
-        }
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            guard let status = (response as? HTTPURLResponse)?.statusCode else { return .unavailable }
-            if status == 404 { return .notFound }
-            guard status == 200, let body = try? JSONDecoder().decode(SNSResponse.self, from: data) else {
-                return .unavailable
-            }
-            guard body.s == "ok", let address = body.result,
-                  (32...44).contains(address.count),
-                  address.rangeOfCharacter(from: CharacterSet(charactersIn: "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz").inverted) == nil else {
-                return .notFound
-            }
-            return .solana(name: name, address: address)
-        } catch {
-            return .unavailable
-        }
-    }
-
     func lookup(_ query: String) async -> NameResult {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 3 else { return .notFound }
-        if TrackedWallets.isSolana(trimmed) { return .solana(name: trimmed, address: trimmed) }
+        // Desk trades on EVM chains only: a Solana address or name is not found rather than
+        // followed to a wallet page nothing here can act on.
+        if TrackedWallets.isSolana(trimmed) { return .notFound }
         if TrackedWallets.isEVM(trimmed) {
             return .wallet(address: trimmed.lowercased(), identity: identity(for: trimmed))
         }
         let lower = trimmed.lowercased()
-        if lower.hasSuffix(".sol") || lower.hasSuffix(".solana") || lower.hasSuffix(".sns") {
-            return await lookupSNS(trimmed)
-        }
+        if lower.hasSuffix(".sol") || lower.hasSuffix(".solana") || lower.hasSuffix(".sns") { return .notFound }
         var components = URLComponents(string: Self.endpoint)!
         components.queryItems = [URLQueryItem(name: "view", value: "lookup"), URLQueryItem(name: "q", value: trimmed)]
         guard let url = components.url,
@@ -196,9 +166,7 @@ final class IdentityDirectory {
         guard status == 200,
               let body = try? JSONDecoder().decode(LookupResponse.self, from: data),
               let address = body.address else { return .unavailable }
-        if body.chain == "solana" {
-            return .solana(name: body.name ?? trimmed, address: address)
-        }
+        if body.chain == "solana" { return .notFound }
         if let identity = body.identity {
             identities[address.lowercased()] = identity
             fetchedAt[address.lowercased()] = .now

@@ -48,9 +48,9 @@ Four tabs.
 
 | Tab | What it does |
 |---|---|
-| Home | Perpl's markets, and Hot Markets: how many traders hold each busy market and which way they lean; each market's chart and the ticket, with leverage and hold-to-confirm |
-| Search | Perpl's markets, and wallets by address or name |
-| Signals | Following and Top traders; trader profiles, scores and copy rules; the Auto-Copy hub with its result, open copies, history and limits |
+| Home | Perpl's markets, and Hot Markets: how many traders hold each busy market and which way they lean; the news that mentions them, read inside Desk; each market's chart, book, holders, chat and the ticket, with leverage and hold-to-confirm. Your own position on the market and your whole desk are a tap away without leaving the chart |
+| Search | Perpl's markets, trending tokens on Monad and other EVM chains with token pages and buying through Relay, and wallets by address or name |
+| Signals | Following, Top traders, Watchlist and Market; wallet movements; trader profiles as sheets over the screen, scores and copy rules; the Auto-Copy hub with its result, open copies, history and limits |
 | Profile | The AUSD balance, open and closed positions, Add funds, Withdraw, activity, and Settings with the network switch |
 
 ### Beyond the app itself

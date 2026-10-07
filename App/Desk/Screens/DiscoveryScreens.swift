@@ -296,10 +296,6 @@ struct MarketSearchScreen: View {
                             Text(query.isEmpty ? "Trending coins" : "Coins")
                                 .font(.system(size: 18, weight: .bold, design: .rounded))
                             Spacer()
-                            Text("VIEW ONLY")
-                                .font(.system(size: 10, weight: .heavy, design: .rounded))
-                                .foregroundStyle(DeskColor.nightMuted.color)
-                                .tracking(1.2)
                         }
                         .foregroundStyle(DeskColor.nightText.color)
                         .padding(.top, 26)
