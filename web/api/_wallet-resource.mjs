@@ -3,25 +3,38 @@ import { hypersyncClient } from "./_history.mjs";
 import { resolveIdentities } from "./_identity.mjs";
 import { TRACKED_KEY, indexWallet, ledgerKey, summarize } from "./_ledger.mjs";
 import { SOLANA } from "./_solana.mjs";
-import { currentPrices, describeWallet, logosFor, metaReader, priceReader, walletBalances } from "./_wallet.mjs";
+import { currentPrices, describeDesk, describeWallet, logosFor, metaReader, priceReader, walletBalances, withDesk, MONAD_AUSD } from "./_wallet.mjs";
+import { chainReader, noAccount } from "./traders.mjs";
 
 const MONAD = "143";
 const BACKFILL_BLOCKS = 45 * 216_000;
 const INDEX_BUDGET_MS = 25_000;
 const MAX_TRACKED = 2_000;
+let sharedVenue = null;
 
-export async function walletResource(address, { chainIndex = MONAD, contract = "", store, fetchImpl = fetch, chain = null, ens = null, hypersync = hypersyncClient(), now = Date.now } = {}) {
+/// What Perpl holds for the wallet, and the wallet's own AUSD, off the chain. A revert is a
+/// wallet with no desk; any other failure leaves the desk unknown rather than empty.
+export async function readDesk(address, venue) {
+  const [account, balance] = await Promise.all([
+    venue.accountByAddress(address).catch((error) => { if (noAccount(error)) return null; throw error; }),
+    venue.tokenBalance(MONAD_AUSD, address),
+  ]);
+  return describeDesk(account, balance);
+}
+
+export async function walletResource(address, { chainIndex = MONAD, contract = "", store, fetchImpl = fetch, chain = null, ens = null, venue = null, hypersync = hypersyncClient(), now = Date.now } = {}) {
   // A Solana address is case-sensitive base58 and lives on one chain.
   const solana = !address.startsWith("0x");
   const wanted = solana ? address : address.toLowerCase();
   const chains = Object.keys(CHAINS).filter((index) => CHAINS[index].rpc !== null && index !== "501");
 
-  const [identities, balances] = await Promise.all([
+  const [identities, balances, desk] = await Promise.all([
     resolveIdentities([wanted], { fetchImpl, chain, store, ens }).catch(() => ({})),
     solana ? walletBalances(wanted, ["501"]).catch(() => null) : balancesAcross(wanted, chains, chainIndex),
+    solana ? null : readDesk(wanted, venue ?? (sharedVenue ??= chainReader())).catch(() => null),
   ]);
   const identity = identities[wanted] ?? null;
-  const wallet = balances ? describeWallet(balances, contract) : { portfolio: null, chains: [], held: null, holdings: [] };
+  const wallet = withDesk(balances ? describeWallet(balances, contract) : { portfolio: null, chains: [], held: null, holdings: [] }, desk);
   if (contract) {
     const match = wallet.holdings.find((row) => row.chainIndex === chainIndex && row.contract.toLowerCase() === contract.toLowerCase());
     wallet.held = match ? { balance: match.balance, value: match.value } : null;

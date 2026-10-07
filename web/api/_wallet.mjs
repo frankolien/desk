@@ -6,6 +6,8 @@ import { okxConfigured, okxGet, okxPost } from "./_okx.mjs";
 
 const MAX_ROWS = 12;
 const MONAD = "143";
+export const MONAD_AUSD = "0x00000000efe302beaa2b3e6e1b18d08d69a9012a";
+const COLLATERAL_DECIMALS = 6;
 const SYMBOL_SELECTOR = "0x95d89b41";
 const DECIMALS_SELECTOR = "0x313ce567";
 
@@ -47,6 +49,46 @@ export function describeWallet(rows, contract) {
     held: held ? { balance: held.balance, value: held.value } : null,
     holdings: assets.slice(0, MAX_ROWS),
   };
+}
+
+/// Perpl keeps a trader's collateral at the exchange contract under the wallet's account, so
+/// the wallet's own AUSD balance is rarely where the dollars are. Both figures, in AUSD.
+export function describeDesk(account, walletRaw) {
+  const scaled = (raw) => Number(BigInt(raw)) / 10 ** COLLATERAL_DECIMALS;
+  const open = account != null && BigInt(account.accountId ?? 0) !== 0n;
+  return {
+    account: open ? String(account.accountId) : null,
+    collateral: open ? scaled(account.balanceCNS) : null,
+    locked: open ? scaled(account.lockedBalanceCNS ?? 0) : null,
+    walletAusd: walletRaw == null ? null : scaled(walletRaw),
+  };
+}
+
+/// The chain settles Monad AUSD: the balance index's row gives way to the wallet's actual
+/// balance, and what the desk holds joins the holdings as its own AUSD row. Totals move by
+/// the difference, since the holdings list is capped and the totals cover every asset.
+export function withDesk(wallet, desk) {
+  if (!desk) return { ...wallet, desk: null };
+  const isAusd = (asset) => asset.chainIndex === MONAD && asset.contract === MONAD_AUSD;
+  const prior = wallet.holdings.find(isAusd) ?? null;
+  const price = prior?.value != null && prior.balance > 0 ? prior.value / prior.balance : 1;
+  const row = (balance, extra = {}) => ({ chainIndex: MONAD, chain: CHAINS[MONAD].name, contract: MONAD_AUSD, symbol: "AUSD", balance, value: balance * price, ...extra });
+  let holdings = wallet.holdings;
+  let delta = 0;
+  if (desk.walletAusd != null) {
+    holdings = holdings.filter((asset) => !isAusd(asset));
+    delta -= prior?.value ?? 0;
+    if (desk.walletAusd > 0) { holdings = [...holdings, row(desk.walletAusd)]; delta += desk.walletAusd * price; }
+  }
+  if (desk.collateral > 0) { holdings = [...holdings, row(desk.collateral, { desk: true })]; delta += desk.collateral * price; }
+  holdings = [...holdings].sort((a, b) => (b.value ?? -1) - (a.value ?? -1)).slice(0, MAX_ROWS);
+  const chains = wallet.chains.map((chain) => ({ ...chain }));
+  const monad = chains.find((chain) => chain.chainIndex === MONAD);
+  if (monad) monad.value += delta;
+  else if (delta !== 0) chains.push({ chainIndex: MONAD, chain: CHAINS[MONAD].name, value: delta });
+  chains.sort((a, b) => b.value - a.value);
+  const portfolio = wallet.portfolio == null && delta === 0 ? null : (wallet.portfolio ?? 0) + delta;
+  return { ...wallet, portfolio, chains, holdings, desk };
 }
 
 const TRUST_WALLET_CHAINS = {

@@ -1,4 +1,4 @@
-import { createPublicClient, http } from "viem";
+import { createPublicClient, erc20Abi, http } from "viem";
 
 import { describe, shardKey, shardOf, statistics, tradesKey } from "./_history.mjs";
 import { MAX_ADDRESSES, NameLookupUnavailable, ensAddressReader, ensReader, lookupName, resolveIdentities } from "./_identity.mjs";
@@ -163,6 +163,9 @@ export function chainReader(rpcURL = process.env.MONAD_MAINNET_RPC || "https://r
     },
     async accountByAddress(address) {
       return read("getAccountByAddr", [address]);
+    },
+    async tokenBalance(token, owner) {
+      return client.readContract({ address: token, abi: erc20Abi, functionName: "balanceOf", args: [owner] });
     },
     async openPosition(perpId, accountId) {
       const [row, mark, valid] = await read("getPositionV2", [BigInt(perpId), BigInt(accountId)]);

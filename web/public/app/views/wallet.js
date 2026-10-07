@@ -20,6 +20,9 @@ const CSS = `<style>
 .wl-chart.blank { height: 60px; }
 .wl-cells { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .wl-cells .num { font-size: 20px; font-weight: 700; }
+.wl-cells .sub { font-size: 12px; margin-top: 2px; }
+.wl-cells a.sub { color: var(--text-2); text-decoration: none; }
+.wl-cells a.sub:hover { color: var(--text); }
 .wl-chains { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .wl-chain { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px 0 3px; border-radius: 999px; background: var(--chip); font-size: 11px; font-weight: 600; color: var(--text-2); }
 .wl-list { display: grid; }
@@ -109,6 +112,13 @@ export default async function mount(el, params) {
   const chains = [...(data.chains ?? [])].sort((a, b) => (b.value ?? 0) - (a.value ?? 0)).slice(0, 4);
   const chainChips = chains.length ? `<div class="wl-chains">${chains.map((c) => `<span class="wl-chain">${logo(nativeLogo(c.chainIndex), c.chain, 16)}${fmtUsd(c.value, { compact: true })}</span>`).join("")}</div>` : "";
   const unreal = ready ? ledger.unrealized : null;
+  const desk = data.desk ?? null;
+  const deskCells = desk && (desk.account || own) ? `<div class="wl-cells">
+        <div class="cell stat"><span class="eyebrow">In trading</span><span class="num">${fmtUsd(desk.account ? desk.collateral : null)}</span>
+          <span class="sub">${desk.account ? `AUSD in ${own ? "your" : "their"} Perpl desk${desk.locked > 0 ? ` · ${fmtUsd(desk.locked)} in orders` : ""}` : "No desk yet"}</span></div>
+        <div class="cell stat"><span class="eyebrow">Wallet AUSD</span><span class="num">${fmtUsd(desk.walletAusd)}</span>
+          ${own ? `<a class="sub" href="/app" data-link>${desk.account ? "Add funds or trade" : "Open your desk on Trade"}</a>` : `<span class="sub">Ready to deposit</span>`}</div>
+      </div>` : "";
   const tab0 = ["positions", "closed", "activity"].includes(params.query?.tab) ? params.query.tab : "positions";
   let window_ = WINDOWS.some(([k]) => k === params.query?.window) ? params.query.window : "7d";
 
@@ -126,6 +136,7 @@ export default async function mount(el, params) {
         <div class="cell stat"><span class="eyebrow">Portfolio value</span><span class="num">${fmtUsd(data.portfolio, { compact: true })}</span>${chainChips}</div>
         <div class="cell stat"><span class="eyebrow">Unrealized</span><span class="num ${dirClass(unreal)}">${indexing ? "…" : fmtUsd(unreal, { sign: true })}</span></div>
       </div>
+      ${deskCells}
     </div>
     <div>
       <div class="tabs" role="tablist" data-tabs>
@@ -222,12 +233,14 @@ export default async function mount(el, params) {
       const rows = holdings.map((h) => {
         const lt = h.chainIndex === "143" && h.contract ? ledgerTokens.get(h.contract.toLowerCase()) : null;
         const cost = lt && lt.averageCost != null && lt.holding ? lt.averageCost * lt.holding : 0;
-        const under = lt && cost > 0 && lt.unrealized != null
+        const under = !h.desk && lt && cost > 0 && lt.unrealized != null
           ? `<span class="num ${dirClass(lt.unrealized)}">${fmtPct(lt.unrealized / cost)}</span>`
           : `<span class="muted">${fmtAmount(h.balance)} ${esc(h.symbol)}</span>`;
+        const where = h.desk ? `In ${own ? "your" : "their"} desk · Perpl` : h.chain;
         const inner = `${logo(tokenLogo(h.chainIndex, h.contract), h.symbol, 36)}
-          <div class="name"><b>${esc(h.symbol)}</b><span>${esc(h.chain)}</span></div>
+          <div class="name"><b>${esc(h.symbol)}</b><span>${esc(where)}</span></div>
           <div class="right"><b class="num">${fmtUsd(h.value)}</b>${under}</div>`;
+        if (h.desk) return own ? `<a class="wl-row" href="/app" data-link>${inner}</a>` : `<div class="wl-row">${inner}</div>`;
         return h.contract ? `<a class="wl-row" href="/app/token/${esc(h.chainIndex)}/${esc(h.contract)}" data-link>${inner}</a>` : `<div class="wl-row">${inner}</div>`;
       });
       return [rows.join(""), `Showing ${rows.length} of ${holdings.length} assets`];
