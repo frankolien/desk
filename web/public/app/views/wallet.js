@@ -91,7 +91,7 @@ export default async function mount(el, params) {
   const tokenLogo = (chainIndex, contract) => logos[`${chainIndex}:${contract ?? ""}`] ?? (contract ? "" : nativeLogo(chainIndex));
 
   const face = id?.avatar
-    ? `<span class="logo logo-68"><img src="${esc(id.avatar)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()"></span>`
+    ? `<span class="logo logo-68"><img src="${esc(id.avatar)}" alt="" referrerpolicy="no-referrer" data-fallback></span>`
     : `<span class="logo logo-68" style="background:linear-gradient(135deg,hsl(${hue(address)} 60% 45%),hsl(${(hue(address) + 40) % 360} 60% 30%))"></span>`;
   const status = [
     id?.name && id?.source ? `<span class="via">${esc(SOURCE_LABEL[id.source] ?? id.source)}</span>` : "",

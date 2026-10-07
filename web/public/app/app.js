@@ -132,11 +132,24 @@ export const nativeLogo = (chainIndex) => NATIVE_LOGOS[String(chainIndex)] ?? ""
 
 const hue = (text) => [...String(text)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
 
+// Images reveal and fall back without inline handlers, which the page's CSP forbids: an image
+// marked data-reveal hides the initials it sits over once it has loaded, and one marked
+// data-fallback is removed if it never does. Both events are caught in the capture phase,
+// since neither bubbles.
+document.addEventListener("load", (event) => {
+  const img = event.target;
+  if (img instanceof HTMLImageElement && img.hasAttribute("data-reveal") && img.previousElementSibling) img.previousElementSibling.hidden = true;
+}, true);
+document.addEventListener("error", (event) => {
+  const img = event.target;
+  if (img instanceof HTMLImageElement && img.hasAttribute("data-fallback")) img.remove();
+}, true);
+
 export function logo(url, label, size = 32, { square = false } = {}) {
   const initials = esc(String(label ?? "?").replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase() || "?");
   const bg = `hsl(${hue(label)} 22% 18%)`;
   // Token art is often a transparent PNG, so the initials must go once it has loaded.
-  const img = url ? `<img src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onload="this.previousElementSibling.hidden=true" onerror="this.remove()">` : "";
+  const img = url ? `<img src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-reveal data-fallback>` : "";
   return `<span class="logo logo-${size}${square ? " sq" : ""}" style="background:${bg}"><span style="position:absolute">${initials}</span>${img}</span>`;
 }
 
@@ -178,7 +191,7 @@ export const knownIdentity = (address) => identities.get(String(address ?? "").t
 export function person(address, id = knownIdentity(address), { size = 24, via = true, link = true } = {}) {
   const name = id?.name ?? short(address);
   const face = id?.avatar
-    ? `<span class="logo logo-${size}"><img src="${esc(id.avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></span>`
+    ? `<span class="logo logo-${size}"><img src="${esc(id.avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-fallback></span>`
     : `<span class="logo logo-${size}" style="background:linear-gradient(135deg,hsl(${hue(address)} 60% 45%),hsl(${(hue(address) + 40) % 360} 60% 30%))"></span>`;
   const label = id?.name ? `<b>${esc(name)}</b>` : `<span class="addr">${esc(name)}</span>`;
   const source = via && id?.source ? `<span class="via">${esc(SOURCE_LABEL[id.source] ?? id.source)}</span>` : "";
@@ -317,7 +330,7 @@ function paintWalletButton() {
   if (!wallet) { button.className = "btn btn-primary"; button.textContent = "Connect wallet"; return; }
   const id = knownIdentity(wallet.address);
   const face = id?.avatar
-    ? `<span class="logo logo-28"><img src="${esc(id.avatar)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()"></span>`
+    ? `<span class="logo logo-28"><img src="${esc(id.avatar)}" alt="" referrerpolicy="no-referrer" data-fallback></span>`
     : `<span class="logo logo-28" style="background:linear-gradient(135deg,hsl(${hue(wallet.address)} 60% 45%),hsl(${(hue(wallet.address) + 40) % 360} 60% 30%))"></span>`;
   button.className = "wallet-pill";
   button.innerHTML = `${face}${id?.name ? `<span>${esc(id.name)}</span>` : `<span class="addr">${esc(short(wallet.address))}</span>`}<svg width="14" height="14" style="color:var(--muted);transform:rotate(90deg)"><use href="#i-chevron"/></svg>`;
@@ -575,7 +588,7 @@ function startSearch() {
     if (people?.address) {
       const id = people.identity ?? {};
       html += `<div class="search-section">People</div><div class="search-row" data-href="/app/wallet/${esc(people.address)}">
-        ${id.avatar ? `<span class="logo logo-28"><img src="${esc(id.avatar)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()"></span>` : `<span class="logo logo-28" style="background:linear-gradient(135deg,var(--brand-deep),#221a55)"></span>`}
+        ${id.avatar ? `<span class="logo logo-28"><img src="${esc(id.avatar)}" alt="" referrerpolicy="no-referrer" data-fallback></span>` : `<span class="logo logo-28" style="background:linear-gradient(135deg,var(--brand-deep),#221a55)"></span>`}
         <div class="name"><b>${esc(id.name ?? short(people.address))}</b><span>${esc(short(people.address))} · via ${esc(SOURCE_LABEL[people.via] ?? people.via ?? "address")}</span></div>
         <div class="right"><small class="muted">Wallet</small></div></div>`;
       rows.push(1);

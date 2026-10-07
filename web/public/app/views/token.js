@@ -116,7 +116,7 @@ function copyButton(text) {
 }
 
 function face(address, id = knownIdentity(address), size = 20) {
-  if (id?.avatar) return `<span class="logo logo-${size}"><img src="${esc(id.avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></span>`;
+  if (id?.avatar) return `<span class="logo logo-${size}"><img src="${esc(id.avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-fallback></span>`;
   const mark = esc(String(address ?? "").replace(/^0x/i, "").slice(0, 2).toUpperCase());
   return `<span class="logo logo-${size}" style="background:linear-gradient(135deg,hsl(${hue(address)} 60% 45%),hsl(${(hue(address) + 40) % 360} 60% 30%))">${mark}</span>`;
 }
