@@ -115,5 +115,29 @@ export function createMarkets({ fetchImpl = fetch, now = Date.now, readMark = nu
     return { at: now(), marks: out };
   }
 
-  return { context, candles, marks, hasInstrument: async (name) => Boolean(await find(name).catch(() => null)) };
+  const bookCache = new Map();
+
+  /// Perpl's public L2 snapshot for `name`, prices and sizes unscaled into decimals. Two
+  /// seconds of cache: the socket is the live path, this is the first paint and the fallback.
+  async function book(name, levels = 20) {
+    const market = await find(name);
+    if (!market) return null;
+    const depth = Math.max(1, Math.min(100, Number(levels) || 20));
+    const key = `${market.id}:${depth}`;
+    const cached = bookCache.get(key);
+    if (cached && now() - cached.at < 2_000) return cached.value;
+    const response = await fetchImpl(`${CANDLE_URL}/${market.id}/book?levels=${depth}`);
+    if (!response.ok) throw new Error(`Perpl HTTP ${response.status}`);
+    const body = await response.json();
+    const level = (row) => ({ price: Number(row.p) / 10 ** market.priceDecimals, size: Number(row.s) / 10 ** market.sizeDecimals, orders: Number(row.o) });
+    const value = {
+      market: market.name, at: Number(body.at) || now(),
+      bids: (body.bid ?? []).map(level).sort((a, b) => b.price - a.price),
+      asks: (body.ask ?? []).map(level).sort((a, b) => a.price - b.price),
+    };
+    bookCache.set(key, { at: now(), value });
+    return value;
+  }
+
+  return { context, candles, marks, book, hasInstrument: async (name) => Boolean(await find(name).catch(() => null)) };
 }

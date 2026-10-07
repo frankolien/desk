@@ -183,6 +183,16 @@ export function createHandler({
           return fail(problem("upstream_unavailable", `Candles could not be read: ${error.message}`, instance));
         }
       }
+      case "book": {
+        const source = get("markets", () => createMarkets({ now }));
+        try {
+          const snapshot = await source.book(route.market, query.levels);
+          if (!snapshot) return fail(problem("not_found", `No market called ${route.market}.`, instance));
+          return envelope(200, snapshot, CACHE.marks);
+        } catch (error) {
+          return fail(problem("upstream_unavailable", `The book could not be read: ${error.message}`, instance));
+        }
+      }
       case "top": {
         const wanted = Math.min(TOP_LIMIT, Math.max(1, Number.parseInt(String(query.limit ?? TOP_LIMIT), 10) || TOP_LIMIT));
         const out = relay(await capture(get("traders", () => tradersHandler({ store })), { view: "top" }), instance);
@@ -223,6 +233,7 @@ function match(segments) {
   if (segments.length === 1 && a === "markets") return { name: "markets", tier: "default" };
   if (segments.length === 2 && a === "markets" && b === "marks") return { name: "marks", tier: "default" };
   if (segments.length === 3 && a === "markets" && c === "candles" && /^[A-Za-z0-9]{1,12}$/.test(b)) return { name: "candles", tier: "default", market: b };
+  if (segments.length === 3 && a === "markets" && c === "book" && /^[A-Za-z0-9]{1,12}$/.test(b)) return { name: "book", tier: "default", market: b };
   if (segments.length === 2 && a === "traders" && b === "top") return { name: "top", tier: "default" };
   if (segments.length === 3 && a === "traders" && c === "history") return { name: "history", tier: "expensive", address: b };
   if (segments.length === 2 && a === "identity") return { name: "identity", tier: "default", address: b };
