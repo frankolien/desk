@@ -1,4 +1,7 @@
 import { $, $$, MARKET_LOGOS, ago, api, dirClass, esc, fmtAmount, fmtCompact, fmtPct, fmtPrice, fmtUsd, handoff, head, hydratePeople, connectedWallet, chartOptions, candleOptions, volumeColor, chartLegend, chartCountdown, identity, knownIdentity, logo, markets, navigate, person, poll, short } from "../app.js";
+import { estimateFill, watchBook } from "../book.js";
+
+const BOOK_LEVELS = 9;
 
 const BAR_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "1H": 3600, "4H": 14400, "1D": 86400 };
 
@@ -92,6 +95,7 @@ export default async function mount(el, params) {
     chart: null, series: null, volume: null, markLine: null, crowd: null, top: null, watched: watched(), lastBar: null,
     ring: [], lastCandle: null, candles: [], legend: null, countdown: null, faces: [], showFaces: localStorage.getItem("desk.web.chartfaces") !== "off",
     positions: null, positionsFor: null, news: null, tp: 0, sl: 0,
+    book: null, bookStop: null, bookFallback: null,
   };
 
   let rows = markets();
@@ -150,8 +154,9 @@ export default async function mount(el, params) {
   stops.push(poll(loadPositions, 10_000));
   stops.push(poll(loadNews, 300_000));
   loadTop();
+  startBook();
 
-  return () => { stops.forEach((stop) => stop()); state.chart?.remove(); };
+  return () => { stops.forEach((stop) => stop()); state.bookStop?.(); state.bookFallback?.(); state.chart?.remove(); };
 
   function paint() {
     const m = state.market;
@@ -185,6 +190,7 @@ export default async function mount(el, params) {
       </section>
       <aside class="stack" style="gap:16px">
         <div class="card card-pad td-ticket stack" id="td-ticket"></div>
+        <div class="card card-pad" id="td-book"></div>
         <div class="card card-pad td-crowd" id="td-crowdcard"></div>
         <div class="card card-pad" id="td-market"></div>
         <div class="card card-pad" id="td-news"></div>
@@ -429,12 +435,82 @@ export default async function mount(el, params) {
     box.innerHTML = `
       <div><span>Size</span><b class="num">${fmtAmount(q.notional, 2)} AUSD <span class="muted">· ${fmtAmount(q.size, m.sizeDecimals)} ${esc(m.name)}</span></b></div>
       <div><span>Entry</span><b class="num">${fmtPrice(m.mark, m.priceDecimals)}</b></div>
+      ${fillRow(q)}
       <div><span>Liquidation</span><b class="num ${state.side === "long" ? "down" : "up"}">${fmtPrice(q.liquidation, m.priceDecimals)} <span class="muted">· ${fmtPct(q.distance, { sign: false, digits: 1 })} away</span></b></div>
       <div><span>Fee</span><b class="num">${fmtAmount(q.fee, 2)} AUSD <span class="muted">· ${(m.takerFee / 1e4).toFixed(3)}%</span></b></div>
       <div><span>Total</span><b class="num">${fmtAmount(q.total, 2)} AUSD</b></div>
       ${exitRow("Take profit", exit("tp", state.tp, q))}
       ${exitRow("Stop loss", exit("sl", state.sl, q))}`;
     line.textContent = sentence();
+  }
+
+  /// Where the book would fill this size right now: the ticket's own number, not the mark.
+  function fillRow(q) {
+    if (!state.book) return "";
+    const fill = estimateFill(state.book, state.side, q.size);
+    if (!fill) return `<div><span>Est. fill</span><b class="muted">Book too thin for this size</b></div>`;
+    const m = state.market;
+    const slip = (fill.price - m.mark) / m.mark * (state.side === "long" ? 1 : -1);
+    return `<div><span>Est. fill</span><b class="num">${fmtPrice(fill.price, m.priceDecimals)} <span class="${slip > 0.0005 ? "down" : "muted"}">· ${fmtPct(slip, { sign: true, digits: 2 })}${fill.partial ? " · partial" : ""}</span></b></div>`;
+  }
+
+  function startBook() {
+    const m = state.market;
+    if (m.id == null) return;
+    paintBook();
+    // The API's two-second snapshot is the path that always works; Perpl's socket refuses
+    // browser origins it does not know, so it is tried as an upgrade and takes over if it
+    // ever answers.
+    let live = false;
+    state.bookFallback = poll(async () => {
+      if (live) return;
+      try {
+        const snapshot = await api(`/api/v1/markets/${m.name}/book?levels=${BOOK_LEVELS}`, { ttl: 1_500 });
+        if (live) return;
+        state.book = { bids: snapshot.bids ?? [], asks: snapshot.asks ?? [], at: snapshot.at, live: false, polled: true };
+      } catch {
+        state.book = state.book ?? { bids: [], asks: [], at: 0, live: false, polled: true, failed: true };
+        if (state.book.failed === undefined) state.book = { ...state.book, failed: true };
+      }
+      paintBook(); paintQuote();
+    }, 2_000);
+    state.bookStop = watchBook(m.id, { price: m.priceDecimals, size: m.sizeDecimals }, (book) => {
+      if (!book.live || (!book.bids.length && !book.asks.length)) return;
+      live = true;
+      state.bookFallback?.(); state.bookFallback = null;
+      state.book = book;
+      paintBook(); paintQuote();
+    });
+  }
+
+  function paintBook() {
+    const host = $("#td-book", root); if (!host) return;
+    const m = state.market;
+    const book = state.book;
+    const stateChip = book?.live
+      ? `<span class="book-state"><i class="dot" style="background:var(--rise)"></i>live</span>`
+      : book?.bids?.length ? `<span class="book-state"><i class="dot" style="background:var(--amber, #e0a52a)"></i>every 2 s</span>`
+      : book?.failed ? `<span class="book-state">unavailable</span>` : `<span class="book-state">loading…</span>`;
+    if (!book || (!book.bids.length && !book.asks.length)) {
+      host.innerHTML = `<div class="row-between"><h3>Book</h3>${stateChip}</div>${book?.failed
+        ? `<div class="note" style="margin-top:8px">Perpl's book could not be read right now.</div>`
+        : `<div class="skel" style="margin-top:12px"></div><div class="skel" style="margin-top:8px;width:70%"></div><div class="skel" style="margin-top:8px;width:85%"></div>`}`;
+      return;
+    }
+    const asks = book.asks.slice(0, BOOK_LEVELS);
+    const bids = book.bids.slice(0, BOOK_LEVELS);
+    const cumulative = (rows) => { let sum = 0; return rows.map((r) => ({ ...r, total: (sum += r.size) })); };
+    const askRows = cumulative(asks); const bidRows = cumulative(bids);
+    const max = Math.max(askRows.at(-1)?.total ?? 0, bidRows.at(-1)?.total ?? 0) || 1;
+    const row = (r, side) => `<div class="book-row ${side}"><span>${fmtPrice(r.price, m.priceDecimals)}</span><span>${fmtAmount(r.size, Math.min(m.sizeDecimals, 4))}</span><span>${fmtAmount(r.total, Math.min(m.sizeDecimals, 4))}</span><i style="width:${((r.total / max) * 100).toFixed(1)}%"></i></div>`;
+    const bestAsk = asks[0]?.price, bestBid = bids[0]?.price;
+    const spread = bestAsk != null && bestBid != null ? bestAsk - bestBid : null;
+    const mid = spread != null ? (bestAsk + bestBid) / 2 : null;
+    host.innerHTML = `<div class="row-between"><h3>Book</h3>${stateChip}</div>
+      <div class="book-head" style="margin-top:10px"><span>Price</span><span>Size ${esc(m.name)}</span><span>Total</span></div>
+      <div class="book-table">${[...askRows].reverse().map((r) => row(r, "ask")).join("")}</div>
+      <div class="book-mid"><span class="num">${mid == null ? "—" : fmtPrice(mid, m.priceDecimals)} <span class="muted" style="font-weight:600">mid</span></span><span class="num">${spread == null ? "" : `spread ${fmtPrice(spread, m.priceDecimals)} · ${fmtPct(spread / mid, { sign: false, digits: 3 })}`}</span></div>
+      <div class="book-table">${bidRows.map((r) => row(r, "bid")).join("")}</div>`;
   }
 
   function exitRow(label, result) {

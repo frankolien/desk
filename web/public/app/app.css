@@ -458,3 +458,19 @@ h3 { font-size: 14px; font-weight: 700; }
   .view { padding: 14px 12px 90px; }
   .table td { height: 52px; }
 }
+
+/* Order book: price, size and a cumulative depth bar behind each level. */
+.book-table { display: grid; gap: 1px; font-size: 12px; }
+.book-row { position: relative; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 3px 8px; border-radius: 6px; overflow: hidden; }
+.book-row > span { position: relative; z-index: 1; font-variant-numeric: tabular-nums; }
+.book-row > span:nth-child(2), .book-row > span:nth-child(3) { text-align: right; color: var(--text-2); }
+.book-row i { position: absolute; top: 0; bottom: 0; right: 0; opacity: .13; }
+.book-row.ask > span:first-child { color: var(--fall); } .book-row.ask i { background: var(--fall); }
+.book-row.bid > span:first-child { color: var(--rise); } .book-row.bid i { background: var(--rise); }
+.book-mid { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; margin: 2px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 700; }
+.book-mid span:last-child { color: var(--muted); font-weight: 600; }
+.book-head { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 0 8px 6px; font-size: 10px; font-weight: 700; color: var(--faint); letter-spacing: .04em; text-transform: uppercase; }
+.book-head span:nth-child(2), .book-head span:nth-child(3) { text-align: right; }
+.book-state { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: var(--muted); }
+.book-state .dot { width: 6px; height: 6px; box-shadow: none; }
+
