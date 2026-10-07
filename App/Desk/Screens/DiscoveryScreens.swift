@@ -2231,6 +2231,7 @@ private struct WalletProfileScreen: View {
     @State private var naming = false
     @State private var draftName = ""
     @State private var copied = false
+    @State private var editsAlerts = false
 
     private enum Tab: String, CaseIterable { case positions = "Positions", closed = "Closed", activity = "Activity" }
 
@@ -2368,8 +2369,18 @@ private struct WalletProfileScreen: View {
                         }
                     }.padding(.top, 20)
 
-                    if tracked != nil, TradeAlerts.shared.permission == .denied {
+                    if let tracked, TradeAlerts.shared.permission == .denied {
                         NotificationsOffLine().padding(.top, 10)
+                    } else if let tracked {
+                        Button {
+                            if TradeAlerts.shared.isOn(for: wallet.address) {
+                                editsAlerts = true
+                            } else {
+                                Task { await perplDirectory.follow(wallet.address, name: tracked.name) }
+                            }
+                        } label: { alertsLine(tracked) }
+                            .buttonStyle(.plain)
+                            .padding(.top, 10)
                     }
 
                     if identity?.source != "sns", let status = statusLine {
@@ -2397,6 +2408,11 @@ private struct WalletProfileScreen: View {
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
+        }
+        .sheet(isPresented: $editsAlerts) {
+            TrackWalletSheet(existing: tracked, directory: perplDirectory)
+                .fittedSheet()
+                .presentationDragIndicator(.visible)
         }
         .alert("Name this wallet", isPresented: $naming) {
             TextField("Name", text: $draftName)
@@ -2486,6 +2502,31 @@ private struct WalletProfileScreen: View {
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.white.opacity(0.35), lineWidth: 1))
         }
         .buttonStyle(.plain)
+    }
+
+    /// What following this wallet alerts on. Following tracks it and turns alerts on in one go;
+    /// this line says so, and opens the threshold when tapped.
+    private func alertsLine(_ tracked: TrackedWallet) -> some View {
+        let on = TradeAlerts.shared.isOn(for: wallet.address)
+        return HStack(spacing: 7) {
+            Image(systemName: on ? "bell.fill" : "bell.slash")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(on ? DeskColor.rise.color : DeskColor.nightMuted.color)
+            Text(alertsText(tracked, on: on))
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.8))
+                .lineLimit(1).minimumScaleFactor(0.8)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white.opacity(0.4))
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func alertsText(_ tracked: TrackedWallet, on: Bool) -> String {
+        guard on else { return "Alerts off · tap to hear when they trade" }
+        let swaps = tracked.firstBuysOnly ? "first buys over $\(Int(tracked.minUsd))" : "swaps over $\(Int(tracked.minUsd))"
+        return isEVM ? "Alerts on · \(swaps), every Perpl move" : "Alerts on · \(swaps)"
     }
 
     private var statusLine: String? {
