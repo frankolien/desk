@@ -67,6 +67,27 @@ caches nothing. Perpl refuses browser origins other than its own and answers its
 endpoints with 451 from United States addresses, which is why the relay exists and why the
 functions are pinned to Frankfurt (`regions` in `vercel.json`).
 
+## Following and alerts
+
+Following works on the web, in the browser you are using. Every Follow button, in a
+trader's drawer, on the Traders page, on a wallet's page and under a market's top traders,
+keeps that trader in this browser's list. The bell in the top bar opens the list, the latest
+moves of everyone on it (perps on Perpl and token buys and sells, from
+`/api/activity?view=following`) and the alerts switch.
+
+Alerts are browser push. "Turn on alerts" asks the browser's permission, subscribes through
+its push service (`sw.js` is the service worker; it only receives pushes and opens the app
+on a click) and registers the subscription with `/api/alerts` under an install secret, as a
+seat alongside the phones. The same scan that pushes to the app then pushes here: opens,
+flips, adds, trims and closes by the traders you follow, as notifications that land on the
+trader over the market's page. The server encrypts each message to the browser's keys and
+signs the request with the VAPID key (`_webpush.mjs`: RFC 8291 and 8292 with Node's crypto
+alone); browsers fetch the public key from `GET /api/alerts?job=key`. Endpoints are accepted
+only at the browser push services (Google, Apple, Mozilla, Microsoft). Unfollowing everyone
+removes the seat; turning alerts off unsubscribes the browser and keeps the list. Safari on a
+Mac, Chrome, Edge and Firefox receive these; on iPhone the handoff to Desk remains, where an
+alert can also copy the trade.
+
 ## Reference
 
 The structure follows Nova (`nov.ag`), read from its shipped bundle:
@@ -138,6 +159,11 @@ sizes in decimals: `{ market, at, bids: [{ price, size, orders }], asks: [...] }
 the market's instrument, ascending `{ time, open, high, low, close, volume }`, one-minute
 cache. A market without an instrument answers 404.
 
+`GET /api/alerts?job=key` — the VAPID public key browsers subscribe with. `POST /api/alerts`
+with `{ install, web: { endpoint, keys }, traders, names }` registers a browser's push
+subscription as a seat; the first registration is confirmed by a push to it, and
+`{ action: "unsubscribe", install }` removes it.
+
 ## Files
 
 ```
@@ -145,6 +171,8 @@ web/public/app/
   index.html        shell: sidebar, top bar, ticker, view, search, QR sheet
   app.css           tokens and components
   app.js            router, fetch, formatting, identity cache, shell behaviour
+  follows.js        the follow list, the bell, the alerts sheet, the push subscription
+  sw.js             service worker: receives push, opens the app on a click
   views/*.js        one module per page, default export mount(el, params) → unmount
   vendor/           lightweight-charts 4.2.3, qrcode-generator 1.4.4
 ```

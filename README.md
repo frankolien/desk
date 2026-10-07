@@ -56,6 +56,9 @@ Monad* and Perpl's *Best Use of Perpl's API*. Swift 6, SwiftUI, iOS 18.4+, iPhon
   with the same passkey, derives the same keys in the tab, shows the live book and your
   positions beside the chart, and places and closes orders through a relay that forwards
   your signed requests and cannot sign. Locked when you leave; nothing is stored.
+- **Follow and hear it in the browser too** — Follow a trader anywhere on the web app and
+  turn on alerts: the same scan that pushes to the phone pushes to the browser, tab closed
+  or not, through its own push service.
 
 ## Security, in one paragraph
 

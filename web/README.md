@@ -64,3 +64,22 @@ node -e "import('viem/accounts').then(({generatePrivateKey,privateKeyToAccount})
 Then send testnet MON to that address and redeploy. Each funded wallet costs about 0.13
 MON (the drip plus the AUSD claim's gas); the function keeps 0.05 back for gas and reports
 `faucet-empty` below that, and the app falls back to Monad's own faucet.
+
+## Browser alerts
+
+Web push needs a VAPID key pair, set only in Vercel: `VAPID_PUBLIC_KEY` and
+`VAPID_PRIVATE_KEY` (base64url, from `generateVapidKeys()` in `api/_webpush.mjs`) and
+`VAPID_SUBJECT` (`https://trydesk.trade`). Generate the pair without the private half ever
+being printed:
+
+```sh
+node -e "import('./api/_webpush.mjs').then(({generateVapidKeys})=>{const k=generateVapidKeys();require('fs').writeFileSync('/tmp/vapid-pub',k.publicKey,{mode:0o600});process.stdout.write(k.privateKey)})" \
+  | vercel env add VAPID_PRIVATE_KEY production
+vercel env add VAPID_PUBLIC_KEY production < /tmp/vapid-pub && rm /tmp/vapid-pub
+printf 'https://trydesk.trade' | vercel env add VAPID_SUBJECT production
+```
+
+Browsers subscribe with the public key, so rotating the pair makes every browser
+re-subscribe the next time it opens the app; nothing else breaks. Like the other
+credentials the keys exist only in Production, so a preview deployment answers the key
+route 503 and "Turn on alerts" says the server is not set up for it.
