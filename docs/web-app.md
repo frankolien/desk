@@ -31,11 +31,11 @@ Chain is Monad, collateral is AUSD, and perps are the first page.
 
 | Route | Page | Source |
 |---|---|---|
-| `/app`, `/app/trade/:market` | Trade. Market list on the left (watched markets first), chart in the middle, ticket on the right with News under it. Below the chart: Positions (the connected or watched wallet's open Perpl positions, this market first, Manage in Desk on each row), Crowd, Top traders, Trades. When the wallet holds this market, a line under the title says so with the PnL. | `/api/v1/markets`, `/api/v1/markets/{m}/candles`, `/api/traders?view=trader`, `?view=crowd`, `?view=top`, `/api/market-snapshot`, `?view=news` |
+| `/app`, `/app/trade/:market` | Trade. Market list on the left (watched markets first), chart in the middle, ticket on the right with the order book under it (nine levels a side, spread and mid, a depth bar behind each level) and News below that. The ticket's Est. fill walks the book for the size typed. Below the chart: Positions (the connected or watched wallet's open Perpl positions, this market first, Manage in Desk on each row), Crowd, Top traders, Trades. When the wallet holds this market, a line under the title says so with the PnL. | `/api/v1/markets`, `/api/v1/markets/{m}/candles`, `/api/traders?view=trader`, `?view=crowd`, `?view=top`, `/api/market-snapshot`, `?view=news` |
 | `/app/markets` | Perps table and Trending spot table with sparklines, risk chip, Trade button. Right rail: Signals. Footer: crowd lean bar. | `/api/v1/markets`, `/api/token-discovery`, `/api/traders?view=signals`, `?view=crowd` |
 | `/app/token/:chainIndex/:address` | Token page: header stats, chart, Trades and Holders with names and faces, Buy/Sell panel, Risk card. | `/api/token-details`, `?view=risk`, `/api/market-snapshot`, `/api/traders?view=identity` |
-| `/app/traders` | Leaderboard with names, open positions, PnL; Follow opens the app. | `/api/traders?view=top`, `?view=identity` |
-| `/app/wallet/:address`, `/app/portfolio` | The wallet page: Portfolio, PnL, Positions, Closed, Activity. Portfolio without an address asks for one, or reads the injected wallet's. | `/api/activity?view=wallet` |
+| `/app/traders` | Leaderboard with names, open positions, PnL; Follow opens the app. Any person anywhere opens in a drawer over the current page (positions, closed trades, win rate, Follow, Full page); `?person=0x…` on any route opens one. | `/api/traders?view=top`, `?view=identity`, `?view=trader`, `?view=history` |
+| `/app/wallet/:address`, `/app/portfolio` | The wallet page: PnL, Positions, Closed, Activity. Portfolio is the connected or watched wallet's own page, and asks to connect when there is none; another wallet's page is reached only by its address, from the drawer's Full page. | `/api/activity?view=wallet` |
 | Search (`/` key) | Tokens on every chain and people (`.nad`, `.eth`, `@handle`, address). | `/api/token-discovery?q=`, `/api/traders?view=lookup&q=` |
 
 ## Ticket
@@ -69,6 +69,9 @@ QR to it. Nothing on the web can move money.
 maxLeverage, priceDecimals, sizeDecimals, makerFee, takerFee, maintenanceMargin }`.
 Prices are decimal numbers. `fundingRate` is per interval as a fraction. Fees are in micros.
 
+`GET /api/v1/markets/{market}/book?levels=1..100` — Perpl's public L2 snapshot with prices and
+sizes in decimals: `{ market, at, bids: [{ price, size, orders }], asks: [...] }`, two-second cache.
+
 `GET /api/v1/markets/{market}/candles?bar=1m|5m|15m|1H|4H|1D` — OKX exchange candles for
 the market's instrument, ascending `{ time, open, high, low, close, volume }`, one-minute
 cache. A market without an instrument answers 404.
@@ -99,6 +102,7 @@ answers most of it:
 | Spot prices for a table or a token | `/api/token-details?view=prices&tokens=…` (one OKX call for 20 tokens, 3 s cache) | 4 s |
 | A token's tape | `/api/market-snapshot?…&limit=100`, 3 s cache | 5 s |
 | Candles | `/api/v1/markets/{m}/candles`, `/api/market-snapshot` | 15 s, with the last bar following ticks in between |
+| The order book | `/api/v1/markets/{m}/book?levels=9`, 2 s CDN cache. Perpl's market-data socket refuses browser origins other than its own, so the page tries it only as an upgrade | 2 s |
 | The wallet's positions | `/api/traders?view=trader&address=…`, private cache | 10 s |
 | News for the market | `/api/market-snapshot?view=news&symbols=…`, 5 min CDN cache | 5 min |
 
