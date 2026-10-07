@@ -1,4 +1,4 @@
-// Serves public/ on 8790 with /api/* proxied to production: node web/tools/serve.mjs
+// Serves public/ on 8790 with /api/* proxied to production (or DESK_API): node web/tools/serve.mjs
 import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { dirname, extname, join, normalize } from "node:path";
@@ -17,7 +17,16 @@ http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   if (url.pathname.startsWith("/api/")) {
     try {
-      const upstream = await fetch(UPSTREAM + url.pathname + url.search, { headers: { accept: "application/json" } });
+      // Method, body and the signed headers go through as they are: the relay forwards
+      // what the browser signed, so this proxy must not reshape it either.
+      const headers = { accept: "application/json" };
+      for (const name of ["content-type", "x-api-key", "x-api-timestamp", "x-api-nonce", "x-api-signature"]) {
+        if (req.headers[name]) headers[name] = req.headers[name];
+      }
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const body = chunks.length ? Buffer.concat(chunks) : undefined;
+      const upstream = await fetch(UPSTREAM + url.pathname + url.search, { method: req.method, headers, body: req.method === "GET" || req.method === "HEAD" ? undefined : body });
       res.writeHead(upstream.status, { "content-type": upstream.headers.get("content-type") ?? "application/json" });
       res.end(Buffer.from(await upstream.arrayBuffer()));
     } catch (error) {
