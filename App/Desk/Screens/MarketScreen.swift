@@ -106,7 +106,13 @@ struct MarketScreen: View {
                 await sparklines.load(discovery.trending)
             }
             .sheet(item: $article) { item in
-                if let link = item.link { InAppSafari(url: link).ignoresSafeArea() }
+                NewsArticleScreen(item: item, market: market) { symbol in
+                    article = nil
+                    // The sheet has to be gone before the market can be pushed under it.
+                    Task { try? await Task.sleep(for: .milliseconds(550)); open(symbol: symbol) }
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             }
             .task { await openRequestedMarket() }
             .onChange(of: MarketOpenRequest.shared.pending) { _, symbol in if symbol != nil { Task { await openRequestedMarket() } } }
@@ -117,6 +123,11 @@ struct MarketScreen: View {
                 if let index = arguments.firstIndex(of: "-open-market"), index + 1 < arguments.count { MarketOpenRequest.shared.open(arguments[index + 1]) }
             }
             .task { if ProcessInfo.processInfo.arguments.contains("-crowd-demo") { directory.seedCrowdForReview() } }
+            .task {
+                guard ProcessInfo.processInfo.arguments.contains("-open-news") else { return }
+                while news.items.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
+                article = news.items.first
+            }
             .task {
                 let arguments = ProcessInfo.processInfo.arguments
                 guard arguments.contains("-open-ticket") || arguments.contains("-open-studio") || arguments.contains("-open-detail") else { return }
