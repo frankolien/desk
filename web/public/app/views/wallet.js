@@ -58,9 +58,13 @@ const recent = () => { try { return JSON.parse(localStorage.getItem(RECENT_KEY) 
 const remember = (address) => { try { localStorage.setItem(RECENT_KEY, JSON.stringify([address, ...recent().filter((a) => a.toLowerCase() !== address.toLowerCase())].slice(0, 5))); } catch {} };
 
 export default async function mount(el, params) {
-  if (!params.address && connectedWallet()) { navigate(`/app/wallet/${connectedWallet().address}`, { replace: true }); return () => {}; }
-  if (!params.address) return mountPicker(el);
-  const address = params.address;
+  // Portfolio is yours: without an address in the URL it is the connected wallet, or a prompt
+  // to connect. Another wallet's page is only ever reached by its own address.
+  const own = !params.address;
+  if (own && !connectedWallet()) return mountConnect(el);
+  const address = params.address ?? connectedWallet().address;
+  const onWallet = () => { if (own) navigate("/app/portfolio", { replace: true }); };
+  document.addEventListener("wallet", onWallet);
   const isEvm = EVM.test(address);
   el.innerHTML = `${CSS}<div class="wl">
     <div class="wl-head"><div class="skel" style="width:68px;height:68px;border-radius:50%"></div><div class="wl-who"><div class="skel" style="width:180px;height:22px"></div><div class="skel" style="width:260px"></div></div></div>
@@ -112,7 +116,7 @@ export default async function mount(el, params) {
     <div class="wl-head">
       ${face}
       <div class="wl-who"><div class="wl-name">${esc(name)}</div><div class="wl-status">${status}</div></div>
-      ${isEvm ? `<button class="btn btn-line" type="button" data-follow>Follow in Desk</button>` : ""}
+      ${isEvm && !own ? `<button class="btn btn-line" type="button" data-follow>Follow in Desk</button>` : own ? `<span class="chip chip-brand" style="align-self:center">Your portfolio</span>` : ""}
     </div>
     <div class="wl-pnl">
       <div class="row-between"><span class="eyebrow">PNL</span>
@@ -263,51 +267,19 @@ export default async function mount(el, params) {
   });
   paintTab(tab0);
 
-  return () => { if (chart) chart.remove(); };
+  return () => { if (chart) chart.remove(); document.removeEventListener("wallet", onWallet); };
 }
 
-async function mountPicker(el) {
-  const list = recent();
+function mountConnect(el) {
   el.innerHTML = `${CSS}<div class="wl enter">
-    <div class="card card-pad stack">
+    <div class="card card-pad stack" style="gap:14px">
       <h2>Your portfolio</h2>
-      <form class="wl-open" data-form>
-        <label class="field"><input type="text" placeholder="0x…, name.nad, name.eth or @handle" autocomplete="off" spellcheck="false" autofocus></label>
-        <button class="btn btn-primary" type="submit">Open</button>
-        ${window.ethereum ? `<button class="btn btn-ghost" type="button" data-connected>Use connected wallet</button>` : ""}
-      </form>
-      <div class="sub" data-hint hidden></div>
-      ${list.length ? `<div class="stack" style="gap:6px"><span class="eyebrow">Recent</span><div class="wl-recent">${list.map((a) => person(a, undefined, { size: 28 })).join("")}</div></div>` : ""}
+      <p class="sub" style="margin:0">Connect a wallet, or watch an address, and your balances, positions and trades show here. Other traders open in a panel over whichever page you are on.</p>
+      <div class="row" style="gap:8px"><button class="btn btn-primary" type="button" data-connect-now>Connect</button></div>
     </div>
   </div>`;
-  hydratePeople(el);
-
-  const form = $("[data-form]", el);
-  const input = $("input", form);
-  const hint = $("[data-hint]", el);
-  const button = $("button[type=submit]", form);
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const q = input.value.trim();
-    if (!q) return;
-    if (EVM.test(q) || SOL.test(q)) return navigate(`/app/wallet/${q}`);
-    button.disabled = true;
-    hint.hidden = true;
-    try {
-      const out = await api(`/api/traders?view=lookup&q=${encodeURIComponent(q)}`, { ttl: 60_000 });
-      if (out?.address) return navigate(`/app/wallet/${out.address}`);
-      throw new Error("No wallet answers to that name.");
-    } catch (error) {
-      hint.textContent = error.message || "No wallet answers to that name.";
-      hint.hidden = false;
-    } finally {
-      button.disabled = false;
-    }
-  });
-  $("[data-connected]", el)?.addEventListener("click", async () => {
-    try {
-      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-      if (accounts?.[0]) navigate(`/app/wallet/${accounts[0]}`);
-    } catch {}
-  });
+  $("[data-connect-now]", el).addEventListener("click", () => $("#connect").click());
+  const onWallet = () => { if (connectedWallet()) navigate("/app/portfolio", { replace: true }); };
+  document.addEventListener("wallet", onWallet);
+  return () => document.removeEventListener("wallet", onWallet);
 }

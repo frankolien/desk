@@ -132,6 +132,25 @@
   </div>
 </div>
 
+<div class="overlay drawer" id="person" hidden>
+  <div class="sheet sheet-drawer sheet-person" role="dialog" aria-label="Trader">
+    <div class="person-head">
+      <div class="person-title" id="person-title"></div>
+      <button class="person-close" type="button" data-close aria-label="Close"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>
+    </div>
+    <div class="person-stats" id="person-stats"></div>
+    <div class="tabs person-tabs" id="person-tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-ptab="positions">Positions</button>
+      <button role="tab" data-ptab="closed">Closed</button>
+    </div>
+    <div class="person-body" id="person-body"></div>
+    <div class="person-foot">
+      <button class="btn btn-primary" type="button" id="person-follow">Follow in Desk</button>
+      <a class="btn btn-ghost" id="person-full" href="/app/portfolio" data-link>Full page</a>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 </body>
 </html>

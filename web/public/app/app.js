@@ -360,7 +360,7 @@ function startWallet() {
   const adopt = (address, via) => {
     setWallet({ address, via, at: Date.now() });
     close();
-    navigate(`/app/wallet/${address}`);
+    navigate("/app/portfolio");
   };
 
   sheet.addEventListener("click", async (event) => {
@@ -435,6 +435,8 @@ async function render() {
   const route = ROUTES.find((r) => r.pattern.test(path));
   if (!route) return navigate("/app", { replace: true });
   const params = { ...route.params(path.match(route.pattern)), query: Object.fromEntries(new URLSearchParams(location.search)) };
+  // ?person=0x… opens that trader's drawer over the page, so a trader can be linked to.
+  if (/^0x[0-9a-fA-F]{40}$/.test(params.query.person ?? "")) openPerson(params.query.person);
   const token = ++mountToken;
   if (unmount) { try { unmount(); } catch {} unmount = null; }
   for (const link of $$("#side-nav .side-link")) {
@@ -455,6 +457,12 @@ async function render() {
 }
 
 document.addEventListener("click", (event) => {
+  const who = event.target.closest("a.person[data-person]");
+  if (who && !event.metaKey && !event.ctrlKey && !event.shiftKey && event.button === 0) {
+    event.preventDefault();
+    openPerson(who.dataset.person);
+    return;
+  }
   const link = event.target.closest("a[data-link]");
   if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
   const url = new URL(link.href, location.origin);
@@ -562,7 +570,11 @@ function startSearch() {
     const row = event.target.closest(".search-row");
     if (!row) return;
     if (row.dataset.q) { input.value = row.dataset.q; input.dispatchEvent(new Event("input")); return; }
-    if (row.dataset.href) { close(); navigate(row.dataset.href); }
+    if (row.dataset.href) {
+      close();
+      const who = row.dataset.href.match(/^\/app\/wallet\/(0x[0-9a-fA-F]{40})$/);
+      if (who) openPerson(who[1]); else navigate(row.dataset.href);
+    }
   });
 
   let timer = null;
@@ -614,3 +626,110 @@ $("#handoff").addEventListener("click", (event) => { if (event.target === $("#ha
 startTicker();
 startSearch();
 render();
+
+// A trader in a drawer over the current page: who they are, what they hold on Perpl and
+// what they closed. The page underneath does not move; the full page is one tap away.
+
+let personAddress = null;
+let personTab = "positions";
+let personData = { trader: null, history: null, token: 0 };
+
+export function openPerson(address) {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address ?? "")) return;
+  personAddress = address;
+  personTab = "positions";
+  personData = { trader: null, history: null, token: personData.token + 1 };
+  const token = personData.token;
+  $("#person").hidden = false;
+  $("#person-full").setAttribute("href", `/app/wallet/${address}`);
+  $$("#person-tabs [data-ptab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.ptab === personTab)));
+  paintPersonHead();
+  paintPersonBody();
+  const id = knownIdentity(address);
+  if (!id) identity(address).then(() => { if (personData.token === token) paintPersonHead(); });
+  api(`/api/traders?view=trader&address=${encodeURIComponent(address)}`, { ttl: 10_000 })
+    .then((out) => { if (personData.token !== token) return; personData.trader = out.traders?.[0] ?? { positions: [] }; paintPersonHead(); paintPersonBody(); })
+    .catch(() => { if (personData.token === token) { personData.trader = { positions: [], failed: true }; paintPersonBody(); } });
+  api(`/api/traders?view=history&address=${encodeURIComponent(address)}`, { ttl: 120_000 })
+    .then((out) => { if (personData.token !== token) return; personData.history = out ?? { trades: [] }; paintPersonHead(); if (personTab === "closed") paintPersonBody(); })
+    .catch(() => { if (personData.token === token) { personData.history = { trades: [] }; if (personTab === "closed") paintPersonBody(); } });
+}
+
+export function closePerson() {
+  $("#person").hidden = true;
+  personAddress = null;
+}
+
+function paintPersonHead() {
+  if (!personAddress) return;
+  const id = knownIdentity(personAddress);
+  const t = personData.trader;
+  const stats = personData.history?.stats;
+  $("#person-title").innerHTML = `${person(personAddress, id, { size: 44, via: true, link: false })}
+    <div class="sub">${t?.accountId != null ? `<span class="chip chip-brand" style="height:22px;font-size:11px">Perpl #${esc(t.accountId)}</span>` : ""}${id?.name ? `<span class="addr">${esc(short(personAddress))}</span>` : ""}</div>`;
+  const value = t ? t.positions.reduce((sum, p) => sum + Number(p.value || 0), 0) : null;
+  const pnl = t ? t.positions.reduce((sum, p) => sum + Number(p.pnl || 0), 0) : null;
+  $("#person-stats").innerHTML = `
+    <div class="person-stat"><span>Open value</span><b class="num">${value == null ? "—" : fmtUsd(value, { compact: true })}</b></div>
+    <div class="person-stat"><span>Open PnL</span><b class="num ${pnl == null ? "muted" : dirClass(pnl)}">${pnl == null ? "—" : fmtUsd(pnl, { sign: true, compact: true })}</b></div>
+    <div class="person-stat"><span>Win rate</span><b class="num">${stats?.winRate == null ? "—" : fmtPct(stats.winRate, { sign: false, digits: 0 })}</b></div>`;
+}
+
+function paintPersonBody() {
+  const body = $("#person-body");
+  if (!personAddress) return;
+  const decimals = (name) => marketsNow.find((m) => m.name === name)?.priceDecimals ?? 2;
+  if (personTab === "positions") {
+    const t = personData.trader;
+    if (!t) { body.innerHTML = `<div class="skel-row"><div class="skel"></div><div class="skel"></div></div><div class="skel-row"><div class="skel"></div><div class="skel"></div></div>`; return; }
+    if (t.unreadable || t.failed) { body.innerHTML = `<div class="empty">Perpl could not be read right now.</div>`; return; }
+    if (!t.positions.length) { body.innerHTML = `<div class="empty">No open positions on Perpl.</div>`; return; }
+    body.innerHTML = [...t.positions].sort((a, b) => Number(b.value) - Number(a.value)).map((p) => {
+      const pnl = Number(p.pnl); const d = decimals(p.market);
+      return `<a class="person-row" href="/app/trade/${esc(p.market)}" data-link>
+        <span class="mkt">${logo(MARKET_LOGOS[p.market], p.market, 18)}${esc(p.market)} <span class="side-chip ${p.side}">${p.side} ${p.leverage ?? "—"}×</span></span>
+        <b class="num ${dirClass(pnl)}">${fmtUsd(pnl, { sign: true })}</b>
+        <span class="meta"><span>${fmtUsd(p.value, { compact: true })}</span><span>entry ${fmtPrice(Number(p.entry), d)}</span><span>mark ${fmtPrice(Number(p.mark), d)}</span>${p.pnlPercent == null ? "" : `<span class="${dirClass(pnl)}">${fmtPct(p.pnlPercent / 100)}</span>`}</span>
+      </a>`;
+    }).join("");
+    return;
+  }
+  const h = personData.history;
+  if (!h) { body.innerHTML = `<div class="skel-row"><div class="skel"></div><div class="skel"></div></div>`; return; }
+  const trades = (h.trades ?? []).slice(0, 20);
+  if (!trades.length) { body.innerHTML = `<div class="empty">No closed trades on record.</div>`; return; }
+  const s = h.stats;
+  const line = s?.trades ? `<div class="meta" style="padding:6px 0 10px;font-size:11px;color:var(--muted)">${s.trades} trades · realised <b class="${dirClass(s.realised)}">${fmtUsd(s.realised, { sign: true, compact: true })}</b>${s.liquidations ? ` · <b class="down">${s.liquidations} liquidated</b>` : ""}</div>` : "";
+  body.innerHTML = line + trades.map((x) => {
+    const pnl = Number(x.pnl); const d = decimals(x.market);
+    return `<div class="person-row">
+      <span class="mkt">${logo(MARKET_LOGOS[x.market], x.market, 18)}${esc(x.market)} <span class="side-chip ${x.side}">${x.side}${x.leverage ? ` ${Number(x.leverage).toFixed(1)}×` : ""}</span></span>
+      <b class="num ${dirClass(pnl)}">${fmtUsd(pnl, { sign: true })}</b>
+      <span class="meta"><span>${fmtPrice(Number(x.entry), d)} → ${fmtPrice(Number(x.exit), d)}</span><span>${ago(Number(x.time))}</span>${x.liquidated ? `<span class="down">liquidated</span>` : ""}</span>
+    </div>`;
+  }).join("");
+}
+
+function startPerson() {
+  const overlay = $("#person");
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay || event.target.closest("[data-close]")) { closePerson(); return; }
+    const tab = event.target.closest("[data-ptab]");
+    if (tab) {
+      personTab = tab.dataset.ptab;
+      $$("#person-tabs [data-ptab]").forEach((b) => b.setAttribute("aria-selected", String(b === tab)));
+      paintPersonBody();
+      return;
+    }
+    if (event.target.closest("#person-follow")) {
+      const name = knownIdentity(personAddress)?.name ?? short(personAddress);
+      closePerson();
+      handoff({ title: `Follow ${name} in Desk`, sub: "Following sends you an alert when they trade. Auto-Copy in Desk copies them under your rules." });
+      return;
+    }
+    // A link inside the drawer (a market, the full page) navigates; the drawer leaves first.
+    if (event.target.closest("a[data-link]")) closePerson();
+  });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !overlay.hidden) closePerson(); });
+}
+startPerson();
