@@ -14,6 +14,19 @@ The domain is **desk-trading-opia.vercel.app**, a stable alias on the team's `we
 project. The earlier `desk-trading.vercel.app` deployment belongs to another Vercel
 account and cannot be updated by this project.
 
+The alias is **pinned to one deployment** and does not follow production: a bad deploy
+cannot touch the relying party, and in return the alias has to be moved by hand whenever
+something under `/.well-known` changes (it carries `apple-app-site-association` for the
+app's passkeys and `webauthn`, the related-origins file that lets trydesk.trade use them).
+After such a deploy:
+
+```sh
+vercel alias set <new deployment url> desk-trading-opia.vercel.app
+tools/check-relying-party.sh      # must still PASS, same association file
+```
+
+`vercel inspect desk-trading-opia.vercel.app` says which deployment it resolves to.
+
 Deployment Protection must stay off. With it on, Vercel answers 302 to an SSO page, and
 that is the redirect Apple refuses to follow while a browser follows it silently.
 
