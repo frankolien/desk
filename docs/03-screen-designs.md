@@ -356,6 +356,11 @@ the tap, and the prompt only authorises what was already decided.
 **Never blank on a bad network.** The last good figure with a note on its age. A zero
 position during a reconnect causes a panic sell.
 
+**Nobody leaves the screen they are trading from.** Another trader's profile, the desk's
+own positions and a single position all present as sheets over the screen that opened
+them, never as a push that hides the tab bar. A sheet closes with a cross or a drag and
+the chart is still where it was.
+
 **Accessibility.** A ticking price is marked `.updatesFrequently`, which tells assistive
 technology to poll rather than be interrupted; iOS has no live-region equivalent and
 this is the documented answer. Announcements are reserved for discrete events — filled,

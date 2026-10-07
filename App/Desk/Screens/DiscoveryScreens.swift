@@ -2380,12 +2380,14 @@ private struct WalletProfileScreen: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .navigationDestination(isPresented: $showsPerpl) {
+        .sheet(isPresented: $showsPerpl) {
             if let copier = CopyTrader.current {
                 TraderProfileScreen(
                     initial: TraderSnapshot(accountId: identity?.perplAccount, address: wallet.address,
                                             pnl: nil, balance: nil, positions: []),
-                    directory: perplDirectory, copier: copier, onCopy: { _ in })
+                    directory: perplDirectory, copier: copier, asSheet: true, onCopy: { _ in })
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
             }
         }
         .alert("Name this wallet", isPresented: $naming) {

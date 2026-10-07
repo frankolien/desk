@@ -788,6 +788,8 @@ struct TraderProfileScreen: View {
     let initial: TraderSnapshot
     let directory: TraderDirectory
     let copier: CopyTrader
+    /// Presented over the screen that opened it rather than pushed, so the close is a cross.
+    var asSheet = false
     let onCopy: (TraderPosition) -> Void
 
     private enum Tab: String, CaseIterable { case positions = "Positions", closed = "Closed", stats = "Stats" }
@@ -926,7 +928,7 @@ struct TraderProfileScreen: View {
 
     private var topBar: some View {
         HStack {
-            circleButton("chevron.left") { dismiss() }
+            circleButton(asSheet ? "xmark" : "chevron.left") { dismiss() }
             Spacer()
             ShareLink(item: explorerURL, message: Text("\(directory.name(for: trader.address)) on Perpl")) {
                 Image(systemName: "square.and.arrow.up")

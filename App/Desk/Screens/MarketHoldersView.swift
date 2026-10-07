@@ -228,11 +228,13 @@ struct HolderPositionSheet: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(isPresented: $showsProfile) {
+            .sheet(isPresented: $showsProfile) {
                 if let copier = CopyTrader.current, let address = holder.address {
                     TraderProfileScreen(
                         initial: TraderSnapshot(accountId: holder.accountId, address: address, pnl: nil, balance: nil, positions: []),
-                        directory: directory, copier: copier, onCopy: { _ in })
+                        directory: directory, copier: copier, asSheet: true, onCopy: { _ in })
+                        .presentationDetents([.large])
+                        .presentationDragIndicator(.visible)
                 }
             }
             .task {

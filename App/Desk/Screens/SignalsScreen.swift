@@ -176,9 +176,18 @@ struct SignalsScreen: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
-            .navigationDestination(item: $selectedTrader) { trader in
-                TraderProfileScreen(initial: trader, directory: directory, copier: copier) { copy($0) }
-                    .toolbar(.hidden, for: .tabBar)
+            .sheet(item: $selectedTrader) { trader in
+                TraderProfileScreen(initial: trader, directory: directory, copier: copier, asSheet: true) { position in
+                    selectedTrader = nil
+                    // The copy ticket is a sheet too; it waits for this one to leave.
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(550))
+                        copy(market: position.market, isLong: position.isLong, leverage: position.leverage,
+                             trader: trader.address, entry: position.entry, pnlPercent: position.pnlPercent)
+                    }
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             }
             .navigationDestination(isPresented: $showsMarket) {
                 PerpDetailScreen(

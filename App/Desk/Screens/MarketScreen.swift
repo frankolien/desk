@@ -86,12 +86,14 @@ struct MarketScreen: View {
                     })
                     .toolbar(.hidden, for: .tabBar)
             }
-            .navigationDestination(item: $selectedTrader) { trader in
-                TraderProfileScreen(initial: trader, directory: directory, copier: copier) { position in
+            .sheet(item: $selectedTrader) { trader in
+                TraderProfileScreen(initial: trader, directory: directory, copier: copier, asSheet: true) { position in
                     selectedTrader = nil
-                    open(symbol: position.market)
+                    // The sheet has to be gone before the market can be pushed under it.
+                    Task { try? await Task.sleep(for: .milliseconds(550)); open(symbol: position.market) }
                 }
-                .toolbar(.hidden, for: .tabBar)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             }
             .navigationDestination(item: $openToken) { target in
                 SpotTokenPage(target: target, model: model)
