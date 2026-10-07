@@ -76,3 +76,68 @@ Perps are leveraged, so nothing we post implies returns: "copy the traders who a
 SEQUENCE
 
 During Metropolis: the TestFlight build, the launch thread, the first trader outreach, and the demo recorded on mainnet with real money. Through judging: weekly Perpl snapshots, cards from testers, the App Hub listing. After: App Store release, per-trader public pages, and the share-card loop running on its own.
+
+---
+
+# Agora bounty · Describe the core features of your trading app
+
+Plain text for the Agora field (limit 8,000 characters). The brief asks how the app integrates
+Mera passkeys, an AUSD balance and Perpl execution.
+
+---
+
+Desk is a native iPhone app for perpetuals on Monad, with the same account open in a browser at trydesk.trade. The three things the bounty asks about are not features bolted on; they are the whole shape of the app.
+
+MERA: THE PASSKEY IS THE ACCOUNT
+
+Create account is one tap and Face ID. A passkey is created on the device and its PRF output is the seed of everything: a fixed salt turns it into entropy, from which Desk derives the wallet that holds your AUSD (secp256k1, the standard Ethereum path) and the key that signs your orders (Ed25519, the key type Perpl's API expects). Nothing is typed, backed up or copied; there is no seed phrase, no wallet app and no extension.
+
+The two keys are handled differently on purpose. The wallet key, which can move AUSD, is derived again for each transaction and never stored. The order key, which can place and close orders but cannot withdraw, is sealed in the keychain to the current Face ID enrolment of this iPhone and leaves memory when Desk locks or the phone locks. Signing is hold-to-confirm plus Face ID on every order. No server can trade for anyone, including ours: the server never holds a key.
+
+Because the passkey lives in iCloud Keychain, the same account opens on the user's other Apple devices and in a browser. trydesk.trade/app signs in with the same passkey through WebAuthn's PRF extension against the app's relying party, which names trydesk.trade as a related origin, derives the same wallet and the same trading key in the tab, and wipes them on lock, idle or close. One credential, phone and browser, and the browser shows the same address, the same positions and the same AUSD.
+
+Onboarding says the hard truth in plain words: lose the phone and its iCloud backup and the funds are gone.
+
+AUSD: THE ONLY MONEY YOU SEE
+
+The balance is AUSD, and only AUSD. Desk reads the wallet's AUSD from the token contract and what is in trading from the Perpl exchange account, and shows both: Wallet, In trading, and the total. The user can show the figure in nineteen currencies, dollars, euros, naira, cedi and more, through a rates function; trading itself stays in AUSD. Every figure rounds the way that costs the user, and any figure that cannot be read says so instead of showing a stale number or a zero.
+
+Funding is a guided screen, not a list of links. Receive gives the address and a QR. Swap MON for AUSD quotes a route through 0x, simulates it on Monad and only then asks for Face ID; nothing is approved and only the MON sent can move. The swap runs the other way too, AUSD back to MON when a token buy needs gas, approving exactly the typed amount and nothing more. Open desk then sets up the Perpl account under one Face ID: approve the AUSD, create the account with the deposit, and allow the order key to forward orders. Deposit alerts tell the user the moment AUSD lands in the wallet. Withdraw moves AUSD back out with a receipt for every step on Monad's explorer. On testnet, Desk fetches test MON and claims 10,000 test AUSD from Agora's faucet contract itself, so a new tester is trading in a minute.
+
+PERPL: WHERE EVERY TRADE RUNS
+
+Orders are signed on the device with the passkey-derived key, which is enrolled with Perpl by an EIP-712 registration the wallet signs, and sent over Perpl's websocket. Each one is tracked frame by frame to a terminal phase: settled, rejected with a reason in plain words, or expired. A market order is immediate-or-cancel within a slippage limit, so it fills at once or not at all. The ticket reads like a checkout before anything is signed: margin, liquidation price, fee, total, and the price Perpl's live order book would fill at. Positions update live with the distance to liquidation; closing is a checkout too, with the AUSD coming back. The user's position sits under the chart and the whole desk slides up over it, so nothing takes a trader off the market.
+
+Perpl is also the data. The leaderboard is read off the exchange contract. Trade history and a score out of 100 are indexed from the chain's own position events through Envio HyperSync, weighted by the money at risk so dust scalpers do not outrank real traders. Follow a trader and Desk pushes an alert the moment they open, add, trim or close, with Copy Trade on the notification. Copy them or fade them, in shadow first, with fixed or conviction sizing, a leverage cap, price protection, stops and take profits placed on Perpl itself, daily loss limits and per-market exposure caps. A websocket on Monad's RPC watches the exchange contract's position events, so a copy wakes as soon as the trader's block lands. Each market has its order book, its crowd of holders, its news read inside the app, and a chat room.
+
+AROUND IT
+
+Tokens on Monad and other EVM chains, bought with MON, with live tapes, holders and wallet profiles you can follow with alert thresholds. Home and Lock Screen widgets, a Live Activity in the Dynamic Island with a working pause, a Control Center toggle and Siri phrases. Swift 6 and SwiftUI on iOS 18.4+, Apple's own controls, Liquid Glass on iOS 26. 542 Swift tests and 265 server tests. Everything in the demo video happens on Monad mainnet with real money.
+
+---
+
+# Judge access instructions (private)
+
+Plain text for the optional field. Passkeys are per device, so there is no shared login to hand
+over; the steps below create a judge's own account in about a minute.
+
+---
+
+IPHONE
+
+1. Install Desk from TestFlight: https://testflight.apple.com/join/zjQdZzMX (iOS 18.4 or later, iPhone).
+2. Open Desk and tap "New here? Create an account". Face ID creates a passkey and the wallet on your device. There is no password and no seed phrase, so there are no test credentials to share; every judge gets their own account this way.
+3. Pick a network in Settings > Network. Monad testnet is free: the Fund screen fetches test MON for fees and claims 10,000 test AUSD from Agora's faucet for you, then Open desk sets up the Perpl account under one Face ID. Monad mainnet ("Use real funds") works the same way with real AUSD: send at least 10 AUSD, or MON to swap in the app, to the address shown.
+4. Trade: Home > any market > Long or Short, type an amount, set leverage, hold to confirm, Face ID. The position appears under the chart and in Your desk (the briefcase); close it from there.
+5. Follow and copy: Signals > Top traders. Open a trader, Follow, then Auto-Copy with Shadow selected. Shadow copies price at the real mark and send nothing.
+6. Everything else is on the tabs: tokens and wallets on Search, alerts and copying on Signals, balance, Add funds and Withdraw on Profile.
+
+BROWSER
+
+https://trydesk.trade/app needs no account to browse: markets with the live order book, the leaderboard, trader pages and token pages. To sign in, use Safari on a Mac signed into the same iCloud account as the iPhone (the passkey is there), or "Create an account" in the browser for a fresh one. Trading in the browser runs on Monad mainnet only.
+
+CODE AND TESTS
+
+Repository: https://github.com/frankolien/desk. Swift tests: swift test --package-path DeskKit (542 tests, no simulator needed). Server tests: cd web && node --test (265 tests). Build the app with xcodegen generate && open Desk.xcodeproj, scheme Desk. The public API is listed at https://trydesk.trade/api/v1.
+
+The demo video was recorded on Monad mainnet with real money; the explorer links for its trades are in docs/submission.md in the repository.
