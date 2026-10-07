@@ -52,6 +52,10 @@ Monad* and Perpl's *Best Use of Perpl's API*. Swift 6, SwiftUI, iOS 18.4+, iPhon
   one feed, with alerts, and a Watchlist and Market view on Signals.
 - **Talk in the market, read the news** — a chat room per market, and headlines that
   mention a market. A story opens as a page inside Desk, never in Safari.
+- **Trade from a browser too** — [trydesk.trade/app](https://trydesk.trade/app) signs in
+  with the same passkey, derives the same keys in the tab, shows the live book and your
+  positions beside the chart, and places and closes orders through a relay that forwards
+  your signed requests and cannot sign. Locked when you leave; nothing is stored.
 
 ## Security, in one paragraph
 

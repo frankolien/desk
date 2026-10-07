@@ -2,8 +2,10 @@
 
 `trydesk.trade/app` is the desk in a browser: the same Perpl markets, the same spot
 discovery, the same traders and wallets as the iPhone app, read from the same functions.
-The web does not sign. Every order still happens in the app with Face ID; the web hands
-the order over with the market, side, size and leverage already chosen.
+Signed in with the passkey, it trades: the browser derives the same keys the phone does,
+signs every Perpl request itself and sends it through the API's relay, which forwards it
+unchanged and cannot sign. Without a passkey session the web is read-only, and the ticket
+hands the order to the app with the market, side, size and leverage already chosen.
 
 ## Sign in
 
@@ -23,6 +25,47 @@ makes the passkey here; on an iPhone with the same iCloud account the app then s
 
 The cryptography (`@noble`, `@scure`, a slice of viem) is bundled once into
 `public/app/vendor/desk-crypto.js` from `tools/crypto-entry.mjs`; the command is in that file.
+
+## Trading
+
+The big button says what it will do. Without a wallet: **Connect wallet**. With a watched or
+browser wallet: **Long BTC in Desk**, the app handoff. With a passkey account whose keys left
+the tab: **Unlock to trade**. Unlocked but this browser has no Perpl key yet: **Set up trading
+here**, which asks the chain whether the wallet has an account; with one, a single public
+enrolment signed by the wallet and the trading key follows, nothing deposited. Without one
+Perpl will not enrol a key, so the desk card opens instead: **Open your desk**.
+Otherwise **Long BTC**.
+
+An order is a market order, immediate-or-cancel within 50 basis points (or the market's cap),
+built the way `OrderBuilder.market` builds it: `t` 1 or 2, `p` 0, `fl` 4, `lv` in hundredths,
+`lb` 0, `ms` the bound, `rq` one past the account's last forwarded id. It is signed with the
+trading key over `[143, POST, /v1/trading/orders, timestamp, nonce, sha256(body)]` and posted
+through `/api/v1/perpl/trading/orders`. Perpl answers accepted or refused at once; the page
+then reads `/v1/trading/positions` once a second for up to twelve seconds and reports the fill
+it finds, or says that none has shown. Closes use types 3 and 4 with leverage 100 and the
+position's whole size. While the keys are in the tab the Positions tab reads the desk's own
+positions from Perpl with a **Close** on each, and the line under the title uses them too.
+
+The desk card under the ticket shows the account's collateral, the wallet's AUSD and **Add
+funds** (approve if the allowance is short, then `depositCollateral`). Without an account it
+is the opening form: approve, `createAccount(deposit)`, `allowOrderForwarding(true)`, then the
+key enrolment, each step with its receipt. Transactions are signed by the wallet key in the
+tab and sent to `rpc.monad.xyz` with DeskChain's gas policy (estimate padded 7.5%, never
+doubled). Withdrawals stay in the app for now.
+
+The API key: `POST /v1/api-key/payload` with the trading key's public key, scope 3 and the
+label "Desk on the web"; the typed data and mac come back and go into `/v1/api-key/enroll`
+byte for byte, with the wallet's EIP-712 signature and the trading key's proof of possession
+over the same digest. The token is kept in this browser per wallet, the way the phone keeps
+its own in the keychain, and is useless without the trading key. Perpl never re-enrols a
+revoked key, so a refusal moves to the next derived index inside the session.
+
+The relay, `GET|POST /api/v1/perpl/{path}`, forwards only `pub/context`, `trading/*` and
+`api-key/*`, copies the four signed headers and the body as received (the page sends it as
+`text/plain` so nothing re-parses it), returns Perpl's status and body as they came, and
+caches nothing. Perpl refuses browser origins other than its own and answers its trading
+endpoints with 451 from United States addresses, which is why the relay exists and why the
+functions are pinned to Frankfurt (`regions` in `vercel.json`).
 
 ## Reference
 

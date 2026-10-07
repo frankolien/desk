@@ -53,6 +53,16 @@ Four tabs.
 | Signals | Following, Top traders, Watchlist and Market; wallet movements; trader profiles as sheets over the screen, scores and copy rules; the Auto-Copy hub with its result, open copies, history and limits |
 | Profile | The AUSD balance, open and closed positions, Add funds, Withdraw, activity, and Settings with the network switch |
 
+### The same account in a browser
+
+`trydesk.trade/app` signs in with the same passkey (WebAuthn with the PRF extension against
+the app's relying party, which names trydesk.trade as a related origin), derives the same
+wallet and trading key in the tab, and trades: a live order book and the desk's own positions
+beside the chart, orders signed in the browser and forwarded by a relay that cannot sign,
+opening and funding a desk from the wallet, closes with one tap. Keys live in memory for the
+tab and are wiped on lock, idle or close. The relay exists because Perpl refuses browser
+origins and answers its trading endpoints with 451 from United States datacenters.
+
 ### Beyond the app itself
 
 Push alerts for the traders you follow, with **Copy Trade**, **View Trader** and **Mute This
