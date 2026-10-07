@@ -1547,6 +1547,7 @@ private struct SpotBuyTicket: View {
     @StateObject private var purchase = SpotPurchaseModel()
     @State private var amount = ""
     @State private var copiedAddress = false
+    @State private var showsSwap = false
 
     /// Covers `depositNative`'s gas, about 38,000 at mainnet's fee, several times over.
     private static let gasReserve = NativeAmount(decimalText: "0.01")!
@@ -1585,6 +1586,9 @@ private struct SpotBuyTicket: View {
             await purchase.quote(token: token, amount: amount, user: address)
         }
         .interactiveDismissDisabled(purchase.phase.isActive)
+        .sheet(isPresented: $showsSwap, onDismiss: { Task { await model.refreshMainnetMON() } }) {
+            SwapSheet(model: model, direction: .toMON) { showsSwap = false }
+        }
     }
 
     private var header: some View {
@@ -1736,6 +1740,14 @@ private struct SpotBuyTicket: View {
         } else if lacksFunds {
             VStack(spacing: 8) {
                 statusCapsule("Not enough MON on Monad mainnet")
+                if model.swappableAUSD != nil {
+                    Button { showsSwap = true } label: {
+                        Label("Swap AUSD for MON", systemImage: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .frame(maxWidth: .infinity).frame(height: 36).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.primary)
+                }
                 Button {
                     model.copyAddress()
                     copiedAddress = true

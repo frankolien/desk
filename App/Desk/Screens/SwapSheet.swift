@@ -4,22 +4,52 @@ import DeskMoney
 import DeskUI
 import SwiftUI
 
+/// Which way the swap runs. MON buys AUSD for the desk; AUSD buys MON for gas and tokens.
+enum SwapDirection: Hashable {
+    case toAUSD, toMON
+
+    var pays: String { self == .toAUSD ? "MON" : "AUSD" }
+    var receives: String { self == .toAUSD ? "AUSD" : "MON" }
+    var title: String { "Swap \(pays) for \(receives)" }
+}
+
 struct SwapSheet: View {
     let model: AppModel
     let onClose: () -> Void
 
+    @State private var direction: SwapDirection
     @State private var flow = SwapModel()
     @State private var amount = ""
     @State private var quoting: Task<Void, Never>?
     @State private var receiptShown = false
 
-    private var available: NativeAmount { model.swappableMON ?? .zero }
-    private var typed: NativeAmount? {
-        guard let value = NativeAmount(decimalText: amount.isEmpty ? "0" : amount), !value.isZero else { return nil }
+    init(model: AppModel, direction: SwapDirection = .toAUSD, onClose: @escaping () -> Void) {
+        self.model = model
+        self.onClose = onClose
+        _direction = State(initialValue: direction)
+    }
+
+    /// Two fees when AUSD is sold, the approval and the swap, so a little MON must already be there.
+    private static let feeFloor = NativeAmount(decimalText: "0.02") ?? .zero
+
+    private var availableMON: NativeAmount { model.swappableMON ?? .zero }
+    private var availableAUSD: Money { model.swappableAUSD ?? .zero }
+    private var typedMON: NativeAmount? {
+        guard direction == .toAUSD, let value = NativeAmount(decimalText: amount.isEmpty ? "0" : amount), !value.isZero else { return nil }
         return value
     }
-    private var tooMuch: Bool { typed.map { $0 > available } ?? false }
-    private var canSwap: Bool { typed != nil && !tooMuch && flow.quoted != nil && !flow.phase.isActive && !flow.isQuoting }
+    private var typedAUSD: Money? {
+        guard direction == .toMON, let value = Money(text: amount.isEmpty ? "0" : amount), !value.isZero else { return nil }
+        return value
+    }
+    private var hasAmount: Bool { typedMON != nil || typedAUSD != nil }
+    private var tooMuch: Bool {
+        if let typedMON { return typedMON > availableMON }
+        if let typedAUSD { return availableAUSD < typedAUSD }
+        return false
+    }
+    private var lacksGas: Bool { direction == .toMON && (model.walletMON.value ?? .zero) < Self.feeFloor }
+    private var canSwap: Bool { hasAmount && !tooMuch && !lacksGas && flow.quoted != nil && !flow.phase.isActive && !flow.isQuoting }
 
     var body: some View {
         ZStack {
@@ -27,8 +57,9 @@ struct SwapSheet: View {
             VStack(alignment: .leading, spacing: 0) {
                 header
                 switch flow.phase {
-                case .done(let receipt): done(receipt)
-                case .checking, .signing, .sending: progress
+                case .done(let receipt): done(hash: receipt.hash, received: receipt.received.display(), unit: "AUSD")
+                case .doneMON(let receipt): done(hash: receipt.hash, received: receipt.received.display(fractionDigits: 3), unit: "MON")
+                case .checking, .signing, .approving, .sending: progress
                 default: entry
                 }
             }
@@ -40,19 +71,32 @@ struct SwapSheet: View {
         .onChange(of: amount) { _, text in
             quoting?.cancel()
             guard let wallet = model.address else { return }
-            quoting = Task { await flow.quote(amount: text, user: wallet) }
+            quoting = Task { await flow.quote(amount: text, direction: direction, user: wallet) }
+        }
+        .onChange(of: direction) { _, _ in
+            quoting?.cancel()
+            amount = ""
+            flow.reset()
         }
         .task { await model.refreshBalances() }
         #if DEBUG
         .task { if ProcessInfo.processInfo.arguments.contains("-swap-demo") { amount = "500" } }
+        .task {
+            // The direction change clears the amount, so the amount follows it.
+            guard ProcessInfo.processInfo.arguments.contains("-swap-back-demo") else { return }
+            direction = .toMON
+            try? await Task.sleep(for: .milliseconds(80))
+            amount = "25"
+        }
         #endif
     }
 
     private var header: some View {
         HStack {
-            Text("Swap MON for AUSD")
+            Text(direction.title)
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .foregroundStyle(DeskColor.nightText.color)
+                .contentTransition(.numericText())
             Spacer()
             Button(action: onClose) {
                 Image(systemName: "xmark")
@@ -70,20 +114,25 @@ struct SwapSheet: View {
 
     private var entry: some View {
         VStack(alignment: .leading, spacing: 0) {
+            Picker("Direction", selection: $direction) {
+                Text("MON → AUSD").tag(SwapDirection.toAUSD)
+                Text("AUSD → MON").tag(SwapDirection.toMON)
+            }
+            .pickerStyle(.segmented)
+            .padding(.top, 14)
+
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 AmountText(amount.isEmpty ? "0" : amount, size: 44,
                            colour: tooMuch ? DeskColor.fall : DeskColor.nightText)
-                Text("MON")
+                Text(direction.pays)
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
             }
-            .padding(.top, 20)
+            .padding(.top, 18)
 
-            Text(tooMuch
-                 ? "More than the \(available.display(fractionDigits: 2)) MON available"
-                 : "\(available.display(fractionDigits: 2)) MON available · \(AppModel.gasReserve.display(fractionDigits: 2)) kept for fees")
+            Text(availableLine)
                 .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(tooMuch ? DeskColor.fall.color : DeskColor.nightMuted.color)
+                .foregroundStyle(tooMuch || lacksGas ? DeskColor.fall.color : DeskColor.nightMuted.color)
                 .padding(.top, 2)
 
             HStack(spacing: 8) {
@@ -118,16 +167,29 @@ struct SwapSheet: View {
             }
 
             HoldToConfirm(title: holdTitle, tint: DeskColor.action, isEnabled: canSwap) {
-                guard let typed else { return }
-                Task { await flow.swap(typed: typed, amount: amount, model: model) }
+                Task { await flow.swap(direction: direction, amount: amount, typedMON: typedMON, typedAUSD: typedAUSD, model: model) }
             }
+        }
+    }
+
+    private var availableLine: String {
+        switch direction {
+        case .toAUSD:
+            return tooMuch
+                ? "More than the \(availableMON.display(fractionDigits: 2)) MON available"
+                : "\(availableMON.display(fractionDigits: 2)) MON available · \(AppModel.gasReserve.display(fractionDigits: 2)) kept for fees"
+        case .toMON:
+            if lacksGas { return "Needs about \(Self.feeFloor.display(fractionDigits: 2)) MON in the wallet for the two fees" }
+            return tooMuch
+                ? "More than the \(availableAUSD.display()) AUSD in your wallet"
+                : "\(availableAUSD.display()) AUSD in your wallet · fees are paid in MON"
         }
     }
 
     private var summary: some View {
         VStack(spacing: 6) {
-            row("You receive", flow.quoted.map { "≈ \(Self.ausd($0.receive.amount)) AUSD" } ?? (flow.isQuoting ? "Quoting…" : "—"))
-            row("At least", flow.quoted.map { "\(Self.ausd($0.receive.minimum ?? $0.receive.amount)) AUSD" } ?? "—")
+            row("You receive", flow.quoted.map { "≈ \(Self.received($0.receive.amount, direction)) \(direction.receives)" } ?? (flow.isQuoting ? "Quoting…" : "—"))
+            row("At least", flow.quoted.map { "\(Self.received($0.receive.minimum ?? $0.receive.amount, direction)) \(direction.receives)" } ?? "—")
             row("Network fee", flow.quoted.map { "≈ \(Self.mon($0.feeMON)) MON" } ?? "—")
             if let problem = flow.quoteError {
                 Label(problem, systemImage: "exclamationmark.circle.fill")
@@ -135,7 +197,9 @@ struct SwapSheet: View {
                     .foregroundStyle(DeskColor.action.color)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                Label("Checked on Monad before Face ID signs it. Nothing is approved; only the MON you send can move.",
+                Label(direction == .toAUSD
+                      ? "Checked on Monad before Face ID signs it. Nothing is approved; only the MON you send can move."
+                      : "Checked on Monad before Face ID signs it. Only the AUSD you approve for this swap can move.",
                       systemImage: "checkmark.shield.fill")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
@@ -145,10 +209,17 @@ struct SwapSheet: View {
     }
 
     private var holdTitle: String {
-        guard let typed else { return "Enter an amount" }
-        if tooMuch { return "Not enough MON" }
+        guard hasAmount else { return "Enter an amount" }
+        if tooMuch { return "Not enough \(direction.pays)" }
+        if lacksGas { return "Needs a little MON for the fees" }
         guard flow.quoted != nil else { return flow.isQuoting ? "Quoting…" : "No quote yet" }
-        return "Hold to swap \(Self.mon(typed)) MON"
+        return "Hold to swap \(paidText) \(direction.pays)"
+    }
+
+    private var paidText: String {
+        if let typedMON { return Self.mon(typedMON) }
+        if let typedAUSD { return typedAUSD.display() }
+        return amount
     }
 
     private func row(_ title: String, _ value: String) -> some View {
@@ -160,24 +231,32 @@ struct SwapSheet: View {
         .font(.system(size: 13, design: .rounded))
     }
 
+    /// Two decimals, rounded down: the keypad's precision, never more than is held.
     private func fill(_ percent: Int) {
-        let raw = percent == 100 ? available.raw : available.raw * Int128(percent) / 100
-        // Two decimals, rounded down: the keypad's precision, never more than is held.
-        let hundredths = raw / 10_000_000_000_000_000 * 10_000_000_000_000_000
-        amount = (NativeAmount(raw: hundredths) ?? .zero).display(fractionDigits: 2, grouping: "")
+        switch direction {
+        case .toAUSD:
+            let raw = percent == 100 ? availableMON.raw : availableMON.raw * Int128(percent) / 100
+            let hundredths = raw / 10_000_000_000_000_000 * 10_000_000_000_000_000
+            amount = (NativeAmount(raw: hundredths) ?? .zero).display(fractionDigits: 2, grouping: "")
+        case .toMON:
+            let raw = percent == 100 ? availableAUSD.raw : availableAUSD.raw * Int64(percent) / 100
+            let hundredths = raw / 10_000 * 10_000
+            amount = (Money(raw: hundredths) ?? .zero).display(fractionDigits: 2, grouping: "")
+        }
         if amount.hasSuffix(".00") { amount.removeLast(3) }
     }
 
     private var progress: some View {
         VStack(alignment: .leading, spacing: 16) {
             Spacer()
-            Text("Swapping \(typed.map(Self.mon) ?? amount) MON")
+            Text("Swapping \(paidText) \(direction.pays)")
                 .font(.system(size: 26, weight: .bold, design: .rounded))
                 .foregroundStyle(DeskColor.nightText.color)
             VStack(alignment: .leading, spacing: 14) {
                 step("Checking the route on Monad", state: stepState(0))
                 step("Confirm with Face ID", state: stepState(1))
-                step("Swapping", state: stepState(2))
+                if direction == .toMON { step("Approving AUSD for the swap", state: stepState(2)) }
+                step("Swapping", state: stepState(direction == .toMON ? 3 : 2))
             }
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -189,11 +268,12 @@ struct SwapSheet: View {
     private enum StepState { case waiting, running, done }
 
     private func stepState(_ index: Int) -> StepState {
-        let current = switch flow.phase {
+        let current: Int = switch flow.phase {
         case .checking: 0
         case .signing: 1
-        case .sending: 2
-        default: 3
+        case .approving: 2
+        case .sending: direction == .toMON ? 3 : 2
+        default: 4
         }
         return index < current ? .done : (index == current ? .running : .waiting)
     }
@@ -214,7 +294,7 @@ struct SwapSheet: View {
         }
     }
 
-    private func done(_ receipt: AppModel.SwapReceipt) -> some View {
+    private func done(hash: String, received: String, unit: String) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer()
             ZStack {
@@ -238,8 +318,8 @@ struct SwapSheet: View {
                 .foregroundStyle(DeskColor.nightMuted.color)
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                AmountText(receipt.received.display(), size: 44)
-                Text("AUSD")
+                AmountText(received, size: 44)
+                Text(unit)
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
             }
@@ -252,17 +332,17 @@ struct SwapSheet: View {
                 .padding(.top, 10)
 
             VStack(spacing: 0) {
-                receiptRow("Paid", "\(typed.map(Self.mon) ?? amount) MON")
+                receiptRow("Paid", "\(paidText) \(direction.pays)")
                 Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
                 receiptRow("Network", model.network.name)
                 Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
-                Link(destination: model.network.explorer.appending(path: "tx/\(receipt.hash)")) {
+                Link(destination: model.network.explorer.appending(path: "tx/\(hash)")) {
                     HStack(spacing: 12) {
                         Text("Swap")
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .foregroundStyle(DeskColor.nightText.color)
                         Spacer(minLength: 8)
-                        Text(receipt.hash)
+                        Text(hash)
                             .font(.system(size: 12, weight: .medium, design: .monospaced))
                             .foregroundStyle(DeskColor.nightMuted.color)
                             .lineLimit(1)
@@ -303,6 +383,9 @@ struct SwapSheet: View {
         .frame(height: 44)
     }
 
+    private static func received(_ text: String, _ direction: SwapDirection) -> String {
+        direction == .toAUSD ? ausd(text) : mon(text)
+    }
     private static func ausd(_ text: String) -> String { Money(text: text).map { $0.display() } ?? text }
     private static func mon(_ text: String) -> String { NativeAmount(decimalText: text).map { $0.display(fractionDigits: 3) } ?? text }
     private static func mon(_ amount: NativeAmount) -> String {
@@ -330,11 +413,12 @@ struct SwapQuote: Decodable, Sendable {
 @MainActor @Observable
 final class SwapModel {
     enum Phase: Equatable {
-        case idle, checking, signing, sending
+        case idle, checking, signing, approving, sending
         case done(AppModel.SwapReceipt)
+        case doneMON(AppModel.MONSwapReceipt)
         case failed(String)
 
-        var isActive: Bool { self == .checking || self == .signing || self == .sending }
+        var isActive: Bool { self == .checking || self == .signing || self == .approving || self == .sending }
     }
 
     private(set) var quoted: SwapQuote?
@@ -345,9 +429,20 @@ final class SwapModel {
 
     private static let endpoint = "https://web-lovat-nine-49.vercel.app/api/swap-quote"
 
-    func quote(amount: String, user: EthereumAddress, debounce: Bool = true) async {
+    func reset() {
+        quoted = nil
         quoteError = nil
-        guard let typed = NativeAmount(decimalText: amount), !typed.isZero else {
+        isQuoting = false
+        phase = .idle
+    }
+
+    func quote(amount: String, direction: SwapDirection, user: EthereumAddress, debounce: Bool = true) async {
+        quoteError = nil
+        let valid = switch direction {
+        case .toAUSD: NativeAmount(decimalText: amount).map { !$0.isZero } ?? false
+        case .toMON: Money(text: amount).map { !$0.isZero } ?? false
+        }
+        guard valid else {
             quoted = nil
             return
         }
@@ -363,6 +458,7 @@ final class SwapModel {
             URLQueryItem(name: "user", value: user.checksummed),
             URLQueryItem(name: "amount", value: amount),
         ]
+        if direction == .toMON { components.queryItems?.append(URLQueryItem(name: "sell", value: "AUSD")) }
         do {
             let (data, response) = try await URLSession.shared.data(from: components.url!)
             guard !Task.isCancelled else { return }
@@ -381,33 +477,41 @@ final class SwapModel {
         }
     }
 
-    func swap(typed: NativeAmount, amount: String, model: AppModel) async {
+    func swap(direction: SwapDirection, amount: String, typedMON: NativeAmount?, typedAUSD: Money?, model: AppModel) async {
         guard let wallet = model.address, !phase.isActive else { return }
         // A 0x quote holds for about thirty seconds; an older one is refreshed before it runs.
         if Date.now.timeIntervalSince(quotedAt) > 20 {
-            await quote(amount: amount, user: wallet, debounce: false)
+            await quote(amount: amount, direction: direction, user: wallet, debounce: false)
         }
         guard let quoted else { return }
-        let checked: AUSDSwap
-        do {
-            checked = try AUSDSwap(
-                chainID: quoted.transaction.chainId, to: quoted.transaction.to,
-                data: quoted.transaction.data, value: quoted.transaction.value,
-                amount: typed, minimumOut: Money(text: quoted.receive.minimum ?? "0") ?? .zero)
-        } catch {
-            phase = .failed("This quote did not pass Desk's safety check, so nothing was signed.")
-            return
-        }
-        phase = .checking
-        do {
-            let receipt = try await model.swapMON(checked) { [weak self] step in
-                self?.phase = switch step {
-                case .checking: .checking
-                case .signing: .signing
-                case .sending: .sending
-                }
+        let transaction = quoted.transaction
+        let report: @MainActor (AppModel.SwapStep) -> Void = { [weak self] step in
+            self?.phase = switch step {
+            case .checking: .checking
+            case .signing: .signing
+            case .approving: .approving
+            case .sending: .sending
             }
-            phase = .done(receipt)
+        }
+        do {
+            switch direction {
+            case .toAUSD:
+                guard let typedMON else { return }
+                let checked = try AUSDSwap(
+                    chainID: transaction.chainId, to: transaction.to, data: transaction.data, value: transaction.value,
+                    amount: typedMON, minimumOut: Money(text: quoted.receive.minimum ?? "0") ?? .zero)
+                phase = .checking
+                phase = .done(try await model.swapMON(checked, progress: report))
+            case .toMON:
+                guard let typedAUSD else { return }
+                let checked = try MONSwap(
+                    chainID: transaction.chainId, to: transaction.to, data: transaction.data, value: transaction.value,
+                    amount: typedAUSD, minimumOut: NativeAmount(decimalText: quoted.receive.minimum ?? "0") ?? .zero)
+                phase = .checking
+                phase = .doneMON(try await model.swapAUSD(checked, progress: report))
+            }
+        } catch is AUSDSwap.Failure {
+            phase = .failed("This quote did not pass Desk's safety check, so nothing was signed.")
         } catch PasskeyFailure.cancelledByUser {
             phase = .idle
         } catch let failure as PasskeyFailure {
@@ -421,7 +525,7 @@ final class SwapModel {
         } catch TransactionSender.Failure.notMinedInTime {
             phase = .failed("Monad has not confirmed the swap yet. Your balances will update when it does.")
         } catch {
-            phase = .failed("The swap could not be sent. No MON was taken. (\(String(describing: error)))")
+            phase = .failed("The swap could not be sent. No \(direction.pays) was taken. (\(String(describing: error)))")
         }
     }
 }

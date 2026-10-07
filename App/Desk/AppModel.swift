@@ -569,11 +569,22 @@ final class AppModel {
         return spare
     }
 
-    enum SwapStep: Equatable, Sendable { case checking, signing, sending }
+    enum SwapStep: Equatable, Sendable { case checking, signing, approving, sending }
 
     struct SwapReceipt: Equatable, Sendable {
         let hash: String
         let received: Money
+    }
+
+    struct MONSwapReceipt: Equatable, Sendable {
+        let hash: String
+        let received: NativeAmount
+    }
+
+    /// AUSD in the wallet that can go back to MON, for gas and tokens; a dollar or more.
+    var swappableAUSD: Money? {
+        guard network.holdsRealFunds, let held = walletAUSD.value, held.raw >= 1_000_000 else { return nil }
+        return held
     }
 
     enum SwapFailure: Error, Equatable, Sendable {
@@ -620,6 +631,53 @@ final class AppModel {
         await refreshUntilChanged()
         let received = walletAUSD.value.flatMap { Money(raw: max(0, $0.raw - held.raw)) } ?? gain
         return SwapReceipt(hash: signed.hashHex, received: received.raw > 0 ? received : gain)
+    }
+
+    /// The approval and the swap are simulated together first. The holder reverts below the quoted
+    /// floor, so a route that would hand back less never reaches Face ID.
+    func swapAUSD(_ swap: MONSwap, progress: @MainActor @escaping (SwapStep) -> Void) async throws -> MONSwapReceipt {
+        guard network.holdsRealFunds, let address else { throw SwapFailure.wrongNetwork }
+        progress(.checking)
+        let rpc = MonadRPC(configuration: try network.rpc())
+        let ausd = try Self.ethereumAddress(network.pinnedCollateralToken)
+        let allowance = ABIMoney.decode(try await rpc.callContract(
+            to: ausd, data: try Calldata.allowance(owner: address, spender: swap.to)))
+        let approval = try Calldata.approve(spender: swap.to, amount: swap.amount)
+        let needsApproval = allowance < swap.amount
+        var calls: [SimulatedCall] = []
+        if needsApproval { calls.append(SimulatedCall(from: address, to: ausd, data: approval)) }
+        calls.append(SimulatedCall(from: address, to: swap.to, data: swap.data))
+        let simulated = try await rpc.simulate(calls)
+        guard simulated.allSatisfy(\.succeeded) else { throw SwapFailure.routeReverts }
+
+        let sender: TransactionSender
+        if let mainnetSender {
+            sender = mainnetSender
+        } else {
+            sender = TransactionSender(rpc: rpc)
+            mainnetSender = sender
+        }
+        let before = walletMON.value
+        progress(.signing)
+        let hash = try await passkey.withKeys { wallet, _ in
+            if needsApproval {
+                await MainActor.run { progress(.approving) }
+                let approved = try await sender.send(to: ausd, data: approval, from: wallet)
+                _ = try await sender.wait(for: approved)
+            }
+            await MainActor.run { progress(.sending) }
+            let swapped = try await sender.send(to: swap.to, data: swap.data, from: wallet)
+            _ = try await sender.wait(for: swapped)
+            return swapped.hashHex
+        }
+        await refreshUntilChanged()
+        // What landed, by the wallet's own balance; the floor stands in until the node catches up.
+        var received = swap.minimumOut
+        if let before, let after = walletMON.value, after.raw > before.raw,
+           let gained = NativeAmount(raw: after.raw - before.raw) {
+            received = gained
+        }
+        return MONSwapReceipt(hash: hash, received: received)
     }
 
     private func refreshUntilChanged() async {
