@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, verify } from "node:crypto";
+import { createECDH, generateKeyPairSync, randomBytes, verify } from "node:crypto";
 import { test } from "node:test";
 
 import { createPublicClient, custom, parseAbi } from "viem";
@@ -591,4 +591,91 @@ test("an install that already had a subscription hears again only when deposit a
   await post({ me: ME });
   assert.equal(apns.sent.length, 3);
   assert.equal(apns.sent[2].payload.aps.alert.title, "Deposit alerts are on");
+});
+
+function fakeWebPush(result = { status: 200 }) {
+  const sent = [];
+  return { configured: true, publicKey: "BPublicKey", sent, async send(subscription, message, options) { sent.push({ subscription, message, options }); return typeof result === "function" ? result(subscription) : result; }, close() {} };
+}
+
+function browserSeat() {
+  const ecdh = createECDH("prime256v1");
+  ecdh.generateKeys();
+  return { endpoint: "https://fcm.googleapis.com/fcm/send/seat-1", keys: { p256dh: ecdh.getPublicKey().toString("base64url"), auth: randomBytes(16).toString("base64url") } };
+}
+
+test("a browser subscribes with its push keys instead of a device token, and is confirmed by a push to it", async () => {
+  const store = memoryStore();
+  const apns = fakeAPNs();
+  const webpush = fakeWebPush();
+  const handler = createHandler(() => ({ store, apns, webpush, chain: fakeChain({}), markets: async () => markets, secret: "s3cret", sleep: async () => {} }));
+  const web = browserSeat();
+
+  const parsed = parseSubscription({ install: INSTALL, web, traders: [ALICE], names: { [ALICE]: "Whale" } });
+  assert.equal(parsed.error, undefined);
+  assert.equal(parsed.record.token, undefined);
+  assert.deepEqual([parsed.record.environment, parsed.record.prices, parsed.record.web.endpoint], ["web", false, web.endpoint]);
+  assert.match(parseSubscription({ install: INSTALL, web: { ...web, endpoint: "https://example.com/x" }, traders: [] }).error, /push services/);
+
+  const subscribed = await handler({ method: "POST", query: {}, body: { install: INSTALL, web, traders: [ALICE], names: { [ALICE]: "Whale" } } }, recorder());
+  assert.deepEqual([subscribed.status, subscribed.body.traders, subscribed.body.confirmed], [200, 1, true]);
+  assert.equal(apns.sent.length, 0);
+  assert.equal(webpush.sent.length, 1);
+  assert.equal(webpush.sent[0].message.title, "Trade alerts are on");
+  assert.match(webpush.sent[0].message.body, /Whale opens, adds to or closes/);
+  assert.equal(webpush.sent[0].message.url, "/app");
+  const stored = JSON.parse(await store.get(`alerts:sub:${subscriptionId(INSTALL)}`));
+  assert.deepEqual([stored.environment, stored.web.endpoint, stored.traders], ["web", web.endpoint, [ALICE]]);
+
+  const refused = fakeWebPush({ status: 410, reason: "Gone" });
+  const refusing = createHandler(() => ({ store: memoryStore(), apns, webpush: refused, chain: fakeChain({}), markets: async () => markets, secret: "s3cret", sleep: async () => {} }));
+  const rejected = await refusing({ method: "POST", query: {}, body: { install: INSTALL, web, traders: [ALICE] } }, recorder());
+  assert.equal(rejected.status, 400);
+  assert.match(rejected.body.error, /browser's push service/);
+
+  const bare = createHandler(() => ({ store: memoryStore(), apns, webpush: null, chain: fakeChain({}), markets: async () => markets, secret: "s3cret", sleep: async () => {} }));
+  const unset = await bare({ method: "POST", query: {}, body: { install: INSTALL, web, traders: [ALICE] } }, recorder());
+  assert.equal(unset.status, 503);
+});
+
+test("the scan tells browsers through their push service, and a gone endpoint drops that seat alone", async () => {
+  const store = memoryStore();
+  const apns = fakeAPNs();
+  const webpush = fakeWebPush();
+  const state = { row: row() };
+  const handler = createHandler(() => ({ store, apns, webpush, chain: fakeChain(state), markets: async () => markets, secret: "s3cret", sleep: async () => {} }));
+  await handler({ method: "POST", query: {}, body: subscribe() }, recorder());
+  await handler({ method: "POST", query: {}, body: { install: "ef".repeat(32), web: browserSeat(), traders: [ALICE], names: { [ALICE]: "Whale" } } }, recorder());
+  apns.sent.length = 0;
+  webpush.sent.length = 0;
+
+  await scan({ store, chain: fakeChain(state), apns, webpush, markets });
+  state.row = row({ positionType: 1 });
+  const second = await scan({ store, chain: fakeChain(state), apns, webpush, markets });
+  assert.deepEqual([second.subscriptions, second.sent], [2, 2]);
+  assert.equal(apns.sent.length, 1);
+  assert.equal(webpush.sent.length, 1);
+  assert.equal(webpush.sent[0].message.title, "Whale flipped short on ETH");
+  assert.equal(webpush.sent[0].message.url, `/app/trade/ETH?person=${ALICE}`);
+  assert.equal(webpush.sent[0].message.tag, "95d2602d30da-20-flipped");
+  assert.equal(webpush.sent[0].options.topic, "95d2602d30da-20-flipped");
+  assert.equal(await store.scard("alerts:subs"), 2);
+
+  state.row = null;
+  const gone = fakeWebPush({ status: 410, reason: "Gone" });
+  await scan({ store, chain: fakeChain(state), apns, webpush: gone, markets });
+  assert.equal(await store.scard("alerts:subs"), 1);
+  assert.equal(await store.get(`alerts:sub:${subscriptionId(INSTALL)}`) !== null, true);
+  assert.equal(await store.get(`alerts:sub:${subscriptionId("ef".repeat(32))}`), null);
+});
+
+test("the key route hands browsers the public VAPID key, and nothing when there is none", async () => {
+  const handler = createHandler(() => ({ store: memoryStore(), apns: fakeAPNs(), webpush: fakeWebPush(), chain: fakeChain({}), markets: async () => markets, secret: "s3cret", sleep: async () => {} }));
+  const out = recorder();
+  out.setHeader = () => {};
+  const keyed = await handler({ method: "GET", query: { job: "key" }, headers: {} }, out);
+  assert.deepEqual([keyed.status, keyed.body], [200, { publicKey: "BPublicKey" }]);
+  const bare = createHandler(() => ({ store: memoryStore(), apns: fakeAPNs(), webpush: null, chain: fakeChain({}), markets: async () => markets, secret: "s3cret", sleep: async () => {} }));
+  const none = await bare({ method: "GET", query: { job: "key" }, headers: {} }, recorder());
+  assert.equal(none.status, 503);
 });

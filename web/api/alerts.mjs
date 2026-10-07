@@ -13,6 +13,7 @@ import {
   walletCountKey, walletDigestKey, walletEvents, walletPayload,
 } from "./_watch.mjs";
 import { isSolanaAddress } from "./_chains.mjs";
+import { parseWebSubscription, vapidFromEnv, webPayload, webPushClient } from "./_webpush.mjs";
 import { chainReader, describePosition, noAccount, openMarkets, perpIdsFromBitmap } from "./traders.mjs";
 
 export const MAX_TRADERS = 20 + MAX_WALLETS;
@@ -44,9 +45,11 @@ const validAddress = (value) => typeof value === "string" && /^0x[a-fA-F0-9]{40}
 
 export function parseSubscription(body) {
   if (!body || typeof body !== "object") return { error: "A JSON body is required." };
-  const { install, token, environment, traders, names, copying, wallets, prices, priceMarkets, targets } = body;
+  const { install, token, environment, traders, names, copying, wallets, prices, priceMarkets, targets, web } = body;
   if (typeof install !== "string" || !/^[0-9a-f]{64}$/.test(install)) return { error: "A valid install secret is required." };
-  if (typeof token !== "string" || !/^[0-9a-fA-F]{64,200}$/.test(token)) return { error: "A valid device token is required." };
+  const browser = web == null ? null : parseWebSubscription(web);
+  if (browser?.error) return { error: browser.error };
+  if (!browser && (typeof token !== "string" || !/^[0-9a-fA-F]{64,200}$/.test(token))) return { error: "A valid device token is required." };
   if (!Array.isArray(traders) || traders.length > MAX_TRADERS || !traders.every(validAddress)) {
     return { error: `Up to ${MAX_TRADERS} trader addresses are allowed.` };
   }
@@ -73,13 +76,14 @@ export function parseSubscription(body) {
   return {
     id: subscriptionId(install),
     record: {
-      token: token.toLowerCase(),
-      environment: environment === "production" ? "production" : "sandbox",
+      ...(browser ? { web: browser } : { token: token.toLowerCase() }),
+      environment: browser ? "web" : environment === "production" ? "production" : "sandbox",
       traders: followed,
       copying: copied,
       names: labels,
       wallets: tracked,
-      prices: prices !== false,
+      // A browser hears about its traders; the market pulse is the phone's by default.
+      prices: browser ? prices === true : prices !== false,
       priceMarkets: watched,
       targets: wanted,
       me: own.me,
@@ -331,6 +335,17 @@ export function shareBudget(followers, budget) {
   return [...chosen];
 }
 
+/// Delivers to whichever kind of seat the record is. A silent wake means nothing to a
+/// browser, and a browser seat on a server without VAPID keys cannot be reached.
+export async function sendTo({ apns, webpush = null }, record, payload, { collapseId = null, background = false } = {}) {
+  if (!record.web) return apns.send(record, payload, { collapseId, background });
+  if (background) return { status: 0, reason: "Silent" };
+  if (!webpush?.configured) return { status: 0, reason: "NotConfigured" };
+  const message = webPayload(payload, { collapseId });
+  if (!message) return { status: 0, reason: "Silent" };
+  return webpush.send(record.web, message, { topic: collapseId });
+}
+
 async function inBatches(items, size, work) {
   const out = [];
   for (let index = 0; index < items.length; index += size) {
@@ -408,7 +423,7 @@ const sentCount = (results, deliveries, part) =>
   results.filter((result, index) => deliveries[index].part === part && result.status === 200).length;
 
 export async function scan({
-  store, chain, apns, markets, quotes = [], sources = {}, skip = skipList(), receiptTimeoutMs, now = Date.now(),
+  store, chain, apns, webpush = null, markets, quotes = [], sources = {}, skip = skipList(), receiptTimeoutMs, now = Date.now(),
 }) {
   const ids = await store.smembers(SUBSCRIPTIONS);
   if (ids.length === 0) {
@@ -520,14 +535,14 @@ export async function scan({
   deliveries.push(...priced.deliveries.map((delivery) => ({ ...delivery, part: "prices" })));
 
   const results = await inBatches(deliveries, 10, ({ record, payload, collapseId, background }) =>
-    apns.send(record, payload, { collapseId, background }));
+    sendTo({ apns, webpush }, record, payload, { collapseId, background }));
 
   const dead = new Set();
   const moved = new Map();
   results.forEach((result, index) => {
     const { id, record } = deliveries[index];
     if (isDeadToken(result)) dead.add(id);
-    else if (result.status === 200 && result.environment !== record.environment) moved.set(id, { ...record, environment: result.environment });
+    else if (result.status === 200 && result.environment && result.environment !== record.environment) moved.set(id, { ...record, environment: result.environment });
   });
   for (const id of dead) {
     await store.del(subscriptionKey(id));
@@ -593,6 +608,7 @@ function safeJSON(text) {
 }
 
 const UNREACHABLE = "This iPhone couldn't be reached by Apple, so alerts weren't saved.";
+const unreachable = (record) => (record.web ? "This browser's push service refused the message, so alerts weren't saved." : UNREACHABLE);
 
 export function createHandler(resolve) {
   return async function handler(req, res) {
@@ -610,8 +626,15 @@ export function createHandler(resolve) {
       }
     }
 
+    if (req.query?.job === "key") {
+      if (!deps.webpush?.configured) return res.status(503).json({ error: "Browser alerts aren't configured on this server." });
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      return res.status(200).json({ publicKey: deps.webpush.publicKey });
+    }
+
     if (!deps.store || !deps.apns) return res.status(503).json({ error: "Trade alerts aren't configured on this server." });
     const { store, apns } = deps;
+    const webpush = deps.webpush ?? null;
 
     if (req.query?.job === "scan") {
       if (!authorized(req, deps.secret)) return res.status(401).json({ error: "Unauthorized." });
@@ -624,7 +647,7 @@ export function createHandler(resolve) {
         for (let round = 0; round < rounds; round += 1) {
           if (round > 0) await deps.sleep(ROUND_INTERVAL_MS);
           const quotes = deps.quotes ? await deps.quotes().catch(() => []) : [];
-          const report = await scan({ store, chain: deps.chain, apns, markets, quotes, sources: deps.receipts, skip: deps.skip });
+          const report = await scan({ store, chain: deps.chain, apns, webpush, markets, quotes, sources: deps.receipts, skip: deps.skip });
           reports.push(report);
           if (report.subscriptions === 0) break;
         }
@@ -674,6 +697,7 @@ export function createHandler(resolve) {
     const parsed = parseSubscription(body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
     const { id, record, wantsPrices } = parsed;
+    if (record.web && !webpush?.configured) return res.status(503).json({ error: "Browser alerts aren't configured on this server." });
 
     if (record.traders.length === 0 && record.copying.length === 0 && record.wallets.length === 0 && record.targets.length === 0
         && !wantsPrices && !record.me) {
@@ -692,21 +716,21 @@ export function createHandler(resolve) {
     let environment = record.environment;
     const depositsOn = Boolean(known) && Boolean(record.me) && !safeJSON(known)?.me;
     if ((!known || depositsOn) && await store.set(`alerts:confirm:${id}`, "1", { ex: 60, nx: true })) {
-      const result = await apns.send(record, {
+      const result = await sendTo({ apns, webpush }, record, {
         aps: { alert: depositsOn ? DEPOSITS_ON : confirmationAlert(record), sound: "default" },
         desk: { type: "confirmation" },
       });
       apns.close();
       confirmed = result.status === 200;
       if (confirmed) environment = result.environment ?? environment;
-      else console.warn(`alerts: confirmation refused, ${result.status || "no answer"} ${result.reason ?? ""} (${result.environment})`);
+      else console.warn(`alerts: confirmation refused, ${result.status || "no answer"} ${result.reason ?? ""} (${record.environment})`);
       if (!confirmed && !known) {
         await store.set(`alerts:confirm:${id}`, "failed", { ex: 60 }).catch(() => {});
-        return res.status(400).json({ error: UNREACHABLE });
+        return res.status(400).json({ error: unreachable(record) });
       }
     } else if (!known) {
       // A follow and a bell tap sync seconds apart; wait for the first to confirm rather than refuse.
-      if (await store.get(`alerts:confirm:${id}`) === "failed") return res.status(400).json({ error: UNREACHABLE });
+      if (await store.get(`alerts:confirm:${id}`) === "failed") return res.status(400).json({ error: unreachable(record) });
       let settled = null;
       for (let attempt = 0; attempt < 10 && !settled; attempt += 1) {
         await deps.sleep(500);
@@ -732,6 +756,7 @@ let production;
 export default createHandler(() => (production ??= {
   store: redisStore(),
   apns: apnsClient(),
+  webpush: webPushClient(vapidFromEnv()),
   hypersync: hypersyncClient({ token: indexToken() }),
   receipts: {
     mainnet: hypersyncClient({ token: indexToken(), url: HYPERSYNC_URLS.mainnet }),
