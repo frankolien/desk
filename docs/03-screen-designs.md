@@ -150,6 +150,14 @@ Moves 1,240.00 AUSD to the exchange.
 otherwise a question mark. And it states the good news plainly: after setup, orders
 cost nothing, because the exchange forwards and pays.
 
+**The swap runs both ways.** MON buys AUSD for the desk; AUSD buys MON for gas and for
+tokens, which are bought with MON. One sheet, a segmented switch at the top, the same
+keypad and the same hold. Selling MON approves nothing and the call carries exactly the
+typed amount. Selling AUSD approves exactly the typed amount to 0x's holder first, so
+that is the most a bad route can take, and the holder itself refuses below the quoted
+floor, which the simulation before Face ID shows. A token ticket short of MON offers the
+swap back right there, above the address to top up.
+
 **The testnet funding sequence is guided, not a list of links.** Three steps with their
 own states, in order, because getting this wrong strands a user on step one:
 

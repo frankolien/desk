@@ -48,6 +48,9 @@ Monad* and Perpl's *Best Use of Perpl's API*. Swift 6, SwiftUI, iOS 18.4+, iPhon
 - **Trade tokens too** — Trending coins on Search, across Monad and the EVM chains Relay
   reaches, bought with MON from the same key; token pages with holders, trades, who got in
   first, and a risk card. EVM only: Solana is not offered anywhere.
+- **MON to AUSD and back** — the dollars for the desk from spare MON, and MON for gas
+  and tokens from AUSD, in one sheet with a switch; checked on Monad before Face ID signs,
+  approving at most the amount typed.
 - **Follow wallets, not only traders** — a wallet's token moves and its perps on Perpl in
   one feed, with alerts, and a Watchlist and Market view on Signals.
 - **Talk in the market, read the news** — a chat room per market, and headlines that
