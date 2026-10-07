@@ -2,6 +2,9 @@
   "framework": null,
   "buildCommand": null,
   "outputDirectory": "public",
+  "regions": [
+    "fra1"
+  ],
   "functions": {
     "api/alerts.mjs": {
       "maxDuration": 60

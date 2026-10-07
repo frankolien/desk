@@ -1,6 +1,7 @@
 export const TIERS = {
   default: { limit: 60, window: 60 },
   expensive: { limit: 10, window: 60 },
+  relay: { limit: 120, window: 60 },
 };
 
 export function clientIp(headers = {}) {

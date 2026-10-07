@@ -30,6 +30,16 @@ const PROBLEMS = {
   unknown_route: [404, "Unknown route"],
 };
 
+/// What the relay will forward to Perpl, and nothing else. The browser signs these; the
+/// server never can, because it never holds a key.
+const PERPL_UPSTREAM = "https://app.perpl.xyz/api/v1/";
+const PERPL_FORWARDABLE = [
+  /^pub\/context$/,
+  /^trading\/(wallet|positions|orders|fills|order-history)$/,
+  /^api-key\/(payload|enroll)$/,
+];
+const PERPL_SIGNED_HEADERS = ["x-api-key", "x-api-timestamp", "x-api-nonce", "x-api-signature"];
+
 export const ENDPOINTS = [
   { path: "/api/v1/markets", tier: "default", description: "Every open Perpl market: mark, 24h change and volume, open interest, funding, leverage" },
   { path: "/api/v1/markets/marks", tier: "default", description: "Every market's mark price read off the exchange contract this instant" },
@@ -41,6 +51,7 @@ export const ENDPOINTS = [
   { path: "/api/v1/tokens/signals", tier: "default", description: "Token signals over a window. ?window=1h|6h|24h" },
   { path: "/api/v1/health", tier: "default", description: "Service health (health+json)" },
   { path: "/api/v1/stats", tier: "default", description: "Usage counters, no addresses" },
+  { path: "/api/v1/perpl/{path}", tier: "relay", description: "Forwards a request the browser signed to Perpl's API, headers and body untouched; GET and POST" },
 ];
 
 export function problem(code, detail, instance, extra = {}) {
@@ -94,7 +105,8 @@ export function createHandler({
   return async function handler(req, res) {
     const method = String(req.method ?? "GET").toUpperCase();
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-API-Timestamp, X-API-Nonce, X-API-Signature");
     res.setHeader("Access-Control-Max-Age", "86400");
     res.setHeader("Access-Control-Expose-Headers", "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After");
     if (method === "OPTIONS") return res.status(204).end();
@@ -119,14 +131,42 @@ export function createHandler({
       return fail(problem("rate_limited", `Limit is ${limit.limit} requests per minute for this route. Try again in ${limit.retryAfter}s.`, instance),
         { "Retry-After": String(limit.retryAfter) });
     }
-    if (method !== "GET" && method !== "HEAD") return fail(problem("method_not_allowed", "Only GET, HEAD and OPTIONS are served.", instance));
     if (!route) return fail(problem("unknown_route", `No route for ${instance}. See ${DOCS}.`, instance));
+    if (method !== "GET" && method !== "HEAD" && !(route.name === "perpl" && method === "POST")) return fail(problem("method_not_allowed", "Only GET, HEAD and OPTIONS are served.", instance));
     if (route.address && !ADDRESS.test(route.address)) {
       return fail(problem("invalid_address", "Addresses are 0x followed by 40 hex characters.", instance));
     }
     if (store) count(store, now()).catch(() => {});
 
     switch (route.name) {
+      case "perpl": {
+        // The signature covers the path, the query and the body byte for byte, so all three go
+        // upstream exactly as they arrived. The query is rebuilt with URLSearchParams on both
+        // sides, which is why the browser builds its signed target the same way.
+        const search = new URLSearchParams(Object.entries(query).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : [[k, v]]))).toString();
+        const upstream = `${PERPL_UPSTREAM}${route.upstream}${search ? `?${search}` : ""}`;
+        const headers = { accept: "application/json" };
+        for (const name of PERPL_SIGNED_HEADERS) { const value = req.headers?.[name]; if (value) headers[name] = String(value); }
+        let body;
+        if (method === "POST") {
+          const raw = req.body;
+          body = typeof raw === "string" ? raw : raw == null ? "" : Buffer.isBuffer(raw) ? raw.toString("utf8") : JSON.stringify(raw);
+          headers["content-type"] = "application/json";
+        }
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 15_000);
+        try {
+          const response = await fetch(upstream, { method, headers, body, signal: controller.signal });
+          const text = await response.text();
+          let parsed = null;
+          try { parsed = text ? JSON.parse(text) : null; } catch { parsed = { error: text.slice(0, 400) }; }
+          return send(response.status, parsed ?? {}, CACHE.none);
+        } catch (error) {
+          return fail(problem("upstream_unavailable", `Perpl could not be reached: ${error.name === "AbortError" ? "timed out" : error.message}`, instance));
+        } finally {
+          clearTimeout(timer);
+        }
+      }
       case "index":
         return envelope(200, {
           name: "Desk API", version: "1", docs: DOCS, openapi: "https://trydesk.trade/openapi.json", health: "/api/v1/health",
@@ -228,6 +268,10 @@ export function createHandler({
 function match(segments) {
   const [a, b, c] = segments;
   if (segments.length === 0) return { name: "index", tier: "default" };
+  if (a === "perpl" && segments.length >= 2) {
+    const upstream = segments.slice(1).join("/");
+    return PERPL_FORWARDABLE.some((rule) => rule.test(upstream)) ? { name: "perpl", tier: "relay", upstream } : null;
+  }
   if (segments.length === 1 && a === "health") return { name: "health", tier: "default" };
   if (segments.length === 1 && a === "stats") return { name: "stats", tier: "default" };
   if (segments.length === 1 && a === "markets") return { name: "markets", tier: "default" };

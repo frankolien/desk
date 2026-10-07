@@ -47,7 +47,7 @@ test("the index names the API, its routes and limits, with CORS and an envelope"
   assert.deepEqual(out.body.data.endpoints, ENDPOINTS);
   assert.deepEqual(out.body.meta, { asOf: new Date(T).toISOString(), chain: "monad", cached: false });
   assert.equal(out.headers["Access-Control-Allow-Origin"], "*");
-  assert.equal(out.headers["Access-Control-Allow-Methods"], "GET, HEAD, OPTIONS");
+  assert.equal(out.headers["Access-Control-Allow-Methods"], "GET, HEAD, POST, OPTIONS");
   assert.equal(out.headers["Access-Control-Max-Age"], "86400");
   assert.equal(out.headers["Content-Type"], "application/json; charset=utf-8");
   assert.equal(out.headers["X-RateLimit-Limit"], "60");
@@ -279,4 +279,58 @@ test("relay status lives inside relay-quote and still answers on the old path", 
   await handler({ method: "GET", url: "/api/relay-quote?user=0x12", query: { user: "0x12" } }, res);
   assert.equal(out.status, 400);
   assert.equal(out.body.reason, "invalid");
+});
+
+test("the relay forwards a signed request to Perpl byte for byte, and nothing off the list", async () => {
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { calls.push({ url: String(url), init }); return new Response(JSON.stringify({ mt: 31, status: { code: 0 } }), { status: 200, headers: { "content-type": "application/json" } }); };
+  try {
+    const { out, res } = recorder();
+    const body = '{"mt":30,"d":[{"rq":7,"mkt":1,"acc":2,"t":1,"p":0,"s":356,"fl":4,"lv":300,"lb":0,"ms":50}]}';
+    await api()({ method: "POST", url: "/api/v1?path=perpl/trading/orders", query: { path: "perpl/trading/orders" }, body,
+      headers: { "x-api-key": "token", "x-api-timestamp": "1789000000000", "x-api-nonce": "n0nce", "x-api-signature": "s1g", "content-type": "text/plain;charset=UTF-8", "x-forwarded-for": "1.1.1.1" } }, res);
+    assert.equal(out.status, 200);
+    assert.deepEqual(out.body, { mt: 31, status: { code: 0 } });
+    assert.equal(out.headers["Cache-Control"], "no-store");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://app.perpl.xyz/api/v1/trading/orders");
+    assert.equal(calls[0].init.method, "POST");
+    assert.equal(calls[0].init.body, body);
+    assert.deepEqual(calls[0].init.headers, { accept: "application/json", "x-api-key": "token", "x-api-timestamp": "1789000000000", "x-api-nonce": "n0nce", "x-api-signature": "s1g", "content-type": "application/json" });
+
+    const fills = await call(api(), "perpl/trading/fills", { query: { page: "2", count: "100" }, headers: { "x-api-key": "token" } });
+    assert.equal(fills.status, 200);
+    assert.equal(calls[1].url, "https://app.perpl.xyz/api/v1/trading/fills?page=2&count=100");
+    assert.equal(calls[1].init.method, "GET");
+    assert.equal(calls[1].init.body, undefined);
+
+    const context = await call(api(), "perpl/pub/context");
+    assert.equal(context.status, 200);
+    assert.equal(calls[2].url, "https://app.perpl.xyz/api/v1/pub/context");
+
+    const off = await call(api(), "perpl/admin/keys", { method: "POST" });
+    assert.equal(off.status, 404);
+    assert.equal(off.body.code, "unknown_route");
+    assert.equal(calls.length, 3);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("Perpl's refusals come back as Perpl sent them, and an unreachable Perpl is a 503 problem", async () => {
+  const realFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: "signature expired" }), { status: 401 });
+    const refused = await call(api(), "perpl/trading/wallet", { headers: { "x-api-key": "token" } });
+    assert.equal(refused.status, 401);
+    assert.deepEqual(refused.body, { error: "signature expired" });
+
+    globalThis.fetch = async () => { throw new Error("ECONNRESET"); };
+    const down = await call(api(), "perpl/trading/wallet");
+    assert.equal(down.status, 503);
+    assert.equal(down.body.code, "upstream_unavailable");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
