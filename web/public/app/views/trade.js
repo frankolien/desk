@@ -1,4 +1,5 @@
 import { $, $$, MARKET_LOGOS, ago, api, dirClass, esc, fmtAmount, fmtCompact, fmtPct, fmtPrice, fmtUsd, handoff, head, hydratePeople, connectedWallet, chartOptions, candleOptions, volumeColor, chartLegend, chartCountdown, identity, knownIdentity, logo, markets, navigate, person, poll, short, toast } from "../app.js";
+import { isFollowing, toggleFollow } from "../follows.js";
 import { estimateFill, watchBook } from "../book.js";
 import { isUnlocked, onSession, session } from "../session.js";
 import { PerplError, accountFor, context as perplContext, describePositions, ensureKey, exchangeOf, marketOf, placeOrder, positions as perplPositions, storedKey, wallet as perplWallet } from "../perpl.js";
@@ -930,10 +931,14 @@ export default async function mount(el, params) {
           <td class="num">${fmtPrice(Number(p.mark), m.priceDecimals)}</td>
           <td class="num">${fmtUsd(p.value, { compact: true })}</td>
           <td class="num ${dirClass(Number(p.pnl))}">${fmtUsd(p.pnl, { sign: true })}<div style="font-size:11px">${fmtPct(p.pnlPercent / 100)}</div></td>
-          <td><button class="btn btn-line btn-xs" data-follow="${esc(p.address)}">Follow</button></td>
+          <td><button class="btn btn-line btn-xs" data-follow="${esc(p.address)}" aria-pressed="${isFollowing(p.address)}">${isFollowing(p.address) ? "Following" : "Follow"}</button></td>
         </tr>`).join("")}</tbody></table></div>
         <div class="card-foot"><span>Ranked by unrealised PnL on this market</span><span>${rows.length} of ${state.top.length} top traders</span></div>`;
-      pane.querySelectorAll("[data-follow]").forEach((b) => b.addEventListener("click", () => handoff({ title: "Follow in Desk", sub: "Following sends you an alert when they trade. Auto-Copy in Desk copies them under your rules." })));
+      pane.querySelectorAll("[data-follow]").forEach((b) => b.addEventListener("click", () => {
+        toggleFollow(b.dataset.follow);
+        b.textContent = isFollowing(b.dataset.follow) ? "Following" : "Follow";
+        b.setAttribute("aria-pressed", String(isFollowing(b.dataset.follow)));
+      }));
       hydratePeople(pane);
       return;
     }

@@ -65,6 +65,7 @@
         </button>
       </div>
       <div class="top-actions">
+        <button class="icon-btn" id="alerts-open" type="button" aria-label="Following and alerts" title="Following"><svg><use href="#i-bell"/></svg><i class="badge" id="alerts-badge" hidden></i></button>
         <a class="icon-btn" href="/status" aria-label="Status" title="Status"><svg><use href="#i-more"/></svg></a>
         <button class="btn btn-primary" id="connect" type="button">Connect wallet</button>
         <div class="popover" id="connect-sheet" role="dialog" aria-label="Connect a wallet" hidden>
@@ -152,9 +153,19 @@
     </div>
     <div class="person-body" id="person-body"></div>
     <div class="person-foot">
-      <button class="btn btn-primary" type="button" id="person-follow">Follow in Desk</button>
+      <button class="btn btn-primary" type="button" id="person-follow">Follow</button>
       <a class="btn btn-ghost" id="person-full" href="/app/portfolio" data-link>Full page</a>
     </div>
+  </div>
+</div>
+
+<div class="overlay drawer" id="alerts" hidden>
+  <div class="sheet sheet-drawer sheet-person" role="dialog" aria-label="Following and alerts">
+    <div class="person-head">
+      <div class="person-title"><b style="font-size:17px">Following</b><div class="sub">The traders you follow, and the alerts that follow them.</div></div>
+      <button class="person-close" type="button" data-close aria-label="Close"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>
+    </div>
+    <div class="al-body" id="alerts-body"></div>
   </div>
 </div>
 

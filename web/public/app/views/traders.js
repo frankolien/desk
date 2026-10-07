@@ -1,4 +1,5 @@
 import { $, $$, esc, api, poll, fmtUsd, fmtPrice, fmtPct, fmtAmount, ago, short, dirClass, logo, MARKET_LOGOS, person, hydratePeople, knownIdentity, handoff, markets } from "../app.js";
+import { isFollowing, toggleFollow } from "../follows.js";
 
 const STYLE = `<style>
 .tr-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
@@ -108,7 +109,7 @@ export default async function mount(el) {
       <td class="left tr-pos"><div class="tr-chips">${chips}${more}</div></td>
       <td class="num">${fmtUsd(t.value, { compact: true })}</td>
       <td class="num ${dirClass(t.pnl)}">${fmtUsd(t.pnl, { sign: true })}<br><span class="tr-pct">${t.pct == null ? "—" : fmtPct(t.pct)}</span></td>
-      <td class="tr-follow"><button class="btn btn-line btn-xs" type="button" data-follow="${esc(t.address)}">Follow</button></td>
+      <td class="tr-follow"><button class="btn btn-line btn-xs" type="button" data-follow="${esc(t.address)}" aria-pressed="${isFollowing(t.address)}">${isFollowing(t.address) ? "Following" : "Follow"}</button></td>
     </tr>${open ? `<tr class="tr-detail"><td colspan="6" data-detail="${esc(t.address)}">${detailHTML(t)}</td></tr>` : ""}`;
   }
 
@@ -233,7 +234,9 @@ export default async function mount(el) {
     const follow = event.target.closest("[data-follow]");
     if (follow) {
       event.stopPropagation();
-      handoff({ title: `Follow ${nameOf(follow.dataset.follow)} in Desk`, sub: "Following sends you an alert when they trade. Auto-Copy in Desk copies them under your rules." });
+      toggleFollow(follow.dataset.follow, knownIdentity(follow.dataset.follow)?.name ?? null);
+      follow.textContent = isFollowing(follow.dataset.follow) ? "Following" : "Follow";
+      follow.setAttribute("aria-pressed", String(isFollowing(follow.dataset.follow)));
       return;
     }
     const sortBtn = event.target.closest("#tr-sort button");

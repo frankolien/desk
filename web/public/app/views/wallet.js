@@ -1,4 +1,5 @@
 import { $, $$, esc, api, connectedWallet, fmtUsd, fmtPct, fmtAmount, short, ago, dirClass, logo, nativeLogo, person, hydratePeople, handoff, navigate } from "../app.js";
+import { isFollowing, toggleFollow } from "../follows.js";
 
 const CSS = `<style>
 .wl { max-width: 760px; margin: 0 auto; display: grid; gap: 26px; }
@@ -126,7 +127,7 @@ export default async function mount(el, params) {
     <div class="wl-head">
       ${face}
       <div class="wl-who"><div class="wl-name">${esc(name)}</div><div class="wl-status">${status}</div></div>
-      ${isEvm && !own ? `<button class="btn btn-line" type="button" data-follow>Follow in Desk</button>` : own ? `<span class="chip chip-brand" style="align-self:center">Your portfolio</span>` : ""}
+      ${isEvm && !own ? `<button class="btn btn-line" type="button" data-follow aria-pressed="${isFollowing(address)}">${isFollowing(address) ? "Following" : "Follow"}</button>` : own ? `<span class="chip chip-brand" style="align-self:center">Your portfolio</span>` : ""}
     </div>
     <div class="wl-pnl">
       <div class="row-between"><span class="eyebrow">PNL</span>
@@ -153,7 +154,11 @@ export default async function mount(el, params) {
     button.innerHTML = `<svg><use href="#i-check"/></svg>`;
     setTimeout(() => { button.innerHTML = `<svg><use href="#i-copy"/></svg>`; }, 1200);
   });
-  $("[data-follow]", el)?.addEventListener("click", () => handoff({ title: `Follow ${name} in Desk`, sub: "Tracking pushes every buy and sell to your phone; following copies them." }));
+  $("[data-follow]", el)?.addEventListener("click", (event) => {
+    toggleFollow(address, id?.name ?? null);
+    event.currentTarget.textContent = isFollowing(address) ? "Following" : "Follow";
+    event.currentTarget.setAttribute("aria-pressed", String(isFollowing(address)));
+  });
 
   const reading = `<div class="wl-reading pulse">Reading this wallet's Monad history…</div>`;
 

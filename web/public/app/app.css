@@ -503,3 +503,22 @@ h3 { font-size: 14px; font-weight: 700; }
 .wallet-pill .key { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 .wallet-pill .key.on { background: var(--rise); box-shadow: 0 0 0 3px rgba(47, 214, 123, .15); }
 .wallet-pill .key.off { background: var(--faint); }
+
+/* ── Following and alerts ──────────────────────────────── */
+
+.icon-btn { position: relative; }
+.icon-btn .badge { position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--brand); color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; font-style: normal; }
+.icon-btn.on { color: var(--text); border-color: var(--line-strong); }
+.al-body { flex: 1; overflow-y: auto; padding: 14px 18px 18px; display: grid; gap: 18px; align-content: start; }
+.al-card { background: var(--card-2); border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; }
+.al-card b { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.al-card .sub { font-size: 12px; line-height: 1.45; }
+.al-card .btn { justify-self: start; }
+.al-on .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rise); box-shadow: 0 0 0 3px rgba(47, 214, 123, .15); }
+.al-h { font-size: 11px; font-weight: 700; color: var(--faint); letter-spacing: .04em; text-transform: uppercase; padding-bottom: 6px; }
+.al-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.al-row:last-child { border-bottom: 0; }
+.al-row .person { flex: 1; min-width: 0; }
+.al-move { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 10px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.al-move:last-child { border-bottom: 0; }
+.al-move .meta { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }

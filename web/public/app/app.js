@@ -1,3 +1,4 @@
+import { isFollowing, startFollows, toggleFollow } from "./follows.js";
 import { PasskeyError, RP_ORIGIN, createPasskey, passkeysAvailable, signInWithPasskey } from "./passkey.js";
 import { isUnlocked, lock, onSession, session, unlockWithPRF } from "./session.js";
 
@@ -671,8 +672,6 @@ startWallet();
 $("#handoff").addEventListener("click", (event) => { if (event.target === $("#handoff") || event.target.closest("[data-close]")) $("#handoff").hidden = true; });
 startTicker();
 startSearch();
-render();
-
 // A trader in a drawer over the current page: who they are, what they hold on Perpl and
 // what they closed. The page underneath does not move; the full page is one tap away.
 
@@ -719,7 +718,18 @@ function paintPersonHead() {
     <div class="person-stat"><span>Open value</span><b class="num">${value == null ? "—" : fmtUsd(value, { compact: true })}</b></div>
     <div class="person-stat"><span>Open PnL</span><b class="num ${pnl == null ? "muted" : dirClass(pnl)}">${pnl == null ? "—" : fmtUsd(pnl, { sign: true, compact: true })}</b></div>
     <div class="person-stat"><span>Win rate</span><b class="num">${stats?.winRate == null ? "—" : fmtPct(stats.winRate, { sign: false, digits: 0 })}</b></div>`;
+  paintPersonFollow();
 }
+
+function paintPersonFollow() {
+  const button = $("#person-follow");
+  if (!button || !personAddress) return;
+  const on = isFollowing(personAddress);
+  button.textContent = on ? "Following" : "Follow";
+  button.classList.toggle("btn-primary", !on);
+  button.classList.toggle("btn-line", on);
+}
+document.addEventListener("follows", () => { if (personAddress) paintPersonFollow(); });
 
 function paintPersonBody() {
   const body = $("#person-body");
@@ -768,9 +778,8 @@ function startPerson() {
       return;
     }
     if (event.target.closest("#person-follow")) {
-      const name = knownIdentity(personAddress)?.name ?? short(personAddress);
-      closePerson();
-      handoff({ title: `Follow ${name} in Desk`, sub: "Following sends you an alert when they trade. Auto-Copy in Desk copies them under your rules." });
+      toggleFollow(personAddress, knownIdentity(personAddress)?.name ?? null);
+      paintPersonFollow();
       return;
     }
     // A link inside the drawer (a market, the full page) navigates; the drawer leaves first.
@@ -779,3 +788,6 @@ function startPerson() {
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !overlay.hidden) closePerson(); });
 }
 startPerson();
+startFollows();
+// The first paint comes last: a ?person= link opens the drawer, whose state is declared above.
+render();
