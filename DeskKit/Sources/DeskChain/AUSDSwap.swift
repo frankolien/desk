@@ -48,11 +48,11 @@ public struct AUSDSwap: Sendable, Hashable {
         self.minimumOut = minimumOut
     }
 
-    private static func strip(_ text: String) -> String {
+    static func strip(_ text: String) -> String {
         text.hasPrefix("0x") || text.hasPrefix("0X") ? String(text.dropFirst(2)) : text
     }
 
-    private static func bytes(_ hex: String) -> Data? {
+    static func bytes(_ hex: String) -> Data? {
         guard hex.count % 2 == 0 else { return nil }
         var out = Data(capacity: hex.count / 2)
         var index = hex.startIndex
