@@ -73,7 +73,7 @@ Following works on the web, in the browser you are using. Every Follow button, i
 trader's drawer, on the Traders page, on a wallet's page and under a market's top traders,
 keeps that trader in this browser's list. The bell in the top bar opens the list, the latest
 moves of everyone on it (perps on Perpl and token buys and sells, from
-`/api/activity?view=following`) and the alerts switch.
+`/api/activity?view=feed`) and the alerts switch.
 
 Alerts are browser push. "Turn on alerts" asks the browser's permission, subscribes through
 its push service (`sw.js` is the service worker; it only receives pushes and opens the app

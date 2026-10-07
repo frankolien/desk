@@ -209,7 +209,7 @@ function paintAlerts() {
 async function loadFeed() {
   const addresses = state.follows.map((row) => row.address).slice(0, 25);
   if (!addresses.length) { state.feed = { events: [], perps: [], pending: [] }; paintFeed(); return; }
-  try { state.feed = await api(`/api/activity?view=following&addresses=${addresses.join(",")}`, { ttl: 10_000 }); }
+  try { state.feed = await api(`/api/activity?view=feed&addresses=${addresses.join(",")}`, { ttl: 10_000 }); }
   catch (error) { state.feed = { error: String(error?.message ?? error) }; }
   paintFeed();
 }
