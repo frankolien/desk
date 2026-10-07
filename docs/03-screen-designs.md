@@ -195,6 +195,12 @@ One market. The screen itself is calm; the ticket is a sheet over it.
 └──────────────────────────────────────┘
 ```
 
+When the desk holds a position on this market, a **Your position** row sits under the
+chart with the side, leverage, distance to liquidation and the open PnL on margin; tapping
+it opens the position sheet, where closing happens. The trade bar carries a briefcase
+with the count of open positions, which opens **Your desk**: in trading, wallet and open
+PnL, and every open position as a row. Checking the book never means leaving the chart.
+
 The account button doubles as the key indicator: unlocked or locked, tapping through to
 Account when unlocked and straight to Face ID when locked. One element doing two jobs, and it puts
 the product's main idea on the home screen without a sentence explaining it.

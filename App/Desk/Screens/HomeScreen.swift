@@ -6,13 +6,6 @@ import SwiftUI
 import UIKit
 
 struct HomeScreen: View {
-    private struct PositionContext: Identifiable {
-        let held: PerplPosition
-        let market: Market
-        let figures: PositionFigures
-        var id: String { "\(held.accountID):\(held.positionID)" }
-    }
-
     private enum Book: String, CaseIterable { case open = "Open", closed = "Closed" }
     private enum Filter: String, CaseIterable, Identifiable {
         case all = "All", perps = "Perps", tokens = "Tokens"
@@ -83,21 +76,9 @@ struct HomeScreen: View {
 
     /// Derived here, at the point of display, so every figure in the row descends from the
     /// one mark that was current when it was drawn.
-    private var positionContexts: [PositionContext] {
-        model.openPositions.compactMap { held in
-            guard let positionMarket = market.market(id: held.marketID),
-                  let mark = market.price(for: positionMarket),
-                  let figures = PositionFigures(position: held, market: positionMarket.config, mark: mark)
-            else { return nil }
-            return PositionContext(held: held, market: positionMarket, figures: figures)
-        }
-    }
+    private var positionContexts: [PositionContext] { PositionContext.all(model: model, market: market) }
 
-    private var totalPositionPnL: Money? {
-        let contexts = positionContexts
-        guard !contexts.isEmpty else { return nil }
-        return contexts.reduce(.zero) { $0 + $1.figures.unrealisedPnL }
-    }
+    private var totalPositionPnL: Money? { PositionContext.totalPnL(positionContexts) }
 
     /// The share card is a record, not merely a snapshot of currently open positions.
     /// Keep realised results visible after the position has closed, then add any live P&L.

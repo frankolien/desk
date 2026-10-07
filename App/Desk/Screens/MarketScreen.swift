@@ -112,6 +112,10 @@ struct MarketScreen: View {
             .onChange(of: MarketOpenRequest.shared.pending) { _, symbol in if symbol != nil { Task { await openRequestedMarket() } } }
             #if DEBUG
             .task { if ProcessInfo.processInfo.arguments.contains("-price-demo") { MarketOpenRequest.shared.open("ETH") } }
+            .task {
+                let arguments = ProcessInfo.processInfo.arguments
+                if let index = arguments.firstIndex(of: "-open-market"), index + 1 < arguments.count { MarketOpenRequest.shared.open(arguments[index + 1]) }
+            }
             .task { if ProcessInfo.processInfo.arguments.contains("-crowd-demo") { directory.seedCrowdForReview() } }
             .task {
                 let arguments = ProcessInfo.processInfo.arguments
@@ -683,6 +687,8 @@ struct PerpDetailScreen: View {
     @State private var ticketPreset: TicketPreset?
     @State private var scrolledPastHeader = false
     @State private var scrollPosition = ScrollPosition(edge: .top)
+    @State private var showsPortfolio = false
+    @State private var selectedPosition: PerplPosition?
     @AppStorage("desk.watchlist") private var savedIDs = ""
 
     var body: some View {
@@ -695,6 +701,7 @@ struct PerpDetailScreen: View {
                     priceRow.padding(.top, 26)
                     chart.padding(.top, 20)
                     ranges.padding(.top, 16)
+                    if let held = heldHere { yourPosition(held).padding(.top, 22) }
                     if Showcase.marketChat {
                         MarketChatPreview(chat: chat) { showsChat = true }.padding(.top, 26)
                     }
@@ -739,6 +746,7 @@ struct PerpDetailScreen: View {
             if ProcessInfo.processInfo.arguments.contains("-open-ticket") { ticket = .up }
             if ProcessInfo.processInfo.arguments.contains("-open-chat") { showsChat = true }
             if ProcessInfo.processInfo.arguments.contains("-open-studio") { showsStudio = true }
+            if ProcessInfo.processInfo.arguments.contains("-open-portfolio") { showsPortfolio = true }
             if ProcessInfo.processInfo.arguments.contains("-detail-scrolled") { scrolledPastHeader = true }
             if ProcessInfo.processInfo.arguments.contains("-detail-about") { tab = .about }
             if ProcessInfo.processInfo.arguments.contains("-detail-bottom") {
@@ -792,6 +800,86 @@ struct PerpDetailScreen: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showsPortfolio) {
+            PortfolioSheet(model: model, market: market)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $selectedPosition) { held in
+            PositionScreen(position: held, market: market, session: session, model: model)
+                .presentationDetents([.large])
+        }
+    }
+
+    /// The desk's own position on this market, figured from the mark on screen.
+    private var heldHere: PositionContext? {
+        guard let listed = market.market,
+              let held = model.openPositions.first(where: { $0.marketID == listed.id }),
+              let mark = market.price(for: listed),
+              let figures = PositionFigures(position: held, market: listed.config, mark: mark)
+        else { return nil }
+        return PositionContext(held: held, market: listed, figures: figures)
+    }
+
+    private func yourPosition(_ position: PositionContext) -> some View {
+        Button { selectedPosition = position.held } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Your position")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .textCase(.uppercase)
+                    Text("\(position.figures.side == .long ? "Long" : "Short") \(position.market.symbol) · \(position.figures.leverageHundredths / 100)×")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                    Text(PortfolioSheet.liquidationLine(position.figures))
+                        .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text((position.figures.unrealisedPnL.isNegative ? "" : "+") + position.figures.unrealisedPnL.display() + " AUSD")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle((position.figures.isProfit ? DeskColor.rise : DeskColor.fall).color)
+                    Text(Percent.micros(position.figures.returnOnMarginMicros) + " on margin")
+                        .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(DeskPressStyle())
+    }
+
+    private var portfolioButton: some View {
+        let count = model.openPositions.count
+        return Button { showsPortfolio = true } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "briefcase.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .frame(width: 52, height: 52)
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.system(size: 11, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 5)
+                        .frame(minWidth: 18, minHeight: 18)
+                        .background(Color.white, in: Capsule())
+                        .offset(x: -3, y: 5)
+                }
+            }
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .perpGlass(interactive: true, in: Circle())
+        .accessibilityLabel(count > 0 ? "Your desk, \(count) open" : "Your desk")
     }
 
     private var isSaved: Bool {
@@ -863,6 +951,7 @@ struct PerpDetailScreen: View {
 
     private var tradeBar: some View {
         HStack(spacing: 10) {
+            portfolioButton
             tradeButton(.down, title: "Short")
             tradeButton(.up, title: "Long")
         }
