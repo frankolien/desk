@@ -19,6 +19,15 @@ const INDICATORS = {
   vwap: { label: "VWAP", color: "#f0a35a" }, bb: { label: "Bollinger 20·2", color: "#9a9a98" },
   vol: { label: "Volume", color: "#6b7280" }, rsi: { label: "RSI 14", color: "#b49cff" }, macd: { label: "MACD 12·26·9", color: "#6f97ff" },
 };
+/// The quick actions are the user's own: four dollar amounts and four shares of the desk.
+const QUICK_DEFAULT = { usd: [25, 50, 100, 250], pct: [25, 50, 75, 100] };
+function quickPrefs() {
+  try {
+    const p = JSON.parse(localStorage.getItem("desk.web.quick") ?? "{}");
+    const four = (xs, fallback, max) => (Array.isArray(xs) && xs.length === 4 && xs.every((x) => Number.isFinite(x) && x > 0 && x <= max) ? xs.map((x) => Math.round(x * 100) / 100) : fallback);
+    return { usd: four(p.usd, QUICK_DEFAULT.usd, 1e9), pct: four(p.pct, QUICK_DEFAULT.pct, 100) };
+  } catch { return { ...QUICK_DEFAULT }; }
+}
 function chartPrefs() {
   try { const p = JSON.parse(localStorage.getItem("desk.web.chart") ?? "{}"); return { chartType: p.chartType === "line" ? "line" : "candle", ind: { vol: true, ...(p.ind ?? {}) }, scale: ["log", "pct"].includes(p.scale) ? p.scale : "auto" }; }
   catch { return { chartType: "candle", ind: { vol: true }, scale: "auto" }; }
@@ -52,7 +61,7 @@ const CSS = `
 .td-chart-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .td-chart-bar .row { flex-wrap: wrap; }
 /* The chart takes most of the window height: taller on a tall screen, never cramped on a short one. */
-.td-chart { height: clamp(480px, 62vh, 820px); position: relative; }
+.td-chart { height: clamp(460px, 56vh, 760px); position: relative; }
 /* Full screen is the chart alone: the market strip, the bar controls and the candles edge to edge,
    over everything else. F toggles, Esc leaves. The ResizeObserver on the chart host does the rest. */
 body.focus { overflow: hidden; }
@@ -106,11 +115,35 @@ body.focus #td-focus { background: var(--chip-hover); }
 .td-fund .big .num { font-size: 20px; }
 .td-fund .note { font-size: 12px; line-height: 1.5; }
 .td-tabs { padding: 0 16px; }
-.td-ticket .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; background: var(--card-2); border-radius: 12px; }
-.td-ticket .sides button { height: 40px; border-radius: 9px; font-size: 14px; font-weight: 800; color: var(--muted); transition: background .15s var(--ease), color .15s var(--ease); }
+.td-ticket .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 5px; background: var(--card-2); border-radius: 14px; }
+.td-ticket .sides button { height: 42px; border-radius: 10px; font-size: 15px; font-weight: 700; color: var(--muted); border: 1px solid transparent; transition: background .15s var(--ease), color .15s var(--ease), border-color .15s var(--ease); }
 .td-ticket .sides button:hover { color: var(--text); }
-.td-ticket .sides button[aria-selected="true"].long { background: var(--rise); color: #04160b; }
-.td-ticket .sides button[aria-selected="true"].short { background: var(--fall); color: #1c0606; }
+.td-ticket .sides button[aria-selected="true"].long { background: rgba(47, 214, 123, .12); border-color: var(--rise); color: var(--rise); }
+.td-ticket .sides button[aria-selected="true"].short { background: rgba(255, 92, 92, .12); border-color: var(--fall); color: var(--fall); }
+/* The amount is the figure: typed straight into it, big, centred, with what it buys underneath. */
+.td-amount { display: grid; justify-items: center; gap: 2px; padding: 14px 0 6px; }
+.td-amount .in { display: flex; align-items: baseline; justify-content: center; gap: 2px; }
+.td-amount .in b { font-size: 48px; font-weight: 500; color: var(--muted); letter-spacing: -.03em; }
+.td-amount input { width: 100%; max-width: 220px; background: none; border: 0; outline: none; text-align: center; font-size: 56px; font-weight: 500; letter-spacing: -.03em; color: var(--text); font-variant-numeric: tabular-nums; }
+.td-amount input::placeholder { color: var(--muted); }
+.td-amount input:focus { color: var(--text); }
+.td-amount .what { font-size: 15px; color: var(--muted); }
+.td-amount .avail { font-size: 12px; color: var(--faint); margin-top: 4px; }
+.td-qa-head { display: flex; align-items: center; justify-content: space-between; margin: 6px 0 8px; }
+.td-qa-head b { font-size: 14px; }
+.td-qa-head button { width: 32px; height: 32px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--chip); color: var(--text); }
+.td-qa-head button[aria-pressed="true"] { background: var(--text); color: #000; }
+.td-qa-head button svg { width: 14px; height: 14px; }
+.td-ticket .quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 0; }
+.td-ticket .quick + .quick { margin-top: 6px; }
+.td-ticket .quick .qa { height: 34px; border-radius: 999px; font-size: 13px; font-weight: 700; border: 1px solid; background: transparent; transition: background .12s var(--ease); }
+.td-ticket .quick .qa.usd { color: var(--rise); border-color: rgba(47, 214, 123, .55); background: rgba(47, 214, 123, .06); }
+.td-ticket .quick .qa.usd:hover { background: rgba(47, 214, 123, .16); }
+.td-ticket .quick .qa.pct { color: #ff7a5c; border-color: rgba(255, 122, 92, .55); background: rgba(255, 122, 92, .06); }
+.td-ticket .quick .qa.pct:hover { background: rgba(255, 122, 92, .16); }
+.td-ticket .quick .qa:disabled { opacity: .4; cursor: not-allowed; }
+.td-ticket .quick input.qa { text-align: center; width: 100%; outline: none; }
+.td-ticket .quick input.qa:focus { border-color: var(--text); }
 .td-ticket .label { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 6px; }
 .td-ticket .label b { color: var(--text); font-size: 13px; }
 .td-ticket .quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
@@ -180,6 +213,7 @@ export default async function mount(el, params) {
     market: null, rows: [], bar: "15m", side: "long", margin: 0, leverage: 3, tab: "crowd", focus: false,
     view: "chart", chartType: chartPrefs().chartType, ind: chartPrefs().ind, scale: chartPrefs().scale, range: null, rangeBar: null,
     line: null, taSeries: [], taSig: "", indOpen: false,
+    quick: quickPrefs(), editQuick: false,
     chart: null, series: null, volume: null, markLine: null, crowd: null, top: null, watched: watched(), lastBar: null,
     ring: [], lastCandle: null, candles: [], legend: null, countdown: null, faces: [], showFaces: localStorage.getItem("desk.web.chartfaces") !== "off",
     positions: null, positionsFor: null, news: null, tp: 0, sl: 0,
@@ -462,18 +496,37 @@ export default async function mount(el, params) {
     paintQuote();
   }
 
+  /// What the desk can put behind a new position right now, in AUSD, or null when the keys are locked.
+  function available() {
+    const account = state.acct?.account;
+    if (!unlockedPasskey() || !account) return null;
+    const free = (Number(account.b ?? 0) - Number(account.lb ?? 0)) / 1e6;
+    return Number.isFinite(free) && free > 0 ? free : 0;
+  }
+
   function paintTicket() {
     const m = state.market;
     state.leverage = Math.min(state.leverage, m.maxLeverage);
+    const free = available();
+    const q = state.quick;
+    const edit = state.editQuick;
+    const chip = (kind, value, i) => edit
+      ? `<input class="qa ${kind}" inputmode="decimal" data-edit="${kind}:${i}" value="${value}" aria-label="${kind === "usd" ? "Dollar amount" : "Percent of desk"} ${i + 1}">`
+      : `<button class="qa ${kind}" data-quick="${kind}:${value}" ${kind === "pct" && free == null ? "disabled title=\"Unlock to use a share of your desk\"" : ""}>${kind === "usd" ? "$" + fmtAmount(value, 2) : value + "%"}</button>`;
     $("#td-ticket", root).innerHTML = `
       <div class="sides" role="tablist">
         <button class="long" role="tab" aria-selected="${state.side === "long"}" data-side="long">Long</button>
         <button class="short" role="tab" aria-selected="${state.side === "short"}" data-side="short">Short</button>
       </div>
+      <div class="td-amount">
+        <div class="in"><b>$</b><input id="td-amount" inputmode="decimal" placeholder="0" value="${state.margin || ""}" autocomplete="off" aria-label="Margin in AUSD"></div>
+        <span class="what" id="td-what">${cap(state.side)} ${esc(m.name)} in AUSD</span>
+        <span class="avail" id="td-avail">${free == null ? "Unlock to see what your desk can put behind it" : `${fmtAmount(free, 2)} AUSD free in your desk`}</span>
+      </div>
       <div>
-        <div class="label"><span>Margin</span><span>AUSD</span></div>
-        <label class="field"><input id="td-amount" inputmode="decimal" placeholder="0" value="${state.margin || ""}" autocomplete="off"><span class="unit">AUSD</span></label>
-        <div class="quick">${QUICK.map((q) => `<button class="chip" data-quick="${q}">$${q}</button>`).join("")}</div>
+        <div class="td-qa-head"><b>Quick actions</b><button type="button" id="td-qaedit" aria-pressed="${edit}" title="${edit ? "Done" : "Edit the quick actions"}" aria-label="${edit ? "Done" : "Edit the quick actions"}">${edit ? `<svg viewBox="0 0 24 24"><use href="#i-check"/></svg>` : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>`}</button></div>
+        <div class="quick">${q.usd.map((v, i) => chip("usd", v, i)).join("")}</div>
+        <div class="quick">${q.pct.map((v, i) => chip("pct", v, i)).join("")}</div>
       </div>
       <div>
         <div class="label"><span>Leverage</span><b class="num" id="td-levtext">${state.leverage}×</b></div>
@@ -494,25 +547,55 @@ export default async function mount(el, params) {
       <div class="note" style="text-align:center;font-size:11px" id="td-note">Signs with Face ID in the app. Nothing on the web can move money.</div>
       <div class="td-keys"><kbd>L</kbd><kbd>S</kbd><span class="note" style="font-size:10px">side</span><kbd>1</kbd>–<kbd>9</kbd><span class="note" style="font-size:10px">leverage</span><kbd>P</kbd><span class="note" style="font-size:10px">positions</span><kbd>F</kbd><span class="note" style="font-size:10px">full screen</span></div>`;
     const ticket = $("#td-ticket", root);
+    // The ticket repaints itself for the quick-action editor; the handlers are bound once.
+    if (ticket.dataset.bound) { bindInputs(); paintQuote(); return; }
+    ticket.dataset.bound = "1";
     ticket.addEventListener("click", (event) => {
       const side = event.target.closest("[data-side]");
       if (side) {
         state.side = side.dataset.side;
         $$("[data-side]", ticket).forEach((b) => b.setAttribute("aria-selected", String(b === side)));
         $("#td-go", ticket).className = `btn btn-lg btn-block ${state.side === "long" ? "btn-rise" : "btn-fall"}`;
+        $("#td-what", ticket).textContent = `${cap(state.side)} ${m.name} in AUSD`;
         paintQuote(); return;
       }
       const quick = event.target.closest("[data-quick]");
-      if (quick) { state.margin = Number(quick.dataset.quick); $("#td-amount", ticket).value = state.margin; paintQuote(); return; }
+      if (quick) {
+        const [kind, raw] = quick.dataset.quick.split(":"); const value = Number(raw);
+        const next = kind === "usd" ? value : Math.floor((available() ?? 0) * value) / 100;
+        state.margin = Math.round(next * 100) / 100;
+        $("#td-amount", ticket).value = state.margin || "";
+        paintQuote(); return;
+      }
+      if (event.target.closest("#td-qaedit")) {
+        if (state.editQuick) {
+          const next = { usd: [...state.quick.usd], pct: [...state.quick.pct] };
+          for (const input of $$("[data-edit]", ticket)) {
+            const [kind, i] = input.dataset.edit.split(":"); const v = Number(String(input.value).replace(/[^0-9.]/g, ""));
+            if (Number.isFinite(v) && v > 0 && (kind === "usd" || v <= 100)) next[kind][Number(i)] = Math.round(v * 100) / 100;
+          }
+          state.quick = next;
+          try { localStorage.setItem("desk.web.quick", JSON.stringify(next)); } catch {}
+        }
+        state.editQuick = !state.editQuick;
+        const margin = state.margin;
+        paintTicket();
+        state.margin = margin;
+        return;
+      }
       const lev = event.target.closest("[data-lev]");
       if (lev) { setLeverage(Number(lev.dataset.lev)); return; }
       if (event.target.closest("#td-go")) onGo();
     });
-    $("#td-amount", ticket).addEventListener("input", (event) => { state.margin = Number(String(event.target.value).replace(/[^0-9.]/g, "")) || 0; paintQuote(); });
-    $("#td-tp", ticket).addEventListener("input", (event) => { state.tp = Number(String(event.target.value).replace(/[^0-9.]/g, "")) || 0; paintQuote(); });
-    $("#td-sl", ticket).addEventListener("input", (event) => { state.sl = Number(String(event.target.value).replace(/[^0-9.]/g, "")) || 0; paintQuote(); });
-    $("#td-lev", ticket).addEventListener("input", (event) => setLeverage(Number(event.target.value)));
+    ticket.addEventListener("keydown", (event) => { if (event.key === "Enter" && event.target.closest("[data-edit]")) $("#td-qaedit", ticket).click(); });
+    bindInputs();
     paintQuote();
+    function bindInputs() {
+      $("#td-amount", ticket).addEventListener("input", (event) => { state.margin = Number(String(event.target.value).replace(/[^0-9.]/g, "")) || 0; paintQuote(); });
+      $("#td-tp", ticket).addEventListener("input", (event) => { state.tp = Number(String(event.target.value).replace(/[^0-9.]/g, "")) || 0; paintQuote(); });
+      $("#td-sl", ticket).addEventListener("input", (event) => { state.sl = Number(String(event.target.value).replace(/[^0-9.]/g, "")) || 0; paintQuote(); });
+      $("#td-lev", ticket).addEventListener("input", (event) => setLeverage(Number(event.target.value)));
+    }
   }
 
   function setLeverage(value) {
@@ -565,6 +648,9 @@ export default async function mount(el, params) {
   function paintQuote() {
     const m = state.market;
     const q = quote();
+    const free = available();
+    const avail = $("#td-avail", root); if (avail) avail.textContent = free == null ? "Unlock to see what your desk can put behind it" : `${fmtAmount(free, 2)} AUSD free in your desk`;
+    $$(".qa.pct[data-quick]", root).forEach((b) => { b.disabled = free == null; b.title = free == null ? "Unlock to use a share of your desk" : ""; });
     const box = $("#td-quote", root); const line = $("#td-sentence", root); const go = $("#td-go", root);
     if (!box) return;
     const mode = tradeMode();
