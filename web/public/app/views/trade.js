@@ -49,7 +49,8 @@ const CSS = `
 .td-head .stat .num { font-size: 15px; }
 .td-head .stat.mark .num { font-size: 22px; letter-spacing: -.02em; }
 .td-head .stat.mark small { font-size: 12px; font-weight: 700; margin-left: 6px; }
-.td-chart-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.td-chart-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.td-chart-bar .row { flex-wrap: wrap; }
 .td-chart { height: 440px; position: relative; }
 /* Full screen is the chart alone: the market strip, the bar controls and the candles edge to edge,
    over everything else. F toggles, Esc leaves. The ResizeObserver on the chart host does the rest. */
