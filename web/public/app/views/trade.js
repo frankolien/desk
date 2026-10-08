@@ -51,7 +51,8 @@ const CSS = `
 .td-head .stat.mark small { font-size: 12px; font-weight: 700; margin-left: 6px; }
 .td-chart-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .td-chart-bar .row { flex-wrap: wrap; }
-.td-chart { height: 440px; position: relative; }
+/* The chart takes most of the window height: taller on a tall screen, never cramped on a short one. */
+.td-chart { height: clamp(480px, 62vh, 820px); position: relative; }
 /* Full screen is the chart alone: the market strip, the bar controls and the candles edge to edge,
    over everything else. F toggles, Esc leaves. The ResizeObserver on the chart host does the rest. */
 body.focus { overflow: hidden; }
@@ -167,7 +168,7 @@ body.focus #td-focus { background: var(--chip-hover); }
 .td-tip b { display: block; font-size: 13px; }
 .td-tip .muted { display: block; }
 @media (max-width: 1320px) { .td-grid { grid-template-columns: minmax(0, 1fr) 320px; } .td-list { display: none; } .td-mobile-pick { display: flex; } }
-@media (max-width: 1000px) { .td-grid { grid-template-columns: 1fr; } .td-chart { height: 340px; } }
+@media (max-width: 1000px) { .td-grid { grid-template-columns: 1fr; } .td-chart { height: clamp(340px, 50vh, 560px); } }
 @media (max-width: 720px) { .td-head { gap: 12px; } .td-head .who { min-width: 0; width: 100%; } .td-head .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; } .td-head .stat.mark { grid-column: 1 / -1; } .td-head .stat .num { font-size: 14px; } }
 `;
 
