@@ -18,7 +18,6 @@ struct TradingShell: View {
     @State private var showsWithdraw = false
     @State private var showsNetwork = false
     @State private var showsSwap = false
-    @State private var showsOnramp = false
     @State private var showsActivity = false
     @State private var fillConfirmation: String?
 
@@ -107,16 +106,10 @@ struct TradingShell: View {
             if arguments.contains("-open-funds") { showsFunding = true }
             if arguments.contains("-open-network") { showsNetwork = true }
             if arguments.contains("-open-swap") { showsSwap = true }
-            if arguments.contains("-open-onramp") { showsOnramp = true }
         }
         #endif
         .sheet(isPresented: $showsSwap) {
             SwapSheet(model: model) { showsSwap = false }
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: $showsOnramp) {
-            OnrampSheet(model: model) { showsOnramp = false }
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }

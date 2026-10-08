@@ -19,10 +19,6 @@ settings:
 packages:
   DeskKit:
     path: DeskKit
-  # Card and Apple Pay deposits: Crossmint's sheet, with the passkey wallet as the recipient.
-  CrossmintCheckout:
-    url: https://github.com/Crossmint/crossmint-checkout-swift
-    from: 1.0.0
 
 targets:
   Desk:
@@ -47,8 +43,6 @@ targets:
         product: DeskFlow
       - package: DeskKit
         product: DeskUI
-      - package: CrossmintCheckout
-        product: CrossmintCheckout
     entitlements:
       path: App/Desk/Desk.entitlements
       properties:
@@ -101,8 +95,6 @@ targets:
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: Desk saves the portfolio cards and videos you choose to keep.
         INFOPLIST_KEY_NSFaceIDUsageDescription: Desk derives your trading key from your face. Nothing is stored.
-        # Only inside Crossmint's sheet, when a card deposit needs an identity document.
-        INFOPLIST_KEY_NSCameraUsageDescription: Desk uses the camera only when a card deposit needs an ID check, inside Crossmint's sheet.
 
   # Home Screen and Lock Screen widget, the auto-copy Live Activity and the Control
   # Center toggle.
