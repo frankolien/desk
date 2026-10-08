@@ -277,7 +277,9 @@ export function chartCountdown(host, { barSeconds, y }) {
   host.appendChild(el);
   const tick = () => {
     const seconds = barSeconds();
-    const left = seconds - (Math.floor(Date.now() / 1000) % seconds);
+    // Weeks start on Monday, four days into the epoch; every other bar on a multiple of itself.
+    const offset = seconds === 604800 ? 345600 : 0;
+    const left = seconds - ((Math.floor(Date.now() / 1000) - offset) % seconds);
     const h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60), s = left % 60;
     el.textContent = seconds >= 3600 ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
     const top = y();

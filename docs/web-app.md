@@ -155,7 +155,7 @@ Prices are decimal numbers. `fundingRate` is per interval as a fraction. Fees ar
 `GET /api/v1/markets/{market}/book?levels=1..100` — Perpl's public L2 snapshot with prices and
 sizes in decimals: `{ market, at, bids: [{ price, size, orders }], asks: [...] }`, two-second cache.
 
-`GET /api/v1/markets/{market}/candles?bar=1m|5m|15m|1H|4H|1D` — OKX exchange candles for
+`GET /api/v1/markets/{market}/candles?bar=1m|5m|15m|1H|4H|1D|1W` — Perpl's candles for
 the market's instrument, ascending `{ time, open, high, low, close, volume }`, one-minute
 cache. A market without an instrument answers 404.
 

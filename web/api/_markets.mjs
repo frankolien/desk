@@ -5,7 +5,22 @@ import { EXCHANGE_VIEWS } from "./_perpl-abi.mjs";
 const CONTEXT_URL = "https://app.perpl.xyz/api/v1/pub/context";
 const EXCHANGE = "0x34B6552d57a35a1D042CcAe1951BD1C370112a6F";
 const CANDLE_URL = "https://app.perpl.xyz/api/v1/market-data";
-export const BAR_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "1H": 3_600, "4H": 14_400, "1D": 86_400 };
+export const BAR_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "1H": 3_600, "4H": 14_400, "1D": 86_400, "1W": 604_800 };
+/// Perpl serves intervals up to a day; weeks are folded here from the daily candles, Monday to
+/// Monday in UTC (1970-01-05 was a Monday, four days into the epoch).
+const WEEK = 604_800;
+const MONDAY_OFFSET = 345_600;
+export const weekStart = (time) => time - ((((time - MONDAY_OFFSET) % WEEK) + WEEK) % WEEK);
+export function weekly(days) {
+  const weeks = new Map();
+  for (const day of [...days].sort((a, b) => a.time - b.time)) {
+    const slot = weekStart(day.time);
+    const week = weeks.get(slot);
+    if (!week) weeks.set(slot, { time: slot, open: day.open, high: day.high, low: day.low, close: day.close, volume: day.volume });
+    else { week.high = Math.max(week.high, day.high); week.low = Math.min(week.low, day.low); week.close = day.close; week.volume += day.volume; }
+  }
+  return [...weeks.values()];
+}
 export const BARS = new Set(Object.keys(BAR_SECONDS));
 const CANDLE_COUNT = 300;
 const COLLATERAL_DECIMALS = 6;
@@ -82,6 +97,7 @@ export function createMarkets({ fetchImpl = fetch, now = Date.now, readMark = nu
 
   async function candles(name, bar) {
     if (!BARS.has(bar)) return null;
+    if (bar === "1W") { const days = await candles(name, "1D"); return days && weekly(days); }
     const market = await find(name);
     if (!market) return null;
     const key = `${market.id}:${bar}`;

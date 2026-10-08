@@ -122,6 +122,28 @@ test("the head and block time come from the stamps, and marks are read off the c
   assert.match(live.headers["Cache-Control"], /s-maxage=2/);
 });
 
+test("weeks are folded from days, Monday to Monday", async () => {
+  const { weekly, weekStart } = await import("../api/_markets.mjs");
+  assert.equal(weekStart(345_600), 345_600);
+  assert.equal(weekStart(345_600 + 6 * 86_400 + 1), 345_600);
+  assert.equal(weekStart(345_600 + 7 * 86_400), 345_600 + 604_800);
+  const day = (i, o, h, l, c, v) => ({ time: 345_600 + i * 86_400, open: o, high: h, low: l, close: c, volume: v });
+  const weeks = weekly([day(8, 5, 6, 4, 5, 1), day(0, 1, 3, 1, 2, 1), day(1, 2, 9, 0.5, 4, 2), day(7, 4, 5, 3, 5, 1)]);
+  assert.deepEqual(weeks, [
+    { time: 345_600, open: 1, high: 9, low: 0.5, close: 4, volume: 3 },
+    { time: 345_600 + 604_800, open: 4, high: 6, low: 3, close: 5, volume: 2 },
+  ]);
+  const fetchImpl = async (url) => {
+    if (url.includes("/pub/context")) return { ok: true, json: async () => ({ markets: [BTC], tokens: [{ symbol: "AUSD" }] }) };
+    assert.match(url, /candles\/86400\//);
+    return { ok: true, json: async () => ({ d: Array.from({ length: 21 }, (_, i) => ({ t: (345_600 + i * 86_400) * 1000, o: 10, h: 12, l: 9, c: 11, v: "1000000" })) }) };
+  };
+  const rows = await createMarkets({ fetchImpl, now: () => 1_790_000_000_000 }).candles("BTC", "1W");
+  assert.equal(rows.length, 3);
+  // The fixture market prices to one decimal, so the raw tens read as units.
+  assert.deepEqual(rows[0], { time: 345_600, open: 1, high: 1.2, low: 0.9, close: 1.1, volume: 7 });
+});
+
 test("candles stop at 300, the newest ones, when Perpl answers one more", async () => {
   const fetchImpl = async (url) => {
     if (url.includes("/pub/context")) return { ok: true, json: async () => ({ markets: [BTC], tokens: [{ symbol: "AUSD" }] }) };

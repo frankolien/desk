@@ -7,9 +7,11 @@ import { ausdBalance, deposit as chainDeposit, explorerTx, hasAccount, openDesk 
 
 const BOOK_LEVELS = 9;
 
-const BAR_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "1H": 3600, "4H": 14400, "1D": 86400 };
+const BAR_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "1H": 3600, "4H": 14400, "1D": 86400, "1W": 604800 };
+// Weeks run Monday to Monday in UTC, like the server folds them; every other bar starts on a multiple of itself.
+const slotOf = (time, seconds) => (seconds === 604800 ? time - ((((time - 345600) % 604800) + 604800) % 604800) : Math.floor(time / seconds) * seconds);
 
-const BARS = ["1m", "5m", "15m", "1H", "4H", "1D"];
+const BARS = ["1m", "5m", "15m", "1H", "4H", "1D", "1W"];
 const SPOT = { BTC: true, ETH: true, SOL: true, PUMP: true };
 const QUICK = [25, 50, 100, 250];
 
@@ -1056,7 +1058,7 @@ export default async function mount(el, params) {
   function tickCandle(mark, at) {
     if (!state.series || !state.lastCandle) return;
     const seconds = BAR_SECONDS[state.bar] ?? 900;
-    const slot = Math.floor(at / 1000 / seconds) * seconds;
+    const slot = slotOf(Math.floor(at / 1000), seconds);
     let c = state.lastCandle;
     if (slot > c.time) c = { time: slot, open: c.close, high: c.close, low: c.close, close: c.close, volume: 0 };
     c = { ...c, close: mark, high: Math.max(c.high, mark), low: Math.min(c.low, mark) };
@@ -1118,7 +1120,7 @@ export default async function mount(el, params) {
     const stacks = new Map();
     for (const el of $$("[data-face]", layer)) {
       const f = state.faces[Number(el.dataset.face)];
-      const slot = Math.floor(f.time / seconds) * seconds;
+      const slot = slotOf(f.time, seconds);
       const x = state.chart.timeScale().timeToCoordinate(slot);
       const y = state.series.priceToCoordinate(f.entry);
       if (x == null || y == null || x < 0) { el.style.display = "none"; continue; }
