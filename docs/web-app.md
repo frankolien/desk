@@ -145,6 +145,21 @@ Positions tab.
 The confirm is **Trade in Desk**: on iPhone it opens the App Store listing, on desktop a
 QR to it. Nothing on the web can move money.
 
+### Token ticket
+
+A token page's ticket trades from the connected wallet. On Monad it swaps MON for the token
+through 0x's allowance holder (`GET /api/swap-quote?view=swap&token=…&sell=MON|TOKEN`), the
+route and the edge check the AUSD swap uses; selling approves exactly the typed amount to the
+holder first. On other chains it pays MON on Monad and Relay delivers the token
+(`GET /api/relay-quote`), polling `/api/relay-status` to the fill, refund or failure; selling
+there is still the app's. The passkey wallet signs in the tab; a browser wallet is switched to
+Monad and asked to send. The amount is typed in USD and converted with the MON mark; the live
+quote shows what arrives, what is paid and the fee, with the MON or token balance beside it.
+A quote older than twenty seconds is refreshed before signing, and a transaction that does not
+match the quote is never signed. Full screen (`F`) and the taller chart work here as on the
+perps page, and the Risk card scores the token out of ten with a launch grid: top ten,
+bundler, sniper, insider, dev and liquidity.
+
 ## New server routes
 
 `GET /api/v1/markets` — every open Perpl market, ten-second cache:
