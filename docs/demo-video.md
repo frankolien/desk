@@ -20,11 +20,21 @@ money out 0:10. Leave out the swap back, Read the room and the live alert; if th
 2:50, the swap's SWAPPED receipt fits as a five-second insert after the tokens.
 
 **Agora bounty video, under 2:00.** It must show a passkey sign-in, an AUSD balance being funded
-or viewed, and a trade on Perpl. Passkey sign-in pickup 0:10 · Your balance 0:25 · Place a trade
-0:30 · Manage and close 0:20 · The browser sign-in with the same passkey and the AUSD in the desk
-0:20 · Take the money out 0:10. For the pickup, lock Desk in Settings, sign out, and record the
-Welcome screen: Face ID, and Home appears with your balance. One line of voice: "Face ID is the
-account. A passkey derives the wallet and the key that signs orders; there is no seed phrase."
+or viewed, and a trade on Perpl. The cut sheet, clip by clip, with the voice-over trimmed to fit
+(about 185 words, which speaks in 1:15, so there is room to breathe):
+
+| Time | Clip | Voice-over |
+|---|---|---|
+| 0:00–0:10 | Pickup: lock Desk in Settings, sign out, record the Welcome screen, Face ID, Home with your balance | "This is Desk, a native iPhone app for perps on Monad. Face ID is the account: a Mera passkey derives the wallet and the key that signs orders. No seed phrase." |
+| 0:10–0:30 | Profile with the AUSD balance; Add funds; Receive; the swap row; close | "My balance, in AUSD, the only money you see. Add funds gives you an address, or swaps MON you already hold, both ways. Open desk sets up your Perpl account under one Face ID." |
+| 0:30–1:00 | BTC, Long, 50 at 5x, the ticket, hold, Face ID, Filled. Keep hold to Filled unbroken | "Long Bitcoin, fifty AUSD at five times. The ticket shows margin, liquidation, fee, and the price Perpl's live book would fill me at. Hold. Face ID. Filled, on Monad mainnet, with real money." |
+| 1:00–1:20 | The position, Close, MAX, hold, Position closed | "The position updates live. Closing is a checkout too: this is the AUSD I get back. Hold. Closed, exactly as Perpl reports it." |
+| 1:20–1:40 | Mac: Safari, trydesk.trade/app, Sign in with your passkey, Touch ID, the portfolio with In trading and Wallet AUSD, then the book beside the chart | "The same passkey opens the same desk in a browser: same address, the AUSD in my desk right there, the live book beside the chart." |
+| 1:40–1:55 | Withdraw, the step list, Face ID, the receipt, the explorer link | "And the money comes back out, with a receipt on Monad's explorer for every step. Perps on Monad, settled in AUSD, from your iPhone." |
+
+Trimming the takes you already have: cut the home-screen scroll from the introduction, speed the
+keypad typing to 2x or cut to the typed amount, and cut the waiting before Filled, but never cut
+between the hold and Filled. Without the browser clip the cut lands at 1:35, which is fine.
 
 **Pitch video, under 2:00.** Separate script in `pitch-video.md`; it reuses the Home and
 leaderboard shots and otherwise is you talking.
