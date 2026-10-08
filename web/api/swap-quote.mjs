@@ -164,12 +164,13 @@ const sideOf = (sell) => (sell && typeof sell === "object" ? sell : SWAP_SIDES[s
 
 /// Wrapped MON is the one token 0x does not route through the holder: buying it is
 /// `deposit()` on the WMON contract itself with the MON attached, and selling it is
-/// `withdraw(amount)` there with nothing attached. Both are accepted as that exact call.
+/// `withdraw(amount)` there with nothing attached. Both are accepted as that call on that
+/// contract; 0x appends a tracking suffix to the call data, which the contract ignores.
 const WRAP_DEPOSIT = "0xd0e30db0";
 const WRAP_WITHDRAW = "0x2e1a7d4d";
 const wraps = (side, to, data, native) => (native
-  ? to === side.buyToken && data === WRAP_DEPOSIT
-  : to === side.sellToken && data.startsWith(WRAP_WITHDRAW) && data.length === 10 + 64);
+  ? to === side.buyToken && data.startsWith(WRAP_DEPOSIT)
+  : to === side.sellToken && data.startsWith(WRAP_WITHDRAW) && data.length >= 10 + 64);
 
 /// The rule the app applies before signing, applied here too so a changed 0x answer is
 /// refused at the edge instead of reaching a phone. Selling MON, the call carries exactly the

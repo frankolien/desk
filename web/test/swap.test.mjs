@@ -145,7 +145,7 @@ const WMON = "0x3bd359c1119da7da1d913d1c4d2b7c461115433a";
 
 test("wrapped MON is the one route that may skip the holder: deposit in, withdraw out", () => {
   const buy = sideFor("MON", WMON, 18, "WMON");
-  const wrap = zeroX({ buyToken: WMON, buyAmount: WEI, minBuyAmount: WEI }, { to: WMON, data: "0xd0e30db0" });
+  const wrap = zeroX({ buyToken: WMON, buyAmount: WEI, minBuyAmount: WEI }, { to: WMON, data: "0xd0e30db0" + "ab".repeat(16) });
   assert.equal(swapTransaction(wrap, WEI, buy)?.to, WMON);
   assert.equal(summarizeSwap(wrap, swapTransaction(wrap, WEI, buy), WEI, buy).approval, undefined);
   assert.equal(swapTransaction(zeroX({ buyToken: WMON, buyAmount: WEI, minBuyAmount: WEI }, { to: WMON, data: "0xa9059cbb" + "00".repeat(64) }), WEI, buy), null);
