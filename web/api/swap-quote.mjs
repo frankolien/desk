@@ -184,6 +184,26 @@ export function swapTransaction(quote, raw, sell = "MON") {
   return ok ? { chainId: Number(MONAD), to: tx.to, data: tx.data, value } : null;
 }
 
+/// Why `swapTransaction` refused an answer, for the 422 and the log; never the data itself.
+export function swapRefusal(quote, raw, sell = "MON") {
+  const side = sideOf(sell);
+  const tx = quote?.transaction;
+  if (!side) return "no side";
+  if (quote?.liquidityAvailable === false) return "no liquidity";
+  if (!tx) return "no transaction";
+  const to = String(tx.to ?? "").toLowerCase();
+  if (to !== ALLOWANCE_HOLDER) return `routes through ${to || "nothing"} instead of the allowance holder`;
+  if (!/^0x[0-9a-f]{8,}$/.test(String(tx.data ?? "").toLowerCase())) return "no call data";
+  const native = side.sellToken === NATIVE_MON;
+  if (String(tx.value ?? "0") !== (native ? raw : "0")) return `carries ${tx.value} instead of ${native ? raw : "0"}`;
+  if (String(quote.sellAmount) !== raw) return `sells ${quote.sellAmount} instead of ${raw}`;
+  if (!/^\d+$/.test(String(quote.buyAmount ?? "")) || quote.buyAmount === "0") return "no buy amount";
+  if (!/^\d+$/.test(String(quote.minBuyAmount ?? ""))) return "no minimum";
+  if (String(quote.buyToken ?? side.buyToken).toLowerCase() !== side.buyToken) return `buys ${quote.buyToken} instead of ${side.buyToken}`;
+  if (String(quote.sellToken ?? side.sellToken).toLowerCase() !== side.sellToken) return `sells ${quote.sellToken} instead of ${side.sellToken}`;
+  return null;
+}
+
 export function summarizeSwap(quote, transaction, raw, sell = "MON") {
   const side = sideOf(sell);
   const native = side.sellToken === NATIVE_MON;
@@ -243,11 +263,11 @@ async function swap(req, res) {
   if (quote.liquidityAvailable === false) {
     return res.status(422).json({ error: `There is not enough ${side.buys} liquidity for this amount.`, reason: "no-liquidity" });
   }
-  const transaction = swapTransaction(quote, wei, sell);
+  const transaction = swapTransaction(quote, wei, side);
   if (!transaction) {
-    return res.status(422).json({ error: "This route needs a transaction Desk does not sign.", reason: "unsupported-route" });
+    return res.status(422).json({ error: "This route needs a transaction Desk does not sign.", reason: "unsupported-route", detail: swapRefusal(quote, wei, side) });
   }
-  return res.status(200).json(summarizeSwap(quote, transaction, wei, sell));
+  return res.status(200).json(summarizeSwap(quote, transaction, wei, side));
 }
 
 export default async function handler(req, res) {

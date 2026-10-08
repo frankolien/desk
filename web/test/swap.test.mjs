@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { ALLOWANCE_HOLDER, AUSD, sideFor, swapTransaction, summarizeSwap } from "../api/swap-quote.mjs";
+import { ALLOWANCE_HOLDER, AUSD, sideFor, swapRefusal, swapTransaction, summarizeSwap } from "../api/swap-quote.mjs";
 
 const WEI = "500000000000000000000";
 const DATA = "0x2213bc0b" + "00".repeat(32 * 5) + "ab".repeat(40);
@@ -131,4 +131,12 @@ test("selling a token approves exactly the typed amount to the holder", () => {
   assert.equal(out.pay.raw, raw);
   assert.equal(out.receive.symbol, "MON");
   assert.deepEqual(out.approval, { token: CHOG.toLowerCase(), spender: ALLOWANCE_HOLDER, amount: raw });
+});
+
+test("a refusal says which rule the answer broke", () => {
+  assert.equal(swapRefusal(zeroX(), WEI), null);
+  assert.equal(swapRefusal(zeroX({}, { to: "0x4cd00e387622c35bddb9b4c962c136462338bc31" }), WEI), "routes through 0x4cd00e387622c35bddb9b4c962c136462338bc31 instead of the allowance holder");
+  assert.equal(swapRefusal(zeroX({}, { value: "1" }), WEI), `carries 1 instead of ${WEI}`);
+  assert.equal(swapRefusal(zeroX({ buyToken: "0x1111111111111111111111111111111111111111" }), WEI), `buys 0x1111111111111111111111111111111111111111 instead of ${AUSD}`);
+  assert.equal(swapRefusal(zeroX({ liquidityAvailable: false }), WEI), "no liquidity");
 });
