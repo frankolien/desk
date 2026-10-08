@@ -145,23 +145,37 @@ export const NATIVE_MON = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 export const ALLOWANCE_HOLDER = "0x0000000000001ff3684f28c67538d4d072c22734";
 const SWAP_SLIPPAGE_BPS = "100";
 export const SWAP_SIDES = {
-  MON: { sellToken: NATIVE_MON, buyToken: AUSD, sellDecimals: 18, buyDecimals: 6, buys: "AUSD" },
-  AUSD: { sellToken: AUSD, buyToken: NATIVE_MON, sellDecimals: 6, buyDecimals: 18, buys: "MON" },
+  MON: { sellToken: NATIVE_MON, buyToken: AUSD, sellDecimals: 18, buyDecimals: 6, sells: "MON", buys: "AUSD" },
+  AUSD: { sellToken: AUSD, buyToken: NATIVE_MON, sellDecimals: 6, buyDecimals: 18, sells: "AUSD", buys: "MON" },
 };
+
+/// Any Monad token against MON, for the market pages: `sell` is MON to buy the token, or TOKEN
+/// to sell it. The token's decimals must already be confirmed on-chain.
+export function sideFor(sell, token, tokenDecimals, symbol = "TOKEN") {
+  if (!/^0x[a-fA-F0-9]{40}$/.test(String(token ?? "")) || !Number.isInteger(tokenDecimals)) return null;
+  const address = String(token).toLowerCase();
+  if (address === NATIVE_MON) return null;
+  if (sell === "MON") return { sellToken: NATIVE_MON, buyToken: address, sellDecimals: 18, buyDecimals: tokenDecimals, sells: "MON", buys: symbol };
+  if (sell === "TOKEN") return { sellToken: address, buyToken: NATIVE_MON, sellDecimals: tokenDecimals, buyDecimals: 18, sells: symbol, buys: "MON" };
+  return null;
+}
+
+const sideOf = (sell) => (sell && typeof sell === "object" ? sell : SWAP_SIDES[sell]);
 
 /// The rule the app applies before signing, applied here too so a changed 0x answer is
 /// refused at the edge instead of reaching a phone. Selling MON, the call carries exactly the
-/// typed amount; selling AUSD, it carries nothing, since the AUSD moves by approval.
+/// typed amount; selling a token, it carries nothing, since the token moves by approval.
 export function swapTransaction(quote, raw, sell = "MON") {
-  const side = SWAP_SIDES[sell];
+  const side = sideOf(sell);
   const tx = quote?.transaction;
   if (!side || !tx || quote.liquidityAvailable === false) return null;
   const to = String(tx.to ?? "").toLowerCase();
   const data = String(tx.data ?? "").toLowerCase();
   const value = String(tx.value ?? "0");
+  const native = side.sellToken === NATIVE_MON;
   const ok = to === ALLOWANCE_HOLDER
     && /^0x[0-9a-f]{8,}$/.test(data)
-    && value === (sell === "MON" ? raw : "0")
+    && value === (native ? raw : "0")
     && String(quote.sellAmount) === raw
     && /^\d+$/.test(String(quote.buyAmount ?? "")) && quote.buyAmount !== "0"
     && /^\d+$/.test(String(quote.minBuyAmount ?? ""))
@@ -171,10 +185,11 @@ export function swapTransaction(quote, raw, sell = "MON") {
 }
 
 export function summarizeSwap(quote, transaction, raw, sell = "MON") {
-  const side = SWAP_SIDES[sell];
+  const side = sideOf(sell);
+  const native = side.sellToken === NATIVE_MON;
   return {
     observedAt: Date.now(),
-    pay: { amount: readableUnits(raw, side.sellDecimals), ...(sell === "MON" ? { wei: raw } : { raw }), symbol: sell },
+    pay: { amount: readableUnits(raw, side.sellDecimals), ...(native ? { wei: raw } : { raw }), symbol: side.sells },
     receive: {
       amount: readableUnits(quote.buyAmount, side.buyDecimals),
       minimum: readableUnits(quote.minBuyAmount, side.buyDecimals),
@@ -184,18 +199,27 @@ export function summarizeSwap(quote, transaction, raw, sell = "MON") {
     sources: Array.isArray(quote.route?.fills)
       ? [...new Set(quote.route.fills.map((fill) => fill.source).filter(Boolean))] : [],
     transaction,
-    // The approval the app makes first when selling AUSD: the holder, for exactly this much.
-    ...(sell === "AUSD" ? { approval: { token: AUSD, spender: ALLOWANCE_HOLDER, amount: raw } } : {}),
+    // The approval made first when selling a token: the holder, for exactly this much.
+    ...(native ? {} : { approval: { token: side.sellToken, spender: ALLOWANCE_HOLDER, amount: raw } }),
   };
 }
 
 async function swap(req, res) {
   const user = String(req.query.user || "");
   const sell = String(req.query.sell || "MON").toUpperCase();
-  const side = SWAP_SIDES[sell];
-  if (!side || !/^0x[a-fA-F0-9]{40}$/.test(user)) {
+  const token = String(req.query.token || "");
+  if (!/^0x[a-fA-F0-9]{40}$/.test(user) || (token && !/^0x[a-fA-F0-9]{40}$/.test(token))) {
     return res.status(400).json({ error: "Valid quote parameters required", reason: "invalid" });
   }
+  let side = token ? null : SWAP_SIDES[sell];
+  if (token) {
+    const decimals = await resolveDecimals(MONAD, token);
+    if (decimals === null) {
+      return res.status(422).json({ error: "This token's decimal precision could not be confirmed on-chain, so it cannot be quoted safely.", reason: "unknown-decimals" });
+    }
+    side = sideFor(sell, token, decimals, String(req.query.symbol || "TOKEN").slice(0, 12));
+  }
+  if (!side) return res.status(400).json({ error: "Valid quote parameters required", reason: "invalid" });
   const wei = baseUnits(String(req.query.amount || ""), side.sellDecimals);
   if (!wei || wei === "0") return res.status(400).json({ error: "Enter a valid amount", reason: "invalid" });
   if (!zeroXConfigured()) return res.status(503).json({ error: "No quote provider is configured for this chain.", reason: "unavailable" });

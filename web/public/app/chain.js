@@ -16,6 +16,7 @@ const ABI = parseAbi([
   "function withdrawCollateral(uint256 amount)",
   "function allowOrderForwarding(bool allow)",
   "function getAccountByAddr(address owner) view returns (uint256)",
+  "function decimals() view returns (uint8)",
 ]);
 const PRIORITY_FEE = 2_000_000_000n;
 const MINIMUM_FEE = 100_000_000_000n;
@@ -32,6 +33,17 @@ export async function readUint(to, functionName, args) {
 }
 
 export const ausdBalance = (token, owner) => readUint(token, "balanceOf", [owner]);
+export const monBalance = (owner) => rpc().getBalance({ address: owner });
+export const tokenBalance = ausdBalance;
+export const tokenDecimals = async (token) => Number(await readUint(token, "decimals", []));
+
+/// For a transaction another wallet sent: resolves to the hash once it is mined, and throws
+/// when it reverted or has not been mined in a minute.
+export async function waitForReceipt(hash) {
+  const receipt = await rpc().waitForTransactionReceipt({ hash, timeout: 60_000 });
+  if (receipt.status !== "success") throw new Error(`The transaction reverted (${hash}).`);
+  return hash;
+}
 export const allowance = (token, owner, spender) => readUint(token, "allowance", [owner, spender]);
 
 /// getAccountByAddr reverts when there is no account, so a revert is the answer, not an error.
@@ -41,16 +53,17 @@ export async function hasAccount(exchange, owner) {
 }
 
 /// Signs and sends one call from the wallet, then waits for its receipt. A reverted estimate
-/// is surfaced, never replaced with a large limit the sender would be billed for.
-export async function sendCall({ account, to, data, onSent }) {
+/// is surfaced, never replaced with a large limit the sender would be billed for. `value` is
+/// the MON the call carries, for a buy paid in MON; a call without one carries nothing.
+export async function sendCall({ account, to, data, value = 0n, onSent }) {
   const node = rpc();
-  const estimate = await node.estimateGas({ account: account.address, to, data });
+  const estimate = await node.estimateGas({ account: account.address, to, data, value });
   const gas = (() => { const padded = (estimate * MARGIN_BPS + 9_999n) / 10_000n; return padded < 21_000n ? 21_000n : padded; })();
   const block = await node.getBlock({ blockTag: "latest" });
   const base = block.baseFeePerGas ?? MINIMUM_FEE;
   const maxFeePerGas = (() => { const cap = base * 2n + PRIORITY_FEE; const floor = MINIMUM_FEE * 2n; return cap > floor ? cap : floor; })();
   const nonce = await node.getTransactionCount({ address: account.address, blockTag: "pending" });
-  const signed = await account.signTransaction({ chainId: CHAIN_ID, type: "eip1559", to, data, gas, maxFeePerGas, maxPriorityFeePerGas: PRIORITY_FEE, nonce, value: 0n });
+  const signed = await account.signTransaction({ chainId: CHAIN_ID, type: "eip1559", to, data, gas, maxFeePerGas, maxPriorityFeePerGas: PRIORITY_FEE, nonce, value });
   const hash = await node.sendRawTransaction({ serializedTransaction: signed });
   onSent?.(hash);
   const receipt = await node.waitForTransactionReceipt({ hash, timeout: 60_000 });

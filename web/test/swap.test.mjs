@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { ALLOWANCE_HOLDER, AUSD, swapTransaction, summarizeSwap } from "../api/swap-quote.mjs";
+import { ALLOWANCE_HOLDER, AUSD, sideFor, swapTransaction, summarizeSwap } from "../api/swap-quote.mjs";
 
 const WEI = "500000000000000000000";
 const DATA = "0x2213bc0b" + "00".repeat(32 * 5) + "ab".repeat(40);
@@ -89,4 +89,46 @@ test("the reverse summary pays AUSD, receives MON, and names the approval the ap
   assert.deepEqual(out.approval, { token: AUSD, spender: ALLOWANCE_HOLDER, amount: RAW_AUSD });
   assert.equal(out.transaction.value, "0");
   assert.equal(summarizeSwap(zeroX(), swapTransaction(zeroX(), WEI), WEI).approval, undefined);
+});
+
+const CHOG = "0xE0590015A873bF326bd645c3E1266d4db41C4E6B";
+
+test("any Monad token has a side against MON, once its decimals are known", () => {
+  const buy = sideFor("MON", CHOG, 18, "CHOG");
+  assert.deepEqual(buy, { sellToken: NATIVE, buyToken: CHOG.toLowerCase(), sellDecimals: 18, buyDecimals: 18, sells: "MON", buys: "CHOG" });
+  const sell = sideFor("TOKEN", CHOG, 18, "CHOG");
+  assert.equal(sell.sellToken, CHOG.toLowerCase());
+  assert.equal(sell.buys, "MON");
+  assert.equal(sideFor("MON", CHOG, null), null);
+  assert.equal(sideFor("MON", NATIVE, 18), null);
+  assert.equal(sideFor("AUSD", CHOG, 18), null);
+  assert.equal(sideFor("MON", "nope", 18), null);
+});
+
+test("buying a token with MON is checked and summarized like AUSD", () => {
+  const side = sideFor("MON", CHOG, 18, "CHOG");
+  const quote = zeroX({ buyToken: CHOG, buyAmount: "4200000000000000000000", minBuyAmount: "4158000000000000000000" });
+  const tx = swapTransaction(quote, WEI, side);
+  assert.equal(tx?.value, WEI);
+  assert.equal(swapTransaction(zeroX({ buyToken: AUSD }), WEI, side), null);
+  const out = summarizeSwap(quote, tx, WEI, side);
+  assert.equal(out.pay.symbol, "MON");
+  assert.equal(out.pay.wei, WEI);
+  assert.equal(out.receive.amount, "4200");
+  assert.equal(out.receive.symbol, "CHOG");
+  assert.equal(out.approval, undefined);
+});
+
+test("selling a token approves exactly the typed amount to the holder", () => {
+  const side = sideFor("TOKEN", CHOG, 18, "CHOG");
+  const raw = "4200000000000000000000";
+  const quote = zeroX({ sellToken: CHOG, buyToken: NATIVE, sellAmount: raw, buyAmount: "490000000000000000000", minBuyAmount: "485100000000000000000" }, { value: "0" });
+  const tx = swapTransaction(quote, raw, side);
+  assert.equal(tx?.value, "0");
+  assert.equal(swapTransaction(zeroX({ sellToken: CHOG, buyToken: NATIVE, sellAmount: raw }, { value: raw }), raw, side), null);
+  const out = summarizeSwap(quote, tx, raw, side);
+  assert.equal(out.pay.symbol, "CHOG");
+  assert.equal(out.pay.raw, raw);
+  assert.equal(out.receive.symbol, "MON");
+  assert.deepEqual(out.approval, { token: CHOG.toLowerCase(), spender: ALLOWANCE_HOLDER, amount: raw });
 });

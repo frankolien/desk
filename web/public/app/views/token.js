@@ -1,4 +1,6 @@
 import { $, $$, esc, api, poll, fmtUsd, fmtSmall, fmtCompact, fmtPct, fmtAmount, short, ago, dirClass, logo, nativeLogo, person, hydratePeople, handoff, identity, knownIdentity, navigate, connectedWallet, chartOptions, candleOptions, volumeColor, chartLegend, chartCountdown } from "../app.js";
+import { isUnlocked, onSession, session } from "../session.js";
+import { allowance, call as chainCall, explorerTx, monBalance, sendCall, tokenBalance, tokenDecimals, waitForReceipt } from "../chain.js";
 
 const STYLE = `<style>
 .tk-tx { display: inline-flex; color: var(--muted); } .tk-tx:hover { color: var(--text); } .tk-tx svg { width: 13px; height: 13px; }
@@ -32,7 +34,7 @@ body.focus { overflow: hidden; }
 body.focus .tk { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; background: var(--bg); }
 body.focus .tk-back, body.focus .tk-side, body.focus .tk-main > .card:nth-child(2) { display: none; }
 body.focus .tk-head { margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--line); }
-body.focus .tk-grid { flex: 1; display: flex; min-height: 0; gap: 0; }
+body.focus .tk-grid { flex: 1; display: flex; align-items: stretch; min-height: 0; gap: 0; }
 body.focus .tk-main { flex: 1; display: flex; flex-direction: column; min-height: 0; gap: 0; }
 body.focus .tk-main > .card:first-child { flex: 1; display: flex; flex-direction: column; min-height: 0; border: 0; border-radius: 0; }
 body.focus .tk-chart { flex: 1; height: auto; min-height: 0; }
@@ -68,6 +70,21 @@ body.focus #tk-focus { background: var(--chip-hover); }
 .tk-amt input { width: 1.4ch; max-width: 100%; min-width: 0; background: none; border: 0; outline: none; text-align: center; font-family: var(--rounded); font-size: 30px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; padding: 0; -moz-appearance: textfield; }
 .tk-amt input::-webkit-outer-spin-button, .tk-amt input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .tk-est { text-align: center; font-size: 12px; color: var(--muted); min-height: 17px; font-family: var(--rounded); font-variant-numeric: tabular-nums; }
+.tk-note { font-size: 12px; color: var(--amber); text-align: center; margin-top: 10px; line-height: 1.4; }
+.tk-note.fall { color: var(--fall); }
+.tk-note:empty { display: none; }
+.tk-steps { display: grid; gap: 10px; padding: 4px 0 2px; }
+.tk-steps .step { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.tk-steps .step i { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--line-strong); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-style: normal; font-weight: 800; }
+.tk-steps .step.running i { border-color: var(--text); border-top-color: transparent; animation: tk-spin 0.8s linear infinite; }
+.tk-steps .step.done i { border-color: var(--rise); background: var(--rise-soft); color: var(--rise); }
+.tk-steps .step.stopped i { border-color: var(--fall); background: var(--fall-soft); color: var(--fall); }
+.tk-steps .step.waiting { color: var(--muted); }
+.tk-steps .step a { margin-left: auto; font-size: 12px; color: var(--muted); text-decoration: underline; }
+.tk-outcome { text-align: center; padding: 8px 0 2px; }
+.tk-outcome b { display: block; font-size: 18px; font-weight: 800; letter-spacing: -0.02em; }
+.tk-outcome span { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+@keyframes tk-spin { to { transform: rotate(360deg); } }
 .tk-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .tk-chips .chip { flex: 1; justify-content: center; }
 .tk-act { display: grid; gap: 10px; }
@@ -117,6 +134,7 @@ const TABS = [["trades", "Trades"], ["holders", "Holders"], ["traders", "Traders
 const EARLY_TABS = ["bundlers", "snipers", "insiders"];
 const EARLY_LABEL = { bundlers: ["Bundles", "bundles"], snipers: ["Snipers", "snipers"], insiders: ["Insiders", "insiders"] };
 const EARLY_RETRIES = 5;
+const CHAIN_NAMES = { 1: "Ethereum", 10: "Optimism", 56: "BNB Chain", 137: "Polygon", 143: "Monad", 501: "Solana", 8453: "Base", 42161: "Arbitrum" };
 const RISK_LABEL = { low: "Low risk", caution: "Caution", high: "High risk", unchecked: "Not checked" };
 const WATCH_KEY = "desk.web.watch";
 const FACES_KEY = "desk.web.chartfaces";
@@ -175,6 +193,8 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   let earlyTimer = null;
   let onKey = null;
   let onFullscreen = null;
+  let stopSession = null;
+  let quoteTimer = null;
   let facesOn = readFaces();
 
   el.innerHTML = `${STYLE}<div class="tk">
@@ -209,7 +229,9 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
           <div class="sub" style="text-align:center;margin:4px 0 14px" id="tk-ticket-sub">Buy in USD</div>
           <div class="eyebrow" style="margin-bottom:8px">Quick actions</div>
           <div class="tk-chips" id="tk-chips"></div>
-          <button class="btn btn-lg btn-block btn-rise" type="button" id="tk-go" style="margin-top:14px">Buy in Desk</button>
+          <div class="tk-note" id="tk-note"></div>
+          <button class="btn btn-lg btn-block btn-rise" type="button" id="tk-go" style="margin-top:14px">Buy</button>
+          <div id="tk-progress" hidden></div>
         </div>
         <div class="card" id="tk-activity">
           <div class="card-head"><h3>Market activity</h3><div class="seg seg-sm seg-line" id="tk-win">${WINDOWS.map(([w]) => `<button type="button" data-win="${w}" aria-selected="${w === "1h"}">${w}</button>`).join("")}</div></div>
@@ -244,7 +266,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
 
   const symbol = row?.symbol || details?.symbol || short(address);
   const name = row?.name || symbol;
-  const chainName = row?.chainName || `Chain ${chainIndex}`;
+  const chainName = row?.chainName || CHAIN_NAMES[String(chainIndex)] || `Chain ${chainIndex}`;
   let price = first(num(info?.price), num(row?.price));
   const change = first(num(info?.priceChange24H), num(row?.change));
   const marketCap = first(num(info?.marketCap), num(row?.marketCap));
@@ -296,55 +318,275 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   let pct = null;
   $$("[data-side]", el).forEach((b) => b.setAttribute("aria-selected", String(b.dataset.side === side)));
   const amountInput = q("#tk-amount");
+  // On Monad the ticket swaps MON for the token through 0x's allowance holder, signed here, and
+  // sells by approving exactly the typed amount to the holder first. On other chains Relay
+  // delivers the token for MON paid on Monad, the app's route; selling there is still the app's.
+  const onMonad = String(chainIndex) === "143";
+  const GAS_RESERVE = 10n ** 16n;
+  const canBuy = onMonad || row?.buyable !== false;
+  const canSell = onMonad;
+  let quote = null;
+  let quoteAt = 0;
+  let quoteError = null;
+  let quoting = false;
+  let quoteSeq = 0;
+  let balance = null;
+  let held = null;
+  let decimals = null;
+  let monPrice = null;
+  let trade = null;
+
+  const kind = () => connectedWallet()?.via ?? null;
+  const canSign = () => kind() === "passkey" || kind() === "browser";
+  const owner = () => { const a = connectedWallet()?.address; return /^0x[0-9a-fA-F]{40}$/.test(a ?? "") ? a : null; };
+  const trim = (text) => text.replace(/\.?0+$/, "");
+  const decimalText = (text) => (/^\d+(\.\d+)?$/.test(text) && Number(text) > 0 ? text : null);
+  const monText = (usd) => (usd > 0 && monPrice > 0 ? decimalText(trim((usd / monPrice).toFixed(6))) : null);
+  const units = (text, d) => { const [w, f = ""] = String(text).split("."); return BigInt((w || "0") + f.slice(0, d).padEnd(d, "0")); };
+  const readable = (raw, d) => { const s = raw.toString().padStart(d + 1, "0"); const whole = s.slice(0, s.length - d); const frac = s.slice(s.length - d).replace(/0+$/, ""); return frac ? `${whole}.${frac}` : whole; };
+  const fmtMON = (wei) => fmtAmount(Number(wei) / 1e18, 4);
+  const sellText = () => {
+    if (amountInput.value) return decimalText(trim(Number(amountInput.value).toFixed(Math.min(decimals ?? 18, 8))));
+    if (pct && held != null && decimals != null) { const raw = (held * BigInt(pct)) / 100n; return raw > 0n ? readable(raw, decimals) : null; }
+    return null;
+  };
+
+  const refreshMON = async () => {
+    const out = await api("/api/v1/markets", { ttl: 30_000, signal }).catch(() => null);
+    const mark = Number(out?.markets?.find((m) => m.name === "MON")?.mark);
+    if (mark > 0) monPrice = mark;
+  };
+  const refreshHoldings = async () => {
+    const user = owner();
+    if (!user) { balance = null; held = null; return; }
+    const [mon, tokens, d] = await Promise.all([
+      monBalance(user).catch(() => null),
+      onMonad ? tokenBalance(address, user).catch(() => null) : null,
+      onMonad && decimals == null ? tokenDecimals(address).catch(() => null) : decimals,
+    ]);
+    if (dead) return;
+    balance = mon; held = tokens; if (Number.isInteger(d)) decimals = d;
+    paintTicket();
+  };
+
+  const requestQuote = ({ now = false } = {}) => {
+    clearTimeout(quoteTimer);
+    const seq = ++quoteSeq;
+    const run = async () => {
+      quoteError = null;
+      const user = owner();
+      const buying = side === "buy";
+      const usd = Number(amountInput.value);
+      const wants = buying ? canBuy && usd > 0 : canSell && Boolean(sellText());
+      if (!user || !wants || !canSign()) { quote = null; quoting = false; paintEstimate(); return null; }
+      if (buying && !(monPrice > 0)) await refreshMON();
+      const amount = buying ? monText(usd) : sellText();
+      if (!amount) { quote = null; quoting = false; paintEstimate(); return null; }
+      quoting = true; paintEstimate();
+      try {
+        const out = onMonad
+          ? await api(`/api/swap-quote?view=swap&user=${user}&amount=${amount}&sell=${buying ? "MON" : "TOKEN"}&token=${address}&symbol=${encodeURIComponent(symbol)}`, { signal })
+          : await api(`/api/relay-quote?user=${user}&chainIndex=${chainIndex}&tokenAddress=${address}&amount=${amount}`, { signal });
+        if (seq !== quoteSeq || dead) return null;
+        quote = onMonad
+          ? { pay: { amount: out.pay.amount, wei: buying ? BigInt(out.pay.wei) : 0n, raw: buying ? null : BigInt(out.pay.raw) }, receive: { amount: out.receive.amount, minimum: out.receive.minimum }, fee: `${fmtAmount(Number(out.feeMON), 4)} MON gas`, transaction: out.transaction, approval: out.approval ?? null, requestId: null }
+          : { pay: { amount: out.pay.amount, wei: units(out.pay.amount, 18), raw: null }, receive: { amount: out.receive.amount, minimum: out.receive.minimum }, fee: `$${out.feeUsd} fee`, transaction: out.transaction, approval: null, requestId: out.requestId };
+        quoteAt = Date.now();
+      } catch (error) {
+        if (seq !== quoteSeq || dead) return null;
+        quote = null; quoteError = error?.message || "A live quote is unavailable right now.";
+      }
+      quoting = false; paintEstimate();
+      return quote;
+    };
+    if (now) return run();
+    return new Promise((resolve) => { quoteTimer = setTimeout(() => resolve(run()), 450); });
+  };
+
   const paintTicket = () => {
     const buying = side === "buy";
     q("#tk-prefix").textContent = buying ? "$" : "";
     q("#tk-prefix").hidden = !buying;
-    q("#tk-ticket-sub").textContent = buying ? `Buy ${symbol} in USD` : `Sell ${symbol} for USD`;
+    const signer = canSign();
+    const sub = buying
+      ? `Buy ${symbol} in USD, paid in MON${balance != null && signer ? ` · ${fmtMON(balance)} MON available` : ""}`
+      : canSell ? `Sell ${symbol} for MON${held != null && decimals != null && signer ? ` · ${fmtAmount(Number(readable(held, decimals)))} ${symbol} held` : ""}` : `Sell ${symbol} for USD`;
+    q("#tk-ticket-sub").textContent = sub;
     q("#tk-chips").innerHTML = buying
       ? [25, 50, 100, 250].map((v) => `<button class="chip" type="button" data-usd="${v}">$${v}</button>`).join("")
       : [25, 50, 75, 100].map((v) => `<button class="chip" type="button" data-pct="${v}" aria-pressed="${pct === v}">${v}%</button>`).join("");
     const go = q("#tk-go");
     const connected = Boolean(connectedWallet());
+    const locked = kind() === "passkey" && !isUnlocked();
+    const can = buying ? canBuy : canSell;
     go.className = `btn btn-lg btn-block ${!connected ? "btn-primary" : buying ? "btn-rise" : "btn-fall"}`;
-    go.textContent = connected ? `${buying ? "Buy" : "Sell"} ${symbol} in Desk` : "Connect wallet";
+    go.hidden = Boolean(trade);
+    go.disabled = connected && signer && buying && !canBuy;
+    const verb = buying ? "Buy" : "Sell";
+    go.textContent = !connected ? "Connect wallet"
+      : !signer || !can ? (buying && !canBuy ? `Not on ${chainName} yet` : `${verb} ${symbol} in Desk`)
+      : locked ? `Unlock to ${verb.toLowerCase()} ${symbol}`
+      : `${verb} ${symbol}`;
     paintEstimate();
+    paintProgress();
   };
   const paintEstimate = () => {
     const amount = Number(amountInput.value);
     amountInput.style.width = `${Math.max(1, amountInput.value.length) + 0.4}ch`;
     const est = q("#tk-est");
-    if (!(amount > 0) || !(price > 0)) { est.textContent = side === "sell" && pct ? `${pct}% of your ${symbol}` : ""; return; }
-    est.textContent = side === "buy" ? `≈ ${fmtAmount(amount / price)} ${symbol} at ${tokenPrice(price)}` : `≈ ${fmtUsd(amount * price)} at ${tokenPrice(price)}`;
+    const note = q("#tk-note");
+    note.textContent = "";
+    const buying = side === "buy";
+    if (!buying && !amount && pct) {
+      est.textContent = quote ? `≈ ${fmtAmount(Number(quote.receive.amount), 4)} MON for ${fmtAmount(Number(quote.pay.amount))} ${symbol} · ${quote.fee}` : quoting ? "Quoting…" : `${pct}% of your ${symbol}`;
+      if (quoteError) note.textContent = quoteError;
+      return;
+    }
+    if (!(amount > 0)) { est.textContent = ""; return; }
+    if (quote) {
+      est.textContent = buying
+        ? `≈ ${fmtAmount(Number(quote.receive.amount))} ${symbol} for ${fmtAmount(Number(quote.pay.amount), 4)} MON · ${quote.fee}`
+        : `≈ ${fmtAmount(Number(quote.receive.amount), 4)} MON for ${fmtAmount(Number(quote.pay.amount))} ${symbol} · ${quote.fee}`;
+      if (buying && balance != null && canSign() && balance < quote.pay.wei + GAS_RESERVE) note.textContent = `That needs ${fmtMON(quote.pay.wei + GAS_RESERVE)} MON with gas; the wallet holds ${fmtMON(balance)} MON.`;
+      if (!buying && held != null && quote.pay.raw != null && held < quote.pay.raw) note.textContent = `The wallet holds ${fmtAmount(Number(readable(held, decimals ?? 18)))} ${symbol}.`;
+      return;
+    }
+    if (quoting) { est.textContent = "Quoting…"; return; }
+    est.textContent = !(price > 0) ? "" : buying ? `≈ ${fmtAmount(amount / price)} ${symbol} at ${tokenPrice(price)}` : `≈ ${fmtUsd(amount * price)} at ${tokenPrice(price)}`;
+    if (quoteError) note.textContent = quoteError;
   };
+  const paintProgress = () => {
+    const host = q("#tk-progress");
+    if (!trade) { host.hidden = true; host.innerHTML = ""; return; }
+    const mark = { running: "", done: "✓", stopped: "×", waiting: "" };
+    const done = Boolean(trade.outcome);
+    host.hidden = false;
+    host.innerHTML = `<div class="tk-steps" style="margin-top:14px">${trade.steps.map((step) => `<div class="step ${step.state}"><i>${mark[step.state]}</i><span>${esc(step.label)}</span>${step.href && step.state !== "waiting" ? `<a href="${esc(step.href)}" target="_blank" rel="noopener">View</a>` : ""}</div>`).join("")}</div>`
+      + (done ? `<div class="tk-outcome"><b>${esc(trade.outcome.title)}</b><span>${esc(trade.outcome.text)}</span></div><button class="btn btn-block" type="button" id="tk-done" style="margin-top:12px">Done</button>` : "");
+    $("#tk-done", host)?.addEventListener("click", () => { trade = null; amountInput.value = ""; pct = null; quote = null; paintTicket(); refreshHoldings(); });
+  };
+  const step = (key, state, href) => {
+    const s = trade?.steps.find((x) => x.key === key);
+    if (!s) return;
+    s.state = state; if (href) s.href = href;
+    paintProgress();
+  };
+  const finish = (title, text) => { for (const s of trade.steps) if (s.state === "running") s.state = "stopped"; else if (s.state === "waiting") s.state = "stopped"; trade.outcome = { title, text }; paintTicket(); refreshHoldings(); };
+
   q("#tk-side-seg").addEventListener("click", (event) => {
     const button = event.target.closest("[data-side]");
-    if (!button || button.dataset.side === side) return;
+    if (!button || button.dataset.side === side || trade) return;
     side = button.dataset.side;
     $$("[data-side]", el).forEach((b) => b.setAttribute("aria-selected", String(b === button)));
     amountInput.value = "";
     pct = null;
+    quote = null;
     paintTicket();
   });
   q("#tk-chips").addEventListener("click", (event) => {
     const chip = event.target.closest(".chip");
-    if (!chip) return;
-    if (chip.dataset.usd) { amountInput.value = chip.dataset.usd; }
+    if (!chip || trade) return;
+    if (chip.dataset.usd) amountInput.value = chip.dataset.usd;
     else { pct = Number(chip.dataset.pct); amountInput.value = ""; $$("[data-pct]", el).forEach((c) => c.setAttribute("aria-pressed", String(Number(c.dataset.pct) === pct))); }
+    quote = null;
     paintEstimate();
+    requestQuote();
   });
-  amountInput.addEventListener("input", () => { if (side === "sell" && amountInput.value) { pct = null; $$("[data-pct]", el).forEach((c) => c.setAttribute("aria-pressed", "false")); } paintEstimate(); });
-  const onWallet = () => paintTicket();
+  amountInput.addEventListener("input", () => {
+    if (side === "sell" && amountInput.value) { pct = null; $$("[data-pct]", el).forEach((c) => c.setAttribute("aria-pressed", "false")); }
+    quote = null;
+    paintEstimate();
+    requestQuote();
+  });
+  const onWallet = () => { quote = null; paintTicket(); refreshHoldings(); requestQuote(); };
   document.addEventListener("wallet", onWallet);
-  q("#tk-go").addEventListener("click", () => {
+  stopSession = onSession(() => { if (!dead) { paintTicket(); refreshHoldings(); requestQuote(); } });
+
+  /// Signs and sends one call from whichever wallet is connected and resolves once it is mined.
+  const send = async ({ to, data, value }, key) => {
+    const wallet = connectedWallet();
+    if (wallet.via === "passkey") {
+      const s = session();
+      if (!s) throw Object.assign(new Error("locked"), { code: "locked" });
+      return sendCall({ account: s.wallet.account, to, data, value, onSent: (hash) => step(key, "running", explorerTx(hash)) });
+    }
+    const provider = window.ethereum;
+    if (!provider) throw new Error("No browser wallet found on this device.");
+    try { await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x8f" }] }); }
+    catch (error) { if (error?.code === 4001) throw error; throw new Error("Switch the wallet to Monad first."); }
+    const hash = await provider.request({ method: "eth_sendTransaction", params: [{ from: wallet.address, to, data, value: `0x${value.toString(16)}` }] });
+    step(key, "running", explorerTx(hash));
+    return waitForReceipt(hash);
+  };
+  const track = async (requestId) => {
+    const deadline = Date.now() + 120_000;
+    while (Date.now() < deadline && !dead) {
+      const out = await api(`/api/relay-status?requestId=${requestId}`, { signal }).catch(() => null);
+      if (["filled", "refunded", "failed"].includes(out?.phase)) return out.phase;
+      await new Promise((f) => setTimeout(f, 1500));
+    }
+    return "timeout";
+  };
+  const failed = (error) => {
+    const text = String(error?.message ?? "");
+    if (error?.code === 4001 || error?.code === "locked" || /reject|denied|cancel/i.test(text)) { trade = null; paintTicket(); return; }
+    finish("Not done", /reverted/i.test(text) ? "The transaction was rejected on Monad. Only gas was spent." : text || "The transaction could not be sent. Nothing left the wallet.");
+  };
+
+  q("#tk-go").addEventListener("click", async () => {
+    if (trade) return;
     if (!connectedWallet()) { $("#connect").click(); return; }
+    const buying = side === "buy";
     const amount = Number(amountInput.value);
-    const what = side === "buy"
-      ? (amount > 0 ? `${fmtUsd(amount)} of ${symbol}` : symbol)
-      : (amount > 0 ? `${fmtAmount(amount)} ${symbol}` : pct ? `${pct}% of your ${symbol}` : symbol);
-    handoff({ title: `${side === "buy" ? "Buy" : "Sell"} ${symbol} in Desk`, sub: `${side === "buy" ? "Buy" : "Sell"} ${what} on ${chainName}. Scan to get Desk.` });
+    if (!canSign() || (buying ? !canBuy : !canSell)) {
+      if (buying && !canBuy) return;
+      const what = buying ? (amount > 0 ? `${fmtUsd(amount)} of ${symbol}` : symbol) : (amount > 0 ? `${fmtAmount(amount)} ${symbol}` : pct ? `${pct}% of your ${symbol}` : symbol);
+      handoff({ title: `${buying ? "Buy" : "Sell"} ${symbol} in Desk`, sub: `${buying ? "Buy" : "Sell"} ${what} on ${chainName}. Scan to get Desk.` });
+      return;
+    }
+    if (buying ? !(amount > 0) : !sellText()) { amountInput.focus(); return; }
+    if (kind() === "passkey" && !isUnlocked()) { document.dispatchEvent(new CustomEvent("desk:unlock")); return; }
+    // Quotes hold for a short while; an older one is refreshed, not filled at a moved rate.
+    if (!quote || Date.now() - quoteAt > 20_000) await requestQuote({ now: true });
+    if (!quote || dead) return;
+    const tx = quote.transaction;
+    const wei = buying ? quote.pay.wei : 0n;
+    const ok = tx && Number(tx.chainId) === 143 && /^0x[0-9a-fA-F]{40}$/.test(tx.to ?? "") && /^0x[0-9a-fA-F]+$/.test(tx.data ?? "") && /^\d+$/.test(String(tx.value ?? "")) && BigInt(tx.value) === wei;
+    if (!ok) { quote = null; quoteError = "This quote did not pass Desk's safety check, so nothing was signed."; paintEstimate(); return; }
+    if (buying && balance != null && balance < wei + GAS_RESERVE) { paintEstimate(); return; }
+    if (!buying && held != null && held < quote.pay.raw) { paintEstimate(); return; }
+    const user = owner();
+    const received = `${fmtAmount(Number(quote.receive.amount), buying ? 2 : 4)} ${buying ? symbol : "MON"}`;
+    trade = {
+      steps: onMonad
+        ? [...(buying ? [] : [{ key: "approve", label: `Approve ${symbol} for the swap`, state: "waiting" }]), { key: "swap", label: buying ? `Swap MON for ${symbol} on Monad` : `Swap ${symbol} for MON on Monad`, state: "waiting" }]
+        : [{ key: "swap", label: "Send MON on Monad", state: "waiting" }, { key: "fill", label: `Relay delivers ${symbol} on ${chainName}`, state: "waiting", href: `https://relay.link/transaction/${quote.requestId}` }],
+      outcome: null,
+    };
+    paintTicket();
+    try {
+      if (quote.approval) {
+        step("approve", "running");
+        const spender = quote.approval.spender;
+        const raw = BigInt(quote.approval.amount);
+        if ((await allowance(address, user, spender)) < raw) await send({ to: address, data: chainCall("approve", [spender, raw]), value: 0n }, "approve");
+        step("approve", "done");
+      }
+      step("swap", "running");
+      await send({ to: tx.to, data: tx.data, value: wei }, "swap");
+      step("swap", "done");
+    } catch (error) { failed(error); return; }
+    if (onMonad) { finish(buying ? `Bought ≈ ${received}` : `Sold for ≈ ${received}`, buying ? `${symbol} is in your wallet. At least ${fmtAmount(Number(quote.receive.minimum))} ${symbol} was guaranteed by the quote.` : `MON is in your wallet. At least ${fmtAmount(Number(quote.receive.minimum), 4)} MON was guaranteed by the quote.`); return; }
+    step("fill", "running");
+    const phase = await track(quote.requestId);
+    if (dead) return;
+    if (phase === "filled") { step("fill", "done"); finish(`Bought ≈ ${received}`, `Delivered on ${chainName}. It shows in your wallet shortly.`); }
+    else if (phase === "refunded") finish("Refunded", "Relay could not fill this, so the MON came back.");
+    else finish("Not filled", phase === "timeout" ? "Still filling. Check Relay for the latest status." : "Relay could not fill this. Any MON not refunded shows on Relay.");
   });
   paintTicket();
+  refreshMON();
+  refreshHoldings();
 
   let risk = { status: "loading", data: null };
   api(`/api/token-details?view=risk&chainIndex=${chainIndex}&address=${address}&riskLevel=${encodeURIComponent(row?.riskLevel ?? "")}&communityRecognized=${row?.communityRecognized ?? ""}`, { ttl: 60_000, signal })
@@ -902,6 +1144,8 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     clearInterval(agoTimer);
     countdown?.remove();
     document.removeEventListener("wallet", onWallet);
+    if (stopSession) stopSession();
+    clearTimeout(quoteTimer);
     if (onKey) document.removeEventListener("keydown", onKey);
     if (onFullscreen) document.removeEventListener("fullscreenchange", onFullscreen);
     document.body.classList.remove("focus");
