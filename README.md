@@ -102,7 +102,7 @@ tools/              testflight.sh, ExportOptions.plist, check-relying-party.sh
 ```sh
 xcodegen generate && open Desk.xcodeproj      # project.yml is the source of truth
 swift test --package-path DeskKit             # 535 tests in 86 suites, ~0.3 s, no simulator
-cd web && node --test                         # 213 server tests
+cd web && node --test                         # 276 server tests
 node web/tools/serve.mjs                      # the site on :8790 with the live API
 tools/testflight.sh                           # archive, export, upload to App Store Connect
 ```
@@ -134,7 +134,7 @@ in the app can reach them, by construction: the app has no server credential to 
 
 ## Status
 
-Shipped to TestFlight on a testnet build. 535 Swift tests and 213 server tests pass. The
+Shipped to TestFlight on a testnet build. 542 Swift tests and 276 server tests pass. The
 site, the alerts pipeline, the history indexer and the eleven functions are deployed.
 
 The only recorded live fill so far is on testnet: a 0.06518 BTC long on 15 September 2026,
