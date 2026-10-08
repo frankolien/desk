@@ -162,6 +162,15 @@ export function sideFor(sell, token, tokenDecimals, symbol = "TOKEN") {
 
 const sideOf = (sell) => (sell && typeof sell === "object" ? sell : SWAP_SIDES[sell]);
 
+/// Wrapped MON is the one token 0x does not route through the holder: buying it is
+/// `deposit()` on the WMON contract itself with the MON attached, and selling it is
+/// `withdraw(amount)` there with nothing attached. Both are accepted as that exact call.
+const WRAP_DEPOSIT = "0xd0e30db0";
+const WRAP_WITHDRAW = "0x2e1a7d4d";
+const wraps = (side, to, data, native) => (native
+  ? to === side.buyToken && data === WRAP_DEPOSIT
+  : to === side.sellToken && data.startsWith(WRAP_WITHDRAW) && data.length === 10 + 64);
+
 /// The rule the app applies before signing, applied here too so a changed 0x answer is
 /// refused at the edge instead of reaching a phone. Selling MON, the call carries exactly the
 /// typed amount; selling a token, it carries nothing, since the token moves by approval.
@@ -173,7 +182,7 @@ export function swapTransaction(quote, raw, sell = "MON") {
   const data = String(tx.data ?? "").toLowerCase();
   const value = String(tx.value ?? "0");
   const native = side.sellToken === NATIVE_MON;
-  const ok = to === ALLOWANCE_HOLDER
+  const ok = (to === ALLOWANCE_HOLDER || wraps(side, to, data, native))
     && /^0x[0-9a-f]{8,}$/.test(data)
     && value === (native ? raw : "0")
     && String(quote.sellAmount) === raw
@@ -192,9 +201,9 @@ export function swapRefusal(quote, raw, sell = "MON") {
   if (quote?.liquidityAvailable === false) return "no liquidity";
   if (!tx) return "no transaction";
   const to = String(tx.to ?? "").toLowerCase();
-  if (to !== ALLOWANCE_HOLDER) return `routes through ${to || "nothing"} instead of the allowance holder`;
-  if (!/^0x[0-9a-f]{8,}$/.test(String(tx.data ?? "").toLowerCase())) return "no call data";
   const native = side.sellToken === NATIVE_MON;
+  if (to !== ALLOWANCE_HOLDER && !wraps(side, to, String(tx.data ?? "").toLowerCase(), native)) return `routes through ${to || "nothing"} instead of the allowance holder`;
+  if (!/^0x[0-9a-f]{8,}$/.test(String(tx.data ?? "").toLowerCase())) return "no call data";
   if (String(tx.value ?? "0") !== (native ? raw : "0")) return `carries ${tx.value} instead of ${native ? raw : "0"}`;
   if (String(quote.sellAmount) !== raw) return `sells ${quote.sellAmount} instead of ${raw}`;
   if (!/^\d+$/.test(String(quote.buyAmount ?? "")) || quote.buyAmount === "0") return "no buy amount";
@@ -219,8 +228,8 @@ export function summarizeSwap(quote, transaction, raw, sell = "MON") {
     sources: Array.isArray(quote.route?.fills)
       ? [...new Set(quote.route.fills.map((fill) => fill.source).filter(Boolean))] : [],
     transaction,
-    // The approval made first when selling a token: the holder, for exactly this much.
-    ...(native ? {} : { approval: { token: side.sellToken, spender: ALLOWANCE_HOLDER, amount: raw } }),
+    // The approval made first when selling a token through the holder: exactly this much.
+    ...(native || String(transaction?.to ?? "").toLowerCase() !== ALLOWANCE_HOLDER ? {} : { approval: { token: side.sellToken, spender: ALLOWANCE_HOLDER, amount: raw } }),
   };
 }
 

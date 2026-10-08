@@ -140,3 +140,20 @@ test("a refusal says which rule the answer broke", () => {
   assert.equal(swapRefusal(zeroX({ buyToken: "0x1111111111111111111111111111111111111111" }), WEI), `buys 0x1111111111111111111111111111111111111111 instead of ${AUSD}`);
   assert.equal(swapRefusal(zeroX({ liquidityAvailable: false }), WEI), "no liquidity");
 });
+
+const WMON = "0x3bd359c1119da7da1d913d1c4d2b7c461115433a";
+
+test("wrapped MON is the one route that may skip the holder: deposit in, withdraw out", () => {
+  const buy = sideFor("MON", WMON, 18, "WMON");
+  const wrap = zeroX({ buyToken: WMON, buyAmount: WEI, minBuyAmount: WEI }, { to: WMON, data: "0xd0e30db0" });
+  assert.equal(swapTransaction(wrap, WEI, buy)?.to, WMON);
+  assert.equal(summarizeSwap(wrap, swapTransaction(wrap, WEI, buy), WEI, buy).approval, undefined);
+  assert.equal(swapTransaction(zeroX({ buyToken: WMON, buyAmount: WEI, minBuyAmount: WEI }, { to: WMON, data: "0xa9059cbb" + "00".repeat(64) }), WEI, buy), null);
+  assert.equal(swapTransaction(zeroX({ buyToken: WMON, buyAmount: WEI, minBuyAmount: WEI }, { to: "0x1111111111111111111111111111111111111111", data: "0xd0e30db0" }), WEI, buy), null);
+  const sell = sideFor("TOKEN", WMON, 18, "WMON");
+  const unwrap = zeroX({ sellToken: WMON, buyToken: NATIVE, sellAmount: WEI, buyAmount: WEI, minBuyAmount: WEI }, { to: WMON, data: "0x2e1a7d4d" + BigInt(WEI).toString(16).padStart(64, "0"), value: "0" });
+  const tx = swapTransaction(unwrap, WEI, sell);
+  assert.equal(tx?.to, WMON);
+  assert.equal(summarizeSwap(unwrap, tx, WEI, sell).approval, undefined);
+  assert.equal(swapRefusal(zeroX({ buyToken: WMON }, { to: WMON, data: "0xa9059cbb" + "00".repeat(64) }), WEI, buy), `routes through ${WMON} instead of the allowance holder`);
+});
