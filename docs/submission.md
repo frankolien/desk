@@ -180,6 +180,9 @@ Being explicit, because judges should not have to guess:
   the app on Perpl testnet on 15 September 2026, documented in
   [`perpl-order-400-audit-2026-09-15.md`](perpl-order-400-audit-2026-09-15.md).
 - Mainnet fills: *(add dated explorer links after the founder's mainnet run)*
+- In progress, not in the app yet: deposits by card and Apple Pay through Crossmint. The server
+  side is built and tested against Crossmint's staging; the sheet ships when Crossmint enables
+  AUSD on Monad for Desk.
 
 ---
 
