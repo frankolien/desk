@@ -27,7 +27,16 @@ const STYLE = `<style>
 .tk-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
 .tk-toolbar .row { gap: 8px; }
 .tk-toolbar .chip { height: 26px; padding: 0 10px; }
-.tk-chart { height: 420px; position: relative; }
+.tk-chart { height: clamp(460px, 56vh, 760px); position: relative; }
+body.focus { overflow: hidden; }
+body.focus .tk { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; background: var(--bg); }
+body.focus .tk-back, body.focus .tk-side, body.focus .tk-main > .card:nth-child(2) { display: none; }
+body.focus .tk-head { margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+body.focus .tk-grid { flex: 1; display: flex; min-height: 0; gap: 0; }
+body.focus .tk-main { flex: 1; display: flex; flex-direction: column; min-height: 0; gap: 0; }
+body.focus .tk-main > .card:first-child { flex: 1; display: flex; flex-direction: column; min-height: 0; border: 0; border-radius: 0; }
+body.focus .tk-chart { flex: 1; height: auto; min-height: 0; }
+body.focus #tk-focus { background: var(--chip-hover); }
 .tk-chart .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 .tk-faces { position: absolute; inset: 0; z-index: 5; pointer-events: none; overflow: hidden; }
 .tk-face { position: absolute; display: inline-flex; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; pointer-events: auto; box-shadow: 0 0 0 2px var(--rise), 0 0 0 3px #000; transition: transform 0.12s var(--ease); }
@@ -98,7 +107,7 @@ const STYLE = `<style>
 .tk-about .row-between > span:first-child { color: var(--muted); }
 .tk-about .k { font-size: 12px; }
 @media (max-width: 1100px) { .tk-grid { grid-template-columns: minmax(0, 1fr); } .tk-side { order: 2; } }
-@media (max-width: 720px) { .tk-stats { margin-left: 0; gap: 14px; } .tk-chart { height: 320px; } }
+@media (max-width: 720px) { .tk-stats { margin-left: 0; gap: 14px; } .tk-chart { height: clamp(340px, 50vh, 560px); } }
 </style>`;
 
 const BARS = ["1m", "5m", "15m", "1H", "4H", "1D"];
@@ -164,6 +173,8 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   let stopSnapshot = null;
   let stopPrices = null;
   let earlyTimer = null;
+  let onKey = null;
+  let onFullscreen = null;
   let facesOn = readFaces();
 
   el.innerHTML = `${STYLE}<div class="tk">
@@ -180,6 +191,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
             <div class="row">
               <button class="chip" type="button" id="tk-faces-toggle" aria-pressed="${facesOn}">Traders</button>
               <div class="seg seg-sm seg-line" id="tk-scale"><button type="button" data-scale="price" aria-selected="true">Price</button><button type="button" data-scale="mc" aria-selected="false">MC</button></div>
+              <button class="chip" type="button" id="tk-focus" aria-pressed="false" title="Full screen · F">Full screen</button>
             </div>
           </div>
           <div class="tk-chart" id="tk-chart"><div class="tk-faces" id="tk-faces"></div><div class="card tk-tip" id="tk-tip" hidden></div></div>
@@ -342,6 +354,31 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
       risk = { status: out ? "ready" : "unavailable", data: out };
       paintRisk();
     });
+
+  // The page becomes the chart: the shell steps out and the browser goes full screen when the
+  // user asked with a click or a key. Leaving browser full screen leaves the mode too.
+  let focus = false;
+  const setFocus = (on, { browser = true } = {}) => {
+    focus = on;
+    document.body.classList.toggle("focus", on);
+    try { localStorage.setItem("desk.web.focus", on ? "on" : "off"); } catch {}
+    const button = q("#tk-focus");
+    if (button) { button.setAttribute("aria-pressed", String(on)); button.textContent = on ? "Exit full screen" : "Full screen"; }
+    if (browser && on && !document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
+    if (!on && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  };
+  onFullscreen = () => { if (!document.fullscreenElement && focus) setFocus(false); };
+  document.addEventListener("fullscreenchange", onFullscreen);
+  onKey = (event) => {
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const target = event.target;
+    if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+    if (event.key.toLowerCase() === "f") { setFocus(!focus); event.preventDefault(); return; }
+    if (event.key === "Escape" && focus) { setFocus(false); event.preventDefault(); }
+  };
+  document.addEventListener("keydown", onKey);
+  q("#tk-focus").addEventListener("click", () => setFocus(!focus));
+  try { if (localStorage.getItem("desk.web.focus") === "on") setFocus(true, { browser: false }); } catch {}
 
   let bar = "5m";
   let scale = query.scale === "mc" ? "mc" : "price";
@@ -865,6 +902,10 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     clearInterval(agoTimer);
     countdown?.remove();
     document.removeEventListener("wallet", onWallet);
+    if (onKey) document.removeEventListener("keydown", onKey);
+    if (onFullscreen) document.removeEventListener("fullscreenchange", onFullscreen);
+    document.body.classList.remove("focus");
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
     dead = true;
     aborter.abort();
     if (stopSnapshot) stopSnapshot();
