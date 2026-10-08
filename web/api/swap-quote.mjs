@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { handleOnramp } from "./_onramp.mjs";
 import {
   ZEROX_CHAINS, chainName, isQuotable, nativeToken, rpcEndpoint,
 } from "./_chains.mjs";
@@ -226,6 +227,8 @@ async function swap(req, res) {
 }
 
 export default async function handler(req, res) {
+  // Card and Apple Pay deposits share this function: funding, like the swap, with no thirteenth.
+  if (req.query.view === "onramp") return handleOnramp(req, res);
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
   res.setHeader("Cache-Control", "private, no-store");
   if (req.query.view === "swap") return swap(req, res);
