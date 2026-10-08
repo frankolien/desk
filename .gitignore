@@ -90,6 +90,8 @@ brandkit
 .env*
 
 # Local marketing work, kept out of the repo
+
+Branding/
 Branding/desk-launch-30s-v1-poster.jpg
 Branding/desk-launch-30s-v1.mp4
 Branding/launch-overlays/
