@@ -666,9 +666,12 @@ export default async function mount(el, params) {
 
   const stopTokens = poll(async () => {
     try {
-      const out = await api("/api/token-discovery", { ttl: 30_000 });
+      // Monad's own trending list leads; the global list fills in behind it.
+      const [out, home] = await Promise.all([api("/api/token-discovery", { ttl: 30_000 }), api("/api/token-discovery?chain=143", { ttl: 30_000 }).catch(() => null)]);
       const known = new Map((tokens ?? []).map((t) => [t.id, t]));
-      tokens = (out.tokens ?? []).map((t) => {
+      const lead = home?.tokens ?? [];
+      const seen = new Set(lead.map((t) => t.id));
+      tokens = [...lead, ...(out.tokens ?? []).filter((t) => !seen.has(t.id))].map((t) => {
         const old = known.get(t.id);
         return old ? { ...t, change5m: old.change5m, change1h: old.change1h, change24h: old.change24h, price: old.price ?? t.price } : t;
       });

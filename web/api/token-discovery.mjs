@@ -107,12 +107,16 @@ export function homeFirst(tokens) {
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
   const query = String(req.query.q || "").trim().slice(0, 100);
+  // `chain` narrows the trending list to one chain, so Monad has its own page of movers
+  // instead of the few that make the global twenty.
+  const chain = /^\d{1,10}$/.test(String(req.query.chain ?? "")) ? String(req.query.chain) : "";
   try {
     const rows = query
       ? await searchTokens(query)
       : await okxGet("/api/v6/dex/market/token/hot-token", {
+          ...(chain ? { chainIndex: chain } : {}),
           rankingType: "4", rankingTimeFrame: "4", riskFilter: "true",
-          stableTokenFilter: "true", limit: "20",
+          stableTokenFilter: "true", limit: chain ? "40" : "20",
         });
     const tokens = homeFirst(rows.map(normalize).filter((token) => token.symbol && token.contract));
     res.setHeader("Cache-Control", query
