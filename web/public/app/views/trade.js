@@ -35,13 +35,18 @@ const CSS = `
 .td-head .stat.mark small { font-size: 12px; font-weight: 700; margin-left: 6px; }
 .td-chart-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
 .td-chart { height: 440px; position: relative; }
-/* Full screen: the shell steps out, the chart takes the height, the ticket stays beside it. F toggles, Esc leaves. */
-body.focus .side, body.focus .top, body.focus .ticker { display: none; }
-body.focus .shell { grid-template-columns: minmax(0, 1fr); }
-body.focus .view { padding: 10px 12px 12px; max-width: none; }
-body.focus .td-grid { gap: 10px; }
-body.focus .td-chart { height: clamp(440px, calc(100vh - 250px), 1100px); }
-body.focus .td-head { padding: 10px 16px; }
+/* Full screen is the chart alone: the market strip, the bar controls and the candles edge to edge,
+   over everything else. F toggles, Esc leaves. The ResizeObserver on the chart host does the rest. */
+body.focus { overflow: hidden; }
+body.focus .td-grid > section { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; gap: 0 !important; background: var(--bg); }
+body.focus .td-grid > section > .card { border-radius: 0; border-left: 0; border-right: 0; }
+body.focus .td-grid > section > .card:first-child { border-top: 0; }
+body.focus .td-grid > section > .card:nth-child(2) { flex: 1; display: flex; flex-direction: column; min-height: 0; border-bottom: 0; }
+body.focus .td-grid > section > .card:nth-child(n+3), body.focus .td-list, body.focus .td-grid > aside { display: none; }
+body.focus .td-head { padding: 8px 16px; }
+body.focus .td-head .stat.mark .num { font-size: 20px; }
+body.focus .td-chart { flex: 1; height: auto; min-height: 0; }
+body.focus #td-focus { background: var(--chip-hover); }
 .td-chart .lw { position: absolute; inset: 0; }
 .td-tabs { padding: 0 16px; }
 .td-ticket .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; background: var(--card-2); border-radius: 12px; }
