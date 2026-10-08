@@ -265,7 +265,7 @@ export function chartLegend(host, { title, bar, format }) {
       const delta = candle.close - ref;
       const pct = ref ? delta / ref : 0;
       const tone = candle.close >= candle.open ? "up" : "down";
-      el.innerHTML = `<b>${esc(title)}</b> · ${esc(barLabel)} · Desk <span class="${tone}">O<i>${format(candle.open)}</i> H<i>${format(candle.high)}</i> L<i>${format(candle.low)}</i> C<i>${format(candle.close)}</i> ${delta >= 0 ? "+" : "−"}${format(Math.abs(delta))} (${fmtPct(pct)})</span>`;
+      el.innerHTML = `<b>${esc(title)}</b> · ${esc(barLabel)} · Desk <span class="${tone}">O<i>${format(candle.open)}</i> H<i>${format(candle.high)}</i> L<i>${format(candle.low)}</i> C<i>${format(candle.close)}</i> ${delta >= 0 ? "+" : "−"}${format(Math.abs(delta))} (${fmtPct(pct)})</span>${candle.volume != null ? ` <span class="vol">Vol<i>$${fmtCompact(candle.volume)}</i></span>` : ""}`;
     },
     remove() { el.remove(); },
   };
@@ -283,7 +283,7 @@ export function chartCountdown(host, { barSeconds, y }) {
     const h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60), s = left % 60;
     el.textContent = seconds >= 3600 ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
     const top = y();
-    if (top == null) { el.hidden = true; return; }
+    if (top == null || el.dataset.off === "1") { el.hidden = true; return; }
     el.hidden = false;
     el.style.top = `${top + 11}px`;
   };

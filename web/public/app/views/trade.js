@@ -12,6 +12,20 @@ const BAR_SECONDS = { "1m": 60, "5m": 300, "15m": 900, "1H": 3600, "4H": 14400, 
 const slotOf = (time, seconds) => (seconds === 604800 ? time - ((((time - 345600) % 604800) + 604800) % 604800) : Math.floor(time / seconds) * seconds);
 
 const BARS = ["1m", "5m", "15m", "1H", "4H", "1D", "1W"];
+// A range and the bar that shows it with room to read.
+const RANGES = [["1d", 86400, "5m"], ["5d", 432000, "15m"], ["1m", 2592000, "1H"], ["3m", 7776000, "4H"], ["6m", 15552000, "1D"], ["1y", 31536000, "1D"], ["All", null, "1W"]];
+const INDICATORS = {
+  ma20: { label: "MA 20", color: "#e5b75a" }, ma50: { label: "MA 50", color: "#b49cff" }, ema200: { label: "EMA 200", color: "#4fd1b8" },
+  vwap: { label: "VWAP", color: "#f0a35a" }, bb: { label: "Bollinger 20·2", color: "#9a9a98" },
+  vol: { label: "Volume", color: "#6b7280" }, rsi: { label: "RSI 14", color: "#b49cff" }, macd: { label: "MACD 12·26·9", color: "#6f97ff" },
+};
+function chartPrefs() {
+  try { const p = JSON.parse(localStorage.getItem("desk.web.chart") ?? "{}"); return { chartType: p.chartType === "line" ? "line" : "candle", ind: { vol: true, ...(p.ind ?? {}) }, scale: ["log", "pct"].includes(p.scale) ? p.scale : "auto" }; }
+  catch { return { chartType: "candle", ind: { vol: true }, scale: "auto" }; }
+}
+const chartTypeIcon = (type) => (type === "candle"
+  ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 3v4M7 15v6M17 3v6M17 17v4"/><rect x="4.5" y="7" width="5" height="8" rx="1"/><rect x="14.5" y="9" width="5" height="8" rx="1"/></svg>`
+  : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 4 9-10"/></svg>`);
 const SPOT = { BTC: true, ETH: true, SOL: true, PUMP: true };
 const QUICK = [25, 50, 100, 250];
 
@@ -50,6 +64,45 @@ body.focus .td-head .stat.mark .num { font-size: 20px; }
 body.focus .td-chart { flex: 1; height: auto; min-height: 0; }
 body.focus #td-focus { background: var(--chip-hover); }
 .td-chart .lw { position: absolute; inset: 0; }
+.td-chart .pane { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.cb-sep { width: 1px; height: 18px; background: var(--line-strong); margin: 0 2px; flex: none; }
+.cb-ic { width: 28px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; color: var(--muted); }
+.cb-ic:hover, .cb-ic[aria-pressed="true"] { background: var(--chip); color: var(--text); }
+.cb-ic svg { width: 16px; height: 16px; }
+.td-ind { position: relative; }
+.td-ind-menu { position: fixed; z-index: 60; min-width: 220px; padding: 8px; background: #121212; border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,.55); display: grid; gap: 2px; }
+.td-ind-menu h5 { font-size: 10px; font-weight: 700; color: var(--faint); letter-spacing: .04em; text-transform: uppercase; padding: 6px 8px 2px; }
+.td-ind-menu button { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; font-size: 12px; font-weight: 600; color: var(--text-2); text-align: left; }
+.td-ind-menu button:hover { background: var(--chip); color: var(--text); }
+.td-ind-menu button[aria-checked="true"] { color: var(--text); }
+.td-ind-menu button i { width: 10px; height: 10px; border-radius: 3px; flex: none; opacity: .45; }
+.td-ind-menu button[aria-checked="true"] i { opacity: 1; }
+.td-ind-menu button em { margin-left: auto; font-style: normal; font-size: 11px; color: var(--faint); }
+.td-ind-count { font-family: var(--rounded); font-size: 10px; padding: 0 5px; border-radius: 999px; background: var(--chip-hover); color: var(--text); }
+.td-ind-legend { position: absolute; left: 12px; top: 30px; z-index: 4; pointer-events: none; display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: #b2b5be; font-family: var(--rounded); font-variant-numeric: tabular-nums; }
+.td-ind-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
+.td-ind-legend b { color: var(--text); font-weight: 600; margin-left: 4px; }
+.td-chart-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 10px; border-top: 1px solid var(--line); font-size: 11px; }
+.td-chart-foot .seg-line button { height: 24px; padding: 0 8px; font-size: 11px; }
+.td-chart-foot .clock { color: var(--faint); font-family: var(--rounded); font-variant-numeric: tabular-nums; margin-right: 6px; }
+.td-depth, .td-fund { padding: 10px 12px 6px; gap: 8px; }
+.td-depth .head, .td-fund .head { display: flex; gap: 18px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+.td-depth .head b, .td-fund .head b { color: var(--text); font-family: var(--rounded); font-variant-numeric: tabular-nums; margin-left: 4px; }
+.td-depth .plot { position: relative; flex: 1; min-height: 0; }
+.td-depth svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.td-depth .y { position: absolute; right: 4px; top: 0; bottom: 0; pointer-events: none; }
+.td-depth .y span, .td-depth .x span { position: absolute; font-size: 10px; color: var(--faint); font-family: var(--rounded); font-variant-numeric: tabular-nums; }
+.td-depth .y span { right: 0; transform: translateY(-50%); }
+.td-depth .x { position: relative; height: 16px; }
+.td-depth .x span { transform: translateX(-50%); }
+.td-depth .cross { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed rgba(255,255,255,.35); pointer-events: none; }
+.td-depth .tip { position: absolute; z-index: 5; pointer-events: none; padding: 8px 10px; min-width: 170px; font-size: 11px; line-height: 1.5; background: #141414; border: 1px solid var(--line-strong); border-radius: 10px; }
+.td-depth .tip b { display: block; font-size: 12px; }
+.td-depth .tip em { font-style: normal; float: right; color: var(--text); font-family: var(--rounded); }
+.td-fund .big { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.td-fund .big .cell { padding: 12px 14px; }
+.td-fund .big .num { font-size: 20px; }
+.td-fund .note { font-size: 12px; line-height: 1.5; }
 .td-tabs { padding: 0 16px; }
 .td-ticket .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; background: var(--card-2); border-radius: 12px; }
 .td-ticket .sides button { height: 40px; border-radius: 9px; font-size: 14px; font-weight: 800; color: var(--muted); transition: background .15s var(--ease), color .15s var(--ease); }
@@ -123,12 +176,15 @@ export default async function mount(el, params) {
   const stops = [];
   const state = {
     market: null, rows: [], bar: "15m", side: "long", margin: 0, leverage: 3, tab: "crowd", focus: false,
+    view: "chart", chartType: chartPrefs().chartType, ind: chartPrefs().ind, scale: chartPrefs().scale, range: null, rangeBar: null,
+    line: null, taSeries: [], taSig: "", indOpen: false,
     chart: null, series: null, volume: null, markLine: null, crowd: null, top: null, watched: watched(), lastBar: null,
     ring: [], lastCandle: null, candles: [], legend: null, countdown: null, faces: [], showFaces: localStorage.getItem("desk.web.chartfaces") !== "off",
     positions: null, positionsFor: null, news: null, tp: 0, sl: 0,
     book: null, bookStop: null, bookFallback: null,
     acct: null, acctBusy: false, trading: null, desk: { open: false, amount: "", busy: false, steps: [], error: null, hash: null },
   };
+  const activeIndicators = () => Object.keys(state.ind).filter((k) => state.ind[k] && INDICATORS[k]);
 
   let rows = markets();
   if (!rows.length) {
@@ -221,7 +277,12 @@ export default async function mount(el, params) {
           <div class="td-chart-bar">
             <div class="row" style="gap:8px">
               <button class="btn btn-ghost btn-xs td-mobile-pick" id="td-pick">${esc(m.name)} <svg width="12" height="12"><use href="#i-chevron"/></svg></button>
+              <div class="seg seg-sm seg-line" id="td-views">${["chart", "depth", "funding"].map((v) => `<button aria-selected="${v === state.view}" data-view="${v}">${cap(v)}</button>`).join("")}</div>
+              <span class="cb-sep"></span>
               <div class="seg seg-sm seg-line" id="td-bars">${BARS.map((b) => `<button aria-selected="${b === state.bar}" data-bar="${b}">${b}</button>`).join("")}</div>
+              <span class="cb-sep"></span>
+              <button class="cb-ic" id="td-type" title="${state.chartType === "candle" ? "Switch to line" : "Switch to candles"}" aria-label="Chart type">${chartTypeIcon(state.chartType)}</button>
+              <span class="td-ind"><button class="chip" style="height:24px;font-size:11px;gap:6px" id="td-indbtn" aria-expanded="false">Indicators <span class="td-ind-count" id="td-indcount">${activeIndicators().length}</span></button><div class="td-ind-menu" id="td-indmenu" hidden></div></span>
             </div>
             <div class="row" style="gap:6px">
               <span class="chip chip-brand" style="height:24px;font-size:11px"><i class="dot" style="width:5px;height:5px;background:var(--brand);box-shadow:none"></i>Perpl mark</span>
@@ -230,7 +291,15 @@ export default async function mount(el, params) {
               <button class="chip" style="height:24px;font-size:11px" id="td-focus" aria-pressed="${state.focus}" title="Full screen · F">${state.focus ? "Exit full screen" : "Full screen"}</button>
             </div>
           </div>
-          <div class="td-chart"><div class="lw" id="td-lw"></div><div class="td-faces" id="td-faces" ${state.showFaces ? "" : "hidden"}></div></div>
+          <div class="td-chart">
+            <div class="lw" id="td-lw"></div><div class="td-ind-legend" id="td-indlegend"></div><div class="td-faces" id="td-faces" ${state.showFaces ? "" : "hidden"}></div>
+            <div class="pane td-depth" id="td-depth" hidden></div>
+            <div class="pane td-fund" id="td-fund" hidden></div>
+          </div>
+          <div class="td-chart-foot">
+            <div class="seg seg-sm seg-line" id="td-ranges">${RANGES.map(([k]) => `<button aria-selected="${k === state.range}" data-range="${k}">${k}</button>`).join("")}</div>
+            <div class="row" style="gap:4px"><span class="clock" id="td-clock"></span><div class="seg seg-sm seg-line" id="td-scales"><button data-scale="pct" aria-selected="${state.scale === "pct"}" title="Percent scale">%</button><button data-scale="log" aria-selected="${state.scale === "log"}" title="Logarithmic scale">log</button><button data-scale="auto" aria-selected="${state.scale === "auto"}" title="Fit the price scale to what is on screen">auto</button></div></div>
+          </div>
         </div>
         <div class="card">
           <div class="tabs td-tabs" id="td-tabs">
@@ -271,6 +340,21 @@ export default async function mount(el, params) {
     });
     $("#td-pick", root).addEventListener("click", () => $("#search-open").click());
     $("#td-focus", root).addEventListener("click", () => setFocus(!state.focus));
+    $("#td-views", root).addEventListener("click", (event) => { const b = event.target.closest("[data-view]"); if (b) setView(b.dataset.view); });
+    $("#td-type", root).addEventListener("click", () => setChartType(state.chartType === "candle" ? "line" : "candle"));
+    $("#td-indbtn", root).addEventListener("click", () => toggleIndicatorMenu());
+    $("#td-indmenu", root).addEventListener("click", (event) => {
+      const b = event.target.closest("[data-ind]"); if (!b) return;
+      // Updated in place, so the menu stays open for the next pick.
+      const on = !state.ind[b.dataset.ind]; state.ind[b.dataset.ind] = on;
+      b.setAttribute("aria-checked", String(on)); b.querySelector("em").textContent = on ? "on" : "";
+      savePrefs(); syncIndicators();
+    });
+    $("#td-ranges", root).addEventListener("click", (event) => { const b = event.target.closest("[data-range]"); if (b) pickRange(b.dataset.range); });
+    $("#td-scales", root).addEventListener("click", (event) => { const b = event.target.closest("[data-scale]"); if (b) setScale(b.dataset.scale); });
+    const onDoc = (event) => { if (state.indOpen && !event.target.closest(".td-ind")) toggleIndicatorMenu(false); };
+    document.addEventListener("click", onDoc); stops.push(() => document.removeEventListener("click", onDoc));
+    paintFunding(); setView(state.view, { quiet: true });
     $("#td-facetoggle", root).addEventListener("click", (event) => {
       state.showFaces = !state.showFaces;
       localStorage.setItem("desk.web.chartfaces", state.showFaces ? "on" : "off");
@@ -1005,24 +1089,30 @@ export default async function mount(el, params) {
     if (!window.LightweightCharts || !host) return;
     const LW = LightweightCharts;
     const chart = LW.createChart(host, chartOptions(LW));
-    const series = chart.addCandlestickSeries(candleOptions({ priceFormat: { type: "price", precision: state.market.priceDecimals, minMove: 10 ** -state.market.priceDecimals } }));
+    const priceFormat = { type: "price", precision: state.market.priceDecimals, minMove: 10 ** -state.market.priceDecimals };
+    const series = chart.addCandlestickSeries(candleOptions({ priceFormat, visible: state.chartType === "candle" }));
+    const line = chart.addAreaSeries({ lineColor: "#26a69a", topColor: "rgba(38,166,154,0.22)", bottomColor: "rgba(38,166,154,0)", lineWidth: 2, priceFormat, visible: state.chartType === "line", crosshairMarkerVisible: false });
     const volume = chart.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "", lastValueVisible: false, priceLineVisible: false });
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
     const fmt = (v) => fmtPrice(v, state.market.priceDecimals);
     state.legend = chartLegend(host.parentElement, { title: `${state.market.name} / AUSD · PERP`, bar: state.bar, format: fmt });
-    state.countdown = chartCountdown(host.parentElement, { barSeconds: () => BAR_SECONDS[state.bar] ?? 900, y: () => { const c = state.lastCandle; const y = c ? series.priceToCoordinate(c.close) : null; return y == null || y < 0 ? null : y; } });
+    state.countdown = chartCountdown(host.parentElement, { barSeconds: () => BAR_SECONDS[state.bar] ?? 900, y: () => { const c = state.lastCandle; const y = c ? activeSeries().priceToCoordinate(c.close) : null; return y == null || y < 0 ? null : y; } });
     stops.push(() => state.countdown.remove());
     chart.subscribeCrosshairMove((param) => {
-      const hit = param?.seriesData?.get(series);
-      const i = hit ? state.candles.findIndex((c) => c.time === hit.time) : -1;
+      const i = param?.time != null ? state.candles.findIndex((c) => c.time === param.time) : -1;
       state.legend.update(i >= 0 ? state.candles[i] : state.lastCandle, i >= 0 ? state.candles[i - 1] : state.candles[state.candles.length - 2], state.bar);
+      paintIndicatorLegend(i >= 0 ? state.candles[i].time : null);
     });
-    state.markLine = series.createPriceLine({ price: state.market.mark, color: "#836ef9", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "mark" });
+    state.chart = chart; state.series = series; state.volume = volume; state.line = line;
+    state.markLine = activeSeries().createPriceLine({ price: state.market.mark, color: "#836ef9", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "mark" });
     chart.timeScale().subscribeVisibleLogicalRangeChange(() => placeFaces());
     const observer = new ResizeObserver(() => { chart.applyOptions({ width: host.clientWidth, height: host.clientHeight }); placeFaces(); });
     observer.observe(host);
     stops.push(() => observer.disconnect());
-    state.chart = chart; state.series = series; state.volume = volume;
+    applyScale();
+    const clock = setInterval(() => { const el = $("#td-clock", root); if (el) el.textContent = new Date().toISOString().slice(11, 19) + " UTC"; if (state.view === "funding") paintFunding(); }, 1000);
+    stops.push(() => clearInterval(clock));
+    stops.push(poll(() => { if (state.view === "depth") paintDepth(); }, 2000));
   }
 
   async function loadCandles(reset = false) {
@@ -1033,20 +1123,27 @@ export default async function mount(el, params) {
     catch { return; }
     if (!rows.length) return;
     if (reset || state.lastBar !== state.bar) {
+      if (state.range && state.rangeBar !== state.bar) { state.range = null; paintRanges(); }
       state.series.setData(rows.map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
+      state.line.setData(rows.map((c) => ({ time: c.time, value: c.close })));
       state.volume.setData(rows.map((c) => ({ time: c.time, value: c.volume, color: volumeColor(c.close >= c.open) })));
       state.chart.timeScale().applyOptions({ barSpacing: Math.min(12, Math.max(4, ($("#td-lw", root)?.clientWidth ?? 800) / (rows.length + 8))) });
       state.chart.timeScale().scrollToRealTime();
       state.lastBar = state.bar;
+      state.candles = rows;
+      state.taSig = "";
+      applyRange();
       if (!state.ring.length) state.ring = rows.slice(-30).map((c) => c.close);
       paintSpark();
     } else {
       for (const c of rows.slice(-3)) {
         state.series.update({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close });
+        state.line.update({ time: c.time, value: c.close });
         state.volume.update({ time: c.time, value: c.volume, color: volumeColor(c.close >= c.open) });
       }
     }
     state.candles = rows;
+    syncIndicators();
     state.lastCandle = { ...rows[rows.length - 1] };
     state.legend?.update(state.lastCandle, rows[rows.length - 2], state.bar);
     state.countdown?.tick();
@@ -1064,9 +1161,222 @@ export default async function mount(el, params) {
     c = { ...c, close: mark, high: Math.max(c.high, mark), low: Math.min(c.low, mark) };
     state.lastCandle = c;
     if (state.candles.length && state.candles[state.candles.length - 1].time === c.time) state.candles[state.candles.length - 1] = c; else if (slot > (state.candles[state.candles.length - 1]?.time ?? 0)) state.candles.push(c);
-    try { state.series.update({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }); } catch { /* older than the series' last bar */ }
+    try { state.series.update({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }); state.line?.update({ time: c.time, value: c.close }); } catch { /* older than the series' last bar */ }
     state.legend?.update(c, state.candles[state.candles.length - 2], state.bar);
     state.countdown?.tick();
+  }
+
+  function activeSeries() { return state.chartType === "line" ? state.line : state.series; }
+
+  function savePrefs() { try { localStorage.setItem("desk.web.chart", JSON.stringify({ chartType: state.chartType, ind: state.ind, scale: state.scale })); } catch {} }
+
+  function setView(view, { quiet = false } = {}) {
+    state.view = view;
+    $$("#td-views [data-view]", root).forEach((b) => b.setAttribute("aria-selected", String(b.dataset.view === view)));
+    $("#td-lw", root).style.visibility = view === "chart" ? "" : "hidden";
+    $("#td-indlegend", root).hidden = view !== "chart";
+    $("#td-faces", root).hidden = view !== "chart" || !state.showFaces;
+    $("#td-depth", root).hidden = view !== "depth";
+    $("#td-fund", root).hidden = view !== "funding";
+    $(".chart-legend", root)?.toggleAttribute("hidden", view !== "chart");
+    const cd = $(".chart-countdown", root); if (cd) { cd.dataset.off = view !== "chart" ? "1" : ""; cd.hidden = view !== "chart"; }
+    if (view === "depth") paintDepth();
+    if (view === "funding") paintFunding();
+    if (!quiet && view === "chart") state.chart?.timeScale().scrollToRealTime();
+  }
+
+  function setChartType(type) {
+    state.chartType = type; savePrefs();
+    const button = $("#td-type", root);
+    if (button) { button.innerHTML = chartTypeIcon(type); button.title = type === "candle" ? "Switch to line" : "Switch to candles"; }
+    if (!state.chart) return;
+    try { (type === "line" ? state.series : state.line).removePriceLine(state.markLine); } catch {}
+    state.series.applyOptions({ visible: type === "candle" });
+    state.line.applyOptions({ visible: type === "line" });
+    state.markLine = activeSeries().createPriceLine({ price: state.market.mark, color: "#836ef9", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "mark" });
+    state.countdown?.tick();
+  }
+
+  // The price scale: percent from the first visible bar, logarithmic, or plain; auto fits it to what is on screen.
+  function setScale(scale) {
+    if (scale === "auto") { state.scale = "auto"; } else { state.scale = state.scale === scale ? "auto" : scale; }
+    savePrefs(); applyScale();
+    $$("#td-scales [data-scale]", root).forEach((b) => b.setAttribute("aria-selected", String(b.dataset.scale === state.scale)));
+  }
+  function applyScale() {
+    if (!state.chart) return;
+    const LW = window.LightweightCharts;
+    state.chart.priceScale("right").applyOptions({ mode: state.scale === "log" ? LW.PriceScaleMode.Logarithmic : state.scale === "pct" ? LW.PriceScaleMode.Percentage : LW.PriceScaleMode.Normal, autoScale: true });
+  }
+
+  // A range picks the bar that shows it with room to read, then shows exactly that many bars.
+  function pickRange(key) {
+    const def = RANGES.find(([k]) => k === key); if (!def) return;
+    state.range = state.range === key ? null : key;
+    paintRanges();
+    if (!state.range) { state.chart?.timeScale().scrollToRealTime(); return; }
+    const [, , bar] = def;
+    state.rangeBar = bar;
+    if (bar !== state.bar) {
+      state.bar = bar;
+      $$("#td-bars [data-bar]", root).forEach((b) => b.setAttribute("aria-selected", String(b.dataset.bar === bar)));
+      loadCandles(true);
+    } else applyRange();
+  }
+  function paintRanges() { $$("#td-ranges [data-range]", root).forEach((b) => b.setAttribute("aria-selected", String(b.dataset.range === state.range))); }
+  function applyRange() {
+    if (!state.chart || !state.range) return;
+    const [, seconds] = RANGES.find(([k]) => k === state.range) ?? [];
+    const total = state.candles.length;
+    if (!seconds) { state.chart.timeScale().fitContent(); return; }
+    const bars = Math.ceil(seconds / (BAR_SECONDS[state.bar] ?? 900));
+    if (bars >= total) { state.chart.timeScale().fitContent(); return; }
+    state.chart.timeScale().setVisibleLogicalRange({ from: total - bars - 0.5, to: total + 2 });
+  }
+
+  // Indicators, computed here from the candles on screen: the ones every terminal has.
+  function taCalc(bars) {
+    const closes = bars.map((b) => b.close);
+    const sma = (period) => { const out = []; let sum = 0; for (let i = 0; i < closes.length; i++) { sum += closes[i]; if (i >= period) sum -= closes[i - period]; if (i >= period - 1) out.push({ time: bars[i].time, value: sum / period }); } return out; };
+    const ema = (values, period) => { const k = 2 / (period + 1); const out = []; let prev = values[0]; for (let j = 0; j < values.length; j++) { prev = j ? values[j] * k + prev * (1 - k) : values[0]; out.push(prev); } return out; };
+    const result = { ma20: sma(20), ma50: sma(50) };
+    result.ema200 = ema(closes, 200).map((v, i) => ({ time: bars[i].time, value: v })).slice(Math.min(30, closes.length - 1));
+    const upper = [], middle = [], lower = [];
+    for (let n = 19; n < closes.length; n++) {
+      const w = closes.slice(n - 19, n + 1); const mean = w.reduce((a, v) => a + v, 0) / 20;
+      const sd = Math.sqrt(w.reduce((a, v) => a + (v - mean) * (v - mean), 0) / 20);
+      middle.push({ time: bars[n].time, value: mean }); upper.push({ time: bars[n].time, value: mean + 2 * sd }); lower.push({ time: bars[n].time, value: mean - 2 * sd });
+    }
+    result.bb = [upper, middle, lower];
+    let pv = 0, vol = 0;
+    result.vwap = bars.map((b) => { const tp = (b.high + b.low + b.close) / 3; pv += tp * b.volume; vol += b.volume; return { time: b.time, value: pv / (vol || 1) }; });
+    let gain = 0, loss = 0; const rsi = [];
+    for (let m = 1; m < closes.length; m++) {
+      const d = closes[m] - closes[m - 1]; const g = Math.max(d, 0), l = Math.max(-d, 0);
+      if (m <= 14) { gain += g / 14; loss += l / 14; } else { gain = (gain * 13 + g) / 14; loss = (loss * 13 + l) / 14; }
+      if (m >= 14) rsi.push({ time: bars[m].time, value: loss === 0 ? 100 : 100 - 100 / (1 + gain / loss) });
+    }
+    result.rsi = rsi;
+    const e12 = ema(closes, 12), e26 = ema(closes, 26); const macd = closes.map((_, i) => e12[i] - e26[i]); const signal = ema(macd, 9);
+    result.macd = [macd.map((v, i) => ({ time: bars[i].time, value: v })).slice(26), signal.map((v, i) => ({ time: bars[i].time, value: v })).slice(26),
+      macd.map((v, i) => { const h = v - signal[i]; return { time: bars[i].time, value: h, color: h >= 0 ? "rgba(38,166,154,0.55)" : "rgba(239,83,80,0.55)" }; }).slice(26)];
+    return result;
+  }
+
+  function syncIndicators() {
+    const chart = state.chart; if (!chart || !state.candles.length) return;
+    const ind = state.ind;
+    const sig = JSON.stringify(ind) + "|" + state.bar + "|" + state.market.name;
+    const calc = taCalc(state.candles);
+    const sub = (ind.rsi ? 0.18 : 0) + (ind.macd ? 0.18 : 0);
+    if (state.taSig !== sig) {
+      for (const s of state.taSeries) { try { chart.removeSeries(s.series); } catch {} }
+      state.taSeries = [];
+      const add = (key, series, color, label) => { state.taSeries.push({ key, series, color, label }); return series; };
+      const lineOpts = (color, lineWidth = 1.5, extra = {}) => ({ color, lineWidth, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, ...extra });
+      if (ind.ma20) add("ma20", chart.addLineSeries(lineOpts(INDICATORS.ma20.color)), INDICATORS.ma20.color, "MA 20");
+      if (ind.ma50) add("ma50", chart.addLineSeries(lineOpts(INDICATORS.ma50.color)), INDICATORS.ma50.color, "MA 50");
+      if (ind.ema200) add("ema200", chart.addLineSeries(lineOpts(INDICATORS.ema200.color)), INDICATORS.ema200.color, "EMA 200");
+      if (ind.vwap) add("vwap", chart.addLineSeries(lineOpts(INDICATORS.vwap.color, 1.5, { lineStyle: 2 })), INDICATORS.vwap.color, "VWAP");
+      if (ind.bb) { add("bb0", chart.addLineSeries(lineOpts("rgba(150,150,148,0.8)", 1)), INDICATORS.bb.color, "BB"); add("bb1", chart.addLineSeries(lineOpts("rgba(150,150,148,0.45)", 1, { lineStyle: 2 })), null, null); add("bb2", chart.addLineSeries(lineOpts("rgba(150,150,148,0.8)", 1)), null, null); }
+      if (ind.rsi) {
+        const s = add("rsi", chart.addLineSeries(lineOpts(INDICATORS.rsi.color, 1.5, { priceScaleId: "rsi", lastValueVisible: true })), INDICATORS.rsi.color, "RSI 14");
+        s.createPriceLine({ price: 70, color: "rgba(239,83,80,0.5)", lineWidth: 1, lineStyle: 2, axisLabelVisible: false });
+        s.createPriceLine({ price: 30, color: "rgba(38,166,154,0.5)", lineWidth: 1, lineStyle: 2, axisLabelVisible: false });
+      }
+      if (ind.macd) {
+        add("macdh", chart.addHistogramSeries({ priceScaleId: "macd", priceLineVisible: false, lastValueVisible: false }), null, null);
+        add("macd", chart.addLineSeries(lineOpts("#6f97ff", 1.5, { priceScaleId: "macd" })), "#6f97ff", "MACD");
+        add("macds", chart.addLineSeries(lineOpts("#f0a35a", 1.5, { priceScaleId: "macd" })), null, null);
+      }
+      chart.priceScale("right").applyOptions({ scaleMargins: { top: 0.08, bottom: sub + (ind.vol ? 0.24 : 0.06) } });
+      state.volume.applyOptions({ visible: !!ind.vol });
+      if (ind.vol) state.volume.priceScale().applyOptions({ scaleMargins: { top: 1 - sub - 0.2, bottom: sub } });
+      if (ind.rsi) chart.priceScale("rsi").applyOptions({ scaleMargins: { top: 1 - sub + 0.02, bottom: ind.macd ? 0.18 : 0 }, borderVisible: false });
+      if (ind.macd) chart.priceScale("macd").applyOptions({ scaleMargins: { top: 0.84, bottom: 0 }, borderVisible: false });
+      state.taSig = sig;
+    }
+    const data = { ma20: calc.ma20, ma50: calc.ma50, ema200: calc.ema200, vwap: calc.vwap, bb0: calc.bb[0], bb1: calc.bb[1], bb2: calc.bb[2], rsi: calc.rsi, macd: calc.macd[0], macds: calc.macd[1], macdh: calc.macd[2] };
+    for (const s of state.taSeries) { try { s.series.setData(data[s.key] ?? []); } catch {} }
+    state.taData = data;
+    paintIndicatorLegend(null);
+    const count = $("#td-indcount", root); if (count) count.textContent = String(activeIndicators().length);
+  }
+  function paintIndicatorLegend(time) {
+    const el = $("#td-indlegend", root); if (!el) return;
+    const fmt = (v) => fmtPrice(v, state.market.priceDecimals);
+    el.innerHTML = state.taSeries.filter((s) => s.label).map((s) => {
+      const rows = state.taData?.[s.key] ?? []; const point = time == null ? rows[rows.length - 1] : rows.find((p) => p.time === time) ?? rows[rows.length - 1];
+      const value = point ? (s.key === "rsi" ? point.value.toFixed(1) : fmt(point.value)) : "—";
+      return `<span><i style="background:${s.color}"></i>${s.label}<b>${value}</b></span>`;
+    }).join("");
+  }
+  function toggleIndicatorMenu(open = !state.indOpen) {
+    state.indOpen = open;
+    const menu = $("#td-indmenu", root); const button = $("#td-indbtn", root);
+    if (!menu) return;
+    // Fixed, placed under the button: the card clips anything that hangs out of it.
+    if (open) { const r = button.getBoundingClientRect(); menu.style.left = `${Math.round(r.left)}px`; menu.style.top = `${Math.round(r.bottom + 6)}px`; }
+    menu.hidden = !open; button.setAttribute("aria-expanded", String(open));
+    if (open) paintIndicatorMenu();
+  }
+  function paintIndicatorMenu() {
+    const menu = $("#td-indmenu", root); if (!menu) return;
+    const groups = [["Overlays", ["ma20", "ma50", "ema200", "vwap", "bb"]], ["Panes", ["vol", "rsi", "macd"]]];
+    menu.innerHTML = groups.map(([title, keys]) => `<h5>${title}</h5>` + keys.map((k) => `<button role="menuitemcheckbox" aria-checked="${!!state.ind[k]}" data-ind="${k}"><i style="background:${INDICATORS[k].color}"></i>${INDICATORS[k].label}<em>${state.ind[k] ? "on" : ""}</em></button>`).join("")).join("");
+  }
+
+  // Depth: the live book as two cumulative hills around the mid, from the same feed as the Book card.
+  function paintDepth(hover = null) {
+    const host = $("#td-depth", root); if (!host || host.hidden) return;
+    const m = state.market; const book = state.book;
+    if (!book || !book.bids?.length || !book.asks?.length) { host.innerHTML = `<div class="empty">${book?.failed ? "Perpl's book could not be read right now." : "Reading the book…"}</div>`; return; }
+    const bids = book.bids.slice(0, 40), asks = book.asks.slice(0, 40);
+    let sum = 0; const bidC = bids.map((r) => ({ price: r.price, total: (sum += r.size) })); sum = 0; const askC = asks.map((r) => ({ price: r.price, total: (sum += r.size) }));
+    const mid = (bids[0].price + asks[0].price) / 2, spread = asks[0].price - bids[0].price;
+    const lo = bids[bids.length - 1].price, hi = asks[asks.length - 1].price, span = Math.max(hi - lo, mid * 0.0001);
+    const maxT = Math.max(bidC[bidC.length - 1].total, askC[askC.length - 1].total) || 1;
+    const X = (p) => ((p - lo) / span) * 1000, Y = (v) => 300 - (v / maxT) * 280;
+    const bidPts = [...bidC].reverse().map((r) => [X(r.price), Y(r.total)]); const askPts = askC.map((r) => [X(r.price), Y(r.total)]);
+    const step = (pts, closeAt) => pts.map(([x, y], i) => (i ? `H${x.toFixed(1)}V${y.toFixed(1)}` : `M${x.toFixed(1)},${y.toFixed(1)}`)).join("") ;
+    const bidLine = `M${bidPts[0][0].toFixed(1)},300V${bidPts[0][1].toFixed(1)}` + bidPts.slice(1).map(([x, y]) => `H${x.toFixed(1)}V${y.toFixed(1)}`).join("") + `H${X(mid).toFixed(1)}`;
+    const askLine = `M${X(mid).toFixed(1)},${askPts[0][1].toFixed(1)}` + askPts.map(([x, y]) => `H${x.toFixed(1)}V${y.toFixed(1)}`).join("");
+    const yTicks = [0.25, 0.5, 0.75, 1].map((f) => `<span style="top:${(100 - f * 93.3).toFixed(1)}%">${fmtAmount(maxT * f, 2)}</span>`).join("");
+    const xTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => `<span style="left:${(f * 100).toFixed(1)}%">${fmtPrice(lo + span * f, m.priceDecimals)}</span>`).join("");
+    let tip = "";
+    if (hover) {
+      const price = lo + span * hover; const side = price <= mid ? "bid" : "ask";
+      const rows = side === "bid" ? bidC : askC; const hit = side === "bid" ? rows.find((r) => r.price <= price) ?? rows[rows.length - 1] : rows.find((r) => r.price >= price) ?? rows[rows.length - 1];
+      const at = side === "bid" ? [...rows].filter((r) => r.price >= price).at(-1) ?? rows[0] : rows.filter((r) => r.price <= price).at(-1) ?? rows[0];
+      const total = at?.total ?? hit?.total ?? 0;
+      tip = `<div class="cross" style="left:${(hover * 100).toFixed(2)}%"></div><div class="tip" style="left:${hover > 0.6 ? "auto" : (hover * 100 + 1.5).toFixed(2) + "%"};right:${hover > 0.6 ? (100 - hover * 100 + 1.5).toFixed(2) + "%" : "auto"};top:12px"><b class="${side === "bid" ? "up" : "down"}">${side === "bid" ? "Bids" : "Asks"} to ${fmtPrice(price, m.priceDecimals)}</b><span>Total<em>${fmtAmount(total, 3)} ${esc(m.name)}</em></span><br><span>Value<em>${fmtUsd(total * price, { compact: true })}</em></span><br><span>From mid<em>${fmtPct((price - mid) / mid)}</em></span></div>`;
+    }
+    host.innerHTML = `<div class="head"><span>Mid<b>${fmtPrice(mid, m.priceDecimals)}</b></span><span>Spread<b>${fmtPrice(spread, m.priceDecimals)} · ${fmtPct(spread / mid, { sign: false })}</b></span><span>Bids in view<b class="up">${fmtAmount(bidC[bidC.length - 1].total, 3)} ${esc(m.name)}</b></span><span>Asks in view<b class="down">${fmtAmount(askC[askC.length - 1].total, 3)} ${esc(m.name)}</b></span><span>${book.live ? "live" : "every 2 s"}</span></div>
+      <div class="plot" id="td-depthplot"><svg viewBox="0 0 1000 300" preserveAspectRatio="none">
+        <path d="${bidLine}V300Z" fill="rgba(38,166,154,0.16)"/><path d="${askLine}V300H${X(mid).toFixed(1)}Z" fill="rgba(239,83,80,0.14)"/>
+        <path d="${bidLine}" fill="none" stroke="#26a69a" stroke-width="1.5" vector-effect="non-scaling-stroke"/><path d="${askLine}" fill="none" stroke="#ef5350" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+        <path d="M${X(mid).toFixed(1)},0V300" stroke="rgba(255,255,255,0.25)" stroke-dasharray="2 4" vector-effect="non-scaling-stroke"/>
+      </svg><div class="y">${yTicks}</div>${tip}</div><div class="x">${xTicks}</div>`;
+    const plot = $("#td-depthplot", host);
+    plot.onmousemove = (event) => { const r = plot.getBoundingClientRect(); paintDepth(Math.min(1, Math.max(0, (event.clientX - r.left) / r.width))); };
+    plot.onmouseleave = () => paintDepth(null);
+  }
+
+  // Funding: what Perpl publishes now. The venue does not expose the history, so this is a reading, not a chart.
+  function paintFunding() {
+    const host = $("#td-fund", root); if (!host || host.hidden) return;
+    const m = state.market; const rate = m.fundingRate; const every = m.fundingIntervalSec || 3600;
+    const perYear = rate == null ? null : rate * (365 * 86400 / every);
+    const left = every - (Math.floor(Date.now() / 1000) % every);
+    const hh = Math.floor(left / 3600), mm = Math.floor((left % 3600) / 60), ss = left % 60;
+    const tone = rate > 0 ? "up" : rate < 0 ? "down" : "";
+    host.innerHTML = `<div class="head"><span>Perpl ${esc(m.name)}-PERP</span><span>Paid every<b>${interval(m.fundingIntervalSec)}</b></span></div>
+      <div class="big">
+        <div class="cell stat"><span class="eyebrow">Current rate</span><span class="num ${tone}">${rate == null ? "—" : fmtPct(rate, { digits: 4 })}</span><span class="sub">per ${interval(m.fundingIntervalSec)}</span></div>
+        <div class="cell stat"><span class="eyebrow">Annualized</span><span class="num ${tone}">${perYear == null ? "—" : fmtPct(perYear, { digits: 1 })}</span><span class="sub">if it stayed here all year</span></div>
+        <div class="cell stat"><span class="eyebrow">Next payment</span><span class="num">${hh ? hh + ":" : ""}${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}</span><span class="sub">${rate > 0 ? "longs pay shorts" : rate < 0 ? "shorts pay longs" : "nobody pays"}</span></div>
+      </div>
+      <div class="note muted">Funding keeps the perp near the index: when longs crowd in the rate goes positive and longs pay shorts every interval, in proportion to position size. Perpl publishes the current rate and the interval; it does not expose the history, so Desk shows the reading rather than a chart. The Crowd tab shows who sits on which side right now.</div>`;
   }
 
   function paintSpark() {

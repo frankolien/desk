@@ -402,7 +402,8 @@ h3 { font-size: 14px; font-weight: 700; }
 
 /* ── Charts ───────────────────────────────────────────── */
 
-.chart-legend { position: absolute; left: 12px; top: 10px; z-index: 4; pointer-events: none; font-size: 12px; color: #b2b5be; white-space: nowrap; }
+.chart-legend { position: absolute; left: 12px; top: 10px; right: 64px; z-index: 4; pointer-events: none; font-size: 12px; color: #b2b5be; line-height: 1.5; }
+.chart-legend .vol { color: #b2b5be; }
 .chart-legend b { color: var(--text); font-weight: 600; }
 .chart-legend span { margin-left: 8px; font-family: var(--rounded); font-variant-numeric: tabular-nums; }
 .chart-legend span i { font-style: normal; margin: 0 6px 0 2px; }
