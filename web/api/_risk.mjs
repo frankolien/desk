@@ -41,6 +41,8 @@ export function assessToken({
 } = {}) {
   const reasons = [];
   const facts = [];
+  const badges = [];
+  const metrics = { topTen: null, creator: null, liquidity: liquidity ?? null };
   const push = (code, weight, text) => reasons.push({ code, weight, text, severity: weight >= 6 ? "high" : weight >= 3 ? "caution" : "info" });
 
   let checked = false;
@@ -58,10 +60,12 @@ export function assessToken({
     checked = true;
     const people = looksLikePool(ranked[0], { liquidity, price }) ? ranked.slice(1) : ranked;
     const topTen = people.slice(0, 10).reduce((sum, row) => sum + row.percent, 0);
+    metrics.topTen = topTen;
     if (topTen > 50) push("concentrated", 6, `Top 10 wallets hold ${Math.round(topTen)}% of supply`);
     else if (topTen > 30) push("concentrated", 3, `Top 10 wallets hold ${Math.round(topTen)}% of supply`);
     if (creator) {
       const own = people.find((row) => row.address === String(creator).toLowerCase());
+      metrics.creator = own?.percent ?? 0;
       if (own && own.percent > 10) push("creator_share", 3, `Creator wallet holds ${Math.round(own.percent)}% of supply`);
     }
   }
@@ -82,18 +86,21 @@ export function assessToken({
   }
 
   // OKX's riskLevelControl: 1 is ordinary, 2 elevated, 3 and up flagged.
-  if (riskFlag === "high") { checked = true; push("flagged", 6, "Flagged by OKX as high risk"); }
-  else if (riskFlag === "medium") { checked = true; push("okx_medium", 3, "OKX rates this token medium risk"); }
-  if (communityRecognized === false) { checked = true; push("unrecognized", 1, "Not recognized by the community yet"); }
-  else if (communityRecognized === true) facts.push({ code: "recognized", text: "Recognized by the community" });
-  if (graduated === false) push("bonding_curve", 1, "Still on the bonding curve");
-  else if (graduated === true) facts.push({ code: "graduated", text: "Graduated to a pool" });
+  if (riskFlag === "high") { checked = true; push("flagged", 6, "Flagged by OKX as high risk"); badges.push({ code: "flagged", text: "OKX flagged", ok: false }); }
+  else if (riskFlag === "medium") { checked = true; push("okx_medium", 3, "OKX rates this token medium risk"); badges.push({ code: "okx_medium", text: "OKX medium", ok: false }); }
+  else if (riskFlag === "clear") { checked = true; badges.push({ code: "okx_clear", text: "OKX clear", ok: true }); }
+  if (communityRecognized === false) { checked = true; push("unrecognized", 1, "Not recognized by the community yet"); badges.push({ code: "unrecognized", text: "Unrecognized", ok: false }); }
+  else if (communityRecognized === true) { facts.push({ code: "recognized", text: "Recognized by the community" }); badges.push({ code: "recognized", text: "Recognized", ok: true }); }
+  if (graduated === false) { push("bonding_curve", 1, "Still on the bonding curve"); badges.push({ code: "bonding_curve", text: "Bonding curve", ok: false }); }
+  else if (graduated === true) { facts.push({ code: "graduated", text: "Graduated to a pool" }); badges.push({ code: "graduated", text: "Graduated", ok: true }); }
   if (marketCap != null) facts.push({ code: "market_cap", text: `Market cap ${compact(marketCap)}` });
 
   reasons.sort((a, b) => b.weight - a.weight);
   const total = reasons.reduce((sum, reason) => sum + reason.weight, 0);
   const level = !checked ? "unchecked" : total >= 6 ? "high" : total >= 3 ? "caution" : "low";
-  return { level, reasons: reasons.map(({ code, text, severity }) => ({ code, text, severity })), facts, checkedAt: now };
+  // Half a point per unit of weight: caution starts at 1.5, high at 3, and 10 is twenty points of flags.
+  const score = checked ? Math.min(10, total / 2) : null;
+  return { level, score, reasons: reasons.map(({ code, text, severity }) => ({ code, text, severity })), facts, badges, metrics, checkedAt: now };
 }
 
 export async function nadfunToken(address, fetchImpl) {
@@ -122,7 +129,8 @@ export async function handleRisk(req, res, { fetchImpl = fetch, okx = { get: okx
     return res.status(400).json({ error: "chainIndex and a token address are required." });
   }
   const identity = { chainIndex, tokenContractAddress: address };
-  const flag = req.query.riskLevel == null ? null : okxRiskLevel(String(req.query.riskLevel));
+  const flagText = req.query.riskLevel == null ? "" : String(req.query.riskLevel);
+  const flag = flagText === "" ? null : okxRiskLevel(flagText) ?? "clear";
   const recognized = req.query.communityRecognized == null ? null : String(req.query.communityRecognized) === "true";
   try {
     const [priceRows, holderRows, tradeRows, launch] = await Promise.all([

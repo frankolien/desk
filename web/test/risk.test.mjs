@@ -59,3 +59,28 @@ test("positive facts are facts, not safety", () => {
     "Launched 40 days ago", "10 of the last 30 trades were sells", "Recognized by the community", "Graduated to a pool", "Market cap $2.4M",
   ]);
 });
+
+test("the score is half a point per unit of weight, capped at ten", () => {
+  assert.equal(assessToken({ now: NOW }).score, null);
+  assert.equal(assessToken({ liquidity: 120_000, now: NOW }).score, 0);
+  assert.equal(assessToken({ liquidity: 25_000, now: NOW }).score, 1.5);
+  assert.equal(assessToken({ liquidity: 8_200, now: NOW }).score, 3);
+  const worst = assessToken({ liquidity: 8_200, holders: [holder("0xdev", 70)], creator: "0xdev", createdAt: NOW / 1000 - 60, trades: Array.from({ length: 20 }, () => ({ type: "buy" })), riskFlag: "high", communityRecognized: false, graduated: false, now: NOW });
+  assert.equal(worst.score, 10);
+});
+
+test("the grid metrics and badges come with the assessment", () => {
+  const risk = assessToken({ liquidity: 60_000, holders: [holder("0xdev", 18), holder("0xa", 5)], creator: "0xDEV", riskFlag: "clear", communityRecognized: true, graduated: true, now: NOW });
+  assert.deepEqual(risk.metrics, { topTen: 23, creator: 18, liquidity: 60_000 });
+  assert.deepEqual(risk.badges, [
+    { code: "okx_clear", text: "OKX clear", ok: true },
+    { code: "recognized", text: "Recognized", ok: true },
+    { code: "graduated", text: "Graduated", ok: true },
+  ]);
+  assert.equal(risk.level, "caution");
+  const unknown = assessToken({ now: NOW });
+  assert.deepEqual(unknown.metrics, { topTen: null, creator: null, liquidity: null });
+  assert.deepEqual(unknown.badges, []);
+  assert.equal(assessToken({ holders: [holder("0xa", 5)], creator: "0xdev", now: NOW }).metrics.creator, 0);
+  assert.equal(assessToken({ riskFlag: "high", communityRecognized: false, graduated: false, now: NOW }).badges.map((b) => b.ok).join(), "false,false,false");
+});

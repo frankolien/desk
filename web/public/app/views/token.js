@@ -65,7 +65,31 @@ const STYLE = `<style>
 .tk-act .row-between { font-size: 12px; }
 .tk-act .row-between b { font-family: var(--rounded); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 12px; }
 .tk-act .bar { margin-top: 5px; }
-.tk-risk .line { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.35; }
+.tk-score { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tk-score .n { font-family: var(--rounded); font-variant-numeric: tabular-nums; font-size: 34px; font-weight: 800; line-height: 1; letter-spacing: -0.02em; }
+.tk-score .n small { font-size: 14px; color: var(--muted); font-weight: 600; margin-left: 3px; letter-spacing: 0; }
+.tk-score.low .n { color: var(--rise); }
+.tk-score.caution .n { color: var(--amber); }
+.tk-score.high .n { color: var(--fall); }
+.tk-ticks { display: grid; grid-template-columns: repeat(10, 14px); gap: 3px; }
+.tk-ticks i { height: 6px; border-radius: 2px; background: var(--chip); }
+.tk-score.low .tk-ticks i.on { background: var(--rise); }
+.tk-score.caution .tk-ticks i.on { background: var(--amber); }
+.tk-score.high .tk-ticks i.on { background: var(--fall); }
+.tk-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.tk-badge { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px 0 5px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--chip); color: var(--text); }
+.tk-badge i { width: 13px; height: 13px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-style: normal; font-weight: 800; line-height: 1; }
+.tk-badge.ok i { background: var(--rise-soft); color: var(--rise); }
+.tk-badge.warn i { background: rgba(232, 179, 57, 0.16); color: var(--amber); }
+.tk-riskgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+.tk-riskgrid div { background: var(--chip); border-radius: 10px; padding: 8px 10px; min-width: 0; }
+.tk-riskgrid span { display: block; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.tk-riskgrid b { display: block; font-family: var(--rounded); font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 700; margin-top: 2px; }
+.tk-riskgrid b.amber { color: var(--amber); }
+.tk-riskgrid b.fall { color: var(--fall); }
+.tk-riskgrid b.pulse { color: var(--faint); }
+.tk-risklines { display: grid; gap: 6px; margin-top: 12px; }
+.tk-risk .line { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 1.35; color: var(--muted); }
 .tk-risk .line i { flex: none; width: 6px; height: 6px; border-radius: 50%; margin-top: 6px; background: var(--faint); }
 .tk-risk .line.high i { background: var(--fall); }
 .tk-risk .line.caution i { background: var(--amber); }
@@ -180,8 +204,8 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
           <div class="card-pad tk-act" id="tk-act">${skel()}${skel()}${skel()}</div>
         </div>
         <div class="card tk-risk" id="tk-risk">
-          <div class="card-head"><h3>Risk</h3><span id="tk-risk-chip"></span></div>
-          <div class="card-pad stack" style="gap:8px" id="tk-risk-body">${skel("80%")}${skel("60%")}${skel("40%", 11)}</div>
+          <div class="card-head"><h3>Risk score</h3><span id="tk-risk-chip"></span></div>
+          <div class="card-pad" id="tk-risk-body">${skel("40%", 34)}<div style="height:12px"></div>${skel("80%")}${skel("60%")}</div>
         </div>
         <div class="card tk-about" id="tk-about">
           <div class="card-head"><h3>About</h3></div>
@@ -310,19 +334,13 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   });
   paintTicket();
 
+  let risk = { status: "loading", data: null };
   api(`/api/token-details?view=risk&chainIndex=${chainIndex}&address=${address}&riskLevel=${encodeURIComponent(row?.riskLevel ?? "")}&communityRecognized=${row?.communityRecognized ?? ""}`, { ttl: 60_000, signal })
     .catch(() => null)
-    .then((risk) => {
+    .then((out) => {
       if (dead) return;
-      const level = RISK_LABEL[risk?.level] ? risk.level : "unchecked";
-      q("#tk-risk-chip").innerHTML = `<span class="risk ${level}"><i></i>${RISK_LABEL[level]}</span>`;
-      const reasons = risk?.reasons ?? [];
-      const facts = risk?.facts ?? [];
-      q("#tk-risk-body").innerHTML = (risk
-        ? (reasons.length ? reasons.map((r) => `<div class="line ${esc(r.severity ?? "info")}"><i></i><span>${esc(r.text)}</span></div>`).join("") : `<div class="line"><i></i><span>Nothing stood out.</span></div>`)
-          + facts.map((f) => `<div class="line muted"><i></i><span>${esc(f.text)}</span></div>`).join("")
-        : `<div class="line muted"><i></i><span>No checks ran for this token.</span></div>`)
-        + (risk ? `<div class="checked">Checked${risk.checkedAt ? ` ${ago(risk.checkedAt)}` : ""} · OKX, nad.fun, on-chain</div>` : "");
+      risk = { status: out ? "ready" : "unavailable", data: out };
+      paintRisk();
     });
 
   let bar = "5m";
@@ -600,6 +618,42 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   const bought = (amount, s) => `<span class="num">${fmtAmount(amount, 2)}</span> <span class="muted num">${share(s)}</span>`;
   const stack = (wallets) => `<span class="tk-stack">${wallets.slice(0, 5).map((w) => face(w)).join("")}${wallets.length > 5 ? `<span class="more">+${wallets.length - 5}</span>` : ""}</span>`;
 
+  const paintRisk = () => {
+    if (risk.status === "loading") return;
+    const r = risk.data;
+    const level = RISK_LABEL[r?.level] ? r.level : "unchecked";
+    q("#tk-risk-chip").innerHTML = `<span class="risk ${level}"><i></i>${RISK_LABEL[level]}</span>`;
+    const score = Number.isFinite(r?.score) ? r.score : null;
+    const ticks = Array.from({ length: 10 }, (_, i) => `<i class="${score != null && i < Math.round(score) ? "on" : ""}"></i>`).join("");
+    const d = early.status === "ready" ? early.data : null;
+    const launchCell = (v) => (d ? share(v ?? 0) : early.status === "loading" || early.status === "indexing" ? "…" : "—");
+    const pct = (v) => (v == null ? "—" : share(v / 100));
+    const tone = (v, warn, bad) => (v == null ? "" : v >= bad ? " fall" : v >= warn ? " amber" : "");
+    const launchTone = (v) => (d ? tone(v ?? 0, 0.05, 0.2) : early.status === "loading" || early.status === "indexing" ? " pulse" : "");
+    const m = r?.metrics ?? {};
+    const liquidity = m.liquidity ?? null;
+    const cells = [
+      ["Top 10", pct(m.topTen), tone(m.topTen, 30, 50), "Held by the ten largest wallets, pool left out"],
+      ["Bundler", launchCell(d?.totals?.bundles), launchTone(d?.totals?.bundles), "Bought by grouped wallets in the launch blocks"],
+      ["Sniper", launchCell(d?.totals?.snipers), launchTone(d?.totals?.snipers), "Bought in the first blocks after launch"],
+      ["Insider", launchCell(d?.totals?.insiders), launchTone(d?.totals?.insiders), "Held by the creator and wallets the creator funded"],
+      ["Dev", pct(m.creator), tone(m.creator, 10, 25), "Held by the creator wallet now"],
+      ["Liquidity", liquidity == null ? "—" : `$${fmtCompact(liquidity)}`, liquidity == null ? "" : liquidity < 10_000 ? " fall" : liquidity < 50_000 ? " amber" : "", "In the pool"],
+    ];
+    const badges = (r?.badges ?? []).map((b) => `<span class="tk-badge ${b.ok ? "ok" : "warn"}"><i>${b.ok ? "✓" : "!"}</i>${esc(b.text)}</span>`).join("");
+    const reasons = r?.reasons ?? [];
+    const facts = r?.facts ?? [];
+    q("#tk-risk-body").innerHTML = `
+      <div class="tk-score ${level}"><div class="n">${score == null ? "—" : score.toFixed(1)}<small>/ 10</small></div><div class="tk-ticks" aria-hidden="true">${ticks}</div></div>
+      ${badges ? `<div class="tk-badges">${badges}</div>` : ""}
+      <div class="tk-riskgrid">${cells.map(([k, v, cls, title]) => `<div title="${esc(title)}"><span>${k}</span><b class="${cls.trim()}">${v}</b></div>`).join("")}</div>
+      <div class="tk-risklines">${r
+        ? (reasons.length ? reasons.map((x) => `<div class="line ${esc(x.severity ?? "info")}"><i></i><span>${esc(x.text)}</span></div>`).join("") : `<div class="line"><i></i><span>Nothing stood out.</span></div>`)
+          + facts.map((f) => `<div class="line muted"><i></i><span>${esc(f.text)}</span></div>`).join("")
+        : `<div class="line muted"><i></i><span>No checks ran for this token.</span></div>`}</div>
+      ${r ? `<div class="checked">Checked${r.checkedAt ? ` ${ago(r.checkedAt)}` : ""} · OKX, nad.fun, on-chain</div>` : ""}`;
+  };
+
   const earlyLine = () => {
     const s = early.status;
     const text = s === "unsupported" ? "Read on Monad only for now."
@@ -737,6 +791,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
       }
     }
     paintCounts();
+    paintRisk();
     if (EARLY_TABS.includes(tab)) paintTable();
   };
 
