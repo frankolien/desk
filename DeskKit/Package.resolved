@@ -1,6 +1,15 @@
 {
-  "originHash" : "168453ca238bfbe9e4102e0ee786c939c6c38b63c2a49c7625fd63cb6c7a68a7",
+  "originHash" : "4a69564a0d3108ac57c71c545c03e31fef2264d590a7ac63b4b3b759c1ef3d41",
   "pins" : [
+    {
+      "identity" : "crossmint-checkout-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Crossmint/crossmint-checkout-swift",
+      "state" : {
+        "revision" : "bc62b381d08473ebb98fd25b79f6f360813e7c51",
+        "version" : "1.4.0"
+      }
+    },
     {
       "identity" : "cryptoswift",
       "kind" : "remoteSourceControl",

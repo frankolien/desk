@@ -8,6 +8,7 @@ struct AddFundsSheet: View {
     @State private var copied = false
     @State private var showsSwap = false
     @State private var showsReceive = false
+    @State private var showsOnramp = false
 
     private var wallet: Money { model.walletAUSD.value ?? .zero }
     private var mainnet: Bool { model.network.holdsRealFunds }
@@ -35,6 +36,8 @@ struct AddFundsSheet: View {
                     option(symbol: "arrow.triangle.2.circlepath", title: "Swap MON for AUSD",
                            detail: "\(spare.display(fractionDigits: 2)) MON available") { showsSwap = true }
                 }
+                option(symbol: "creditcard", title: "Apple Pay or card",
+                       detail: "AUSD into this wallet, through Crossmint") { showsOnramp = true }
                 option(symbol: "qrcode", title: "Receive AUSD",
                        detail: mainnet ? "From any wallet or exchange on Monad" : "Send test AUSD to this wallet") {
                     withAnimation(.snappy(duration: 0.25)) { showsReceive.toggle() }
@@ -89,6 +92,14 @@ struct AddFundsSheet: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showsOnramp) {
+            OnrampSheet(model: model) { showsOnramp = false }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        #if DEBUG
+        .task { if ProcessInfo.processInfo.arguments.contains("-open-onramp") { showsOnramp = true } }
+        #endif
     }
 
     private var balanceLine: String {
