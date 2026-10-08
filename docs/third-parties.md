@@ -39,6 +39,7 @@ endpoints. Sources are listed by what they are for.
 | Service | Used for | Where | Key |
 |---|---|---|---|
 | Apple Push Notification service — `api.push.apple.com`, sandbox | Trade alerts and the silent wake for away copying | `_apns.mjs`, `alerts.mjs` | `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`, `APNS_TOPIC` |
+| Crossmint — `staging.crossmint.com`, `www.crossmint.com` | Card and Apple Pay deposits: the server links the passkey wallet to a Crossmint user and opens an order; Crossmint's sheet in the app takes the payment and the KYC and delivers AUSD on Monad (test USDC on Base Sepolia in staging) | `_onramp.mjs` via `swap-quote.mjs?view=onramp`, `OnrampSheet.swift` | `CROSSMINT_API_KEY` (server key, `sk_…`), `CROSSMINT_CLIENT_KEY` (public, `ck_…`), optional `CROSSMINT_ENV`, `CROSSMINT_TOKEN_LOCATOR` |
 | Browser push services — `fcm.googleapis.com`, `web.push.apple.com`, `updates.push.services.mozilla.com`, `*.notify.windows.com` | Trade alerts to browsers that follow traders on the web app; each message is encrypted to the browser's keys | `_webpush.mjs`, `alerts.mjs` | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` |
 | Upstash Redis (Vercel KV) | Alert subscriptions, trader history shards, wallet ledgers, identity, price and summary caches | `_store.mjs` | `KV_REST_API_URL`, `KV_REST_API_TOKEN` |
 | Railway | Runs the wallet-ledger worker (`web/worker`) around the clock; same env names as Vercel plus `CRON_SECRET` and `DESK_API` | `web/worker/index.mjs`, `web/Dockerfile` | project `desk-worker` |

@@ -83,3 +83,24 @@ Browsers subscribe with the public key, so rotating the pair makes every browser
 re-subscribe the next time it opens the app; nothing else breaks. Like the other
 credentials the keys exist only in Production, so a preview deployment answers the key
 route 503 and "Turn on alerts" says the server is not set up for it.
+
+## Card and Apple Pay deposits
+
+Deposits by card or Apple Pay go through Crossmint. `CROSSMINT_API_KEY` is the server-side key
+(`sk_staging_…` or `sk_production_…`, scopes `orders.create` and `orders.read`); the environment
+follows the key's prefix, so a staging key can only ever reach staging. `CROSSMINT_CLIENT_KEY` is
+the matching client key (`ck_…`), public by design: the app hands it to Crossmint's sheet to
+identify itself, and the server serves it from `GET /api/swap-quote?view=onramp`. In staging the
+delivered token is test USDC on Base Sepolia, Crossmint's stand-in, and nothing reaches Monad; in
+production it is AUSD on Monad, which Crossmint enables per customer. `CROSSMINT_TOKEN_LOCATOR`
+overrides the token for either.
+
+```sh
+vercel env add CROSSMINT_API_KEY production      # paste the sk_ key when asked
+vercel env add CROSSMINT_CLIENT_KEY production   # paste the ck_ key
+```
+
+The route: `GET` says what is set up, `POST { wallet, amount, email, currency? }` links the wallet
+to a Crossmint user and opens an order, answering with a `clientSecret` scoped to that order, and
+`GET ?orderId=` follows it to delivery. The app never sees the server key, and the server never
+sees a card.

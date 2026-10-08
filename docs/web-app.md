@@ -159,6 +159,8 @@ sizes in decimals: `{ market, at, bids: [{ price, size, orders }], asks: [...] }
 the market's instrument, ascending `{ time, open, high, low, close, volume }`, one-minute
 cache. A market without an instrument answers 404.
 
+`GET|POST /api/swap-quote?view=onramp` — card and Apple Pay deposits through Crossmint: GET says what is set up (environment, token, limits, the public client key), POST `{ wallet, amount, email, currency? }` links the wallet to a Crossmint user and opens an order, answering with a `clientSecret` for that order; `GET ?orderId=` follows it to delivery. The app presents Crossmint's sheet with the secret; the server key never leaves the server.
+
 `GET /api/alerts?job=key` — the VAPID public key browsers subscribe with. `POST /api/alerts`
 with `{ install, web: { endpoint, keys }, traders, names }` registers a browser's push
 subscription as a seat; the first registration is confirmed by a push to it, and

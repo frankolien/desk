@@ -48,6 +48,9 @@ Monad* and Perpl's *Best Use of Perpl's API*. Swift 6, SwiftUI, iOS 18.4+, iPhon
 - **Trade tokens too** — Trending coins on Search, across Monad and the EVM chains Relay
   reaches, bought with MON from the same key; token pages with holders, trades, who got in
   first, and a risk card. EVM only: Solana is not offered anywhere.
+- **Deposit with Apple Pay or a card** — through Crossmint's sheet inside the app, with the
+  passkey wallet as the recipient; Desk never sees the card. Live once Crossmint enables Monad
+  for Desk; until then it runs in their staging.
 - **MON to AUSD and back** — the dollars for the desk from spare MON, and MON for gas
   and tokens from AUSD, in one sheet with a switch; checked on Monad before Face ID signs,
   approving at most the amount typed.
