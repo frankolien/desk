@@ -139,7 +139,7 @@ liquidation price before anything is shown (a long's stop sits below the mark an
 liquidation, its take profit above the mark); a valid one reads as the return on margin and the
 move it needs, and both ride along in the sentence.
 
-Keys work anywhere outside a field: `L` and `S` pick the side, `1`–`9` the leverage, `P` the
+Full screen, from the chart bar or `F`, hides the sidebar, top bar and ticker, gives the chart the viewport and asks the browser for full screen; `Esc` leaves, and the choice is remembered for the next visit (without the browser part, which needs a click). Keys work anywhere outside a field: `L` and `S` pick the side, `1`–`9` the leverage, `P` the
 Positions tab.
 
 The confirm is **Trade in Desk**: on iPhone it opens the App Store listing, on desktop a

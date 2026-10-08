@@ -35,6 +35,13 @@ const CSS = `
 .td-head .stat.mark small { font-size: 12px; font-weight: 700; margin-left: 6px; }
 .td-chart-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
 .td-chart { height: 440px; position: relative; }
+/* Full screen: the shell steps out, the chart takes the height, the ticket stays beside it. F toggles, Esc leaves. */
+body.focus .side, body.focus .top, body.focus .ticker { display: none; }
+body.focus .shell { grid-template-columns: minmax(0, 1fr); }
+body.focus .view { padding: 10px 12px 12px; max-width: none; }
+body.focus .td-grid { gap: 10px; }
+body.focus .td-chart { height: clamp(440px, calc(100vh - 250px), 1100px); }
+body.focus .td-head { padding: 10px 16px; }
 .td-chart .lw { position: absolute; inset: 0; }
 .td-tabs { padding: 0 16px; }
 .td-ticket .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; background: var(--card-2); border-radius: 12px; }
@@ -108,7 +115,7 @@ export default async function mount(el, params) {
   const root = $("#td", el);
   const stops = [];
   const state = {
-    market: null, rows: [], bar: "15m", side: "long", margin: 0, leverage: 3, tab: "crowd",
+    market: null, rows: [], bar: "15m", side: "long", margin: 0, leverage: 3, tab: "crowd", focus: false,
     chart: null, series: null, volume: null, markLine: null, crowd: null, top: null, watched: watched(), lastBar: null,
     ring: [], lastCandle: null, candles: [], legend: null, countdown: null, faces: [], showFaces: localStorage.getItem("desk.web.chartfaces") !== "off",
     positions: null, positionsFor: null, news: null, tp: 0, sl: 0,
@@ -162,7 +169,9 @@ export default async function mount(el, params) {
     if (key === "l" || key === "s") { setSide(key === "l" ? "long" : "short"); event.preventDefault(); return; }
     if (/^[1-9]$/.test(key)) { setLeverage(Number(key)); event.preventDefault(); return; }
     if (key === "0") { setLeverage(10); event.preventDefault(); return; }
-    if (key === "p") { setTab("positions"); event.preventDefault(); }
+    if (key === "p") { setTab("positions"); event.preventDefault(); return; }
+    if (key === "f") { setFocus(!state.focus); event.preventDefault(); return; }
+    if (event.key === "Escape" && state.focus) { setFocus(false); event.preventDefault(); }
   };
   document.addEventListener("keydown", onKey);
   stops.push(() => document.removeEventListener("keydown", onKey));
@@ -174,6 +183,24 @@ export default async function mount(el, params) {
   loadTop();
   startBook();
   startAccount();
+
+  // The whole page becomes the terminal: the shell steps out and the browser goes full screen when
+  // the user asked with a click or a key; a persisted preference restores the layout without the
+  // browser part, which needs a gesture. Leaving browser full screen leaves the mode too.
+  function setFocus(on, { browser = true } = {}) {
+    state.focus = on;
+    document.body.classList.toggle("focus", on);
+    try { localStorage.setItem("desk.web.focus", on ? "on" : "off"); } catch {}
+    const button = $("#td-focus", root);
+    if (button) { button.setAttribute("aria-pressed", String(on)); button.textContent = on ? "Exit full screen" : "Full screen"; }
+    if (browser && on && !document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
+    if (!on && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  }
+  const onFullscreen = () => { if (!document.fullscreenElement && state.focus) setFocus(false); };
+  document.addEventListener("fullscreenchange", onFullscreen);
+  stops.push(() => document.removeEventListener("fullscreenchange", onFullscreen));
+  stops.push(() => { if (state.focus) setFocus(false); document.body.classList.remove("focus"); });
+  try { if (localStorage.getItem("desk.web.focus") === "on") setFocus(true, { browser: false }); } catch {}
 
   return () => { stops.forEach((stop) => stop()); state.bookStop?.(); state.bookFallback?.(); state.chart?.remove(); };
 
@@ -193,6 +220,7 @@ export default async function mount(el, params) {
               <span class="chip chip-brand" style="height:24px;font-size:11px"><i class="dot" style="width:5px;height:5px;background:var(--brand);box-shadow:none"></i>Perpl mark</span>
               <span class="chip" style="height:24px;font-size:11px">OKX tape</span>
               <button class="chip" style="height:24px;font-size:11px" id="td-facetoggle" aria-pressed="${state.showFaces}">Top traders</button>
+              <button class="chip" style="height:24px;font-size:11px" id="td-focus" aria-pressed="${state.focus}" title="Full screen · F">${state.focus ? "Exit full screen" : "Full screen"}</button>
             </div>
           </div>
           <div class="td-chart"><div class="lw" id="td-lw"></div><div class="td-faces" id="td-faces" ${state.showFaces ? "" : "hidden"}></div></div>
@@ -235,6 +263,7 @@ export default async function mount(el, params) {
       setTab(b.dataset.tab);
     });
     $("#td-pick", root).addEventListener("click", () => $("#search-open").click());
+    $("#td-focus", root).addEventListener("click", () => setFocus(!state.focus));
     $("#td-facetoggle", root).addEventListener("click", (event) => {
       state.showFaces = !state.showFaces;
       localStorage.setItem("desk.web.chartfaces", state.showFaces ? "on" : "off");
@@ -370,7 +399,7 @@ export default async function mount(el, params) {
       <button class="btn btn-lg btn-block ${state.side === "long" ? "btn-rise" : "btn-fall"}" id="td-go"></button>
       <div class="td-status" id="td-status" hidden></div>
       <div class="note" style="text-align:center;font-size:11px" id="td-note">Signs with Face ID in the app. Nothing on the web can move money.</div>
-      <div class="td-keys"><kbd>L</kbd><kbd>S</kbd><span class="note" style="font-size:10px">side</span><kbd>1</kbd>–<kbd>9</kbd><span class="note" style="font-size:10px">leverage</span><kbd>P</kbd><span class="note" style="font-size:10px">positions</span></div>`;
+      <div class="td-keys"><kbd>L</kbd><kbd>S</kbd><span class="note" style="font-size:10px">side</span><kbd>1</kbd>–<kbd>9</kbd><span class="note" style="font-size:10px">leverage</span><kbd>P</kbd><span class="note" style="font-size:10px">positions</span><kbd>F</kbd><span class="note" style="font-size:10px">full screen</span></div>`;
     const ticket = $("#td-ticket", root);
     ticket.addEventListener("click", (event) => {
       const side = event.target.closest("[data-side]");
