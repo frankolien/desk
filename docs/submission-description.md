@@ -141,3 +141,69 @@ CODE AND TESTS
 Repository: https://github.com/frankolien/desk. Swift tests: swift test --package-path DeskKit (542 tests, no simulator needed). Server tests: cd web && node --test (265 tests). Build the app with xcodegen generate && open Desk.xcodeproj, scheme Desk. The public API is listed at https://trydesk.trade/api/v1.
 
 The demo video was recorded on Monad mainnet with real money; the explorer links for its trades are in docs/submission.md in the repository.
+
+---
+
+# Monad Foundation · Best Mera-Powered UX on Monad
+
+"Describe how your project meaningfully integrates Mera as the entire account layer." Plain text, limit 8,000.
+
+---
+
+Mera is the account. Desk has no other credential: no seed phrase, no wallet app, no extension, no email and password. A user taps Create account, Face ID creates a passkey on the device, and from that moment the passkey is the wallet, the trading identity and the sign-in, on the phone and in a browser.
+
+ONE PRF EVALUATION, EVERYTHING DERIVED
+
+Each sign-in evaluates the passkey's PRF with Desk's fixed salt (the hash of "mera.prf.salt.v1"). The 32 bytes that come back are treated as BIP-39 entropy, so the whole account is one deterministic tree under the passkey. From that seed Desk derives two keys in two namespaces: the wallet key, secp256k1 at m/44'/60'/0'/0/0, which holds and moves the AUSD; and the trading key, Ed25519 at m/44'/501'/i'/0', the key type Perpl's API signs with. The same derivation is pinned by test vectors in the Swift package and in the web app's test suite, so the phone and the browser always arrive at the same address from the same passkey.
+
+THE TWO KEYS ARE TREATED DIFFERENTLY, ON PURPOSE
+
+The wallet key can move money, so it is never stored. It is derived again inside a scoped closure for each transaction that needs it: opening the desk, depositing, withdrawing, swapping, buying a token. The closure gets the key, signs, and the key is gone. Nothing may hold it.
+
+The trading key can place and close orders but cannot withdraw, so it may be kept, but only sealed: in the keychain under the device's current biometric enrolment and "when passcode set, this device only". It opens with Face ID, leaves memory when Desk locks or the phone locks, and if iOS suspends Desk in the background it is wiped the moment Desk returns, before anything can use it. A copy of the phone's data without the phone's current Face ID cannot open it.
+
+Every order is hold-to-confirm plus Face ID. No server can trade for anyone, including ours: the server pushes notifications, reads public chain data and indexes history. It never sees a key.
+
+HOW THE ACCOUNT MEETS PERPL AND MONAD
+
+Opening a desk is one Face ID: the wallet key approves AUSD, creates the Perpl account with the deposit, and allows order forwarding. The trading key is then enrolled with Perpl by an EIP-712 registration the wallet signs, with a proof of possession the trading key signs, so Perpl knows which wallet stands behind which API key. From then on the trading key signs every request and the websocket sign-in, and the wallet key is only asked for when money moves.
+
+The same wallet key signs plain messages, not transactions, to prove the address to Desk's own profile service when a user sets a name or avatar, and to register a .nad name from inside the app.
+
+THE SAME ACCOUNT IN A BROWSER
+
+Because the passkey lives in iCloud Keychain, trydesk.trade/app signs in with the same passkey through WebAuthn's PRF extension, against the app's relying party, which names trydesk.trade as a related origin. The tab derives the same wallet and trading key, shows the same address, positions and AUSD, enrols its own trading-key index with Perpl so each surface can be revoked separately, and wipes the keys on lock, idle or close. One credential, two surfaces, nothing synced through us.
+
+WHAT THE USER IS TOLD
+
+Onboarding says the hard truth in plain words: lose the phone and its iCloud backup and the funds are gone, because there is no seed phrase to recover from. Settings offers Lock, which drops the keys, and the app locks itself with the phone. Everything a user has to understand about the account fits on one screen, and nothing about it requires knowing what a private key is.
+
+Everything above is in the shipped build and on Monad mainnet; the demo video shows the sign-in, the desk, a trade, and the browser opening the same account.
+
+---
+
+# Monad Foundation · Mera: One Passkey, Many Keys
+
+"Describe how your project meaningfully utilizes Mera in non-account work." Plain text, limit 8,000.
+
+---
+
+Desk evaluates the passkey's PRF once and grows two key trees from it in two namespaces. One is the account. The other never touches a blockchain transaction at all: it is an authentication key for an exchange API, and that is the non-account work.
+
+THE SECOND NAMESPACE
+
+From the PRF seed, Desk derives an Ed25519 key with SLIP-10 at m/44'/501'/i'/0', apart from the wallet's secp256k1 tree at m/44'/60'. Perpl's API authenticates with Ed25519 signatures, not with Ethereum signatures, so this key exists for one job: to sign requests. Every REST call carries a signature over a canonical string (chain id, method, path, timestamp, nonce, hash of the body), and the trading websocket is entered with a signed sign-in. None of this is a transaction. The key cannot withdraw and cannot move AUSD; Perpl's registration binds it to the wallet, but the key itself is pure API identity.
+
+Deriving it from the passkey instead of generating and storing a random key changes what the user has to keep: nothing. There is no API key to copy out of a dashboard, no secret to back up, and no way to lose it separately from the account. Every device with the passkey can recompute it, and the index i gives each surface its own key: the phone enrols one index, the browser enrols another, and either can be revoked at Perpl without touching the other. Perpl never re-enrols a revoked key, so a refusal moves Desk to the next index inside the same session, deterministically, with no new secret created.
+
+The key is also the reason Desk can be left running. It is sealed to Face ID on the device, so copy-trading can keep signing orders while Desk is open, or briefly in the background with away copying on, without the money-moving key ever being present. The split is the safety model: one passkey, two keys, and only the one that cannot withdraw is ever held.
+
+MESSAGES, NOT TRANSACTIONS
+
+The wallet key does non-transaction work too. Desk's profile service, where a user sets a display name and avatar, accepts changes only with a signed message over the address and a timestamp, and deletes a profile the same way. The server verifies the signature and never holds anything. The alerts seat, the chat identity and the web session are deliberately not derived from the PRF: they are random per install, so a notification token or a chat handle can never be worked back towards the account.
+
+THE BROWSER AS THE PROOF
+
+trydesk.trade/app re-derives both namespaces from the same passkey in a tab, through WebAuthn's PRF extension and a related-origin relying party. The API key the browser enrols is a sibling of the phone's, from the same seed, and it signs the browser's orders through a relay that forwards the signed requests and cannot sign. The test suites on both sides pin the derivation to the same vectors, so one passkey yields the same wallet and the same family of API keys wherever the user is.
+
+Everything described is in the shipped build; the optional video shows a trading key being enrolled and then signing an order, and the browser enrolling its own.

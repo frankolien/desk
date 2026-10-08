@@ -39,6 +39,29 @@ between the hold and Filled. Without the browser clip the cut lands at 1:35, whi
 **Pitch video, under 2:00.** Separate script in `pitch-video.md`; it reuses the Home and
 leaderboard shots and otherwise is you talking.
 
+**Perpl, best use of the API, under 2:00.** It must show the automation on Perpl with real on-chain
+activity, so this is the only cut where one small live copy on camera is worth it: set one trader
+to Live with fixed sizing at the minimum and a tight leverage cap just before the take, and call
+it live. Signals > Top traders 0:10 · a trader's sheet, score and Follow 0:15 · Auto-Copy rules,
+Live selected, price protection, the stop placed on Perpl 0:25 · the hub's result card with time
+to fill and slippage 0:15 · the alert landing, Copy Trade, Face ID, filled 0:25 · the position on
+the market page and its explorer receipt 0:15 · the Crowd view of the market, how many hold it
+and which way 0:10. Voice: "Desk reads every trader off Perpl's exchange contract, scores them
+on their record, and copies their moves the moment the trade lands on chain, under my rules. This
+copy is live, on mainnet, with real money. Stops are placed on Perpl itself, so the copy stays
+protected after Desk is closed. The hub measures every fill."
+
+**Perpl, analytics and risk tool, under 2:00.** The dashboard is the web app, so this is a Mac
+recording with the phone for the last shot. trydesk.trade/app Markets: open interest, funding,
+the crowd lean per market 0:20 · one market: the live order book, the holders and which way they
+lean 0:20 · Traders: the leaderboard, a trader in the drawer with open positions and the closed
+history, the score 0:25 · a wallet page: holdings, realised PnL over 7 and 30 days, the trades,
+the risk labels 0:25 · a token page: holders, the tape, bundlers and snipers, the risk card 0:15 ·
+iPhone: Signals > Market, the long-against-short view of every market 0:15. Voice: "Protocol-level
+and wallet-level in one place, all read from the exchange contract and Monad's own events: what
+every market holds and which way it leans, who the traders are and how they really performed,
+and what any wallet did. Every figure that cannot be read says so."
+
 ## Before recording
 
 - **Mainnet.** Settings > Network > Monad mainnet > Use real funds. Say "mainnet" out loud; it is
