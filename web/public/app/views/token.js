@@ -605,7 +605,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     document.body.classList.toggle("focus", on);
     try { localStorage.setItem("desk.web.focus", on ? "on" : "off"); } catch {}
     const button = q("#tk-focus");
-    if (button) { button.setAttribute("aria-pressed", String(on)); button.textContent = on ? "Exit full screen" : "Full screen"; }
+    if (button) { button.setAttribute("aria-pressed", String(on)); button.textContent = on ? "✕ Exit full screen · Esc" : "Full screen"; }
     if (browser && on && !document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
     if (!on && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
   };

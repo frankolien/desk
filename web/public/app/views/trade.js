@@ -291,7 +291,7 @@ export default async function mount(el, params) {
     document.body.classList.toggle("focus", on);
     try { localStorage.setItem("desk.web.focus", on ? "on" : "off"); } catch {}
     const button = $("#td-focus", root);
-    if (button) { button.setAttribute("aria-pressed", String(on)); button.textContent = on ? "Exit full screen" : "Full screen"; }
+    if (button) { button.setAttribute("aria-pressed", String(on)); button.textContent = on ? "✕ Exit full screen · Esc" : "Full screen"; }
     if (browser && on && !document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
     if (!on && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
   }
@@ -1215,7 +1215,10 @@ export default async function mount(el, params) {
       state.series.setData(rows.map((c) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
       state.line.setData(rows.map((c) => ({ time: c.time, value: c.close })));
       state.volume.setData(rows.map((c) => ({ time: c.time, value: c.volume, color: volumeColor(c.close >= c.open) })));
-      state.chart.timeScale().applyOptions({ barSpacing: Math.min(12, Math.max(4, ($("#td-lw", root)?.clientWidth ?? 800) / (rows.length + 8))) });
+      // The latest bar sits about four fifths of the way across at a readable spacing, with
+      // room to its right; the past is a scroll away rather than squeezed in from the start.
+      const width = $("#td-lw", root)?.clientWidth ?? 800;
+      state.chart.timeScale().applyOptions({ barSpacing: 8, rightOffset: Math.max(6, Math.floor(width * 0.2 / 8)) });
       state.chart.timeScale().scrollToRealTime();
       state.lastBar = state.bar;
       state.candles = rows;
