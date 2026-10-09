@@ -61,6 +61,10 @@ struct MarketScreen: View {
                     }
                     .padding(.top, 8)
                     .padding(.bottom, 116)
+                    // Pinned to the scroll view's own width: a child a third of a point wider
+                    // (a price that rounds up, a strip that measures early) would otherwise widen
+                    // the page and let the whole thing be dragged sideways now and then.
+                    .containerRelativeFrame(.horizontal)
                     #if DEBUG
                     .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width in
                         if ProcessInfo.processInfo.arguments.contains("-width-probe") { print("home-content-width \(width) screen \(UIScreen.main.bounds.width)") }
