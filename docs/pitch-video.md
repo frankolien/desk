@@ -39,7 +39,7 @@ have one to hold up.
 > them on their record, and copies their moves the moment their trade lands on the chain, under
 > your rules, in shadow first. Nobody submits a track record. The chain is the track record.
 >
-> And the same passkey opens the same desk in a browser."
+> And the same passkey opens the same desk in a browser, where it buys Monad tokens too."
 
 ## 1:25–1:50 · Why me, why now
 
@@ -51,7 +51,7 @@ have one to hold up.
 > this the right moment.
 >
 > Everything in the demo is on mainnet with real money: deposit, trade, close, withdraw. It is on
-> TestFlight today, with 542 Swift tests and 265 server tests behind it. That's Desk."
+> TestFlight today, with 542 Swift tests and 276 server tests behind it. That's Desk."
 
 ## Rules
 
