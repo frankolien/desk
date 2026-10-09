@@ -19,6 +19,19 @@ browser, trimmed to the sign-in, the AUSD in the desk, the book and the drawer 0
 money out 0:10. Leave out the swap back, Read the room and the live alert; if the cut lands under
 2:50, the swap's SWAPPED receipt fits as a five-second insert after the tokens.
 
+**From the 5:04 recording to the 2:50 judge cut.** The take ran 5:04 against the 4:30 script, so
+every section came in about an eighth long. Trim by section, in the order recorded, to these
+lengths: Introduction 0:15 (the one line, over Home) · Your balance 0:20 (Profile, Add funds,
+close) · Place a trade 0:30 (never cut between the hold and Filled) · Manage and close 0:20 ·
+Follow and copy 0:25 (the sheet, Follow, the hub card; drop the leaderboard scroll) · Tokens 0:20
+(the tape, Follow, the alert line; drop the holders scroll) · The browser 0:25 (sign-in, the AUSD
+in the desk, the book, the drawer; drop the chart tour) · Take the money out 0:10 (the receipt
+and the explorer). That is 2:45; the swap's SWAPPED receipt fits as a five-second insert after
+the tokens for 2:50. Drop whole: the swap back, Read the room, the live alert. Cut on taps, not
+mid-animation; keep the voice sentences whole and move them a second earlier rather than speed
+the picture up. Submit the 2:50 cut as the technical demo and put the 5:04 take behind an
+"extended demo" link in the Judge access text.
+
 **Agora bounty video, under 2:00.** It must show a passkey sign-in, an AUSD balance being funded
 or viewed, and a trade on Perpl. The cut sheet, clip by clip, with the voice-over trimmed to fit
 (about 185 words, which speaks in 1:15, so there is room to breathe):
