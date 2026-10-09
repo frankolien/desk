@@ -172,7 +172,7 @@ The same wallet key signs plain messages, not transactions, to prove the address
 
 THE SAME ACCOUNT IN A BROWSER
 
-Because the passkey lives in iCloud Keychain, trydesk.trade/app signs in with the same passkey through WebAuthn's PRF extension, against the app's relying party, which names trydesk.trade as a related origin. The tab derives the same wallet and trading key, shows the same address, positions and AUSD, enrols its own trading-key index with Perpl so each surface can be revoked separately, and wipes the keys on lock, idle or close. One credential, two surfaces, nothing synced through us.
+Because the passkey lives in iCloud Keychain, trydesk.trade/app signs in with the same passkey through WebAuthn's PRF extension, against the app's relying party, which names trydesk.trade as a related origin. The tab derives the same wallet and trading key, shows the same address, positions and AUSD, enrols its own trading-key index with Perpl so each surface can be revoked separately, and wipes the keys on lock, idle or close. The wallet key signs in the tab too: a token page buys any Monad token for MON through 0x, and sells it back, with the same scoped-closure rule as the phone and an edge check that refuses any transaction that does not match the quote. One credential, two surfaces, nothing synced through us.
 
 WHAT THE USER IS TOLD
 
