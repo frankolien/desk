@@ -7,6 +7,8 @@ struct AddFundsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var copied = false
     @State private var showsSwap = false
+    @State private var showsUSDC = false
+    @State private var usdc: (raw: Int128, decimals: Int)?
     @State private var showsReceive = false
 
     private var wallet: Money { model.walletAUSD.value ?? .zero }
@@ -34,6 +36,10 @@ struct AddFundsSheet: View {
                 if let spare = model.swappableMON {
                     option(symbol: "arrow.triangle.2.circlepath", title: "Swap MON for AUSD",
                            detail: "\(spare.display(fractionDigits: 2)) MON available") { showsSwap = true }
+                }
+                if mainnet, let usdc, usdc.raw > 0 {
+                    option(symbol: "dollarsign.arrow.circlepath", title: "Swap USDC for AUSD",
+                           detail: "\(USDCSwapModel.readable(usdc.raw, decimals: usdc.decimals)) USDC in wallet") { showsUSDC = true }
                 }
                 option(symbol: "qrcode", title: "Receive AUSD",
                        detail: mainnet ? "From any wallet or exchange on Monad" : "Send test AUSD to this wallet") {
@@ -89,6 +95,17 @@ struct AddFundsSheet: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showsUSDC, onDismiss: { Task { await loadUSDC(); await model.refreshBalances() } }) {
+            USDCSwapSheet(model: model) { showsUSDC = false }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .task { await loadUSDC() }
+    }
+
+    private func loadUSDC() async {
+        guard mainnet, let token = try? AppModel.ethereumAddress(String(ChainTable.monadUSDC.dropFirst(2))) else { return }
+        usdc = try? await model.tokenBalance(token)
     }
 
     private var balanceLine: String {

@@ -788,6 +788,51 @@ final class AppModel {
         return MONSwapReceipt(hash: hash, received: received)
     }
 
+    /// A token swapped for AUSD through 0x's holder, the way `sellToken` swaps one for MON;
+    /// what landed is read off the wallet's AUSD balance, with the quoted floor standing in
+    /// until the node catches up.
+    func swapTokenToAUSD(_ sale: TokenSale, progress: @MainActor @escaping (SwapStep) -> Void) async throws -> SwapReceipt {
+        guard network.holdsRealFunds, let address else { throw SwapFailure.wrongNetwork }
+        progress(.checking)
+        let rpc = MonadRPC(configuration: try network.rpc())
+        let allowance = Self.count(try await rpc.callContract(
+            to: sale.token, data: try Calldata.allowance(owner: address, spender: sale.to)))
+        let approval = try Calldata.approve(spender: sale.to, raw: sale.amountRaw)
+        let needsApproval = allowance < sale.amountRaw
+        var calls: [SimulatedCall] = []
+        if needsApproval { calls.append(SimulatedCall(from: address, to: sale.token, data: approval)) }
+        calls.append(SimulatedCall(from: address, to: sale.to, data: sale.data))
+        let simulated = try await rpc.simulate(calls)
+        guard simulated.allSatisfy(\.succeeded) else { throw SwapFailure.routeReverts }
+
+        let sender: TransactionSender
+        if let mainnetSender {
+            sender = mainnetSender
+        } else {
+            sender = TransactionSender(rpc: rpc)
+            mainnetSender = sender
+        }
+        let before = walletAUSD.value
+        progress(.signing)
+        let hash = try await passkey.withKeys { wallet, _ in
+            if needsApproval {
+                await MainActor.run { progress(.approving) }
+                let approved = try await sender.send(to: sale.token, data: approval, from: wallet)
+                _ = try await sender.wait(for: approved)
+            }
+            await MainActor.run { progress(.sending) }
+            let swapped = try await sender.send(to: sale.to, data: sale.data, from: wallet)
+            _ = try await sender.wait(for: swapped)
+            return swapped.hashHex
+        }
+        await refreshUntilChanged()
+        var received = Money(raw: Int64(clamping: sale.minimumOut.raw)) ?? .zero
+        if let before, let after = walletAUSD.value, after.raw > before.raw, let gained = Money(raw: after.raw - before.raw) {
+            received = gained
+        }
+        return SwapReceipt(hash: hash, received: received)
+    }
+
     private func refreshUntilChanged() async {
         let before = (walletMON.value?.raw, walletAUSD.value)
         for _ in 0..<6 {

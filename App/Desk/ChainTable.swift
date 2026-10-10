@@ -7,6 +7,8 @@ import Foundation
 enum ChainTable {
     static let monad = "143"
     static let solana = "501"
+    /// Circle's USDC on Monad, the one stable a wallet is likely to hold beside AUSD.
+    static let monadUSDC = "0x754704bc059f8c67012fed69bc8a327a5aafb603"
 
     private static let names: [String: String] = [
         "1": "Ethereum", "10": "OP Mainnet", "56": "BNB Chain", "130": "Unichain", "137": "Polygon",
