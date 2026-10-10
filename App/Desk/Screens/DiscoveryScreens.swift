@@ -955,7 +955,6 @@ private struct SpotTokenDetailScreen: View {
         TokenRisk.quick(riskLevel: token.riskLevel, liquidity: token.liquidity, communityRecognized: token.communityRecognized)
     }
     @State private var tradeSide: String?
-    @State private var holdings = SpotHoldingsModel()
     @AppStorage("desk.spotWatchlist") private var savedSpotData = ""
 
     private var isSaved: Bool {
@@ -977,10 +976,6 @@ private struct SpotTokenDetailScreen: View {
                 VStack(alignment: .leading, spacing: 0) {
                     header
                     chart
-                    if let holding = holdings.holdings.first(where: { $0.purchase.id == "\(token.chainIndex):\(token.contract.lowercased())" }) {
-                        TokenPositionCard(holding: holding, token: token) { tradeSide = $0 }
-                            .padding(.horizontal, 20).padding(.top, 14)
-                    }
                     ranges
                     Divider().overlay(Color.white.opacity(0.12)).padding(.top, 10)
                     tabs
@@ -1003,8 +998,6 @@ private struct SpotTokenDetailScreen: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .task { await feed.run(period: range) }
-        .task(id: model.address) { await holdings.run(for: model.address) }
-        .onChange(of: tradeSide) { _, side in if side == nil { Task { await holdings.refresh() } } }
         .onChange(of: range) { _, newValue in feed.changePeriod(newValue) }
         .task(id: feed.holders.map(\.id)) { await IdentityDirectory.shared.resolve(feed.holders.map(\.wallet.address)) }
         .task(id: feed.transactions.map(\.wallet.address)) { await IdentityDirectory.shared.resolve(feed.transactions.map(\.wallet.address)) }
@@ -3293,71 +3286,6 @@ extension SpotLiveFeed.Candle {
     var chartCandle: ChartCandle {
         ChartCandle(open: open, high: high, low: low, close: close, volume: nil,
                     time: timestamp > 100_000_000_000 ? Double(timestamp) / 1_000 : Double(timestamp))
-    }
-}
-
-/// What this wallet holds of a token: the value now, what it has done since the buy, the
-/// amount, what was paid and the average entry, with Buy more and Sell.
-struct TokenPositionCard: View {
-    let holding: SpotHolding
-    let token: TrendingSpotToken
-    let onTrade: (String) -> Void
-
-    var body: some View {
-        let amount = holding.balance.flatMap { Double($0.replacingOccurrences(of: ",", with: "")) }
-        let paid = holding.purchase.paidUSD
-        let pnl = holding.value.flatMap { value in paid.map { value - $0 } }
-        let entry: Double? = {
-            guard let paid, let amount, amount > 0 else { return nil }
-            return paid / amount
-        }()
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("YOUR POSITION").font(.system(size: 10, weight: .heavy, design: .rounded)).tracking(1.2).foregroundStyle(.secondary)
-                    Text(holding.value.map { DisplayCurrency.shared.format($0) } ?? Unavailable.text)
-                        .font(.system(size: 28, weight: .heavy, design: .rounded).monospacedDigit())
-                }
-                Spacer()
-                if let pnl, let change = holding.changeSincePaid {
-                    VStack(alignment: .trailing, spacing: 3) {
-                        Text((pnl < 0 ? "−" : "+") + DisplayCurrency.shared.format(abs(pnl)))
-                            .font(.system(size: 18, weight: .bold, design: .rounded).monospacedDigit())
-                        Text(String(format: "%@%.2f%% since buy", change < 0 ? "▼ " : "▲ ", abs(change * 100)))
-                            .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
-                    }
-                    .foregroundStyle((pnl < 0 ? DeskColor.fall : DeskColor.rise).color)
-                }
-            }
-            Divider().overlay(Color.white.opacity(0.12))
-            HStack {
-                figure("Holding", holding.balance.map { "\(SpotFormat.amount($0)) \(token.symbol)" } ?? "—")
-                Spacer()
-                figure("Invested", paid.map { DisplayCurrency.shared.format($0) } ?? "—")
-                Spacer()
-                figure("Avg. entry", entry.map { "$" + SpotFormat.amount(String($0)) } ?? "—", trailing: true)
-            }
-            HStack(spacing: 10) {
-                Button { onTrade("Buy") } label: {
-                    Text("Buy more").frame(maxWidth: .infinity).frame(height: 40).contentShape(Capsule())
-                }
-                .buttonStyle(.plain).foregroundStyle(.black).background(DeskColor.rise.color, in: Capsule())
-                Button { onTrade("Sell") } label: {
-                    Text("Sell").frame(maxWidth: .infinity).frame(height: 40).contentShape(Capsule())
-                }
-                .buttonStyle(.plain).foregroundStyle(.primary).background(Color.white.opacity(0.1), in: Capsule())
-            }
-            .font(.system(size: 14, weight: .bold, design: .rounded))
-        }
-        .padding(16)
-        .perpSearchGlass(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-    }
-
-    private func figure(_ title: String, _ value: String, trailing: Bool = false) -> some View {
-        VStack(alignment: trailing ? .trailing : .leading, spacing: 2) {
-            Text(title).font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
-            Text(value).font(.system(size: 13, weight: .bold, design: .rounded).monospacedDigit()).lineLimit(1).minimumScaleFactor(0.7)
-        }
     }
 }
 
