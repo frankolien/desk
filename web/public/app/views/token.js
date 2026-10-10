@@ -1137,8 +1137,8 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   if (tab === "holders" || EARLY_TABS.includes(tab)) paintTable();
   paintCounts();
   loadEarly();
-  stopSnapshot = poll(() => refresh(generation, false), 5_000);
-  stopPrices = poll(tickPrices, 4_000);
+  stopSnapshot = poll(() => refresh(generation, false), 2_000);
+  stopPrices = poll(tickPrices, 2_000);
 
   function cleanup() {
     clearInterval(agoTimer);

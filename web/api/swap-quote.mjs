@@ -223,6 +223,7 @@ export function summarizeSwap(quote, transaction, raw, sell = "MON") {
     receive: {
       amount: readableUnits(quote.buyAmount, side.buyDecimals),
       minimum: readableUnits(quote.minBuyAmount, side.buyDecimals),
+      minimumRaw: String(quote.minBuyAmount),
       symbol: side.buys,
     },
     feeMON: readableUnits(String(quote.totalNetworkFee ?? "0"), 18),

@@ -74,7 +74,7 @@ export default async function handler(req, res) {
         : dexCandles(common, bar),
       signedGet("/api/v6/dex/market/trades", { ...common, limit: String(limit) }),
     ]);
-    res.setHeader("Cache-Control", "public, s-maxage=3, stale-while-revalidate=10");
+    res.setHeader("Cache-Control", "public, s-maxage=1, stale-while-revalidate=2");
     return res.status(200).json({ symbol, chainIndex, address, bar, observedAt: Date.now(), candles, trades });
   } catch (error) {
     return res.status(502).json({ error: error.message });

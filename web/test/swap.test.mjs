@@ -84,7 +84,7 @@ test("the reverse summary pays AUSD, receives MON, and names the approval the ap
   const quote = zeroXBack();
   const out = summarizeSwap(quote, swapTransaction(quote, RAW_AUSD, "AUSD"), RAW_AUSD, "AUSD");
   assert.deepEqual(out.pay, { amount: "12.5", raw: RAW_AUSD, symbol: "AUSD" });
-  assert.deepEqual(out.receive, { amount: "508", minimum: "502.92", symbol: "MON" });
+  assert.deepEqual(out.receive, { amount: "508", minimum: "502.92", minimumRaw: "502920000000000000000", symbol: "MON" });
   assert.equal(out.feeMON, "0.0451149125");
   assert.deepEqual(out.approval, { token: AUSD, spender: ALLOWANCE_HOLDER, amount: RAW_AUSD });
   assert.equal(out.transaction.value, "0");

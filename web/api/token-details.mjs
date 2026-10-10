@@ -26,7 +26,7 @@ async function handlePrices(req, res) {
       volume24H: number(row.volume24H), marketCap: number(row.marketCap), liquidity: number(row.liquidity), holders: number(row.holders),
       txs5m: number(row.txs5M), time: number(row.time),
     }));
-    res.setHeader("Cache-Control", "public, s-maxage=3, stale-while-revalidate=10");
+    res.setHeader("Cache-Control", "public, s-maxage=1, stale-while-revalidate=2");
     return res.status(200).json({ observedAt: Date.now(), prices });
   } catch (error) {
     return res.status(502).json({ error: error.message });
