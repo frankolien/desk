@@ -66,6 +66,7 @@ struct TradingShell: View {
             }
 
             Tab("Profile", systemImage: "person.crop.circle.fill", value: .home) {
+                NavigationStack {
                 HomeScreen(
                     model: model,
                     market: market,
@@ -80,6 +81,7 @@ struct TradingShell: View {
                     onSwap: { showsSwap = true },
                     onAccount: { showsAccount = true },
                     isActive: tab == .home)
+                }
             }
         }
         .tint(.white)

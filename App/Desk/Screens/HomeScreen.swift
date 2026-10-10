@@ -35,6 +35,7 @@ struct HomeScreen: View {
     @AppStorage("desk.firstOpened") private var firstOpened: Double = 0
     @State private var selectedPosition: PerplPosition?
     @State private var spot = SpotHoldingsModel()
+    @State private var openToken: TokenOpenRequest.Target?
     @State private var book: Book = .open
     @State private var filter: Filter = .all
     @State private var range: Range = .day
@@ -202,6 +203,11 @@ struct HomeScreen: View {
             }
         }
         #endif
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationDestination(item: $openToken) { target in
+            SpotTokenPage(target: target, model: model)
+                .toolbar(.hidden, for: .tabBar)
+        }
         .sheet(item: $selectedPosition) { held in
             PositionScreen(position: held, market: market, session: model.trading, model: model)
                 .presentationDetents([.large])
@@ -650,8 +656,9 @@ struct HomeScreen: View {
                     subtitle: holding.balance.map { "\($0) on \(holding.purchase.chainName)" } ?? holding.purchase.chainName,
                     value: hidesBalance ? "•••••" : holding.value.map { DisplayCurrency.shared.format($0) } ?? Unavailable.text,
                     detail: holding.changeSincePaid.map { Self.percent(Int($0 * 1_000_000)) + " since buy" },
-                    tint: (holding.changeSincePaid ?? 0) < 0 ? DeskColor.fall : DeskColor.rise,
-                    action: onSpot)
+                    tint: (holding.changeSincePaid ?? 0) < 0 ? DeskColor.fall : DeskColor.rise) {
+                        openToken = .init(chainIndex: holding.purchase.chainIndex, contract: holding.purchase.contract, symbol: holding.purchase.symbol)
+                    }
             }
         }
     }
