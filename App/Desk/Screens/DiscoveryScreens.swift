@@ -3416,18 +3416,110 @@ private struct TokenPositionContent: View {
         return paid / amount
     }
 
+    private var amountHeld: Double? { current.balance.flatMap { Double($0.replacingOccurrences(of: ",", with: "")) } }
+    private var pnl: Double? { current.value.flatMap { value in current.purchase.paidUSD.map { value - $0 } } }
+
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 16) {
-                header
-                chart
-                ranges
-                TokenPositionCard(holding: current, token: token) { tradeSide = $0 }
-                transactions
+        NavigationStack {
+            GlassPage {
+                GlassSection {
+                    HStack(spacing: 14) {
+                        MarketTokenLogo(symbol: token.symbol, size: 38, remoteURL: token.artworkURL)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(token.name.isEmpty ? token.symbol : token.name).font(.headline).lineLimit(1)
+                            Text("\(token.symbol) · \(token.displayChainName)").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(feed.latestPrice.map(spotPrice) ?? "$—").font(.headline.monospacedDigit())
+                            if let change = feed.changePercent {
+                                Text(String(format: "%@%.2f%%", change >= 0 ? "+" : "", change))
+                                    .font(.caption.weight(.semibold).monospacedDigit())
+                                    .foregroundStyle((change >= 0 ? DeskColor.rise : DeskColor.fall).color)
+                            }
+                        }
+                    }
+                }
+
+                GlassSection("Since your entry") {
+                    VStack(spacing: 10) {
+                        CandlestickChart(
+                            candles: feed.candles.map(\.chartCandle),
+                            guides: entryPrice.map { [PriceGuide(label: "Entry", value: $0, text: PriceAxis.label($0), tint: .white.opacity(0.9))] } ?? [],
+                            marks: [ChartMark(time: current.purchase.boughtAt.timeIntervalSince1970, label: "Bought", tint: DeskColor.rise.color)])
+                            .frame(height: 220)
+                            .accessibilityLabel("Chart for \(token.symbol) with your entry")
+                        Picker("Range", selection: $range) {
+                            ForEach(["LIVE", "1m", "5m", "15m", "1H", "4H"], id: \.self) { Text($0) }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
+
+                GlassSection("Your position") {
+                    GlassRow("Value", value: current.value.map { DisplayCurrency.shared.format($0) } ?? Unavailable.text)
+                    GlassRow("Since buy") {
+                        if let pnl, let change = current.changeSincePaid {
+                            Text(String(format: "%@%@ (%@%.2f%%)", pnl < 0 ? "−" : "+", DisplayCurrency.shared.format(abs(pnl)), change < 0 ? "▼ " : "▲ ", abs(change * 100)))
+                                .fontWeight(.semibold)
+                                .foregroundStyle((pnl < 0 ? DeskColor.fall : DeskColor.rise).color)
+                                .monospacedDigit()
+                        } else {
+                            Text("—").foregroundStyle(.secondary)
+                        }
+                    }
+                    GlassRow("Holding", value: current.balance.map { "\(SpotFormat.amount($0)) \(token.symbol)" } ?? "—")
+                    GlassRow("Invested", value: current.purchase.paidUSD.map { DisplayCurrency.shared.format($0) } ?? "—")
+                    GlassRow("Average entry", value: entryPrice.map { "$" + SpotFormat.amount(String($0)) } ?? "—")
+                }
+
+                GlassSection("Transactions") {
+                    GlassRow("Bought", subtitle: current.purchase.boughtAt.formatted(date: .abbreviated, time: .shortened)) {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(current.purchase.paidUSD.map { "+" + DisplayCurrency.shared.format($0) } ?? "—")
+                                .fontWeight(.semibold).monospacedDigit()
+                            Text(current.balance.map { "\(SpotFormat.amount($0)) \(token.symbol)" } ?? "")
+                                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        }
+                    }
+                }
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
-            .padding(.bottom, 32)
+            .navigationTitle(token.symbol)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Token page") {
+                        dismiss()
+                        onOpenPage()
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                HStack(spacing: 10) {
+                    Button { tradeSide = "Buy" } label: {
+                        Text("Buy more")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 2)
+                    }
+                    .controlSize(.large)
+                    .deskProminentButton()
+                    Button { tradeSide = "Sell" } label: {
+                        Text("Sell")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 2)
+                    }
+                    .controlSize(.large)
+                    .deskSecondaryButton()
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 8)
+            }
         }
         .task { await feed.run(period: range) }
         .task(id: model.address) { await holdings.run(for: model.address) }
@@ -3437,88 +3529,6 @@ private struct TokenPositionContent: View {
             SpotTradeTicket(token: token, side: tradeSide ?? "Buy", model: model)
                 .fittedSheet()
                 .presentationDragIndicator(.visible)
-        }
-    }
-
-    private var header: some View {
-        HStack(spacing: 12) {
-            MarketTokenLogo(symbol: token.symbol, size: 44, remoteURL: token.artworkURL)
-            VStack(alignment: .leading, spacing: 3) {
-                Button {
-                    dismiss()
-                    onOpenPage()
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(token.symbol).font(.system(size: 20, weight: .heavy, design: .rounded))
-                        Image(systemName: "chevron.right").font(.system(size: 13, weight: .bold)).foregroundStyle(.secondary)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                HStack(spacing: 6) {
-                    Text("Open").font(.system(size: 11, weight: .bold, design: .rounded))
-                    Circle().fill(DeskColor.rise.color).frame(width: 6, height: 6)
-                }
-                .foregroundStyle(DeskColor.rise.color)
-                .padding(.horizontal, 10).frame(height: 24)
-                .background(DeskColor.rise.color.opacity(0.14), in: Capsule())
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 3) {
-                Text(feed.latestPrice.map(spotPrice) ?? "$—")
-                    .font(.system(size: 22, weight: .heavy, design: .rounded).monospacedDigit())
-                if let change = feed.changePercent {
-                    Text(String(format: "%@%.2f%%", change >= 0 ? "+" : "", change))
-                        .font(.system(size: 13, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle((change >= 0 ? DeskColor.rise : DeskColor.fall).color)
-                } else {
-                    Text(token.displayChainName).font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private var chart: some View {
-        CandlestickChart(
-            candles: feed.candles.map(\.chartCandle),
-            guides: entryPrice.map { [PriceGuide(label: "Entry", value: $0, text: PriceAxis.label($0), tint: .white.opacity(0.9))] } ?? [],
-            marks: [ChartMark(time: current.purchase.boughtAt.timeIntervalSince1970, label: "Bought", tint: DeskColor.rise.color)])
-            .frame(height: 250)
-            .accessibilityLabel("Chart for \(token.symbol) with your entry")
-    }
-
-    private var ranges: some View {
-        HStack(spacing: 0) {
-            ForEach(["LIVE", "1m", "5m", "15m", "1H", "4H"], id: \.self) { item in
-                Button { withAnimation(.easeOut(duration: 0.18)) { range = item } } label: {
-                    Text(item).font(.system(size: 13, weight: .heavy, design: .rounded))
-                        .foregroundStyle(range == item ? .white : .secondary)
-                        .frame(maxWidth: .infinity).frame(height: 36)
-                        .background(range == item ? Color.white.opacity(0.12) : .clear, in: Capsule())
-                }.buttonStyle(.plain)
-            }
-        }
-    }
-
-    private var transactions: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("1 transaction").font(.system(size: 16, weight: .bold, design: .rounded))
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Bought").font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(DeskColor.rise.color)
-                    Text(current.purchase.boughtAt.formatted(date: .abbreviated, time: .shortened))
-                        .font(.system(size: 12, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(current.purchase.paidUSD.map { "+" + DisplayCurrency.shared.format($0) } ?? "—")
-                        .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
-                    Text(current.balance.map { "\(SpotFormat.amount($0)) \(token.symbol)" } ?? "")
-                        .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit()).foregroundStyle(.secondary)
-                }
-            }
-            .padding(14)
-            .perpSearchGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 }
