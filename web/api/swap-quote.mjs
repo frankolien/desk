@@ -151,11 +151,12 @@ export const SWAP_SIDES = {
 
 /// Any Monad token against MON, for the market pages: `sell` is MON to buy the token, or TOKEN
 /// to sell it. The token's decimals must already be confirmed on-chain.
-export function sideFor(sell, token, tokenDecimals, symbol = "TOKEN") {
+export function sideFor(sell, token, tokenDecimals, symbol = "TOKEN", buy = "MON") {
   if (!/^0x[a-fA-F0-9]{40}$/.test(String(token ?? "")) || !Number.isInteger(tokenDecimals)) return null;
   const address = String(token).toLowerCase();
-  if (address === NATIVE_MON) return null;
+  if (address === NATIVE_MON || address === AUSD) return null;
   if (sell === "MON") return { sellToken: NATIVE_MON, buyToken: address, sellDecimals: 18, buyDecimals: tokenDecimals, sells: "MON", buys: symbol };
+  if (sell === "TOKEN" && buy === "AUSD") return { sellToken: address, buyToken: AUSD, sellDecimals: tokenDecimals, buyDecimals: 6, sells: symbol, buys: "AUSD" };
   if (sell === "TOKEN") return { sellToken: address, buyToken: NATIVE_MON, sellDecimals: tokenDecimals, buyDecimals: 18, sells: symbol, buys: "MON" };
   return null;
 }
@@ -248,7 +249,7 @@ async function swap(req, res) {
     if (decimals === null) {
       return res.status(422).json({ error: "This token's decimal precision could not be confirmed on-chain, so it cannot be quoted safely.", reason: "unknown-decimals" });
     }
-    side = sideFor(sell, token, decimals, String(req.query.symbol || "TOKEN").slice(0, 12));
+    side = sideFor(sell, token, decimals, String(req.query.symbol || "TOKEN").slice(0, 12), String(req.query.buy || "MON").toUpperCase());
   }
   if (!side) return res.status(400).json({ error: "Valid quote parameters required", reason: "invalid" });
   const wei = baseUnits(String(req.query.amount || ""), side.sellDecimals);

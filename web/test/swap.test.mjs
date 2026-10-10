@@ -157,3 +157,16 @@ test("wrapped MON is the one route that may skip the holder: deposit in, withdra
   assert.equal(summarizeSwap(unwrap, tx, WEI, sell).approval, undefined);
   assert.equal(swapRefusal(zeroX({ buyToken: WMON }, { to: WMON, data: "0xa9059cbb" + "00".repeat(64) }), WEI, buy), `routes through ${WMON} instead of the allowance holder`);
 });
+
+test("a token can be sold for AUSD instead of MON, with the same approval", () => {
+  const usdc = "0x754704bc059f8c67012fed69bc8a327a5aafb603";
+  const side = sideFor("TOKEN", usdc, 6, "USDC", "AUSD");
+  assert.deepEqual(side, { sellToken: usdc, buyToken: AUSD, sellDecimals: 6, buyDecimals: 6, sells: "USDC", buys: "AUSD" });
+  const raw = "100000000";
+  const quote = zeroX({ sellToken: usdc, buyToken: AUSD, sellAmount: raw, buyAmount: "99850000", minBuyAmount: "99351500" }, { value: "0" });
+  const out = summarizeSwap(quote, swapTransaction(quote, raw, side), raw, side);
+  assert.equal(out.receive.amount, "99.85");
+  assert.equal(out.receive.symbol, "AUSD");
+  assert.deepEqual(out.approval, { token: usdc, spender: ALLOWANCE_HOLDER, amount: raw });
+  assert.equal(sideFor("TOKEN", AUSD, 6, "AUSD", "AUSD"), null);
+});
