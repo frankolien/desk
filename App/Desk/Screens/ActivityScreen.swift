@@ -11,7 +11,7 @@ struct ActivityScreen: View {
     }
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
+    @State private var page: WebPage?
     @State private var entries: [ActivityEntry] = []
     @State private var state: LoadState = .loading
     @State private var filter: Filter = .all
@@ -45,6 +45,7 @@ struct ActivityScreen: View {
         }
         .background(Color(red: 0.11, green: 0.11, blue: 0.12).ignoresSafeArea())
         .preferredColorScheme(.dark)
+        .sheet(item: $page) { InAppSafari(url: $0.url).ignoresSafeArea() }
         .task { await load() }
     }
 
@@ -116,7 +117,7 @@ struct ActivityScreen: View {
                                 .padding(.top, 22)
                                 .padding(.bottom, 4)
                             ForEach(section.entries) { entry in
-                                Button { openURL(model.network.explorer.appending(path: "tx/\(entry.hash)")) } label: {
+                                Button { page = WebPage(url: model.network.explorer.appending(path: "tx/\(entry.hash)")) } label: {
                                     ActivityRow(entry: entry, network: model.network.holdsRealFunds ? "Monad" : "Monad testnet")
                                 }
                                 .buttonStyle(.plain)

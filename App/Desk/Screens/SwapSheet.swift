@@ -22,6 +22,7 @@ struct SwapSheet: View {
     @State private var amount = ""
     @State private var quoting: Task<Void, Never>?
     @State private var receiptShown = false
+    @State private var page: WebPage?
 
     init(model: AppModel, direction: SwapDirection = .toAUSD, onClose: @escaping () -> Void) {
         self.model = model
@@ -68,6 +69,7 @@ struct SwapSheet: View {
             .padding(.bottom, 12)
         }
         .interactiveDismissDisabled(flow.phase.isActive)
+        .sheet(item: $page) { InAppSafari(url: $0.url).ignoresSafeArea() }
         .onChange(of: amount) { _, text in
             quoting?.cancel()
             guard let wallet = model.address else { return }
@@ -336,7 +338,7 @@ struct SwapSheet: View {
                 Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
                 receiptRow("Network", model.network.name)
                 Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
-                Link(destination: model.network.explorer.appending(path: "tx/\(hash)")) {
+                Button { page = WebPage(url: model.network.explorer.appending(path: "tx/\(hash)")) } label: {
                     HStack(spacing: 12) {
                         Text("Swap")
                             .font(.system(size: 13, weight: .semibold, design: .rounded))

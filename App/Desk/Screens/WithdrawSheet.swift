@@ -16,6 +16,7 @@ struct WithdrawSheet: View {
     @State private var recipientText = ""
     @FocusState private var editingRecipient: Bool
     @State private var receiptShown = false
+    @State private var page: WebPage?
 
     private var tradingBalance: Money { model.collateral.value ?? .zero }
     private var walletBalance: Money { model.walletAUSD.value ?? .zero }
@@ -70,6 +71,7 @@ struct WithdrawSheet: View {
             .padding(.bottom, 12)
         }
         .interactiveDismissDisabled(model.withdrawal.isBusy)
+        .sheet(item: $page) { InAppSafari(url: $0.url).ignoresSafeArea() }
         #if DEBUG
         .task { if ProcessInfo.processInfo.arguments.contains("-withdraw-sent") { model.seedWithdrawalSentForReview() } }
         #endif
@@ -436,7 +438,7 @@ struct WithdrawSheet: View {
             receiptRow("Network", model.network.name)
             ForEach(Array(receipt.transactions.enumerated()), id: \.element) { index, hash in
                 Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
-                Link(destination: model.network.explorer.appending(path: "tx/\(hash)")) {
+                Button { page = WebPage(url: model.network.explorer.appending(path: "tx/\(hash)")) } label: {
                     HStack(spacing: 12) {
                         Text(labels.indices.contains(index) ? labels[index] : "Transaction")
                             .font(.system(size: 13, weight: .semibold, design: .rounded))

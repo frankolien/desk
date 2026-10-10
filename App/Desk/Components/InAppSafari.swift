@@ -16,3 +16,9 @@ struct InAppSafari: UIViewControllerRepresentable {
 
     func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
 }
+
+/// A page to show over Desk, for a sheet that takes an item.
+struct WebPage: Identifiable, Hashable {
+    let url: URL
+    var id: String { url.absoluteString }
+}
