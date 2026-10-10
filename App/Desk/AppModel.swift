@@ -694,9 +694,9 @@ final class AppModel {
             SimulatedCall(to: swap.token, data: balanceOf),
         ])
         guard simulated[1].succeeded else { throw SwapFailure.routeReverts }
-        let before = NativeAmount(bigEndian: simulated[0].returnData).raw
-        let after = NativeAmount(bigEndian: simulated[2].returnData).raw
-        guard after - before >= swap.minimumOutRaw else { throw SwapFailure.underdelivers(.zero) }
+        let before = Self.count(simulated[0].returnData)
+        let after = Self.count(simulated[2].returnData)
+        guard after >= before, after - before >= swap.minimumOutRaw else { throw SwapFailure.underdelivers(.zero) }
 
         let sender: TransactionSender
         if let mainnetSender {
@@ -713,6 +713,79 @@ final class AppModel {
         _ = try await sender.wait(for: signed)
         await refreshMainnetMON()
         return signed.hashHex
+    }
+
+    /// A 256-bit word as a count, saturating at Int128's ceiling rather than wrapping: a token
+    /// with an absurd supply reads as "more than anything" instead of a plausible small number.
+    private static func count(_ word: Data) -> Int128 {
+        var value: Int128 = 0
+        for byte in word.drop(while: { $0 == 0 }) {
+            let (shifted, overflow) = value.multipliedReportingOverflow(by: 256)
+            guard !overflow else { return .max }
+            let (added, carried) = shifted.addingReportingOverflow(Int128(byte))
+            guard !carried else { return .max }
+            value = added
+        }
+        return value
+    }
+
+    /// A token's balance for this wallet and its decimals, read from the contract.
+    func tokenBalance(_ token: EthereumAddress) async throws -> (raw: Int128, decimals: Int) {
+        guard let address else { throw SwapFailure.wrongNetwork }
+        let rpc = MonadRPC(configuration: try network.rpc())
+        let read = try await rpc.simulate([
+            SimulatedCall(to: token, data: try Calldata.balanceOf(address)),
+            SimulatedCall(to: token, data: Calldata.decimals()),
+        ])
+        let decimals = Int(clamping: Self.count(read[1].returnData))
+        return (Self.count(read[0].returnData), min(max(decimals, 0), 36))
+    }
+
+    /// Sells a Monad token for MON through 0x's holder. The approval, for exactly the amount
+    /// sold, and the swap are simulated together first; the holder reverts below the quoted
+    /// floor, so a route that would hand back less never reaches Face ID. Returns the hash and
+    /// the MON that landed, by the wallet's own balance.
+    func sellToken(_ sale: TokenSale, progress: @MainActor @escaping (SwapStep) -> Void) async throws -> MONSwapReceipt {
+        guard network.holdsRealFunds, let address else { throw SwapFailure.wrongNetwork }
+        progress(.checking)
+        let rpc = MonadRPC(configuration: try network.rpc())
+        let allowance = Self.count(try await rpc.callContract(
+            to: sale.token, data: try Calldata.allowance(owner: address, spender: sale.to)))
+        let approval = try Calldata.approve(spender: sale.to, raw: sale.amountRaw)
+        let needsApproval = allowance < sale.amountRaw
+        var calls: [SimulatedCall] = []
+        if needsApproval { calls.append(SimulatedCall(from: address, to: sale.token, data: approval)) }
+        calls.append(SimulatedCall(from: address, to: sale.to, data: sale.data))
+        let simulated = try await rpc.simulate(calls)
+        guard simulated.allSatisfy(\.succeeded) else { throw SwapFailure.routeReverts }
+
+        let sender: TransactionSender
+        if let mainnetSender {
+            sender = mainnetSender
+        } else {
+            sender = TransactionSender(rpc: rpc)
+            mainnetSender = sender
+        }
+        let before = mainnetMON.value
+        progress(.signing)
+        let hash = try await passkey.withKeys { wallet, _ in
+            if needsApproval {
+                await MainActor.run { progress(.approving) }
+                let approved = try await sender.send(to: sale.token, data: approval, from: wallet)
+                _ = try await sender.wait(for: approved)
+            }
+            await MainActor.run { progress(.sending) }
+            let swapped = try await sender.send(to: sale.to, data: sale.data, from: wallet)
+            _ = try await sender.wait(for: swapped)
+            return swapped.hashHex
+        }
+        await refreshMainnetMON()
+        var received = sale.minimumOut
+        if let before, let after = mainnetMON.value, after.raw > before.raw,
+           let gained = NativeAmount(raw: after.raw - before.raw) {
+            received = gained
+        }
+        return MONSwapReceipt(hash: hash, received: received)
     }
 
     private func refreshUntilChanged() async {
@@ -764,7 +837,7 @@ final class AppModel {
         }
     }
 
-    private static func ethereumAddress(_ digits: String) throws -> EthereumAddress {
+    static func ethereumAddress(_ digits: String) throws -> EthereumAddress {
         var bytes = Data()
         var index = digits.startIndex
         while index < digits.endIndex {

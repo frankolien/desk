@@ -41,6 +41,19 @@ enum SpotPurchases {
         UserDefaults.standard.set(try? JSONEncoder().encode(list), forKey: key(address))
     }
 
+    /// After a sale: gone when all of it went, else what was paid shrinks with the holding.
+    static func reduce(_ id: String, keeping fraction: Double, for address: EthereumAddress) {
+        guard fraction > 0.0001 else { forget(id, for: address); return }
+        var list = load(for: address)
+        guard let index = list.firstIndex(where: { $0.id == id }) else { return }
+        let previous = list[index]
+        list[index] = SpotPurchase(
+            chainIndex: previous.chainIndex, chainName: previous.chainName, contract: previous.contract,
+            symbol: previous.symbol, name: previous.name, logoURL: previous.logoURL,
+            paidUSD: previous.paidUSD.map { $0 * fraction }, boughtAt: previous.boughtAt)
+        UserDefaults.standard.set(try? JSONEncoder().encode(list), forKey: key(address))
+    }
+
     static func forget(_ id: String, for address: EthereumAddress) {
         let list = load(for: address).filter { $0.id != id }
         UserDefaults.standard.set(try? JSONEncoder().encode(list), forKey: key(address))

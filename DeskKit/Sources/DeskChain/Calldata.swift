@@ -13,6 +13,15 @@ public enum Calldata {
             + (try ABIWord.uint(String(amount.raw)))
     }
 
+    /// An approval for a raw token count, whatever the token's decimals.
+    public static func approve(spender: EthereumAddress, raw: Int128) throws -> Data {
+        selector("approve(address,uint256)")
+            + (try ABIWord.address(spender.checksummed))
+            + (try ABIWord.uint(String(raw)))
+    }
+
+    public static func decimals() -> Data { selector("decimals()") }
+
     public static func balanceOf(_ owner: EthereumAddress) throws -> Data {
         selector("balanceOf(address)") + (try ABIWord.address(owner.checksummed))
     }
