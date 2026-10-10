@@ -10,9 +10,20 @@ struct PriceGuide: Identifiable, Hashable {
     var id: String { label }
 }
 
+/// A moment on the chart, such as the buy that opened a position: a dot on the first candle
+/// at or after that time, with the candle's close as its height.
+struct ChartMark: Identifiable, Hashable {
+    let time: Double
+    let label: String
+    let tint: Color
+
+    var id: Double { time }
+}
+
 struct CandlestickChart: View {
     let candles: [ChartCandle]
     var guides: [PriceGuide] = []
+    var marks: [ChartMark] = []
     @State private var scrubbed: Int?
 
     private static let stamp: DateFormatter = {
@@ -97,6 +108,27 @@ struct CandlestickChart: View {
                                         height: CGFloat(share) * (size.height - volumeTop))
                 context.fill(Path(roundedRect: volumeRect, cornerRadius: 2),
                              with: .color(.white.opacity(0.15)))
+            }
+
+            for mark in marks {
+                // Before the window: pinned to its first candle, so the position still reads as open.
+                guard let index = samples.firstIndex(where: { ($0.time ?? 0) >= mark.time })
+                        ?? (samples.last.flatMap { ($0.time ?? 0) < mark.time ? nil : 0 }) else { continue }
+                let candle = samples[index]
+                let center = CGPoint(x: layout.x(index), y: axis.y(candle.close))
+                let dot = CGRect(x: center.x - 8, y: center.y - 8, width: 16, height: 16)
+                context.fill(Path(ellipseIn: dot), with: .color(mark.tint))
+                context.stroke(Path(ellipseIn: dot), with: .color(.black.opacity(0.6)), lineWidth: 1.5)
+                context.draw(
+                    Text("+").font(.system(size: 13, weight: .heavy, design: .rounded)).foregroundStyle(.black),
+                    at: center, anchor: .center)
+                let resolved = context.resolve(
+                    Text(mark.label).font(.system(size: 10, weight: .bold, design: .rounded)).foregroundStyle(mark.tint))
+                let textSize = resolved.measure(in: CGSize(width: 120, height: 20))
+                let pill = CGRect(x: min(max(center.x - textSize.width / 2 - 6, 0), plotWidth - textSize.width - 12),
+                                  y: max(center.y - 30, 0), width: textSize.width + 12, height: textSize.height + 6)
+                context.fill(Path(roundedRect: pill, cornerRadius: pill.height / 2), with: .color(.black.opacity(0.78)))
+                context.draw(resolved, at: CGPoint(x: pill.midX, y: pill.midY), anchor: .center)
             }
 
             if let last = samples.last {
