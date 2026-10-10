@@ -475,15 +475,18 @@ struct MarketSearchScreen: View {
                 .buttonStyle(DeskPressStyle())
                 .accessibilityLabel("Clear search")
             } else {
-                Button("Paste") {
+                Button {
                     query = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                } label: {
+                    Text("Paste")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .padding(.horizontal, 14)
+                        .frame(height: 36)
+                        .background(Color.white.opacity(0.12), in: Capsule())
+                        .contentShape(Capsule())
                 }
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(DeskColor.nightText.color)
                 .buttonStyle(DeskPressStyle())
-                .padding(.horizontal, 12)
-                .frame(height: 30)
-                .background(Color.white.opacity(0.12), in: Capsule())
             }
         }
         .padding(.leading, 16)
@@ -1605,6 +1608,8 @@ private struct SpotTradeTicket: View {
     var body: some View {
         if side == "Buy" {
             SpotBuyTicket(token: token, model: model)
+        } else if token.isOnMonad {
+            SpotSellTicket(token: token, model: model)
         } else {
             SpotSellQuote(token: token, side: side)
         }
@@ -1750,9 +1755,15 @@ private struct SpotBuyTicket: View {
             step(token.isOnMonad ? "\(token.symbol) in your wallet" : "Filled on \(token.displayChainName)", state: purchase.phase.stepState(2))
             switch purchase.phase {
             case .filled:
-                Text("Bought ≈ \(SpotFormat.amount(purchase.quoted?.receive.amount)) \(token.symbol)")
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                    .foregroundStyle(DeskColor.rise.color)
+                TradeReceiptCard(
+                    title: "Bought ≈ \(SpotFormat.amount(purchase.quoted?.receive.amount)) \(token.symbol)",
+                    rows: [
+                        ("Paid", "\(SpotFormat.amount(amount)) MON"),
+                        ("Delivered on", token.displayChainName),
+                        (token.isOnMonad ? "Network fee" : "Network and fill fees",
+                         purchase.quoted.map { $0.feeMON.map { "\(SpotFormat.amount($0)) MON" } ?? "$\($0.feeUsd ?? "—")" } ?? "—"),
+                    ],
+                    hash: purchase.txHash, link: purchase.trackingURL)
                     .padding(.top, 4)
             case .refunded:
                 Text("Relay could not fill this and refunded your MON.")
@@ -1793,19 +1804,10 @@ private struct SpotBuyTicket: View {
                 ? "Buying Solana tokens is not available yet"
                 : "Buying on \(token.displayChainName) is not available yet")
         } else if purchase.phase.isFinished {
-            HStack(spacing: 10) {
-                if let url = purchase.trackingURL {
-                    Link(destination: url) {
-                        Text(token.isOnMonad ? "View on explorer" : "View on Relay").frame(maxWidth: .infinity).frame(height: 54).contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .background(Color.white.opacity(0.1), in: Capsule())
-                }
-                Button { dismiss() } label: {
-                    Text("Done").frame(maxWidth: .infinity).frame(height: 54).contentShape(Capsule())
-                }
-                .buttonStyle(.plain).foregroundStyle(.black).background(.white, in: Capsule())
+            Button { dismiss() } label: {
+                Text("Done").frame(maxWidth: .infinity).frame(height: 54).contentShape(Capsule())
             }
+            .buttonStyle(.plain).foregroundStyle(.black).background(.white, in: Capsule())
             .font(.system(size: 16, weight: .bold, design: .rounded))
         } else if purchase.phase.isActive {
             statusCapsule(purchase.phase.sentence(chain: token.displayChainName), spinning: true)
@@ -1855,6 +1857,438 @@ private struct SpotBuyTicket: View {
     }
 }
 
+
+/// A receipt that stays in the app: what happened, the figures, and the transaction, which
+/// opens in a sheet over Desk rather than in Safari.
+private struct TradeReceiptCard: View {
+    let title: String
+    let rows: [(String, String)]
+    let hash: String?
+    let link: URL?
+    @State private var showsLink = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(DeskColor.rise.color)
+                Text(title).font(.system(size: 16, weight: .bold, design: .rounded)).lineLimit(1).minimumScaleFactor(0.8)
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 50)
+            ForEach(rows, id: \.0) { row in
+                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+                HStack {
+                    Text(row.0).font(.system(size: 13, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(row.1).font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit()).lineLimit(1).minimumScaleFactor(0.7)
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 42)
+            }
+            if let link {
+                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+                Button { showsLink = true } label: {
+                    HStack(spacing: 12) {
+                        Text(hash == nil ? "Fill on Relay" : "Transaction")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        Spacer(minLength: 8)
+                        Text(hash ?? "relay.link")
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 150)
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(DeskColor.action.color)
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(height: 46)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .sheet(isPresented: $showsLink) { InAppSafari(url: link).ignoresSafeArea() }
+            }
+        }
+        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 0.6))
+    }
+}
+
+/// Selling a Monad token for MON: the buy ticket's shape, with the amount in the token and
+/// the usual shares of the balance to pick from.
+private struct SpotSellTicket: View {
+    let token: TrendingSpotToken
+    let model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var sale = SpotSaleModel()
+    @State private var amount = ""
+    @State private var balance: (raw: Int128, decimals: Int)?
+    @State private var picked: Double?
+
+    private static let shares: [(String, Double)] = [("10%", 0.1), ("25%", 0.25), ("50%", 0.5), ("Max", 1)]
+
+    private var heldText: String? { balance.map { SpotSaleModel.readable($0.raw, decimals: $0.decimals) } }
+    private var typed: Decimal? { Decimal(string: amount, locale: Locale(identifier: "en_US_POSIX")).flatMap { $0 > 0 ? $0 : nil } }
+    private var overBalance: Bool {
+        guard let typed, let heldText, let held = Decimal(string: heldText, locale: Locale(identifier: "en_US_POSIX")) else { return false }
+        return typed > held
+    }
+    private var soldFraction: Double {
+        guard let balance, balance.raw > 0, let raw = sale.quoted?.pay?.raw.flatMap(Int128.init) else { return 0 }
+        return min(1, Double(raw) / Double(balance.raw))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            header
+            payCard
+            if sale.phase.isActive || sale.phase.isFinished {
+                progress
+            } else {
+                receipt
+                if let error = sale.quoteError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.yellow)
+                }
+            }
+            Spacer(minLength: 0)
+            action
+        }
+        .padding(24)
+        .preferredColorScheme(.dark)
+        .task { await loadBalance() }
+        .task(id: amount) {
+            guard !sale.phase.isActive, let address = model.address else { return }
+            await sale.quote(token: token, amount: amount, user: address)
+        }
+        .interactiveDismissDisabled(sale.phase.isActive)
+    }
+
+    private func loadBalance() async {
+        let digits = token.contract.hasPrefix("0x") ? String(token.contract.dropFirst(2)) : token.contract
+        guard let contract = try? AppModel.ethereumAddress(digits) else { return }
+        balance = try? await model.tokenBalance(contract)
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            MarketTokenLogo(symbol: token.symbol, size: 42, remoteURL: token.artworkURL)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Sell \(token.symbol)").font(.system(size: 22, weight: .heavy, design: .rounded))
+                Text("Swapped for MON on Monad through 0x")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button { dismiss() } label: {
+                Image(systemName: "xmark.circle.fill").font(.title2).contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .disabled(sale.phase.isActive)
+        }
+    }
+
+    private var payCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("YOU SELL").font(.system(size: 10, weight: .heavy, design: .rounded)).tracking(1.2).foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline) {
+                TextField("0", text: $amount)
+                    .keyboardType(.decimalPad)
+                    .font(.system(size: 34, weight: .bold, design: .rounded).monospacedDigit())
+                    .disabled(sale.phase.isActive || sale.phase.isFinished)
+                    .onChange(of: amount) { _, _ in if picked != nil, amount != pickedAmount { picked = nil } }
+                HStack(spacing: 6) {
+                    MarketTokenLogo(symbol: token.symbol, size: 20, remoteURL: token.artworkURL)
+                    Text(token.symbol).font(.system(size: 16, weight: .bold, design: .rounded))
+                }
+                .foregroundStyle(.secondary)
+            }
+            HStack {
+                Text("Balance \(heldText.map { SpotFormat.amount($0) } ?? "—") \(token.symbol)")
+                    .foregroundStyle(overBalance ? DeskColor.fall.color : .secondary)
+                Spacer()
+                Text("Monad mainnet").foregroundStyle(.secondary)
+            }
+            .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
+            HStack(spacing: 8) {
+                ForEach(Self.shares, id: \.0) { share in
+                    Button {
+                        pick(share.1)
+                    } label: {
+                        Text(share.0)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .frame(maxWidth: .infinity).frame(height: 34)
+                            .background(picked == share.1 ? Color.white : Color.white.opacity(0.1), in: Capsule())
+                            .foregroundStyle(picked == share.1 ? .black : .primary)
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(balance == nil || balance?.raw == 0 || sale.phase.isActive || sale.phase.isFinished)
+                }
+            }
+        }
+        .padding(16)
+        .perpSearchGlass(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var pickedAmount: String? {
+        guard let picked, let balance else { return nil }
+        return SpotSaleModel.share(of: balance.raw, decimals: balance.decimals, fraction: picked)
+    }
+
+    private func pick(_ fraction: Double) {
+        picked = fraction
+        if let text = SpotSaleModel.share(of: balance?.raw ?? 0, decimals: balance?.decimals ?? 18, fraction: fraction) { amount = text }
+    }
+
+    private var receipt: some View {
+        VStack(spacing: 9) {
+            row("You receive", value: sale.quoted.map { "≈ \(SpotFormat.amount($0.receive.amount)) MON" }, emphasised: true)
+            row("At least", value: sale.quoted.map { "\(SpotFormat.amount($0.receive.minimum)) MON" })
+            row("Network fee", value: sale.quoted.map { $0.feeMON.map { "\(SpotFormat.amount($0)) MON" } ?? "—" })
+            row("Arrives in", value: sale.quoted.map { _ in "This block" })
+        }
+        .font(.system(size: 13, design: .rounded))
+        .redacted(reason: sale.isQuoting ? .placeholder : [])
+    }
+
+    private func row(_ title: String, value: String?, emphasised: Bool = false) -> some View {
+        HStack {
+            Text(title).foregroundStyle(.secondary)
+            Spacer()
+            Text(value ?? "—")
+                .fontWeight(emphasised ? .bold : .semibold)
+                .foregroundStyle(emphasised ? .primary : .secondary)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+    }
+
+    private var progress: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            step("Signed with Face ID", state: sale.phase.stepState(0))
+            step("Approved \(token.symbol) for exactly this swap", state: sale.phase.stepState(1))
+            step("Swapped for MON on Monad", state: sale.phase.stepState(2))
+            switch sale.phase {
+            case .sold(let receipt):
+                TradeReceiptCard(
+                    title: "Sold \(SpotFormat.amount(amount)) \(token.symbol)",
+                    rows: [
+                        ("Received", "\(receipt.received.display()) MON"),
+                        ("On", "Monad mainnet"),
+                        ("Network fee", sale.quoted.map { $0.feeMON.map { "\(SpotFormat.amount($0)) MON" } ?? "—" } ?? "—"),
+                    ],
+                    hash: receipt.hash, link: URL(string: "https://monadvision.com/tx/\(receipt.hash)"))
+                    .padding(.top, 4)
+            case .failed(let sentence):
+                Text(sentence)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded)).foregroundStyle(DeskColor.fall.color)
+            default:
+                EmptyView()
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .perpSearchGlass(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private func step(_ title: String, state: SpotPurchaseModel.StepState) -> some View {
+        HStack(spacing: 10) {
+            Group {
+                switch state {
+                case .waiting: Image(systemName: "circle").foregroundStyle(.secondary)
+                case .running: ProgressView().controlSize(.small)
+                case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(DeskColor.rise.color)
+                case .stopped: Image(systemName: "xmark.circle.fill").foregroundStyle(DeskColor.fall.color)
+                }
+            }
+            .frame(width: 20)
+            Text(title)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(state == .waiting ? .secondary : .primary)
+        }
+    }
+
+    @ViewBuilder
+    private var action: some View {
+        if sale.phase.isFinished {
+            Button { dismiss() } label: {
+                Text("Done").frame(maxWidth: .infinity).frame(height: 54).contentShape(Capsule())
+            }
+            .buttonStyle(.plain).foregroundStyle(.black).background(.white, in: Capsule())
+            .font(.system(size: 16, weight: .bold, design: .rounded))
+        } else if sale.phase.isActive {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(sale.phase.sentence).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .font(.system(size: 14, weight: .semibold, design: .rounded))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity).frame(height: 54)
+            .background(Color.white.opacity(0.06), in: Capsule())
+        } else if balance?.raw == 0 {
+            Text("No \(token.symbol) in this wallet")
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity).frame(height: 54)
+                .background(Color.white.opacity(0.06), in: Capsule())
+        } else {
+            HoldToConfirm(
+                title: overBalance ? "More than you hold" : (sale.quoted == nil ? "Enter an amount" : "Hold to sell \(token.symbol)"),
+                tint: DeskColor.fall,
+                isEnabled: sale.quoted != nil && typed != nil && !sale.isQuoting && !overBalance
+            ) {
+                Task {
+                    await sale.sell(token: token, model: model, soldFraction: soldFraction)
+                }
+            }
+        }
+    }
+}
+
+@MainActor
+private final class SpotSaleModel: ObservableObject {
+    enum Phase: Equatable {
+        case idle, signing, approving, swapping
+        case sold(AppModel.MONSwapReceipt)
+        case failed(String)
+
+        var isActive: Bool { self == .signing || self == .approving || self == .swapping }
+        var isFinished: Bool {
+            switch self {
+            case .sold, .failed: true
+            default: false
+            }
+        }
+        var sentence: String {
+            switch self {
+            case .signing: "Confirm with Face ID…"
+            case .approving: "Approving on Monad…"
+            case .swapping: "Swapping on Monad…"
+            default: ""
+            }
+        }
+        func stepState(_ index: Int) -> SpotPurchaseModel.StepState {
+            switch (self, index) {
+            case (.signing, 0): .running
+            case (.approving, 0): .done
+            case (.approving, 1): .running
+            case (.swapping, 0), (.swapping, 1): .done
+            case (.swapping, 2): .running
+            case (.sold, _): .done
+            case (.failed, _): .stopped
+            default: .waiting
+            }
+        }
+    }
+
+    @Published private(set) var quoted: RelayQuote?
+    @Published private(set) var quoteError: String?
+    @Published private(set) var isQuoting = false
+    @Published private(set) var phase: Phase = .idle
+    private(set) var quotedAt = Date.distantPast
+
+    private static let host = "https://web-lovat-nine-49.vercel.app"
+
+    /// A raw count as decimal text at the token's decimals, with no trailing zeros.
+    nonisolated static func readable(_ raw: Int128, decimals: Int) -> String {
+        guard decimals > 0 else { return String(raw) }
+        var digits = String(raw)
+        if digits.count <= decimals { digits = String(repeating: "0", count: decimals - digits.count + 1) + digits }
+        let whole = String(digits.prefix(digits.count - decimals))
+        var fraction = String(digits.suffix(decimals))
+        while fraction.hasSuffix("0") { fraction.removeLast() }
+        return fraction.isEmpty ? whole : "\(whole).\(fraction)"
+    }
+
+    /// A share of a balance as decimal text; the whole balance is exact, a part is rounded
+    /// down to the token's units so it never asks for more than is held.
+    nonisolated static func share(of raw: Int128, decimals: Int, fraction: Double) -> String? {
+        guard raw > 0 else { return nil }
+        if fraction >= 1 { return readable(raw, decimals: decimals) }
+        let part = Int128(Double(raw) * fraction)
+        return part > 0 ? readable(part, decimals: decimals) : nil
+    }
+
+    func quote(token: TrendingSpotToken, amount: String, user: EthereumAddress) async {
+        quoteError = nil
+        let text = amount.trimmingCharacters(in: .whitespaces)
+        guard let typed = Decimal(string: text, locale: Locale(identifier: "en_US_POSIX")), typed > 0 else {
+            quoted = nil
+            return
+        }
+        isQuoting = true
+        defer { isQuoting = false }
+        try? await Task.sleep(for: .milliseconds(450))
+        guard !Task.isCancelled else { return }
+        var components = URLComponents(string: "\(Self.host)/api/swap-quote")!
+        components.queryItems = [
+            URLQueryItem(name: "view", value: "swap"),
+            URLQueryItem(name: "user", value: user.checksummed),
+            URLQueryItem(name: "amount", value: text),
+            URLQueryItem(name: "sell", value: "TOKEN"),
+            URLQueryItem(name: "token", value: token.contract),
+            URLQueryItem(name: "symbol", value: String(token.symbol.prefix(12))),
+        ]
+        do {
+            let (data, response) = try await URLSession.shared.data(from: components.url!)
+            guard !Task.isCancelled else { return }
+            if (response as? HTTPURLResponse)?.statusCode == 200 {
+                quoted = try JSONDecoder().decode(RelayQuote.self, from: data)
+                quotedAt = .now
+            } else {
+                quoted = nil
+                let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                quoteError = body?["error"] as? String ?? "A live quote is unavailable right now."
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            quoted = nil
+            quoteError = "The quote service could not be reached."
+        }
+    }
+
+    func sell(token: TrendingSpotToken, model: AppModel, soldFraction: Double) async {
+        guard let wallet = model.address, !phase.isActive, let quoted else { return }
+        let sale: TokenSale
+        do {
+            sale = try TokenSale(
+                chainID: quoted.transaction.chainId, to: quoted.transaction.to, data: quoted.transaction.data,
+                value: quoted.transaction.value, token: token.contract,
+                amountRaw: quoted.pay?.raw ?? "", minimumOutRaw: quoted.receive.minimumRaw ?? "")
+        } catch {
+            phase = .failed("This quote did not pass Desk's safety check, so nothing was signed.")
+            return
+        }
+        phase = .signing
+        do {
+            let receipt = try await model.sellToken(sale) { [weak self] step in
+                guard let self else { return }
+                switch step {
+                case .approving: self.phase = .approving
+                case .sending: self.phase = .swapping
+                default: break
+                }
+            }
+            phase = .sold(receipt)
+            SpotPurchases.reduce("\(token.chainIndex):\(token.contract.lowercased())", keeping: 1 - soldFraction, for: wallet)
+        } catch PasskeyFailure.cancelledByUser {
+            phase = .idle
+        } catch let failure as PasskeyFailure {
+            phase = .failed(failure.sentence)
+        } catch AppModel.SwapFailure.routeReverts {
+            phase = .failed("This route reverts right now. Nothing was signed.")
+        } catch TransactionSender.Failure.reverted {
+            phase = .failed("The swap was rejected on Monad. Only gas was spent.")
+        } catch {
+            phase = .failed("The swap could not be sent. Nothing left the wallet.")
+        }
+    }
+}
+
 @MainActor
 private enum SpotFormat {
     private static let significant: NumberFormatter = {
@@ -1874,6 +2308,7 @@ private enum SpotFormat {
 private struct RelayQuote: Decodable, Sendable {
     struct Side: Decodable, Sendable {
         let amount: String?
+        let raw: String?
         let minimum: String?
         let minimumRaw: String?
         let usd: String?
@@ -1886,6 +2321,7 @@ private struct RelayQuote: Decodable, Sendable {
         let value: String
     }
     let requestId: String?
+    let pay: Side?
     let receive: Side
     let feeUsd: String?
     let feeMON: String?
@@ -1932,7 +2368,7 @@ private final class SpotPurchaseModel: ObservableObject {
     @Published private(set) var phase: Phase = .idle
     private(set) var quotedAt = Date.distantPast
     private var requestId: String?
-    private var txHash: String?
+    private(set) var txHash: String?
 
     private static let host = "https://web-lovat-nine-49.vercel.app"
 

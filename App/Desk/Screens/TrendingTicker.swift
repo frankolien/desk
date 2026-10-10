@@ -122,7 +122,11 @@ struct TrendingTicker: View {
     private var row: some View {
         HStack(spacing: 28) {
             ForEach(tokens) { token in
-                Button { onOpen(token) } label: { TickerItem(token: token, closes: sparklines.closes[TickerSparklines.key(token)]) }
+                // While the strip moves, a touch catches it; the token opens on a tap once it
+                // stands still, so a reach for a passing name never lands on the wrong one.
+                Button {
+                    if resumedAt != nil { stop(); walkOnLater(after: 8) } else { onOpen(token) }
+                } label: { TickerItem(token: token, closes: sparklines.closes[TickerSparklines.key(token)]) }
                     .buttonStyle(.plain)
             }
         }

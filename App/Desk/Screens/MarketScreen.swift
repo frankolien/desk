@@ -27,6 +27,7 @@ struct MarketScreen: View {
     @State private var article: NewsItem?
     @State private var sparklines = TickerSparklines()
     @StateObject private var discovery = TokenDiscoveryModel()
+    @State private var spot = SpotHoldingsModel()
     @AppStorage("desk.watchlist") private var savedIDs = ""
     @AppStorage("desk.spotWatchlist") private var savedSpotData = ""
 
@@ -104,6 +105,7 @@ struct MarketScreen: View {
                     .toolbar(.hidden, for: .tabBar)
             }
             .task { await directory.run() }
+            .task(id: model.address) { if Showcase.spotTrading { await spot.run(for: model.address) } }
             .task { if Showcase.spotTrading { await discovery.run() } }
             .task { if Showcase.news { await news.run() } }
             .task(id: discovery.trending.prefix(10).map(\.id).joined(separator: ",")) {
@@ -125,6 +127,9 @@ struct MarketScreen: View {
             .task {
                 let arguments = ProcessInfo.processInfo.arguments
                 if let index = arguments.firstIndex(of: "-open-market"), index + 1 < arguments.count { MarketOpenRequest.shared.open(arguments[index + 1]) }
+                if let index = arguments.firstIndex(of: "-open-token"), index + 2 < arguments.count {
+                    TokenOpenRequest.shared.open(.init(chainIndex: arguments[index + 1], contract: arguments[index + 2]))
+                }
             }
             .task { if ProcessInfo.processInfo.arguments.contains("-crowd-demo") { directory.seedCrowdForReview() } }
             .task {
@@ -170,12 +175,24 @@ struct MarketScreen: View {
                     if model.hasTradingAccount {
                         HStack(alignment: .center, spacing: 9) {
                             TokenLogo(asset: .ausd, size: 30)
-                            AmountText(model.collateral.value?.display() ?? Unavailable.text, size: 38)
+                            AmountText(everything.map { DisplayCurrency.shared.format($0) } ?? model.collateral.value?.display() ?? Unavailable.text, size: 38)
                         }
                         .frame(height: 44)
-                        Text("Available to trade")
-                            .font(.system(size: 13, weight: .medium, design: .rounded))
-                            .foregroundStyle(DeskColor.nightMuted.color)
+                        HStack(spacing: 6) {
+                            if let pnl = openPnL {
+                                Text((pnl < 0 ? "▼ −" : "▲ +") + DisplayCurrency.shared.format(abs(pnl)))
+                                    .font(.system(size: 13, weight: .bold, design: .rounded).monospacedDigit())
+                                    .foregroundStyle((pnl < 0 ? DeskColor.fall : DeskColor.rise).color)
+                                Text("open ·")
+                                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                                    .foregroundStyle(DeskColor.nightMuted.color)
+                            }
+                            Text("\(model.collateral.value?.display() ?? Unavailable.text) available to trade")
+                                .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
+                                .foregroundStyle(DeskColor.nightMuted.color)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
                     } else {
                         HStack(alignment: .center, spacing: 9) {
                             TokenLogo(asset: .ausd, size: 30)
@@ -201,6 +218,27 @@ struct MarketScreen: View {
                 .frame(height: 44)
             }
         }
+    }
+
+    /// Everything the wallet is worth through Desk: the desk, the AUSD beside it, the tokens
+    /// bought here, and what the open perps are up or down right now.
+    private var everything: Double? {
+        guard let collateral = model.collateral.value else { return nil }
+        let wallet = model.walletAUSD.value ?? .zero
+        let tokens = spot.holdings.compactMap(\.value).reduce(0, +)
+        let perps = PositionContext.totalPnL(PositionContext.all(model: model, market: market)).map { Double($0.raw) / 1_000_000 } ?? 0
+        return Double(collateral.raw + wallet.raw) / 1_000_000 + tokens + perps
+    }
+
+    /// Open perps' unrealised PnL plus what the tokens have done since they were bought.
+    private var openPnL: Double? {
+        let perps = PositionContext.totalPnL(PositionContext.all(model: model, market: market)).map { Double($0.raw) / 1_000_000 }
+        let tokens = spot.holdings.compactMap { holding -> Double? in
+            guard let value = holding.value, let paid = holding.purchase.paidUSD else { return nil }
+            return value - paid
+        }
+        guard perps != nil || !tokens.isEmpty else { return nil }
+        return (perps ?? 0) + tokens.reduce(0, +)
     }
 
     private var walletCaption: String {
