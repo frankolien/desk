@@ -680,6 +680,41 @@ final class AppModel {
         return MONSwapReceipt(hash: hash, received: received)
     }
 
+    /// Buys a Monad token with MON through 0x's holder, after the route is simulated and the
+    /// token balance it would leave is checked against the quoted floor; below it, Face ID is
+    /// never asked. Returns the transaction hash once mined.
+    func buyToken(_ swap: TokenSwap, progress: @MainActor @escaping (SwapStep) -> Void) async throws -> String {
+        guard network.holdsRealFunds, let address else { throw SwapFailure.wrongNetwork }
+        progress(.checking)
+        let rpc = MonadRPC(configuration: try network.rpc())
+        let balanceOf = try Calldata.balanceOf(address)
+        let simulated = try await rpc.simulate([
+            SimulatedCall(to: swap.token, data: balanceOf),
+            SimulatedCall(from: address, to: swap.to, data: swap.data, value: swap.value.bigEndianBytes),
+            SimulatedCall(to: swap.token, data: balanceOf),
+        ])
+        guard simulated[1].succeeded else { throw SwapFailure.routeReverts }
+        let before = NativeAmount(bigEndian: simulated[0].returnData).raw
+        let after = NativeAmount(bigEndian: simulated[2].returnData).raw
+        guard after - before >= swap.minimumOutRaw else { throw SwapFailure.underdelivers(.zero) }
+
+        let sender: TransactionSender
+        if let mainnetSender {
+            sender = mainnetSender
+        } else {
+            sender = TransactionSender(rpc: rpc)
+            mainnetSender = sender
+        }
+        progress(.signing)
+        let signed = try await passkey.withKeys { wallet, _ in
+            try await sender.send(to: swap.to, data: swap.data, value: swap.value.bigEndianBytes, from: wallet)
+        }
+        progress(.sending)
+        _ = try await sender.wait(for: signed)
+        await refreshMainnetMON()
+        return signed.hashHex
+    }
+
     private func refreshUntilChanged() async {
         let before = (walletMON.value?.raw, walletAUSD.value)
         for _ in 0..<6 {
