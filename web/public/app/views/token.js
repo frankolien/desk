@@ -224,6 +224,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
       <aside class="tk-side">
         <div class="card card-pad" id="tk-ticket">
           <div class="seg" style="display:flex" id="tk-side-seg"><button type="button" data-side="buy" aria-selected="true" style="flex:1">Buy</button><button type="button" data-side="sell" aria-selected="false" style="flex:1">Sell</button></div>
+          <div id="tk-pay" style="display:flex;align-items:center;justify-content:space-between;margin-top:10px" hidden><span class="sub" id="tk-pay-label">Pay with</span><div class="seg seg-sm seg-line"><button type="button" data-pay="AUSD" aria-selected="true">AUSD</button><button type="button" data-pay="MON" aria-selected="false">MON</button></div></div>
           <div class="tk-amt"><span id="tk-prefix">$</span><input id="tk-amount" type="number" inputmode="decimal" min="0" step="any" placeholder="0" aria-label="Amount"></div>
           <div class="tk-est" id="tk-est"></div>
           <div class="sub" style="text-align:center;margin:4px 0 14px" id="tk-ticket-sub">Buy in USD</div>
@@ -318,10 +319,12 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   let pct = null;
   $$("[data-side]", el).forEach((b) => b.setAttribute("aria-selected", String(b.dataset.side === side)));
   const amountInput = q("#tk-amount");
-  // On Monad the ticket swaps MON for the token through 0x's allowance holder, signed here, and
-  // sells by approving exactly the typed amount to the holder first. On other chains Relay
-  // delivers the token for MON paid on Monad, the app's route; selling there is still the app's.
+  // On Monad the ticket swaps AUSD or MON for the token through 0x's allowance holder, signed
+  // here, and sells for either by approving exactly the typed amount to the holder first. On
+  // other chains Relay delivers the token for MON paid on Monad, the app's route; selling there
+  // is still the app's.
   const onMonad = String(chainIndex) === "143";
+  const AUSD = "0x00000000efe302beaa2b3e6e1b18d08d69a9012a";
   const GAS_RESERVE = 10n ** 16n;
   const canBuy = onMonad || row?.buyable !== false;
   const canSell = onMonad;
@@ -335,6 +338,12 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   let decimals = null;
   let monPrice = null;
   let trade = null;
+  let payWith = "AUSD";
+  let receiveIn = "AUSD";
+  let ausd = null;
+  const currency = () => (onMonad ? (side === "buy" ? payWith : receiveIn) : "MON");
+  const inAUSD = () => currency() === "AUSD";
+  const fmtSide = (part) => fmtAmount(Number(part.amount), part.symbol === "AUSD" ? 2 : 4);
 
   const kind = () => connectedWallet()?.via ?? null;
   const canSign = () => kind() === "passkey" || kind() === "browser";
@@ -359,13 +368,14 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   const refreshHoldings = async () => {
     const user = owner();
     if (!user) { balance = null; held = null; return; }
-    const [mon, tokens, d] = await Promise.all([
+    const [mon, tokens, d, dollars] = await Promise.all([
       monBalance(user).catch(() => null),
       onMonad ? tokenBalance(address, user).catch(() => null) : null,
       onMonad && decimals == null ? tokenDecimals(address).catch(() => null) : decimals,
+      onMonad ? tokenBalance(AUSD, user).catch(() => null) : null,
     ]);
     if (dead) return;
-    balance = mon; held = tokens; if (Number.isInteger(d)) decimals = d;
+    balance = mon; held = tokens; ausd = dollars; if (Number.isInteger(d)) decimals = d;
     paintTicket();
   };
 
@@ -379,18 +389,18 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
       const usd = Number(amountInput.value);
       const wants = buying ? canBuy && usd > 0 : canSell && Boolean(sellText());
       if (!user || !wants || !canSign()) { quote = null; quoting = false; paintEstimate(); return null; }
-      if (buying && !(monPrice > 0)) await refreshMON();
-      const amount = buying ? monText(usd) : sellText();
+      if (buying && !inAUSD() && !(monPrice > 0)) await refreshMON();
+      const amount = buying ? (inAUSD() ? decimalText(trim(usd.toFixed(6))) : monText(usd)) : sellText();
       if (!amount) { quote = null; quoting = false; paintEstimate(); return null; }
       quoting = true; paintEstimate();
       try {
         const out = onMonad
-          ? await api(`/api/swap-quote?view=swap&user=${user}&amount=${amount}&sell=${buying ? "MON" : "TOKEN"}&token=${address}&symbol=${encodeURIComponent(symbol)}`, { signal })
+          ? await api(`/api/swap-quote?view=swap&user=${user}&amount=${amount}&sell=${buying ? payWith : "TOKEN"}&buy=${receiveIn}&token=${address}&symbol=${encodeURIComponent(symbol)}`, { signal })
           : await api(`/api/relay-quote?user=${user}&chainIndex=${chainIndex}&tokenAddress=${address}&amount=${amount}`, { signal });
         if (seq !== quoteSeq || dead) return null;
         quote = onMonad
-          ? { pay: { amount: out.pay.amount, wei: buying ? BigInt(out.pay.wei) : 0n, raw: buying ? null : BigInt(out.pay.raw) }, receive: { amount: out.receive.amount, minimum: out.receive.minimum }, fee: `${fmtAmount(Number(out.feeMON), 4)} MON gas`, transaction: out.transaction, approval: out.approval ?? null, requestId: null }
-          : { pay: { amount: out.pay.amount, wei: units(out.pay.amount, 18), raw: null }, receive: { amount: out.receive.amount, minimum: out.receive.minimum }, fee: `$${out.feeUsd} fee`, transaction: out.transaction, approval: null, requestId: out.requestId };
+          ? { pay: { amount: out.pay.amount, symbol: out.pay.symbol, wei: out.pay.wei ? BigInt(out.pay.wei) : 0n, raw: out.pay.raw ? BigInt(out.pay.raw) : null }, receive: { amount: out.receive.amount, minimum: out.receive.minimum, symbol: out.receive.symbol }, fee: `${fmtAmount(Number(out.feeMON), 4)} MON gas`, transaction: out.transaction, approval: out.approval ?? null, requestId: null }
+          : { pay: { amount: out.pay.amount, symbol: "MON", wei: units(out.pay.amount, 18), raw: null }, receive: { amount: out.receive.amount, minimum: out.receive.minimum, symbol }, fee: `$${out.feeUsd} fee`, transaction: out.transaction, approval: null, requestId: out.requestId };
         quoteAt = Date.now();
       } catch (error) {
         if (seq !== quoteSeq || dead) return null;
@@ -408,10 +418,15 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     q("#tk-prefix").textContent = buying ? "$" : "";
     q("#tk-prefix").hidden = !buying;
     const signer = canSign();
+    const available = !signer ? "" : inAUSD() ? (ausd != null ? ` · ${fmtAmount(Number(readable(ausd, 6)), 2)} AUSD available` : "") : (balance != null ? ` · ${fmtMON(balance)} MON available` : "");
     const sub = buying
-      ? `Buy ${symbol} in USD, paid in MON${balance != null && signer ? ` · ${fmtMON(balance)} MON available` : ""}`
-      : canSell ? `Sell ${symbol} for MON${held != null && decimals != null && signer ? ` · ${fmtAmount(Number(readable(held, decimals)))} ${symbol} held` : ""}` : `Sell ${symbol} for USD`;
+      ? `Buy ${symbol} in USD, paid in ${currency()}${available}`
+      : canSell ? `Sell ${symbol} for ${currency()}${held != null && decimals != null && signer ? ` · ${fmtAmount(Number(readable(held, decimals)))} ${symbol} held` : ""}` : `Sell ${symbol} for USD`;
     q("#tk-ticket-sub").textContent = sub;
+    const pay = q("#tk-pay");
+    pay.hidden = !onMonad || Boolean(trade);
+    q("#tk-pay-label").textContent = buying ? "Pay with" : "Receive";
+    $$("[data-pay]", pay).forEach((b) => b.setAttribute("aria-selected", String(b.dataset.pay === currency())));
     q("#tk-chips").innerHTML = buying
       ? [25, 50, 100, 250].map((v) => `<button class="chip" type="button" data-usd="${v}">$${v}</button>`).join("")
       : [25, 50, 75, 100].map((v) => `<button class="chip" type="button" data-pct="${v}" aria-pressed="${pct === v}">${v}%</button>`).join("");
@@ -438,16 +453,18 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     note.textContent = "";
     const buying = side === "buy";
     if (!buying && !amount && pct) {
-      est.textContent = quote ? `≈ ${fmtAmount(Number(quote.receive.amount), 4)} MON for ${fmtAmount(Number(quote.pay.amount))} ${symbol} · ${quote.fee}` : quoting ? "Quoting…" : `${pct}% of your ${symbol}`;
+      est.textContent = quote ? `≈ ${fmtSide(quote.receive)} ${quote.receive.symbol} for ${fmtAmount(Number(quote.pay.amount))} ${symbol} · ${quote.fee}` : quoting ? "Quoting…" : `${pct}% of your ${symbol}`;
       if (quoteError) note.textContent = quoteError;
       return;
     }
     if (!(amount > 0)) { est.textContent = ""; return; }
     if (quote) {
       est.textContent = buying
-        ? `≈ ${fmtAmount(Number(quote.receive.amount))} ${symbol} for ${fmtAmount(Number(quote.pay.amount), 4)} MON · ${quote.fee}`
-        : `≈ ${fmtAmount(Number(quote.receive.amount), 4)} MON for ${fmtAmount(Number(quote.pay.amount))} ${symbol} · ${quote.fee}`;
-      if (buying && balance != null && canSign() && balance < quote.pay.wei + GAS_RESERVE) note.textContent = `That needs ${fmtMON(quote.pay.wei + GAS_RESERVE)} MON with gas; the wallet holds ${fmtMON(balance)} MON.`;
+        ? `≈ ${fmtAmount(Number(quote.receive.amount))} ${symbol} for ${fmtSide(quote.pay)} ${quote.pay.symbol} · ${quote.fee}`
+        : `≈ ${fmtSide(quote.receive)} ${quote.receive.symbol} for ${fmtAmount(Number(quote.pay.amount))} ${symbol} · ${quote.fee}`;
+      if (buying && !inAUSD() && balance != null && canSign() && balance < quote.pay.wei + GAS_RESERVE) note.textContent = `That needs ${fmtMON(quote.pay.wei + GAS_RESERVE)} MON with gas; the wallet holds ${fmtMON(balance)} MON.`;
+      if (buying && inAUSD() && ausd != null && quote.pay.raw != null && canSign() && ausd < quote.pay.raw) note.textContent = `That needs ${fmtAmount(Number(quote.pay.amount), 2)} AUSD; the wallet holds ${fmtAmount(Number(readable(ausd, 6)), 2)} AUSD.`;
+      else if (buying && inAUSD() && balance != null && canSign() && balance < GAS_RESERVE) note.textContent = "Paying in AUSD still needs about 0.01 MON for gas.";
       if (!buying && held != null && quote.pay.raw != null && held < quote.pay.raw) note.textContent = `The wallet holds ${fmtAmount(Number(readable(held, decimals ?? 18)))} ${symbol}.`;
       return;
     }
@@ -482,6 +499,14 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     pct = null;
     quote = null;
     paintTicket();
+  });
+  q("#tk-pay").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-pay]");
+    if (!button || trade || button.dataset.pay === currency()) return;
+    if (side === "buy") payWith = button.dataset.pay; else receiveIn = button.dataset.pay;
+    quote = null;
+    paintTicket();
+    requestQuote();
   });
   q("#tk-chips").addEventListener("click", (event) => {
     const chip = event.target.closest(".chip");
@@ -550,16 +575,17 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     if (!quote || Date.now() - quoteAt > 20_000) await requestQuote({ now: true });
     if (!quote || dead) return;
     const tx = quote.transaction;
-    const wei = buying ? quote.pay.wei : 0n;
+    const wei = buying && !inAUSD() ? quote.pay.wei : 0n;
     const ok = tx && Number(tx.chainId) === 143 && /^0x[0-9a-fA-F]{40}$/.test(tx.to ?? "") && /^0x[0-9a-fA-F]+$/.test(tx.data ?? "") && /^\d+$/.test(String(tx.value ?? "")) && BigInt(tx.value) === wei;
     if (!ok) { quote = null; quoteError = "This quote did not pass Desk's safety check, so nothing was signed."; paintEstimate(); return; }
-    if (buying && balance != null && balance < wei + GAS_RESERVE) { paintEstimate(); return; }
+    if (buying && !inAUSD() && balance != null && balance < wei + GAS_RESERVE) { paintEstimate(); return; }
+    if (buying && inAUSD() && ausd != null && quote.pay.raw != null && ausd < quote.pay.raw) { paintEstimate(); return; }
     if (!buying && held != null && held < quote.pay.raw) { paintEstimate(); return; }
     const user = owner();
-    const received = `${fmtAmount(Number(quote.receive.amount), buying ? 2 : 4)} ${buying ? symbol : "MON"}`;
+    const received = buying ? `${fmtAmount(Number(quote.receive.amount), 2)} ${symbol}` : `${fmtSide(quote.receive)} ${quote.receive.symbol}`;
     trade = {
       steps: onMonad
-        ? [...(buying ? [] : [{ key: "approve", label: `Approve ${symbol} for the swap`, state: "waiting" }]), { key: "swap", label: buying ? `Swap MON for ${symbol} on Monad` : `Swap ${symbol} for MON on Monad`, state: "waiting" }]
+        ? [...(quote.approval ? [{ key: "approve", label: `Approve ${quote.pay.symbol} for the swap`, state: "waiting" }] : []), { key: "swap", label: `Swap ${quote.pay.symbol} for ${quote.receive.symbol} on Monad`, state: "waiting" }]
         : [{ key: "swap", label: "Send MON on Monad", state: "waiting" }, { key: "fill", label: `Relay delivers ${symbol} on ${chainName}`, state: "waiting", href: `https://relay.link/transaction/${quote.requestId}` }],
       outcome: null,
     };
@@ -569,14 +595,15 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
         step("approve", "running");
         const spender = quote.approval.spender;
         const raw = BigInt(quote.approval.amount);
-        if ((await allowance(address, user, spender)) < raw) await send({ to: address, data: chainCall("approve", [spender, raw]), value: 0n }, "approve");
+        const approved = quote.approval.token;
+        if ((await allowance(approved, user, spender)) < raw) await send({ to: approved, data: chainCall("approve", [spender, raw]), value: 0n }, "approve");
         step("approve", "done");
       }
       step("swap", "running");
       await send({ to: tx.to, data: tx.data, value: wei }, "swap");
       step("swap", "done");
     } catch (error) { failed(error); return; }
-    if (onMonad) { finish(buying ? `Bought ≈ ${received}` : `Sold for ≈ ${received}`, buying ? `${symbol} is in your wallet. At least ${fmtAmount(Number(quote.receive.minimum))} ${symbol} was guaranteed by the quote.` : `MON is in your wallet. At least ${fmtAmount(Number(quote.receive.minimum), 4)} MON was guaranteed by the quote.`); return; }
+    if (onMonad) { finish(buying ? `Bought ≈ ${received}` : `Sold for ≈ ${received}`, buying ? `${symbol} is in your wallet. At least ${fmtAmount(Number(quote.receive.minimum))} ${symbol} was guaranteed by the quote.` : `${quote.receive.symbol} is in your wallet. At least ${fmtSide({ amount: quote.receive.minimum, symbol: quote.receive.symbol })} ${quote.receive.symbol} was guaranteed by the quote.`); return; }
     step("fill", "running");
     const phase = await track(quote.requestId);
     if (dead) return;

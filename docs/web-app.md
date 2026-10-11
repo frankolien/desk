@@ -147,14 +147,17 @@ QR to it. Nothing on the web can move money.
 
 ### Token ticket
 
-A token page's ticket trades from the connected wallet. On Monad it swaps MON for the token
-through 0x's allowance holder (`GET /api/swap-quote?view=swap&token=…&sell=MON|TOKEN`), the
-route and the edge check the AUSD swap uses; selling approves exactly the typed amount to the
-holder first. On other chains it pays MON on Monad and Relay delivers the token
+A token page's ticket trades from the connected wallet. On Monad it swaps AUSD or MON for the
+token through 0x's allowance holder (`GET /api/swap-quote?view=swap&token=…&sell=AUSD|MON|TOKEN`,
+with `buy=AUSD|MON` when selling), the route and the edge check the AUSD swap uses; a "Pay
+with" switch picks AUSD, the default, or MON, and "Receive" does the same when selling. Paying
+in AUSD, or selling a token, approves exactly the typed amount to the holder first; paying in
+MON approves nothing. On other chains it pays MON on Monad and Relay delivers the token
 (`GET /api/relay-quote`), polling `/api/relay-status` to the fill, refund or failure; selling
 there is still the app's. The passkey wallet signs in the tab; a browser wallet is switched to
-Monad and asked to send. The amount is typed in USD and converted with the MON mark; the live
-quote shows what arrives, what is paid and the fee, with the MON or token balance beside it.
+Monad and asked to send. The amount is typed in USD: paid in AUSD it is the amount itself,
+paid in MON it is converted with the MON mark; the live quote shows what arrives, what is paid
+and the fee, with the AUSD, MON or token balance beside it.
 A quote older than twenty seconds is refreshed before signing, and a transaction that does not
 match the quote is never signed. Full screen (`F`) and the taller chart work here as on the
 perps page, and the Risk card scores the token out of ten with a launch grid: top ten,
