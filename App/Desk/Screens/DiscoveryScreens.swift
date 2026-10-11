@@ -449,8 +449,13 @@ struct MarketSearchScreen: View {
                 }
             }
             .task(id: TokenOpenRequest.shared.pending) {
-                guard let target = TokenOpenRequest.shared.take() else { return }
-                selectedSpot = await discovery.find(target)
+                // The request is only cleared once the token is found: clearing it first would
+                // change this task's id and cancel the lookup under way.
+                guard let target = TokenOpenRequest.shared.pending else { return }
+                let token = await discovery.find(target)
+                guard !Task.isCancelled else { return }
+                selectedSpot = token
+                _ = TokenOpenRequest.shared.take()
             }
         }
     }
