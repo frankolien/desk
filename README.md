@@ -46,9 +46,10 @@ Monad* and Perpl's *Best Use of Perpl's API*. Swift 6, SwiftUI, iOS 18.4+, iPhon
   Activity with a working pause in the Dynamic Island; a Control Center toggle; Siri.
 - **Share the result** — a position card over your own photo, with a code that opens Desk.
 - **Trade tokens too** — Trending coins on Search, across Monad and the EVM chains Relay
-  reaches, bought with AUSD or MON from the same key and sold back for either; token pages
-  with holders, trades, who got in first, and a risk card. EVM only: Solana is not offered
-  anywhere.
+  reaches, bought with AUSD or MON from the same key and sold back for either; a token on
+  another chain sells for AUSD on Monad with no gas on that chain, the wallet signing Calibur's
+  batch under EIP-7702 and Relay taking the gas from the proceeds; token pages with holders,
+  trades, who got in first, and a risk card. EVM only: Solana is not offered anywhere.
 - **MON to AUSD and back** — the dollars for the desk from spare MON, and MON for gas
   and tokens from AUSD, in one sheet with a switch; checked on Monad before Face ID signs,
   approving at most the amount typed.
@@ -136,7 +137,7 @@ in the app can reach them, by construction: the app has no server credential to 
 
 ## Status
 
-Shipped to TestFlight on a testnet build. 550 Swift tests and 279 server tests pass. The
+Shipped to TestFlight on a testnet build. 553 Swift tests and 283 server tests pass. The
 site, the alerts pipeline, the history indexer and the eleven functions are deployed.
 
 The only recorded live fill so far is on testnet: a 0.06518 BTC long on 15 September 2026,

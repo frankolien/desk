@@ -145,6 +145,19 @@ Positions tab.
 The confirm is **Trade in Desk**: on iPhone it opens the App Store listing, on desktop a
 QR to it. Nothing on the web can move money.
 
+### Gasless sale on another chain
+
+`GET /api/relay-quote?view=sell&user=…&chainIndex=…&tokenAddress=…&amount=…` quotes a token on
+Ethereum, Base, BNB, Arbitrum and the rest sold for AUSD on Monad, with Calibur's gas overhead
+so Relay prices the origin gas into the fee it takes from the proceeds. The answer carries
+Relay's two calls, an approval on the token to Relay's router for exactly the amount and the
+deposit on that router, and the wallet's state on that chain: whether it already runs Calibur,
+its transaction count for the EIP-7702 authorization, and Calibur's sequence for the batch.
+The app checks the calls against the same rule, signs the authorization and Calibur's typed
+batch with the wallet key, and `POST …?view=execute` encodes Calibur's `execute` and hands it to
+Relay under the server's key; `relay-status` follows the request to the fill. `view=balance`
+reads a token balance on that chain. Nothing on the origin chain needs the wallet's gas.
+
 ### Token ticket
 
 A token page's ticket trades from the connected wallet. On Monad it swaps AUSD or MON for the
