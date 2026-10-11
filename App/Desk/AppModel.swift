@@ -535,6 +535,44 @@ final class AppModel {
         await refreshMainnetMON()
     }
 
+    /// `buy` paid in AUSD: the approval of exactly the typed AUSD to Relay's depository and
+    /// the deposit are simulated together, then signed in one hold of the key; Relay fills on
+    /// the other chain from there. What landed in AUSD terms is read off the wallet afterwards.
+    func buyWithAUSD(_ deposit: RelayTokenDeposit, progress: @MainActor @escaping (SwapStep) -> Void) async throws {
+        guard network.holdsRealFunds, let address else { throw SwapFailure.wrongNetwork }
+        progress(.checking)
+        let rpc = MonadRPC(configuration: try network.rpc())
+        let allowance = ABIMoney.decode(try await rpc.callContract(
+            to: deposit.token, data: try Calldata.allowance(owner: address, spender: deposit.to)))
+        let approval = try Calldata.approve(spender: deposit.to, amount: deposit.amount)
+        let needsApproval = allowance < deposit.amount
+        var calls: [SimulatedCall] = []
+        if needsApproval { calls.append(SimulatedCall(from: address, to: deposit.token, data: approval)) }
+        calls.append(SimulatedCall(from: address, to: deposit.to, data: deposit.data))
+        let simulated = try await rpc.simulate(calls)
+        guard simulated.allSatisfy(\.succeeded) else { throw SwapFailure.routeReverts }
+
+        let sender: TransactionSender
+        if let mainnetSender {
+            sender = mainnetSender
+        } else {
+            sender = TransactionSender(rpc: rpc)
+            mainnetSender = sender
+        }
+        progress(.signing)
+        try await passkey.withKeys { wallet, _ in
+            if needsApproval {
+                await MainActor.run { progress(.approving) }
+                let approved = try await sender.send(to: deposit.token, data: approval, from: wallet)
+                _ = try await sender.wait(for: approved)
+            }
+            await MainActor.run { progress(.sending) }
+            let sent = try await sender.send(to: deposit.to, data: deposit.data, from: wallet)
+            _ = try await sender.wait(for: sent)
+        }
+        await refreshUntilChanged()
+    }
+
     static let gasReserve = NativeAmount(decimalText: "0.5") ?? .zero
 
     /// Perpl's `min_account_open_amount`: 100 AUSD on testnet, 10 on mainnet.

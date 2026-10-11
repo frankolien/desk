@@ -1590,8 +1590,8 @@ private struct SpotBuyTicket: View {
     /// Covers `depositNative`'s gas, about 38,000 at mainnet's fee, several times over.
     private static let gasReserve = NativeAmount(decimalText: "0.01")!
 
-    /// Only a Monad token can be paid for in AUSD; elsewhere Relay takes MON.
-    private var paysAUSD: Bool { token.isOnMonad && pays == .ausd }
+    /// AUSD on Monad pays for a token anywhere: through 0x on Monad, through Relay elsewhere.
+    private var paysAUSD: Bool { pays == .ausd }
     private var typed: NativeAmount? { NativeAmount(decimalText: amount).flatMap { $0.isZero ? nil : $0 } }
     private var typedAUSD: Money? { Money(text: amount).flatMap { $0.isZero ? nil : $0 } }
     private var hasAmount: Bool { paysAUSD ? typedAUSD != nil : typed != nil }
@@ -1666,7 +1666,7 @@ private struct SpotBuyTicket: View {
             HStack {
                 Text("YOU PAY").font(.system(size: 10, weight: .heavy, design: .rounded)).tracking(1.2).foregroundStyle(.secondary)
                 Spacer()
-                if token.isOnMonad {
+                if isBuyable {
                     Picker("Pay with", selection: $pays) {
                         ForEach(SpotCurrency.allCases) { Text($0.rawValue).tag($0) }
                     }
@@ -1740,7 +1740,9 @@ private struct SpotBuyTicket: View {
     private var progress: some View {
         VStack(alignment: .leading, spacing: 12) {
             step("Signed with Face ID", state: purchase.phase.stepState(0))
-            step(paysAUSD ? "AUSD approved and swapped through 0x" : token.isOnMonad ? "Swapped through 0x on Monad" : "MON deposited on Monad · not filled yet", state: purchase.phase.stepState(1))
+            step(token.isOnMonad
+                ? (paysAUSD ? "AUSD approved and swapped through 0x" : "Swapped through 0x on Monad")
+                : "\(paysAUSD ? "AUSD" : "MON") deposited on Monad · not filled yet", state: purchase.phase.stepState(1))
             step(token.isOnMonad ? "\(token.symbol) in your wallet" : "Filled on \(token.displayChainName)", state: purchase.phase.stepState(2))
             switch purchase.phase {
             case .filled:
@@ -2422,6 +2424,7 @@ private final class SpotPurchaseModel: ObservableObject {
                 URLQueryItem(name: "chainIndex", value: token.chainIndex),
                 URLQueryItem(name: "tokenAddress", value: token.contract),
                 URLQueryItem(name: "amount", value: amount),
+                URLQueryItem(name: "pay", value: pays == .ausd ? "AUSD" : "MON"),
             ]
         do {
             let (data, response) = try await URLSession.shared.data(from: components.url!)
@@ -2449,9 +2452,13 @@ private final class SpotPurchaseModel: ObservableObject {
             await quote(token: token, amount: amount, user: wallet, pays: pays, debounce: false)
         }
         guard let quoted else { return }
-        if token.isOnMonad, pays == .ausd {
+        if pays == .ausd {
             guard let typed = Money(text: amount), !typed.isZero else { return }
-            await purchase(token: token, quoted: quoted, typed: typed, wallet: wallet, model: model)
+            if token.isOnMonad {
+                await purchase(token: token, quoted: quoted, typed: typed, wallet: wallet, model: model)
+            } else {
+                await deposit(token: token, quoted: quoted, typed: typed, wallet: wallet, model: model)
+            }
             return
         }
         guard let typed = NativeAmount(decimalText: amount), !typed.isZero else { return }
@@ -2537,6 +2544,53 @@ private final class SpotPurchaseModel: ObservableObject {
         }
         phase = .filled
         remember(token, quoted, wallet: wallet)
+    }
+
+    /// A token elsewhere paid in AUSD: the approval and Relay's deposit on Monad, checked
+    /// against the quote before Face ID, then Relay's fill on the other chain to follow.
+    private func deposit(token: TrendingSpotToken, quoted: RelayQuote, typed: Money, wallet: EthereumAddress, model: AppModel) async {
+        guard let requestId = quoted.requestId else {
+            phase = .failed("This quote did not pass Desk's safety check, so nothing was signed.")
+            return
+        }
+        let deposit: RelayTokenDeposit
+        do {
+            deposit = try RelayTokenDeposit(
+                chainID: quoted.transaction.chainId, to: quoted.transaction.to,
+                data: quoted.transaction.data, value: quoted.transaction.value,
+                wallet: wallet, amount: typed)
+        } catch {
+            phase = .failed("This quote did not pass Desk's safety check, so nothing was signed.")
+            return
+        }
+        self.requestId = requestId
+        phase = .signing
+        do {
+            try await model.buyWithAUSD(deposit) { _ in }
+        } catch PasskeyFailure.cancelledByUser {
+            phase = .idle
+            return
+        } catch let failure as PasskeyFailure {
+            phase = .failed(failure.sentence)
+            return
+        } catch AppModel.SwapFailure.routeReverts {
+            phase = .failed("This deposit reverts right now. Nothing was signed.")
+            return
+        } catch TransactionSender.Failure.reverted {
+            phase = .failed("The deposit was rejected on Monad. Only gas was spent.")
+            return
+        } catch TransactionSender.Failure.notMinedInTime {
+            phase = .filling
+            await track(requestId)
+            remember(token, quoted, wallet: wallet, paidUSD: Double(typed.text))
+            return
+        } catch {
+            phase = .failed("The deposit could not be sent. No AUSD was taken.")
+            return
+        }
+        phase = .filling
+        await track(requestId)
+        remember(token, quoted, wallet: wallet, paidUSD: Double(typed.text))
     }
 
     /// A Monad token paid in AUSD: the approval and the swap, checked against the quote before
