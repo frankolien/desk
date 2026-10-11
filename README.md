@@ -46,8 +46,9 @@ Monad* and Perpl's *Best Use of Perpl's API*. Swift 6, SwiftUI, iOS 18.4+, iPhon
   Activity with a working pause in the Dynamic Island; a Control Center toggle; Siri.
 - **Share the result** — a position card over your own photo, with a code that opens Desk.
 - **Trade tokens too** — Trending coins on Search, across Monad and the EVM chains Relay
-  reaches, bought with MON from the same key; token pages with holders, trades, who got in
-  first, and a risk card. EVM only: Solana is not offered anywhere.
+  reaches, bought with AUSD or MON from the same key and sold back for either; token pages
+  with holders, trades, who got in first, and a risk card. EVM only: Solana is not offered
+  anywhere.
 - **MON to AUSD and back** — the dollars for the desk from spare MON, and MON for gas
   and tokens from AUSD, in one sheet with a switch; checked on Monad before Face ID signs,
   approving at most the amount typed.
@@ -59,9 +60,10 @@ Monad* and Perpl's *Best Use of Perpl's API*. Swift 6, SwiftUI, iOS 18.4+, iPhon
   with the same passkey, derives the same keys in the tab, shows the live book and your
   positions beside the chart, and places and closes orders through a relay that forwards
   your signed requests and cannot sign. Locked when you leave; nothing is stored.
-- **Buy tokens from the browser** — a token page's ticket swaps MON for any Monad token
-  through 0x from the passkey or a browser wallet, and buys tokens on other chains for MON
-  through Relay; a risk score out of ten with the launch grid sits beside it.
+- **Buy tokens from the browser** — a token page's ticket swaps AUSD or MON for any Monad
+  token through 0x from the passkey or a browser wallet, sells for either, and buys tokens
+  on other chains for MON through Relay; a risk score out of ten with the launch grid sits
+  beside it.
 - **Follow and hear it in the browser too** — Follow a trader anywhere on the web app and
   turn on alerts: the same scan that pushes to the phone pushes to the browser, tab closed
   or not, through its own push service.
@@ -134,7 +136,7 @@ in the app can reach them, by construction: the app has no server credential to 
 
 ## Status
 
-Shipped to TestFlight on a testnet build. 542 Swift tests and 276 server tests pass. The
+Shipped to TestFlight on a testnet build. 550 Swift tests and 279 server tests pass. The
 site, the alerts pipeline, the history indexer and the eleven functions are deployed.
 
 The only recorded live fill so far is on testnet: a 0.06518 BTC long on 15 September 2026,

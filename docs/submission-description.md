@@ -22,7 +22,7 @@ What you can do:
 - Follow traders who are actually winning. The leaderboard is read off the Perpl exchange contract; trade history and scores are indexed from the chain's own position events through Envio HyperSync. Each trader is scored out of 100 on win rate, profit factor and drawdown, weighted by the money actually at risk, so dust scalpers do not outrank real traders.
 - Copy them, or fade them: shadow or live, fixed or conviction sizing, a leverage cap, price protection, stops and take profits placed on Perpl itself, a daily loss limit, per-market exposure caps and baskets of the leaderboard's best. Shadow fills at the real mainnet mark with real fees in the arithmetic and sends nothing, so a strategy is proven before money moves. Every copy records time to fill and slippage.
 - Hear it the moment they trade. Push alerts with Copy Trade, View Trader and Mute on the notification; Copy Trade opens Desk on a filled-in ticket. A Live Activity in the Dynamic Island, widgets, a Control Center toggle and Siri phrases.
-- Trade tokens too, bought with MON, with token pages that show holders, the live tape and who got in first. Tap a buyer and follow the wallet: Desk tells you when it swaps again, over a size you choose, and about every move it makes on Perpl. EVM only.
+- Trade tokens too, bought with AUSD or MON and sold back for either, with token pages that show holders, the live tape and who got in first. Tap a buyer and follow the wallet: Desk tells you when it swaps again, over a size you choose, and about every move it makes on Perpl. EVM only.
 - Swap both ways: MON for AUSD to fund the desk, AUSD back to MON when a token buy needs gas, checked on Monad before Face ID signs and approving at most the amount typed.
 - Read the market: news that mentions a market opens as a page inside Desk, and each market has a chat room.
 - Take the money out with a receipt for every step on Monad's explorer.
@@ -39,7 +39,7 @@ WHAT MAKES IT USEFUL
 
 HOW IT IS BUILT
 
-A SwiftUI app and a local Swift package with seven targets whose boundaries carry meaning: the money arithmetic has no network by construction, chain, auth, Perpl and the copy engine are separate. The server is eleven Vercel functions and one Railway worker: market data, swaps, trader indexing, alerts to phones through Apple and to browsers through their push services. 542 Swift tests and 265 Node tests. Secrets exist only in the server's environment; nothing sensitive ships in the app. The repository is public; the TestFlight build is open.
+A SwiftUI app and a local Swift package with seven targets whose boundaries carry meaning: the money arithmetic has no network by construction, chain, auth, Perpl and the copy engine are separate. The server is eleven Vercel functions and one Railway worker: market data, swaps, trader indexing, alerts to phones through Apple and to browsers through their push services. 550 Swift tests and 279 Node tests. Secrets exist only in the server's environment; nothing sensitive ships in the app. The repository is public; the TestFlight build is open.
 
 Built for Monad Metropolis for Agora's Best Mobile Trading App on Monad, Perpl's Best Use of Perpl's API, and Mera, with passkeys as the only credential.
 
@@ -112,7 +112,7 @@ Perpl is also the data. The leaderboard is read off the exchange contract. Trade
 
 AROUND IT
 
-Tokens on Monad and other EVM chains, bought with MON, with live tapes, holders and wallet profiles you can follow with alert thresholds. Home and Lock Screen widgets, a Live Activity in the Dynamic Island with a working pause, a Control Center toggle and Siri phrases. Swift 6 and SwiftUI on iOS 18.4+, Apple's own controls, Liquid Glass on iOS 26. 542 Swift tests and 265 server tests. Everything in the demo video happens on Monad mainnet with real money.
+Tokens on Monad and other EVM chains, bought with AUSD or MON, with live tapes, holders and wallet profiles you can follow with alert thresholds. Home and Lock Screen widgets, a Live Activity in the Dynamic Island with a working pause, a Control Center toggle and Siri phrases. Swift 6 and SwiftUI on iOS 18.4+, Apple's own controls, Liquid Glass on iOS 26. 550 Swift tests and 279 server tests. Everything in the demo video happens on Monad mainnet with real money.
 
 ---
 
@@ -138,7 +138,7 @@ https://trydesk.trade/app needs no account to browse: markets with the live orde
 
 CODE AND TESTS
 
-Repository: https://github.com/frankolien/desk. Swift tests: swift test --package-path DeskKit (542 tests, no simulator needed). Server tests: cd web && node --test (265 tests). Build the app with xcodegen generate && open Desk.xcodeproj, scheme Desk. The public API is listed at https://trydesk.trade/api/v1.
+Repository: https://github.com/frankolien/desk. Swift tests: swift test --package-path DeskKit (550 tests, no simulator needed). Server tests: cd web && node --test (279 tests). Build the app with xcodegen generate && open Desk.xcodeproj, scheme Desk. The public API is listed at https://trydesk.trade/api/v1.
 
 The demo video was recorded on Monad mainnet with real money; the explorer links for its trades are in docs/submission.md in the repository.
 
@@ -172,7 +172,7 @@ The same wallet key signs plain messages, not transactions, to prove the address
 
 THE SAME ACCOUNT IN A BROWSER
 
-Because the passkey lives in iCloud Keychain, trydesk.trade/app signs in with the same passkey through WebAuthn's PRF extension, against the app's relying party, which names trydesk.trade as a related origin. The tab derives the same wallet and trading key, shows the same address, positions and AUSD, enrols its own trading-key index with Perpl so each surface can be revoked separately, and wipes the keys on lock, idle or close. The wallet key signs in the tab too: a token page buys any Monad token for MON through 0x, and sells it back, with the same scoped-closure rule as the phone and an edge check that refuses any transaction that does not match the quote. One credential, two surfaces, nothing synced through us.
+Because the passkey lives in iCloud Keychain, trydesk.trade/app signs in with the same passkey through WebAuthn's PRF extension, against the app's relying party, which names trydesk.trade as a related origin. The tab derives the same wallet and trading key, shows the same address, positions and AUSD, enrols its own trading-key index with Perpl so each surface can be revoked separately, and wipes the keys on lock, idle or close. The wallet key signs in the tab too: a token page buys any Monad token for AUSD or MON through 0x, and sells it back for either, with the same scoped-closure rule as the phone and an edge check that refuses any transaction that does not match the quote. One credential, two surfaces, nothing synced through us.
 
 WHAT THE USER IS TOLD
 

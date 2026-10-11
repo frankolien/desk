@@ -51,7 +51,7 @@ have one to hold up.
 > this the right moment.
 >
 > Everything in the demo is on mainnet with real money: deposit, trade, close, withdraw. It is on
-> TestFlight today, with 542 Swift tests and 276 server tests behind it. That's Desk."
+> TestFlight today, with 550 Swift tests and 279 server tests behind it. That's Desk."
 
 ## Rules
 
