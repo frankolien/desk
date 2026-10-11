@@ -237,8 +237,10 @@ async function execute(fetchImpl, req, res) {
     const response = await fetchImpl(`${RELAY}/execute`, { method: "POST", headers: relayHeaders(), body: JSON.stringify(payload) });
     const out = await response.json().catch(() => ({}));
     if (!response.ok) {
-      console.error("relay execute refused", response.status, String(out?.message ?? out?.error ?? "").slice(0, 200));
-      return res.status(422).json({ error: "Relay could not take this sale right now.", reason: "refused" });
+      // Relay's own words, for the ticket's failure line and the log; never the payload.
+      const detail = String(out?.message ?? out?.error ?? "").slice(0, 200);
+      console.error("relay execute refused", response.status, detail);
+      return res.status(422).json({ error: "Relay could not take this sale right now.", reason: "refused", detail });
     }
     return res.status(200).json({ requestId: out.requestId ?? requestId });
   } catch {

@@ -34,7 +34,8 @@ enum RelayExecute {
         guard let (data, response) = try? await URLSession.shared.data(for: request) else { throw Failure.unreachable }
         let body = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
         guard (response as? HTTPURLResponse)?.statusCode == 200, let requestID = body["requestId"] as? String else {
-            throw Failure.refused(body["error"] as? String ?? "Relay could not take this sale right now.")
+            let error = body["error"] as? String ?? "Relay could not take this sale right now."
+            throw Failure.refused((body["detail"] as? String).map { "\(error) Relay says: \($0)." } ?? error)
         }
         return requestID
     }
