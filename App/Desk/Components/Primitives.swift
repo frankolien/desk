@@ -1,4 +1,5 @@
 import DeskUI
+import SafariServices
 import SwiftUI
 import UIKit
 
@@ -220,12 +221,68 @@ struct AmountKeypad: View {
 struct FittedSheet: ViewModifier {
     @State private var height: CGFloat = 0
 
+    /// Below this the sheet hugs its content; from here on the sheet stays this tall and the
+    /// content is given that height to scroll in, so a receipt never pushes a button off screen.
+    /// No `.sheet` may sit in this chain, shown or not: on iOS 26 one stops the sheet from
+    /// ever taking its height; content presents through `TopPresenter` instead.
+    private var cap: CGFloat { UIScreen.main.bounds.height - 110 }
+
     func body(content: Content) -> some View {
         content
-            .fixedSize(horizontal: false, vertical: true)
+            .fixedSize(horizontal: false, vertical: height < cap)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
             .frame(maxHeight: .infinity, alignment: .top)
-            .presentationDetents([.height(max(height, 1))])
+            .presentationDetents([.height(min(max(height, 1), cap))])
+    }
+}
+
+/// Presents over whatever is on top, through UIKit: the way out for content inside a fitted
+/// sheet, where a SwiftUI `.sheet` modifier would break the sheet it sits in.
+@MainActor
+enum TopPresenter {
+    private static var top: UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let window = scenes.flatMap(\.windows).first { $0.isKeyWindow } ?? scenes.flatMap(\.windows).first
+        var controller = window?.rootViewController
+        while let presented = controller?.presentedViewController { controller = presented }
+        return controller
+    }
+
+    /// A SwiftUI view as a page sheet, medium or large; `onDismiss` runs however it closes.
+    static func present<Content: View>(_ view: Content, onDismiss: @escaping () -> Void = {}) {
+        let host = DismissReportingHost(rootView: AnyView(view.preferredColorScheme(.dark)), onDismiss: onDismiss)
+        host.view.backgroundColor = .black
+        host.sheetPresentationController?.detents = [.medium(), .large()]
+        host.sheetPresentationController?.prefersGrabberVisible = true
+        top?.present(host, animated: true)
+    }
+
+    static func present(url: URL) {
+        let configuration = SFSafariViewController.Configuration()
+        configuration.barCollapsingEnabled = true
+        let controller = SFSafariViewController(url: url, configuration: configuration)
+        controller.dismissButtonStyle = .done
+        controller.preferredControlTintColor = .white
+        top?.present(controller, animated: true)
+    }
+
+    /// Closes the sheet `present` put up, if it is the top one.
+    static func dismiss() {
+        guard let host = top as? DismissReportingHost else { return }
+        host.dismiss(animated: true)
+    }
+
+    private final class DismissReportingHost: UIHostingController<AnyView> {
+        let onDismiss: () -> Void
+        init(rootView: AnyView, onDismiss: @escaping () -> Void) {
+            self.onDismiss = onDismiss
+            super.init(rootView: rootView)
+        }
+        @available(*, unavailable) required init?(coder: NSCoder) { nil }
+        override func viewDidDisappear(_ animated: Bool) {
+            super.viewDidDisappear(animated)
+            if isBeingDismissed || presentingViewController == nil { onDismiss() }
+        }
     }
 }
 

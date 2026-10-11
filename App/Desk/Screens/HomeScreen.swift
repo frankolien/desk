@@ -202,6 +202,10 @@ struct HomeScreen: View {
                 try? await Task.sleep(for: .seconds(2))
                 selectedPosition = model.openPositions.first
             }
+            if arguments.contains("-open-holding") {
+                while spot.holdings.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
+                openHolding = spot.holdings.first
+            }
         }
         #endif
         .toolbar(.hidden, for: .navigationBar)

@@ -1583,8 +1583,6 @@ private struct SpotBuyTicket: View {
     @StateObject private var purchase = SpotPurchaseModel()
     @State private var amount = ""
     @State private var copiedAddress = false
-    @State private var showsSwap = false
-    @State private var swapDirection: SwapDirection = .toMON
     @State private var pays: SpotCurrency = .ausd
 
     /// Covers `depositNative`'s gas, about 38,000 at mainnet's fee, several times over.
@@ -1638,9 +1636,6 @@ private struct SpotBuyTicket: View {
         }
         .onChange(of: pays) { _, _ in amount = "" }
         .interactiveDismissDisabled(purchase.phase.isActive)
-        .sheet(isPresented: $showsSwap, onDismiss: { Task { await model.refreshMainnetMON(); await model.refreshBalances() } }) {
-            SwapSheet(model: model, direction: swapDirection) { showsSwap = false }
-        }
     }
 
     private var header: some View {
@@ -1832,10 +1827,13 @@ private struct SpotBuyTicket: View {
         }
     }
 
+    /// Presented through UIKit, never a `.sheet` here: one inside a fitted sheet stops the
+    /// ticket's own sheet from taking its height.
     private func swapButton(_ title: String, direction: SwapDirection) -> some View {
         Button {
-            swapDirection = direction
-            showsSwap = true
+            TopPresenter.present(SwapSheet(model: model, direction: direction) { TopPresenter.dismiss() }) {
+                Task { await model.refreshMainnetMON(); await model.refreshBalances() }
+            }
         } label: {
             Label(title, systemImage: "arrow.triangle.2.circlepath")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
@@ -1864,7 +1862,6 @@ struct TradeReceiptCard: View {
     let rows: [(String, String)]
     let hash: String?
     let link: URL?
-    @State private var showsLink = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1887,7 +1884,7 @@ struct TradeReceiptCard: View {
             }
             if let link {
                 Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
-                Button { showsLink = true } label: {
+                Button { TopPresenter.present(url: link) } label: {
                     HStack(spacing: 12) {
                         Text(hash == nil ? "Fill on Relay" : "Transaction")
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
@@ -1907,7 +1904,6 @@ struct TradeReceiptCard: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .sheet(isPresented: $showsLink) { InAppSafari(url: link).ignoresSafeArea() }
             }
         }
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -4070,6 +4066,14 @@ private struct TokenPositionContent: View {
         .task { await feed.run(period: range) }
         .task(id: model.address) { await holdings.run(for: model.address) }
         .onChange(of: range) { _, newValue in feed.changePeriod(newValue) }
+        #if DEBUG
+        .task {
+            let arguments = ProcessInfo.processInfo.arguments
+            guard let side = ["Buy", "Sell"].first(where: { arguments.contains("-open-holding-\($0.lowercased())") }) else { return }
+            try? await Task.sleep(for: .seconds(1))
+            tradeSide = side
+        }
+        #endif
         .sheet(isPresented: Binding(get: { tradeSide != nil }, set: { if !$0 { tradeSide = nil } }),
                onDismiss: { Task { await holdings.refresh() } }) {
             SpotTradeTicket(token: token, side: tradeSide ?? "Buy", model: model)
