@@ -101,8 +101,24 @@ test("any Monad token has a side against MON, once its decimals are known", () =
   assert.equal(sell.buys, "MON");
   assert.equal(sideFor("MON", CHOG, null), null);
   assert.equal(sideFor("MON", NATIVE, 18), null);
-  assert.equal(sideFor("AUSD", CHOG, 18), null);
+  assert.equal(sideFor("USDC", CHOG, 18), null);
   assert.equal(sideFor("MON", "nope", 18), null);
+});
+
+test("a token can be bought with AUSD: the typed AUSD is approved exactly, nothing rides along", () => {
+  const side = sideFor("AUSD", CHOG, 18, "CHOG");
+  assert.deepEqual(side, { sellToken: AUSD, buyToken: CHOG.toLowerCase(), sellDecimals: 6, buyDecimals: 18, sells: "AUSD", buys: "CHOG" });
+  const quote = zeroXBack({ buyToken: CHOG, buyAmount: "4200000000000000000000", minBuyAmount: "4158000000000000000000" });
+  const tx = swapTransaction(quote, RAW_AUSD, side);
+  assert.equal(tx?.value, "0");
+  assert.equal(swapTransaction(zeroXBack({ buyToken: CHOG }, { value: "1" }), RAW_AUSD, side), null);
+  assert.equal(swapTransaction(zeroXBack({ buyToken: NATIVE }), RAW_AUSD, side), null);
+  const out = summarizeSwap(quote, tx, RAW_AUSD, side);
+  assert.deepEqual(out.pay, { amount: "12.5", raw: RAW_AUSD, symbol: "AUSD" });
+  assert.equal(out.receive.amount, "4200");
+  assert.equal(out.receive.symbol, "CHOG");
+  assert.deepEqual(out.approval, { token: AUSD, spender: ALLOWANCE_HOLDER, amount: RAW_AUSD });
+  assert.equal(sideFor("AUSD", AUSD, 6, "AUSD"), null);
 });
 
 test("buying a token with MON is checked and summarized like AUSD", () => {

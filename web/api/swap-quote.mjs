@@ -149,13 +149,15 @@ export const SWAP_SIDES = {
   AUSD: { sellToken: AUSD, buyToken: NATIVE_MON, sellDecimals: 6, buyDecimals: 18, sells: "AUSD", buys: "MON" },
 };
 
-/// Any Monad token against MON, for the market pages: `sell` is MON to buy the token, or TOKEN
-/// to sell it. The token's decimals must already be confirmed on-chain.
+/// Any Monad token against MON or AUSD, for the market pages: `sell` is MON or AUSD to buy the
+/// token, or TOKEN to sell it for MON or, with `buy`, AUSD. The token's decimals must already
+/// be confirmed on-chain.
 export function sideFor(sell, token, tokenDecimals, symbol = "TOKEN", buy = "MON") {
   if (!/^0x[a-fA-F0-9]{40}$/.test(String(token ?? "")) || !Number.isInteger(tokenDecimals)) return null;
   const address = String(token).toLowerCase();
   if (address === NATIVE_MON || address === AUSD) return null;
   if (sell === "MON") return { sellToken: NATIVE_MON, buyToken: address, sellDecimals: 18, buyDecimals: tokenDecimals, sells: "MON", buys: symbol };
+  if (sell === "AUSD") return { sellToken: AUSD, buyToken: address, sellDecimals: 6, buyDecimals: tokenDecimals, sells: "AUSD", buys: symbol };
   if (sell === "TOKEN" && buy === "AUSD") return { sellToken: address, buyToken: AUSD, sellDecimals: tokenDecimals, buyDecimals: 6, sells: symbol, buys: "AUSD" };
   if (sell === "TOKEN") return { sellToken: address, buyToken: NATIVE_MON, sellDecimals: tokenDecimals, buyDecimals: 18, sells: symbol, buys: "MON" };
   return null;
