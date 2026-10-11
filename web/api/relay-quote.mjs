@@ -60,16 +60,33 @@ export function depositTransaction(quote, user, wei) {
   return ok ? { chainId: MONAD, to: tx.to, data: tx.data, value: String(tx.value) } : null;
 }
 
+/// The same deposit paid in AUSD: Relay's approval on AUSD to the depository for exactly the
+/// amount, then `depositErc20(depositor, AUSD, amount, id)` on the depository carrying nothing.
+const DEPOSIT_ERC20 = "0xe8017952";
+export function depositWithAUSD(quote, user, raw) {
+  const items = (quote?.steps ?? []).flatMap((step) => (step.kind === "transaction" ? step.items ?? [] : [{ kind: step.kind }]));
+  if (items.length !== 2 || items.some((item) => item.kind)) return null;
+  const [approve, deposit] = items.map((item) => ({ to: String(item.data?.to ?? "").toLowerCase(), data: String(item.data?.data ?? "").toLowerCase(), value: String(item.data?.value ?? "0"), chainId: Number(item.data?.chainId) }));
+  const approval = APPROVE + word(DEPOSITORY) + word(BigInt(raw).toString(16));
+  const ok = approve.chainId === MONAD && deposit.chainId === MONAD && approve.value === "0" && deposit.value === "0"
+    && approve.to === AUSD && approve.data === approval
+    && deposit.to === DEPOSITORY && deposit.data.length === 2 + 8 + 64 * 4 && deposit.data.startsWith(DEPOSIT_ERC20)
+    && deposit.data.slice(10, 74) === word(user) && deposit.data.slice(74, 138) === word(AUSD) && deposit.data.slice(138, 202) === word(BigInt(raw).toString(16));
+  if (!ok) return null;
+  const tx = items[1].data;
+  return { transaction: { chainId: MONAD, to: tx.to, data: tx.data, value: "0" }, approval: { token: AUSD, spender: DEPOSITORY, amount: raw } };
+}
+
 /// `depositTransaction` checks only what leaves the wallet; nothing binds what arrives but
 /// Relay's request id, so a quote paying a different token or chain is refused here.
-export function matchesRoute(quote, chainIndex, token) {
+export function matchesRoute(quote, chainIndex, token, paying = NATIVE) {
   const out = quote?.details?.currencyOut?.currency;
   const into = quote?.details?.currencyIn?.currency;
   if (!out || !into) return false;
   if (Number(out.chainId) !== Number(chainIndex)) return false;
   if (String(out.address ?? "").toLowerCase() !== String(token).toLowerCase()) return false;
   if (Number(into.chainId) !== MONAD) return false;
-  return String(into.address ?? "").toLowerCase() === NATIVE.toLowerCase();
+  return String(into.address ?? "").toLowerCase() === paying.toLowerCase();
 }
 
 /// Relay's two calls for a sale, and nothing else: an approval on the sold token, to the
@@ -248,7 +265,7 @@ async function execute(fetchImpl, req, res) {
   }
 }
 
-export function summarize(quote, transaction) {
+export function summarize(quote, transaction, paid = null) {
   const details = quote.details ?? {};
   const fees = quote.fees ?? {};
   const usd = (value) => (value == null || Number.isNaN(Number(value)) ? null : String(value));
@@ -258,7 +275,7 @@ export function summarize(quote, transaction) {
     .reduce((sum, value) => sum + value, 0);
   return {
     requestId: quote.steps[0].requestId,
-    pay: { amount: details.currencyIn?.amountFormatted, usd: usd(details.currencyIn?.amountUsd) },
+    pay: { amount: details.currencyIn?.amountFormatted, usd: usd(details.currencyIn?.amountUsd), symbol: paid ? "AUSD" : "MON", ...(paid ? { raw: paid } : {}) },
     receive: {
       amount: details.currencyOut?.amountFormatted,
       minimum: formatUnits(details.currencyOut?.minimumAmount, details.currencyOut?.currency?.decimals),
@@ -268,7 +285,8 @@ export function summarize(quote, transaction) {
     feeUsd: String(Math.round(feeUsd * 100) / 100),
     impactPercent: details.totalImpact?.percent ?? null,
     seconds: details.timeEstimate ?? null,
-    transaction,
+    transaction: transaction.transaction ?? transaction,
+    ...(transaction.approval ? { approval: transaction.approval } : {}),
   };
 }
 
@@ -327,7 +345,9 @@ export function createHandler(fetchImpl = fetch) {
     const user = String(req.query.user || "");
     const chainIndex = String(req.query.chainIndex || "");
     const token = String(req.query.tokenAddress || "");
-    const wei = baseUnits(String(req.query.amount || ""), 18);
+    // Paid in MON by default, the chain's own coin; `pay=AUSD` pays from the wallet's dollars.
+    const paysAUSD = String(req.query.pay || "MON").toUpperCase() === "AUSD";
+    const wei = baseUnits(String(req.query.amount || ""), paysAUSD ? 6 : 18);
 
     if (!evmAddress(user) || !evmAddress(token)) {
       return res.status(400).json({ error: "Valid quote parameters required", reason: "invalid" });
@@ -350,7 +370,7 @@ export function createHandler(fetchImpl = fetch) {
         },
         body: JSON.stringify({
           user, recipient: user,
-          originChainId: MONAD, originCurrency: NATIVE,
+          originChainId: MONAD, originCurrency: paysAUSD ? AUSD : NATIVE,
           destinationChainId: Number(chainIndex), destinationCurrency: token,
           amount: wei, tradeType: "EXACT_INPUT",
         }),
@@ -364,11 +384,11 @@ export function createHandler(fetchImpl = fetch) {
       return res.status(502).json({ error: "The quote service could not be reached.", reason: "unreachable" });
     }
 
-    const transaction = depositTransaction(quote, user, wei);
-    if (!transaction || !matchesRoute(quote, chainIndex, token)) {
+    const transaction = paysAUSD ? depositWithAUSD(quote, user, wei) : depositTransaction(quote, user, wei);
+    if (!transaction || !matchesRoute(quote, chainIndex, token, paysAUSD ? AUSD : NATIVE)) {
       return res.status(422).json({ error: "This route needs a transaction Desk does not sign.", reason: "unsupported-route" });
     }
-    return res.status(200).json(summarize(quote, transaction));
+    return res.status(200).json(summarize(quote, transaction, paysAUSD ? wei : null));
   };
 }
 

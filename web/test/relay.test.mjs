@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { isBuyable } from "../api/_chains.mjs";
-import { createHandler, depositTransaction, matchesRoute, phase } from "../api/relay-quote.mjs";
+import { createHandler, depositTransaction, depositWithAUSD, matchesRoute, phase } from "../api/relay-quote.mjs";
 
 const USER = "0x03508bb71268bba25ecacc8f620e01866650532c";
 const TOKEN = "0x532f27101965dd16442e59d40670faf5ebb142e4";
@@ -122,4 +122,49 @@ test("status folds Relay's words into four phases", async () => {
   assert.deepEqual(byPath.body, { phase: "filled", destinationTx: "0xbb" });
   const bad = await handler({ method: "GET", query: { view: "status", requestId: "0x12" } }, recorder());
   assert.equal(bad.status, 400);
+});
+
+const AUSD = "0x00000000efe302beaa2b3e6e1b18d08d69a9012a";
+const DEPOSITORY = "0x4cd00e387622c35bddb9b4c962c136462338bc31";
+const RAW_AUSD = "5000000";
+const APPROVE_AUSD = `0x095ea7b3${DEPOSITORY.slice(2).padStart(64, "0")}${"4c4b40".padStart(64, "0")}`;
+const DEPOSIT_AUSD = `0xe8017952${USER.slice(2).padStart(64, "0")}${AUSD.slice(2).padStart(64, "0")}${"4c4b40".padStart(64, "0")}${"ab".repeat(32)}`;
+
+function ausdQuote(items = null) {
+  const base = relayQuote();
+  const data = items ?? [
+    { chainId: 143, to: AUSD, data: APPROVE_AUSD, value: "0" },
+    { chainId: 143, to: DEPOSITORY, data: DEPOSIT_AUSD, value: "0" },
+  ];
+  return {
+    ...base,
+    steps: data.map((item, index) => ({ id: index ? "deposit" : "approve", kind: "transaction", requestId: `0x${"12".repeat(32)}`, items: [{ data: item }] })),
+    details: { ...base.details, currencyIn: { amountFormatted: "5.0", amountUsd: "5", currency: { chainId: 143, address: AUSD, symbol: "AUSD", decimals: 6 } } },
+  };
+}
+
+test("paid in AUSD, the deposit is the approval to the depository and depositErc20 for exactly that, crediting the user", () => {
+  const out = depositWithAUSD(ausdQuote(), USER, RAW_AUSD);
+  assert.deepEqual(out, {
+    transaction: { chainId: 143, to: DEPOSITORY, data: DEPOSIT_AUSD, value: "0" },
+    approval: { token: AUSD, spender: DEPOSITORY, amount: RAW_AUSD },
+  });
+  assert.equal(depositWithAUSD(ausdQuote(), USER, "5000001"), null);
+  assert.equal(depositWithAUSD(ausdQuote(), "0x1111111111111111111111111111111111111111", RAW_AUSD), null);
+  assert.equal(depositWithAUSD(ausdQuote([{ chainId: 143, to: DEPOSITORY, data: DEPOSIT_AUSD, value: "0" }]), USER, RAW_AUSD), null);
+  assert.equal(depositWithAUSD(ausdQuote([{ chainId: 143, to: AUSD, data: APPROVE_AUSD, value: "0" }, { chainId: 143, to: DEPOSITORY, data: DEPOSIT_AUSD, value: "1" }]), USER, RAW_AUSD), null);
+  assert.equal(depositWithAUSD(ausdQuote([{ chainId: 143, to: AUSD, data: APPROVE_AUSD, value: "0" }, { chainId: 143, to: "0x1111111111111111111111111111111111111111", data: DEPOSIT_AUSD, value: "0" }]), USER, RAW_AUSD), null);
+  assert.equal(matchesRoute(ausdQuote(), "8453", TOKEN, AUSD), true);
+  assert.equal(matchesRoute(ausdQuote(), "8453", TOKEN), false);
+});
+
+test("a buy paid in AUSD is summarised with the approval the app makes first", async () => {
+  const out = await quote(respond(200, ausdQuote()), { amount: "5", pay: "AUSD" });
+  assert.equal(out.status, 200);
+  assert.deepEqual(out.body.pay, { amount: "5.0", usd: "5", symbol: "AUSD", raw: RAW_AUSD });
+  assert.deepEqual(out.body.approval, { token: AUSD, spender: DEPOSITORY, amount: RAW_AUSD });
+  assert.equal(out.body.transaction.value, "0");
+  // The MON quote's shape is refused when AUSD was asked for, and the other way round.
+  assert.equal((await quote(respond(200, relayQuote()), { amount: "5", pay: "AUSD" })).status, 422);
+  assert.equal((await quote(respond(200, ausdQuote()), { amount: "5" })).status, 422);
 });
