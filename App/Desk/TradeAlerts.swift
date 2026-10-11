@@ -549,7 +549,7 @@ enum InstallSecret {
     }
 }
 
-final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+final class DeskAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUserNotificationCenterDelegate {
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
@@ -557,6 +557,12 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         UNUserNotificationCenter.current().delegate = self
         TradeAlerts.registerCategories()
         Task { await TradeAlerts.shared.resume() }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-ask-notifications") {
+            Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
+        }
+        Self.debugTap()
+        #endif
         return true
     }
 
@@ -584,24 +590,62 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         return await copier?.wake() == true ? .newData : .noData
     }
 
-    nonisolated func userNotificationCenter(
+    // Both delegate methods stay on the main actor: UIKit's completion handler, which Swift
+    // calls when they return, updates the app snapshot and asserts it is on the main thread.
+    // Marked nonisolated, they returned on a background thread and the app aborted on every tap.
+    func userNotificationCenter(
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
         await Self.noteFiredTarget(notification.request.content.userInfo)
         return [.banner, .list, .sound]
     }
 
-    nonisolated private static func noteFiredTarget(_ userInfo: [AnyHashable: Any]) async {
+    private static func noteFiredTarget(_ userInfo: [AnyHashable: Any]) async {
         guard let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "price",
               desk["kind"] as? String == "target", let market = desk["market"] as? String,
               let level = (desk["level"] as? NSNumber)?.doubleValue else { return }
         await MainActor.run { TradeAlerts.shared.targetFired(market: market, level: level) }
     }
 
-    nonisolated func userNotificationCenter(
+    func userNotificationCenter(
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
-        let userInfo = response.notification.request.content.userInfo
+        await Self.handleTap(userInfo: response.notification.request.content.userInfo, action: response.actionIdentifier)
+    }
+
+    #if DEBUG
+    /// `-tap-notification trade|summary|wallet|price` runs the tap handler at launch with the
+    /// payload the server sends for that alert, the way a cold-start tap would.
+    static func debugTap() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-tap-notification"), index + 1 < arguments.count else { return }
+        let payloads: [String: [String: Any]] = [
+            "trade": ["type": "trade", "event": "opened", "trader": "0x03508bb71268bba25ecacc8f620e01866650532c", "market": "BTC", "side": "long", "leverage": 5, "entry": "82100", "value": "500", "observedAt": 1791504000000],
+            "summary": ["type": "trade", "event": "summary", "trader": "0x95D2602d30DA1179fd13274839e60345857ca648"],
+            "wallet": ["type": "wallet", "wallet": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045", "token": "0x527d86b0820a72f7dfb937fe1da0c649019b7777", "symbol": "GOCHI", "chainIndex": "143"],
+            "price": ["type": "price", "kind": "target", "market": "BTC", "level": 82000.0, "direction": "up", "mark": 82010.5],
+        ]
+        guard let desk = payloads[arguments[index + 1]], let data = try? JSONSerialization.data(withJSONObject: desk) else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            // Re-read from JSON inside the task: a `[String: Any]` cannot cross into it.
+            guard let desk = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+            await handleTap(userInfo: ["desk": desk], action: UNNotificationDefaultActionIdentifier)
+            // The follow guards stop here on a phone that follows nobody; the screens a real tap
+            // reaches are opened anyway, so they get exercised too.
+            switch desk["type"] as? String {
+            case "wallet": TokenOpenRequest.shared.open(.init(chainIndex: "143", contract: desk["token"] as? String ?? "", symbol: desk["symbol"] as? String))
+            case "trade" where desk["event"] as? String == "summary": TradeAlerts.shared.openedTrader = desk["trader"] as? String
+            case "trade": TradeAlerts.shared.opened = TradeAlert(userInfo: ["desk": desk])
+            default: break
+            }
+        }
+    }
+    #endif
+
+    /// What a tap on a notification does, by the payload's type: opens the market, the token,
+    /// the profile, the trader or the trade itself.
+    static func handleTap(userInfo: [AnyHashable: Any], action: String) async {
         await Self.noteFiredTarget(userInfo)
         if let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "price",
            let market = desk["market"] as? String {
@@ -624,7 +668,6 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
             }
             return
         }
-        let action = response.actionIdentifier
         if let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "trade",
            desk["event"] as? String == "summary" {
             guard let trader = desk["trader"] as? String, !trader.isEmpty,
