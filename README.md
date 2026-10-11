@@ -63,7 +63,7 @@ Monad* and Perpl's *Best Use of Perpl's API*. Swift 6, SwiftUI, iOS 18.4+, iPhon
   your signed requests and cannot sign. Locked when you leave; nothing is stored.
 - **Buy tokens from the browser** — a token page's ticket swaps AUSD or MON for any Monad
   token through 0x from the passkey or a browser wallet, sells for either, and buys tokens
-  on other chains for MON through Relay; a risk score out of ten with the launch grid sits
+  on other chains for AUSD or MON through Relay; a risk score out of ten with the launch grid sits
   beside it.
 - **Follow and hear it in the browser too** — Follow a trader anywhere on the web app and
   turn on alerts: the same scan that pushes to the phone pushes to the browser, tab closed

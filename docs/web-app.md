@@ -165,7 +165,7 @@ token through 0x's allowance holder (`GET /api/swap-quote?view=swap&token=…&se
 with `buy=AUSD|MON` when selling), the route and the edge check the AUSD swap uses; a "Pay
 with" switch picks AUSD, the default, or MON, and "Receive" does the same when selling. Paying
 in AUSD, or selling a token, approves exactly the typed amount to the holder first; paying in
-MON approves nothing. On other chains it pays MON on Monad and Relay delivers the token
+MON approves nothing. On other chains it pays AUSD or MON on Monad and Relay delivers the token
 (`GET /api/relay-quote`), polling `/api/relay-status` to the fill, refund or failure; selling
 there is still the app's. The passkey wallet signs in the tab; a browser wallet is switched to
 Monad and asked to send. The amount is typed in USD: paid in AUSD it is the amount itself,

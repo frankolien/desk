@@ -341,7 +341,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
   let payWith = "AUSD";
   let receiveIn = "AUSD";
   let ausd = null;
-  const currency = () => (onMonad ? (side === "buy" ? payWith : receiveIn) : "MON");
+  const currency = () => (side === "buy" ? payWith : onMonad ? receiveIn : "MON");
   const inAUSD = () => currency() === "AUSD";
   const fmtSide = (part) => fmtAmount(Number(part.amount), part.symbol === "AUSD" ? 2 : 4);
 
@@ -372,7 +372,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
       monBalance(user).catch(() => null),
       onMonad ? tokenBalance(address, user).catch(() => null) : null,
       onMonad && decimals == null ? tokenDecimals(address).catch(() => null) : decimals,
-      onMonad ? tokenBalance(AUSD, user).catch(() => null) : null,
+      tokenBalance(AUSD, user).catch(() => null),
     ]);
     if (dead) return;
     balance = mon; held = tokens; ausd = dollars; if (Number.isInteger(d)) decimals = d;
@@ -396,11 +396,11 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
       try {
         const out = onMonad
           ? await api(`/api/swap-quote?view=swap&user=${user}&amount=${amount}&sell=${buying ? payWith : "TOKEN"}&buy=${receiveIn}&token=${address}&symbol=${encodeURIComponent(symbol)}`, { signal })
-          : await api(`/api/relay-quote?user=${user}&chainIndex=${chainIndex}&tokenAddress=${address}&amount=${amount}`, { signal });
+          : await api(`/api/relay-quote?user=${user}&chainIndex=${chainIndex}&tokenAddress=${address}&amount=${amount}&pay=${payWith}`, { signal });
         if (seq !== quoteSeq || dead) return null;
         quote = onMonad
           ? { pay: { amount: out.pay.amount, symbol: out.pay.symbol, wei: out.pay.wei ? BigInt(out.pay.wei) : 0n, raw: out.pay.raw ? BigInt(out.pay.raw) : null }, receive: { amount: out.receive.amount, minimum: out.receive.minimum, symbol: out.receive.symbol }, fee: `${fmtAmount(Number(out.feeMON), 4)} MON gas`, transaction: out.transaction, approval: out.approval ?? null, requestId: null }
-          : { pay: { amount: out.pay.amount, symbol: "MON", wei: units(out.pay.amount, 18), raw: null }, receive: { amount: out.receive.amount, minimum: out.receive.minimum, symbol }, fee: `$${out.feeUsd} fee`, transaction: out.transaction, approval: null, requestId: out.requestId };
+          : { pay: { amount: out.pay.amount, symbol: out.pay.symbol ?? "MON", wei: out.pay.raw ? 0n : units(out.pay.amount, 18), raw: out.pay.raw ? BigInt(out.pay.raw) : null }, receive: { amount: out.receive.amount, minimum: out.receive.minimum, symbol }, fee: `$${out.feeUsd} fee`, transaction: out.transaction, approval: out.approval ?? null, requestId: out.requestId };
         quoteAt = Date.now();
       } catch (error) {
         if (seq !== quoteSeq || dead) return null;
@@ -424,7 +424,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
       : canSell ? `Sell ${symbol} for ${currency()}${held != null && decimals != null && signer ? ` · ${fmtAmount(Number(readable(held, decimals)))} ${symbol} held` : ""}` : `Sell ${symbol} for USD`;
     q("#tk-ticket-sub").textContent = sub;
     const pay = q("#tk-pay");
-    pay.hidden = !onMonad || Boolean(trade);
+    pay.hidden = Boolean(trade) || (!onMonad && !buying);
     q("#tk-pay-label").textContent = buying ? "Pay with" : "Receive";
     $$("[data-pay]", pay).forEach((b) => b.setAttribute("aria-selected", String(b.dataset.pay === currency())));
     q("#tk-chips").innerHTML = buying
@@ -586,7 +586,7 @@ export default async function mount(el, { chainIndex, address, query = {} }) {
     trade = {
       steps: onMonad
         ? [...(quote.approval ? [{ key: "approve", label: `Approve ${quote.pay.symbol} for the swap`, state: "waiting" }] : []), { key: "swap", label: `Swap ${quote.pay.symbol} for ${quote.receive.symbol} on Monad`, state: "waiting" }]
-        : [{ key: "swap", label: "Send MON on Monad", state: "waiting" }, { key: "fill", label: `Relay delivers ${symbol} on ${chainName}`, state: "waiting", href: `https://relay.link/transaction/${quote.requestId}` }],
+        : [...(quote.approval ? [{ key: "approve", label: `Approve ${quote.pay.symbol} for the deposit`, state: "waiting" }] : []), { key: "swap", label: `Send ${quote.pay.symbol} on Monad`, state: "waiting" }, { key: "fill", label: `Relay delivers ${symbol} on ${chainName}`, state: "waiting", href: `https://relay.link/transaction/${quote.requestId}` }],
       outcome: null,
     };
     paintTicket();
