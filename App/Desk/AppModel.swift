@@ -715,6 +715,54 @@ final class AppModel {
         return signed.hashHex
     }
 
+    /// Buys a Monad token with AUSD through 0x's holder. The approval, for exactly the typed
+    /// AUSD, and the swap are simulated together with the token balance read either side, and
+    /// only a route that leaves at least the quoted floor reaches Face ID. Returns the hash
+    /// once mined.
+    func buyTokenWithAUSD(_ purchase: TokenPurchase, progress: @MainActor @escaping (SwapStep) -> Void) async throws -> String {
+        guard network.holdsRealFunds, let address else { throw SwapFailure.wrongNetwork }
+        progress(.checking)
+        let rpc = MonadRPC(configuration: try network.rpc())
+        let ausd = try Self.ethereumAddress(network.pinnedCollateralToken)
+        let allowance = ABIMoney.decode(try await rpc.callContract(
+            to: ausd, data: try Calldata.allowance(owner: address, spender: purchase.to)))
+        let approval = try Calldata.approve(spender: purchase.to, amount: purchase.amount)
+        let needsApproval = allowance < purchase.amount
+        let balanceOf = try Calldata.balanceOf(address)
+        var calls: [SimulatedCall] = []
+        if needsApproval { calls.append(SimulatedCall(from: address, to: ausd, data: approval)) }
+        calls.append(SimulatedCall(to: purchase.token, data: balanceOf))
+        calls.append(SimulatedCall(from: address, to: purchase.to, data: purchase.data))
+        calls.append(SimulatedCall(to: purchase.token, data: balanceOf))
+        let simulated = try await rpc.simulate(calls)
+        guard simulated.allSatisfy(\.succeeded) else { throw SwapFailure.routeReverts }
+        let before = Self.count(simulated[simulated.count - 3].returnData)
+        let after = Self.count(simulated[simulated.count - 1].returnData)
+        guard after >= before, after - before >= purchase.minimumOutRaw else { throw SwapFailure.underdelivers(.zero) }
+
+        let sender: TransactionSender
+        if let mainnetSender {
+            sender = mainnetSender
+        } else {
+            sender = TransactionSender(rpc: rpc)
+            mainnetSender = sender
+        }
+        progress(.signing)
+        let hash = try await passkey.withKeys { wallet, _ in
+            if needsApproval {
+                await MainActor.run { progress(.approving) }
+                let approved = try await sender.send(to: ausd, data: approval, from: wallet)
+                _ = try await sender.wait(for: approved)
+            }
+            await MainActor.run { progress(.sending) }
+            let swapped = try await sender.send(to: purchase.to, data: purchase.data, from: wallet)
+            _ = try await sender.wait(for: swapped)
+            return swapped.hashHex
+        }
+        await refreshUntilChanged()
+        return hash
+    }
+
     /// A 256-bit word as a count, saturating at Int128's ceiling rather than wrapping: a token
     /// with an absurd supply reads as "more than anything" instead of a plausible small number.
     private static func count(_ word: Data) -> Int128 {

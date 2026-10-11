@@ -1549,6 +1549,12 @@ private struct SpotTradeTicket: View {
     }
 }
 
+/// What a Monad token is paid with, or sold for: AUSD, the dollar Desk runs on, or MON.
+private enum SpotCurrency: String, CaseIterable, Identifiable {
+    case ausd = "AUSD", mon = "MON"
+    var id: String { rawValue }
+}
+
 private struct SpotBuyTicket: View {
     let token: TrendingSpotToken
     let model: AppModel
@@ -1557,16 +1563,29 @@ private struct SpotBuyTicket: View {
     @State private var amount = ""
     @State private var copiedAddress = false
     @State private var showsSwap = false
+    @State private var swapDirection: SwapDirection = .toMON
+    @State private var pays: SpotCurrency = .ausd
 
     /// Covers `depositNative`'s gas, about 38,000 at mainnet's fee, several times over.
     private static let gasReserve = NativeAmount(decimalText: "0.01")!
 
+    /// Only a Monad token can be paid for in AUSD; elsewhere Relay takes MON.
+    private var paysAUSD: Bool { token.isOnMonad && pays == .ausd }
     private var typed: NativeAmount? { NativeAmount(decimalText: amount).flatMap { $0.isZero ? nil : $0 } }
+    private var typedAUSD: Money? { Money(text: amount).flatMap { $0.isZero ? nil : $0 } }
+    private var hasAmount: Bool { paysAUSD ? typedAUSD != nil : typed != nil }
     private var balance: NativeAmount? { model.mainnetMON.value }
+    private var ausdBalance: Money? { model.walletAUSD.value }
     private var lacksFunds: Bool {
+        if paysAUSD {
+            guard let typedAUSD, let ausdBalance else { return false }
+            return ausdBalance < typedAUSD
+        }
         guard let typed, let balance else { return false }
         return balance.raw < typed.raw + Self.gasReserve.raw
     }
+    /// Paying in AUSD still burns a little MON as gas.
+    private var lacksGas: Bool { paysAUSD && balance.map { $0.raw < Self.gasReserve.raw } == true }
     private var isBuyable: Bool { token.isBuyable }
     @State private var risk = TokenRiskModel()
 
@@ -1586,17 +1605,19 @@ private struct SpotBuyTicket: View {
         .padding(24)
         .preferredColorScheme(.dark)
         .task { await model.refreshMainnetMON() }
+        .task { await model.refreshBalances() }
         .task { await risk.load(chainIndex: token.chainIndex, contract: token.contract, riskLevel: token.riskLevel, communityRecognized: token.communityRecognized) }
         #if DEBUG
         .onAppear { if ProcessInfo.processInfo.arguments.contains("-spot-buy"), amount.isEmpty { amount = "5" } }
         #endif
-        .task(id: amount) {
+        .task(id: "\(pays.rawValue) \(amount)") {
             guard isBuyable, !purchase.phase.isActive, let address = model.address else { return }
-            await purchase.quote(token: token, amount: amount, user: address)
+            await purchase.quote(token: token, amount: amount, user: address, pays: paysAUSD ? .ausd : .mon)
         }
+        .onChange(of: pays) { _, _ in amount = "" }
         .interactiveDismissDisabled(purchase.phase.isActive)
-        .sheet(isPresented: $showsSwap, onDismiss: { Task { await model.refreshMainnetMON() } }) {
-            SwapSheet(model: model, direction: .toMON) { showsSwap = false }
+        .sheet(isPresented: $showsSwap, onDismiss: { Task { await model.refreshMainnetMON(); await model.refreshBalances() } }) {
+            SwapSheet(model: model, direction: swapDirection) { showsSwap = false }
         }
     }
 
@@ -1620,23 +1641,36 @@ private struct SpotBuyTicket: View {
 
     private var payCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("YOU PAY").font(.system(size: 10, weight: .heavy, design: .rounded)).tracking(1.2).foregroundStyle(.secondary)
+            HStack {
+                Text("YOU PAY").font(.system(size: 10, weight: .heavy, design: .rounded)).tracking(1.2).foregroundStyle(.secondary)
+                Spacer()
+                if token.isOnMonad {
+                    Picker("Pay with", selection: $pays) {
+                        ForEach(SpotCurrency.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 150)
+                    .disabled(purchase.phase.isActive || purchase.phase.isFinished)
+                }
+            }
             HStack(alignment: .firstTextBaseline) {
                 TextField("0", text: $amount)
                     .keyboardType(.decimalPad)
                     .font(.system(size: 34, weight: .bold, design: .rounded).monospacedDigit())
                     .disabled(purchase.phase.isActive || purchase.phase.isFinished)
                 HStack(spacing: 6) {
-                    MarketTokenLogo(symbol: "MON", size: 20)
-                    Text("MON").font(.system(size: 16, weight: .bold, design: .rounded))
+                    MarketTokenLogo(symbol: paysAUSD ? "AUSD" : "MON", size: 20)
+                    Text(paysAUSD ? "AUSD" : "MON").font(.system(size: 16, weight: .bold, design: .rounded))
                 }
                 .foregroundStyle(.secondary)
             }
             HStack {
-                Text("Balance \(balance.map { $0.display() } ?? "—") MON")
+                Text(paysAUSD
+                    ? "Balance \(ausdBalance.map { $0.display() } ?? "—") AUSD"
+                    : "Balance \(balance.map { $0.display() } ?? "—") MON")
                     .foregroundStyle(lacksFunds ? DeskColor.fall.color : .secondary)
                 Spacer()
-                Text("Monad mainnet").foregroundStyle(.secondary)
+                Text(lacksGas ? "Needs a little MON for gas" : "Monad mainnet").foregroundStyle(lacksGas ? DeskColor.fall.color : .secondary)
             }
             .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
         }
@@ -1684,14 +1718,14 @@ private struct SpotBuyTicket: View {
     private var progress: some View {
         VStack(alignment: .leading, spacing: 12) {
             step("Signed with Face ID", state: purchase.phase.stepState(0))
-            step(token.isOnMonad ? "Swapped through 0x on Monad" : "MON deposited on Monad · not filled yet", state: purchase.phase.stepState(1))
+            step(paysAUSD ? "AUSD approved and swapped through 0x" : token.isOnMonad ? "Swapped through 0x on Monad" : "MON deposited on Monad · not filled yet", state: purchase.phase.stepState(1))
             step(token.isOnMonad ? "\(token.symbol) in your wallet" : "Filled on \(token.displayChainName)", state: purchase.phase.stepState(2))
             switch purchase.phase {
             case .filled:
                 TradeReceiptCard(
                     title: "Bought ≈ \(SpotFormat.amount(purchase.quoted?.receive.amount)) \(token.symbol)",
                     rows: [
-                        ("Paid", "\(SpotFormat.amount(amount)) MON"),
+                        ("Paid", "\(SpotFormat.amount(amount)) \(paysAUSD ? "AUSD" : "MON")"),
                         ("Delivered on", token.displayChainName),
                         (token.isOnMonad ? "Network fee" : "Network and fill fees",
                          purchase.quoted.map { $0.feeMON.map { "\(SpotFormat.amount($0)) MON" } ?? "$\($0.feeUsd ?? "—")" } ?? "—"),
@@ -1744,22 +1778,19 @@ private struct SpotBuyTicket: View {
             .font(.system(size: 16, weight: .bold, design: .rounded))
         } else if purchase.phase.isActive {
             statusCapsule(purchase.phase.sentence(chain: token.displayChainName), spinning: true)
-        } else if lacksFunds {
+        } else if lacksFunds || lacksGas {
             VStack(spacing: 8) {
-                statusCapsule("Not enough MON on Monad mainnet")
-                if model.swappableAUSD != nil {
-                    Button { showsSwap = true } label: {
-                        Label("Swap AUSD for MON", systemImage: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .frame(maxWidth: .infinity).frame(height: 36).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).foregroundStyle(.primary)
+                statusCapsule(lacksGas ? "Not enough MON for gas" : paysAUSD ? "Not enough AUSD in the wallet" : "Not enough MON on Monad mainnet")
+                if lacksGas || !paysAUSD, model.swappableAUSD != nil {
+                    swapButton("Swap AUSD for MON", direction: .toMON)
+                } else if paysAUSD, model.swappableMON != nil {
+                    swapButton("Swap MON for AUSD", direction: .toAUSD)
                 }
                 Button {
                     model.copyAddress()
                     copiedAddress = true
                 } label: {
-                    Label(copiedAddress ? "Address copied" : "Copy address to add MON",
+                    Label(copiedAddress ? "Address copied" : "Copy address to add \(lacksGas || !paysAUSD ? "MON" : "AUSD")",
                           systemImage: copiedAddress ? "checkmark" : "doc.on.doc")
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .frame(maxWidth: .infinity).frame(height: 36).contentShape(Rectangle())
@@ -1770,12 +1801,23 @@ private struct SpotBuyTicket: View {
             HoldToConfirm(
                 title: purchase.quoted == nil ? "Enter an amount" : "Hold to buy \(token.symbol)",
                 tint: DeskColor.rise,
-                isEnabled: purchase.quoted != nil && typed != nil && !purchase.isQuoting
+                isEnabled: purchase.quoted != nil && hasAmount && !purchase.isQuoting
             ) {
-                guard let typed else { return }
-                Task { await purchase.buy(token: token, amount: amount, typed: typed, model: model) }
+                Task { await purchase.buy(token: token, amount: amount, pays: paysAUSD ? .ausd : .mon, model: model) }
             }
         }
+    }
+
+    private func swapButton(_ title: String, direction: SwapDirection) -> some View {
+        Button {
+            swapDirection = direction
+            showsSwap = true
+        } label: {
+            Label(title, systemImage: "arrow.triangle.2.circlepath")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .frame(maxWidth: .infinity).frame(height: 36).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).foregroundStyle(.primary)
     }
 
     private func statusCapsule(_ text: String, spinning: Bool = false) -> some View {
@@ -1849,14 +1891,15 @@ struct TradeReceiptCard: View {
     }
 }
 
-/// Selling a Monad token for MON: the buy ticket's shape, with the amount in the token and
-/// the usual shares of the balance to pick from.
+/// Selling a Monad token for AUSD or MON: the buy ticket's shape, with the amount in the token
+/// and the usual shares of the balance to pick from.
 private struct SpotSellTicket: View {
     let token: TrendingSpotToken
     let model: AppModel
     @Environment(\.dismiss) private var dismiss
     @StateObject private var sale = SpotSaleModel()
     @State private var amount = ""
+    @State private var receives: SpotCurrency = .ausd
     @State private var balance: (raw: Int128, decimals: Int)?
     @State private var picked: Double?
 
@@ -1892,9 +1935,9 @@ private struct SpotSellTicket: View {
         .padding(24)
         .preferredColorScheme(.dark)
         .task { await loadBalance() }
-        .task(id: amount) {
+        .task(id: "\(receives.rawValue) \(amount)") {
             guard !sale.phase.isActive, let address = model.address else { return }
-            await sale.quote(token: token, amount: amount, user: address)
+            await sale.quote(token: token, amount: amount, user: address, receives: receives)
         }
         .interactiveDismissDisabled(sale.phase.isActive)
     }
@@ -1910,7 +1953,7 @@ private struct SpotSellTicket: View {
             MarketTokenLogo(symbol: token.symbol, size: 42, remoteURL: token.artworkURL)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Sell \(token.symbol)").font(.system(size: 22, weight: .heavy, design: .rounded))
-                Text("Swapped for MON on Monad through 0x")
+                Text("Swapped for \(receives.rawValue) on Monad through 0x")
                     .font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
             }
             Spacer()
@@ -1925,7 +1968,17 @@ private struct SpotSellTicket: View {
 
     private var payCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("YOU SELL").font(.system(size: 10, weight: .heavy, design: .rounded)).tracking(1.2).foregroundStyle(.secondary)
+            HStack {
+                Text("YOU SELL").font(.system(size: 10, weight: .heavy, design: .rounded)).tracking(1.2).foregroundStyle(.secondary)
+                Spacer()
+                Text("FOR").font(.system(size: 10, weight: .heavy, design: .rounded)).tracking(1.2).foregroundStyle(.secondary)
+                Picker("Receive", selection: $receives) {
+                    ForEach(SpotCurrency.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 150)
+                .disabled(sale.phase.isActive || sale.phase.isFinished)
+            }
             HStack(alignment: .firstTextBaseline) {
                 TextField("0", text: $amount)
                     .keyboardType(.decimalPad)
@@ -1978,8 +2031,8 @@ private struct SpotSellTicket: View {
 
     private var receipt: some View {
         VStack(spacing: 9) {
-            row("You receive", value: sale.quoted.map { "≈ \(SpotFormat.amount($0.receive.amount)) MON" }, emphasised: true)
-            row("At least", value: sale.quoted.map { "\(SpotFormat.amount($0.receive.minimum)) MON" })
+            row("You receive", value: sale.quoted.map { "≈ \(SpotFormat.amount($0.receive.amount)) \(receives.rawValue)" }, emphasised: true)
+            row("At least", value: sale.quoted.map { "\(SpotFormat.amount($0.receive.minimum)) \(receives.rawValue)" })
             row("Network fee", value: sale.quoted.map { $0.feeMON.map { "\(SpotFormat.amount($0)) MON" } ?? "—" })
             row("Arrives in", value: sale.quoted.map { _ in "This block" })
         }
@@ -2004,17 +2057,17 @@ private struct SpotSellTicket: View {
         VStack(alignment: .leading, spacing: 12) {
             step("Signed with Face ID", state: sale.phase.stepState(0))
             step("Approved \(token.symbol) for exactly this swap", state: sale.phase.stepState(1))
-            step("Swapped for MON on Monad", state: sale.phase.stepState(2))
+            step("Swapped for \(receives.rawValue) on Monad", state: sale.phase.stepState(2))
             switch sale.phase {
-            case .sold(let receipt):
+            case .sold(let hash, let received):
                 TradeReceiptCard(
                     title: "Sold \(SpotFormat.amount(amount)) \(token.symbol)",
                     rows: [
-                        ("Received", "\(receipt.received.display()) MON"),
+                        ("Received", received),
                         ("On", "Monad mainnet"),
                         ("Network fee", sale.quoted.map { $0.feeMON.map { "\(SpotFormat.amount($0)) MON" } ?? "—" } ?? "—"),
                     ],
-                    hash: receipt.hash, link: URL(string: "https://monadvision.com/tx/\(receipt.hash)"))
+                    hash: hash, link: URL(string: "https://monadvision.com/tx/\(hash)"))
                     .padding(.top, 4)
             case .failed(let sentence):
                 Text(sentence)
@@ -2075,7 +2128,7 @@ private struct SpotSellTicket: View {
                 isEnabled: sale.quoted != nil && typed != nil && !sale.isQuoting && !overBalance
             ) {
                 Task {
-                    await sale.sell(token: token, model: model, soldFraction: soldFraction)
+                    await sale.sell(token: token, model: model, soldFraction: soldFraction, receives: receives)
                 }
             }
         }
@@ -2086,7 +2139,7 @@ private struct SpotSellTicket: View {
 private final class SpotSaleModel: ObservableObject {
     enum Phase: Equatable {
         case idle, signing, approving, swapping
-        case sold(AppModel.MONSwapReceipt)
+        case sold(hash: String, received: String)
         case failed(String)
 
         var isActive: Bool { self == .signing || self == .approving || self == .swapping }
@@ -2146,7 +2199,7 @@ private final class SpotSaleModel: ObservableObject {
         return part > 0 ? readable(part, decimals: decimals) : nil
     }
 
-    func quote(token: TrendingSpotToken, amount: String, user: EthereumAddress) async {
+    func quote(token: TrendingSpotToken, amount: String, user: EthereumAddress, receives: SpotCurrency = .mon) async {
         quoteError = nil
         let text = amount.trimmingCharacters(in: .whitespaces)
         guard let typed = Decimal(string: text, locale: Locale(identifier: "en_US_POSIX")), typed > 0 else {
@@ -2163,6 +2216,7 @@ private final class SpotSaleModel: ObservableObject {
             URLQueryItem(name: "user", value: user.checksummed),
             URLQueryItem(name: "amount", value: text),
             URLQueryItem(name: "sell", value: "TOKEN"),
+            URLQueryItem(name: "buy", value: receives.rawValue),
             URLQueryItem(name: "token", value: token.contract),
             URLQueryItem(name: "symbol", value: String(token.symbol.prefix(12))),
         ]
@@ -2184,7 +2238,7 @@ private final class SpotSaleModel: ObservableObject {
         }
     }
 
-    func sell(token: TrendingSpotToken, model: AppModel, soldFraction: Double) async {
+    func sell(token: TrendingSpotToken, model: AppModel, soldFraction: Double, receives: SpotCurrency = .mon) async {
         guard let wallet = model.address, !phase.isActive, let quoted else { return }
         let sale: TokenSale
         do {
@@ -2197,16 +2251,22 @@ private final class SpotSaleModel: ObservableObject {
             return
         }
         phase = .signing
-        do {
-            let receipt = try await model.sellToken(sale) { [weak self] step in
-                guard let self else { return }
-                switch step {
-                case .approving: self.phase = .approving
-                case .sending: self.phase = .swapping
-                default: break
-                }
+        let report: @MainActor (AppModel.SwapStep) -> Void = { [weak self] step in
+            guard let self else { return }
+            switch step {
+            case .approving: self.phase = .approving
+            case .sending: self.phase = .swapping
+            default: break
             }
-            phase = .sold(receipt)
+        }
+        do {
+            if receives == .ausd {
+                let receipt = try await model.swapTokenToAUSD(sale, progress: report)
+                phase = .sold(hash: receipt.hash, received: "\(receipt.received.display()) AUSD")
+            } else {
+                let receipt = try await model.sellToken(sale, progress: report)
+                phase = .sold(hash: receipt.hash, received: "\(receipt.received.display()) MON")
+            }
             SpotPurchases.reduce("\(token.chainIndex):\(token.contract.lowercased())", keeping: 1 - soldFraction, for: wallet)
         } catch PasskeyFailure.cancelledByUser {
             phase = .idle
@@ -2310,9 +2370,9 @@ private final class SpotPurchaseModel: ObservableObject {
         return requestId.flatMap { URL(string: "https://relay.link/transaction/\($0)") }
     }
 
-    func quote(token: TrendingSpotToken, amount: String, user: EthereumAddress, debounce: Bool = true) async {
+    func quote(token: TrendingSpotToken, amount: String, user: EthereumAddress, pays: SpotCurrency = .mon, debounce: Bool = true) async {
         quoteError = nil
-        guard let typed = NativeAmount(decimalText: amount), !typed.isZero else {
+        guard let typed = Decimal(string: amount.trimmingCharacters(in: .whitespaces), locale: Locale(identifier: "en_US_POSIX")), typed > 0 else {
             quoted = nil
             return
         }
@@ -2330,7 +2390,7 @@ private final class SpotPurchaseModel: ObservableObject {
                 URLQueryItem(name: "view", value: "swap"),
                 URLQueryItem(name: "user", value: user.checksummed),
                 URLQueryItem(name: "amount", value: amount),
-                URLQueryItem(name: "sell", value: "MON"),
+                URLQueryItem(name: "sell", value: pays == .ausd ? "AUSD" : "MON"),
                 URLQueryItem(name: "token", value: token.contract),
                 URLQueryItem(name: "symbol", value: String(token.symbol.prefix(12))),
             ]
@@ -2358,14 +2418,20 @@ private final class SpotPurchaseModel: ObservableObject {
         }
     }
 
-    func buy(token: TrendingSpotToken, amount: String, typed: NativeAmount, model: AppModel) async {
+    func buy(token: TrendingSpotToken, amount: String, pays: SpotCurrency, model: AppModel) async {
         guard let wallet = model.address, !phase.isActive else { return }
         // Relay prices hold for about thirty seconds; an older quote is refreshed rather
         // than filled at a rate that has already moved.
         if Date.now.timeIntervalSince(quotedAt) > 20 {
-            await quote(token: token, amount: amount, user: wallet, debounce: false)
+            await quote(token: token, amount: amount, user: wallet, pays: pays, debounce: false)
         }
         guard let quoted else { return }
+        if token.isOnMonad, pays == .ausd {
+            guard let typed = Money(text: amount), !typed.isZero else { return }
+            await purchase(token: token, quoted: quoted, typed: typed, wallet: wallet, model: model)
+            return
+        }
+        guard let typed = NativeAmount(decimalText: amount), !typed.isZero else { return }
         if token.isOnMonad {
             await swap(token: token, quoted: quoted, typed: typed, wallet: wallet, model: model)
             return
@@ -2450,12 +2516,51 @@ private final class SpotPurchaseModel: ObservableObject {
         remember(token, quoted, wallet: wallet)
     }
 
-    private func remember(_ token: TrendingSpotToken, _ quoted: RelayQuote, wallet: EthereumAddress) {
+    /// A Monad token paid in AUSD: the approval and the swap, checked against the quote before
+    /// Face ID, mined in a block. What was paid is the holding's cost in dollars, exactly.
+    private func purchase(token: TrendingSpotToken, quoted: RelayQuote, typed: Money, wallet: EthereumAddress, model: AppModel) async {
+        let purchase: TokenPurchase
+        do {
+            purchase = try TokenPurchase(
+                chainID: quoted.transaction.chainId, to: quoted.transaction.to, data: quoted.transaction.data,
+                value: quoted.transaction.value, token: token.contract, amount: typed,
+                minimumOutRaw: quoted.receive.minimumRaw ?? "")
+        } catch {
+            phase = .failed("This quote did not pass Desk's safety check, so nothing was signed.")
+            return
+        }
+        phase = .signing
+        do {
+            txHash = try await model.buyTokenWithAUSD(purchase) { _ in }
+        } catch PasskeyFailure.cancelledByUser {
+            phase = .idle
+            return
+        } catch let failure as PasskeyFailure {
+            phase = .failed(failure.sentence)
+            return
+        } catch AppModel.SwapFailure.routeReverts {
+            phase = .failed("This route reverts right now. Nothing was signed.")
+            return
+        } catch AppModel.SwapFailure.underdelivers {
+            phase = .failed("The route would hand back less than the quote. Nothing was signed.")
+            return
+        } catch TransactionSender.Failure.reverted {
+            phase = .failed("The swap was rejected on Monad. Only gas was spent.")
+            return
+        } catch {
+            phase = .failed("The swap could not be sent. No AUSD was taken.")
+            return
+        }
+        phase = .filled
+        remember(token, quoted, wallet: wallet, paidUSD: Double(typed.text))
+    }
+
+    private func remember(_ token: TrendingSpotToken, _ quoted: RelayQuote, wallet: EthereumAddress, paidUSD: Double? = nil) {
         guard phase == .filled else { return }
         SpotPurchases.record(SpotPurchase(
             chainIndex: token.chainIndex, chainName: token.chainName, contract: token.contract,
             symbol: token.symbol, name: token.name, logoURL: token.logoURL,
-            paidUSD: quoted.receive.usd.flatMap(Double.init), boughtAt: .now), for: wallet)
+            paidUSD: paidUSD ?? quoted.receive.usd.flatMap(Double.init), boughtAt: .now), for: wallet)
     }
 
     private func track(_ requestId: String) async {
