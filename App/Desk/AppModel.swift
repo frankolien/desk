@@ -763,6 +763,18 @@ final class AppModel {
         return hash
     }
 
+    /// Sells a token on another chain for AUSD on Monad with no gas there: the wallet signs the
+    /// EIP-7702 authorization, if it does not yet run Calibur on that chain, and Calibur's batch
+    /// of Relay's approval and deposit, in one hold of the key; `RelayExecute` hands both to the
+    /// server, which forwards them to Relay. Returns Relay's request id to follow to the fill.
+    func sellGasless(_ sale: GaslessSale, progress: @MainActor @escaping (SwapStep) -> Void) async throws -> String {
+        guard network.holdsRealFunds, address != nil else { throw SwapFailure.wrongNetwork }
+        progress(.signing)
+        let signatures = try await passkey.withKeys { wallet, _ in try sale.signatures(with: wallet) }
+        progress(.sending)
+        return try await RelayExecute.submit(sale, signatures: signatures)
+    }
+
     /// A 256-bit word as a count, saturating at Int128's ceiling rather than wrapping: a token
     /// with an absurd supply reads as "more than anything" instead of a plausible small number.
     private static func count(_ word: Data) -> Int128 {
