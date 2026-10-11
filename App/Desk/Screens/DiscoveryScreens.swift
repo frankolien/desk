@@ -1538,6 +1538,20 @@ private final class SpotLiveFeed: ObservableObject {
     }
 }
 
+/// A ticket's upper part: sized to its content while it fits the sheet, scrolling once a
+/// receipt makes it taller than the screen, so the button below it always stays in reach.
+private struct TicketScroll<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) { content }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollIndicators(.hidden)
+    }
+}
+
 private struct SpotTradeTicket: View {
     let token: TrendingSpotToken
     let side: String
@@ -1597,16 +1611,17 @@ private struct SpotBuyTicket: View {
     @State private var risk = TokenRiskModel()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-            payCard
-            if purchase.phase.isActive || purchase.phase.isFinished {
-                progress
-            } else {
-                receipt
-                notices
+        VStack(spacing: 16) {
+            TicketScroll {
+                header
+                payCard
+                if purchase.phase.isActive || purchase.phase.isFinished {
+                    progress
+                } else {
+                    receipt
+                    notices
+                }
             }
-            Spacer(minLength: 0)
             action
         }
         .padding(24)
@@ -1924,19 +1939,20 @@ private struct SpotSellTicket: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-            payCard
-            if sale.phase.isActive || sale.phase.isFinished {
-                progress
-            } else {
-                receipt
-                if let error = sale.quoteError {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.yellow)
+        VStack(spacing: 16) {
+            TicketScroll {
+                header
+                payCard
+                if sale.phase.isActive || sale.phase.isFinished {
+                    progress
+                } else {
+                    receipt
+                    if let error = sale.quoteError {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.yellow)
+                    }
                 }
             }
-            Spacer(minLength: 0)
             action
         }
         .padding(24)
@@ -2615,19 +2631,20 @@ private struct SpotGaslessSellTicket: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-            payCard
-            if sale.phase.isActive || sale.phase.isFinished {
-                progress
-            } else {
-                receipt
-                if let error = sale.quoteError {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.yellow)
+        VStack(spacing: 16) {
+            TicketScroll {
+                header
+                payCard
+                if sale.phase.isActive || sale.phase.isFinished {
+                    progress
+                } else {
+                    receipt
+                    if let error = sale.quoteError {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundStyle(.yellow)
+                    }
                 }
             }
-            Spacer(minLength: 0)
             action
         }
         .padding(24)
