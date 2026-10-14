@@ -7,6 +7,7 @@ import UIKit
 
 struct HomeScreen: View {
     private enum Book: String, CaseIterable { case open = "Open", closed = "Closed" }
+    private enum Chevron { case up, down }
     private enum Filter: String, CaseIterable, Identifiable {
         case all = "All", perps = "Perps", tokens = "Tokens"
         var id: String { rawValue }
@@ -44,6 +45,7 @@ struct HomeScreen: View {
     @State private var copiedAddress = false
     @State private var editsProfile = false
     @State private var showsPortfolioReplay = false
+    @State private var expandedTrade: Int64?
 
     private var collateralInCurrency: String {
         model.collateral.value.map { DisplayCurrency.shared.format($0) } ?? Unavailable.text
@@ -242,6 +244,11 @@ struct HomeScreen: View {
         #if DEBUG
         .task {
             if ProcessInfo.processInfo.arguments.contains("-open-profile-editor") { editsProfile = true }
+            if ProcessInfo.processInfo.arguments.contains("-closed-book") { book = .closed }
+            if ProcessInfo.processInfo.arguments.contains("-expand-closed") {
+                book = .closed
+                expandedTrade = model.closedTrades.first?.id
+            }
             if ProcessInfo.processInfo.arguments.contains("-open-portfolio-replay") {
                 try? await Task.sleep(for: .seconds(1.2))
                 showsPortfolioReplay = true
@@ -685,6 +692,7 @@ struct HomeScreen: View {
             ForEach(trades.prefix(12)) { trade in
                 let symbol = market.market(id: trade.marketID)?.symbol ?? "#\(trade.marketID)"
                 let pnl = trade.realisedPnLRaw.flatMap { Money(raw: $0) }
+                let expanded = expandedTrade == trade.id
                 ledgerRow(
                     mark: { MarketTokenLogo(symbol: symbol, size: 40) },
                     title: "\(trade.isLong ? "Long" : "Short") \(symbol) · \(trade.leverageHundredths / 100)×",
@@ -692,7 +700,16 @@ struct HomeScreen: View {
                     value: hidesBalance ? "•••••" : pnl.map { ($0.isNegative ? "" : "+") + $0.display() + " AUSD" } ?? Unavailable.text,
                     detail: nil,
                     tint: (pnl?.isNegative ?? false) ? DeskColor.fall : DeskColor.rise,
-                    action: onActivity)
+                    chevron: expanded ? .up : .down) {
+                        Haptics.selection()
+                        withAnimation(.snappy(duration: 0.28)) { expandedTrade = expanded ? nil : trade.id }
+                    }
+                if expanded && !hidesBalance {
+                    ClosedTradeCard(trade: trade, symbol: symbol, market: market.market(id: trade.marketID))
+                        .padding(.top, 2)
+                        .padding(.bottom, 12)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
         }
     }
@@ -716,7 +733,7 @@ struct HomeScreen: View {
 
     private func ledgerRow<Mark: View>(
         @ViewBuilder mark: @escaping () -> Mark, title: String, subtitle: String,
-        value: String, detail: String?, tint: DeskRGB, action: @escaping () -> Void
+        value: String, detail: String?, tint: DeskRGB, chevron: Chevron? = nil, action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 12) {
@@ -743,6 +760,12 @@ struct HomeScreen: View {
                             .foregroundStyle(DeskColor.nightMuted.color)
                             .lineLimit(1)
                     }
+                }
+                if let chevron {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .rotationEffect(.degrees(chevron == .up ? 180 : 0))
                 }
             }
             .padding(.vertical, 11)

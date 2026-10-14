@@ -13,6 +13,8 @@ struct ClosedTrade: Codable, Identifiable, Hashable, Sendable {
     let sizeRaw: Int64
     let collateralRaw: Int64
     let feeRaw: Int64
+    /// Absent on trades recorded before funding was kept; filled in the next time Perpl lists them.
+    let realisedFundingRaw: Int64?
     let closedAt: Date
 
     var id: Int64 { positionID }
@@ -28,6 +30,7 @@ struct ClosedTrade: Codable, Identifiable, Hashable, Sendable {
         sizeRaw = position.sizeRaw
         collateralRaw = position.collateralRaw
         feeRaw = position.feeRaw
+        realisedFundingRaw = position.realisedFundingRaw
         self.closedAt = closedAt
     }
 }
