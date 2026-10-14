@@ -76,18 +76,16 @@ struct TrendingTicker: View {
                     .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
                     .clipped()
                     .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 8)
-                            .onChanged { value in
-                                stop()
-                                dragging = value.translation.width
-                            }
-                            .onEnded { value in
-                                manual += value.translation.width
-                                dragging = 0
-                                walkOnLater()
-                            }
-                    )
+                    .gesture(SidewaysPan { translation, ended in
+                        if ended {
+                            manual += translation
+                            dragging = 0
+                            walkOnLater()
+                        } else {
+                            stop()
+                            dragging = translation
+                        }
+                    })
                     .onTapGesture {
                         if resumedAt == nil { walkOn() } else { stop(); walkOnLater(after: 8) }
                     }
@@ -96,6 +94,7 @@ struct TrendingTicker: View {
             }
         }
         .frame(height: 64)
+        .accessibilityIdentifier("trending-ticker")
     }
 
     private func stop() {
@@ -165,5 +164,37 @@ private struct TickerItem: View {
             }
         }
         .contentShape(Rectangle())
+    }
+}
+
+/// A pan that only starts sideways, so a vertical flick that begins on the strip still scrolls the
+/// page. SwiftUI's DragGesture took any direction and held the page still.
+struct SidewaysPan: UIGestureRecognizerRepresentable {
+    /// Horizontal translation, and whether the pan has ended.
+    let onChange: (CGFloat, Bool) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let recognizer = UIPanGestureRecognizer()
+        recognizer.delegate = context.coordinator
+        return recognizer
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        let x = recognizer.translation(in: recognizer.view).x
+        switch recognizer.state {
+        case .began, .changed: onChange(x, false)
+        case .ended, .cancelled, .failed: onChange(x, true)
+        default: break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = recognizer as? UIPanGestureRecognizer else { return true }
+            let velocity = pan.velocity(in: pan.view)
+            return abs(velocity.x) > abs(velocity.y)
+        }
     }
 }

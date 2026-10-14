@@ -35,21 +35,16 @@ struct CandlestickChart: View {
     var body: some View {
         GeometryReader { proxy in
             canvas
-                .gesture(
-                    LongPressGesture(minimumDuration: 0.18)
-                        .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
-                        .onChanged { value in
-                            guard case .second(true, let drag) = value, let drag else { return }
-                            let samples = Array(candles.suffix(25))
-                            let layout = CandleLayout(count: samples.count, width: proxy.size.width - 62)
-                            let index = min(max(Int(drag.location.x / layout.step) - layout.leading, 0), samples.count - 1)
-                            if index != scrubbed {
-                                scrubbed = index
-                                UISelectionFeedbackGenerator().selectionChanged()
-                            }
-                        }
-                        .onEnded { _ in scrubbed = nil }
-                )
+                .gesture(ScrubPress { location in
+                    guard let location else { scrubbed = nil; return }
+                    let samples = Array(candles.suffix(25))
+                    let layout = CandleLayout(count: samples.count, width: proxy.size.width - 62)
+                    let index = min(max(Int(location.x / layout.step) - layout.leading, 0), samples.count - 1)
+                    if index != scrubbed {
+                        scrubbed = index
+                        UISelectionFeedbackGenerator().selectionChanged()
+                    }
+                })
         }
     }
 
@@ -283,5 +278,26 @@ private struct SelectedIntervalGlass: ViewModifier {
 
     func body(content: Content) -> some View {
         if selected { content.deskGlass(in: Capsule()) } else { content }
+    }
+}
+
+/// Hold, then slide, to read candles. UIKit's long press rather than SwiftUI's: it fails the moment
+/// a finger moves before the hold completes, so a flick that starts on the chart still scrolls the
+/// page or drags its sheet down. SwiftUI's sequenced long press held every touch on the chart.
+struct ScrubPress: UIGestureRecognizerRepresentable {
+    var minimumDuration: TimeInterval = 0.18
+    let onChange: (CGPoint?) -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let recognizer = UILongPressGestureRecognizer()
+        recognizer.minimumPressDuration = minimumDuration
+        return recognizer
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        switch recognizer.state {
+        case .began, .changed: onChange(context.converter.localLocation)
+        default: onChange(nil)
+        }
     }
 }
