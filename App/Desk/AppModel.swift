@@ -149,7 +149,7 @@ final class AppModel {
                 hasDesk.record(true)
                 openPosition = Self.reviewPosition
                 openPositions = Self.reviewPosition.map { [$0] } ?? []
-                stagedClosedTrades = Self.reviewClosedPositions.map { ClosedTrade(position: $0) }
+                stagedClosedTrades = Self.reviewClosedPositions(market: network.holdsRealFunds ? 1 : 16).map { ClosedTrade(position: $0, closedAt: $0.updatedAt ?? .now) }
                 isKeyUnlocked = true
                 hasTradingAccount = name != "home-setup"
                 if network.holdsRealFunds, name == "home-setup" || name == "fund" {
@@ -175,17 +175,28 @@ final class AppModel {
         return try? JSONDecoder().decode(PerplPosition.self, from: body)
     }()
 
-    static let reviewClosedPositions: [PerplPosition] = {
-        let body = Data(#"""
-        [{"mkt":16,"acc":42,"pid":"5","sd":2,"c":"1200000000","ep":768000,"s":50000,
-          "lv":1000,"efs":"0","xfs":"0","fee":"1920000","xp":761500,
-          "dpnl":"325000000","fnd":"-125000","st":2},
-         {"mkt":16,"acc":42,"pid":"4","sd":1,"c":"800000000","ep":772000,"s":25000,
-          "lv":1200,"efs":"0","xfs":"0","fee":"965000","xp":769300,
-          "dpnl":"-67500000","fnd":"40000","st":2}]
-        """#.utf8)
+    /// A month of BTC trades, wins and losses, each closed at its own time so Profile's P&L line
+    /// and the closed list read like an account that has been trading.
+    /// BTC is market 16 on testnet and 1 on mainnet.
+    static func reviewClosedPositions(market: Int) -> [PerplPosition] {
+        let now = Int64(Date.now.timeIntervalSince1970 * 1000)
+        let trades: [(daysAgo: Double, side: Int, entry: Int64, exit: Int64, size: Int64, leverage: Int64)] = [
+            (0.6, 2, 786_000, 780_100, 1_800, 1_300), (2, 1, 770_200, 783_900, 2_500, 1_000),
+            (5, 2, 772_000, 779_600, 1_000, 1_200), (8, 1, 764_000, 769_900, 1_500, 500),
+            (11, 2, 781_000, 770_500, 2_000, 800), (14, 1, 775_000, 768_000, 1_200, 1_500),
+            (18, 1, 749_000, 771_200, 1_800, 1_000), (22, 2, 760_000, 766_800, 1_500, 1_000),
+            (27, 1, 742_000, 751_500, 2_000, 500),
+        ]
+        // BTC at one price decimal and five size decimals: price × size is AUSD micros.
+        let rows = trades.enumerated().map { index, trade in
+            let notional = trade.entry * trade.size
+            let pnl = (trade.exit - trade.entry) * trade.size * (trade.side == 1 ? 1 : -1)
+            let at = now - Int64(trade.daysAgo * 86_400_000)
+            return #"{"mkt":\#(market),"acc":42,"pid":"\#(20 - index)","sd":\#(trade.side),"c":"\#(notional * 100 / trade.leverage)","ep":\#(trade.entry),"s":\#(trade.size),"lv":\#(trade.leverage),"efs":"0","xfs":"0","fee":"\#(notional * 7 / 10_000)","xp":\#(trade.exit),"dpnl":"\#(pnl)","fnd":"\#(-notional / 4_000)","st":2,"at":{"t":\#(at)}}"#
+        }
+        let body = Data(("[" + rows.joined(separator: ",") + "]").utf8)
         return (try? JSONDecoder().decode([PerplPosition].self, from: body)) ?? []
-    }()
+    }
     #endif
 
     var addressShort: String {

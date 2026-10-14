@@ -13,9 +13,18 @@ struct HomeScreen: View {
         var id: String { rawValue }
     }
     private enum Range: String, CaseIterable, Identifiable {
-        case day = "24h", week = "7d", all = "All"
+        case day = "24h", week = "7d", month = "30d", all = "All"
         var id: String { rawValue }
-        var seconds: TimeInterval? { switch self { case .day: 86_400; case .week: 7 * 86_400; case .all: nil } }
+        var seconds: TimeInterval? {
+            switch self { case .day: 86_400; case .week: 7 * 86_400; case .month: 30 * 86_400; case .all: nil }
+        }
+        var caption: String { self == .all ? "all time" : rawValue }
+    }
+    /// P&L is Perpl's record of closed trades plus what is open now, so a deposit never reads as a
+    /// gain; Balance is the account's value as this phone sampled it.
+    private enum ChartMode: String, CaseIterable, Identifiable {
+        case pnl = "P&L", balance = "Balance"
+        var id: String { rawValue }
     }
 
     let model: AppModel
@@ -40,7 +49,9 @@ struct HomeScreen: View {
     @State private var openHolding: SpotHolding?
     @State private var book: Book = .open
     @State private var filter: Filter = .all
-    @State private var range: Range = .day
+    @AppStorage("desk.portfolio.range") private var range: Range = .month
+    @AppStorage("desk.portfolio.mode") private var chartMode: ChartMode = .pnl
+    @State private var scrubbed: PortfolioChartPoint?
     @State private var equity: [EquityLog.Point] = []
     @State private var copiedAddress = false
     @State private var editsProfile = false
@@ -107,70 +118,52 @@ struct HomeScreen: View {
         return "Desk since " + Date(timeIntervalSince1970: firstOpened).formatted(.dateTime.month(.abbreviated).year())
     }
 
-    private var shownEquity: [EquityLog.Point] {
-        guard let seconds = range.seconds else { return equity }
-        let cutoff = Date.now.addingTimeInterval(-seconds)
-        let window = equity.filter { $0.at >= cutoff }
-        if hasPortfolioMovement(window) { return window }
-        let lastActivity = Array(equity.suffix(72))
-        return hasPortfolioMovement(lastActivity) ? lastActivity : window
-    }
+    private var cutoff: Date? { range.seconds.map { Date.now.addingTimeInterval(-$0) } }
 
-    private var showsLastActivity: Bool {
-        guard let seconds = range.seconds, let first = shownEquity.first else { return false }
-        return first.at < Date.now.addingTimeInterval(-seconds)
-    }
-
-    private func hasPortfolioMovement(_ points: [EquityLog.Point]) -> Bool {
-        guard let first = points.first else { return false }
-        return points.count >= 2 && points.contains { $0.raw != first.raw || $0.pnlRaw != first.pnlRaw }
-    }
-
-    private func hasValueMovement(_ values: [Double]) -> Bool {
-        guard let first = values.first else { return false }
-        return values.count >= 2 && values.contains { abs($0 - first) > 0.000_001 }
-    }
-
-    private var chartPoints: [Double] {
-        let values = shownEquity.map { Double($0.raw) / 1_000_000 }
-        if hasValueMovement(values) { return values }
-        let pnl = shownEquity.compactMap { $0.pnlRaw.map { Double($0) / 1_000_000 } }
-        if hasValueMovement(pnl) { return pnl }
-        let realised = realisedTradeChart
-        return realised.isEmpty ? values : realised
-    }
-
-    private var realisedTradeChart: [Double] {
-        let realised = model.closedTrades
-            .filter { $0.realisedPnLRaw != nil }
-            .sorted { $0.closedAt < $1.closedAt }
-        guard !realised.isEmpty else { return [] }
-        var running = 0.0
-        return [0] + realised.map { trade in
-            running += Double(trade.realisedPnLRaw ?? 0) / 1_000_000
-            return running
+    /// Cumulative realised P&L at each close, then what is open now. The range starts from the
+    /// running total at its cutoff, so the line shows what happened inside it.
+    private var pnlSeries: (points: [PortfolioChartPoint], baseline: Double) {
+        let trades = model.closedTrades.filter { $0.realisedPnLRaw != nil }.sorted { $0.closedAt < $1.closedAt }
+        let open = Double(totalPositionPnL?.raw ?? 0) / 1_000_000
+        guard !trades.isEmpty || totalPositionPnL != nil else { return ([], 0) }
+        let value = { (trade: ClosedTrade) in Double(trade.realisedPnLRaw ?? 0) / 1_000_000 }
+        var running = trades.filter { trade in cutoff.map { trade.closedAt < $0 } ?? false }.map(value).reduce(0, +)
+        let start = cutoff ?? trades.first.map { $0.closedAt.addingTimeInterval(-3_600) } ?? Date.now.addingTimeInterval(-3_600)
+        var points = [PortfolioChartPoint(id: 0, date: start, value: running)]
+        let baseline = running
+        for trade in trades where trade.closedAt >= start {
+            running += value(trade)
+            points.append(PortfolioChartPoint(id: points.count, date: trade.closedAt, value: running))
         }
+        points.append(PortfolioChartPoint(id: points.count, date: .now, value: running + open))
+        return (points, baseline)
     }
 
-    private var usesTradeHistoryChart: Bool {
-        let values = shownEquity.map { Double($0.raw) / 1_000_000 }
-        let pnl = shownEquity.compactMap { $0.pnlRaw.map { Double($0) / 1_000_000 } }
-        return !hasValueMovement(values) && !hasValueMovement(pnl) && hasValueMovement(realisedTradeChart)
+    /// The account's value as sampled on this phone, from the last sample before the range began.
+    private var balanceSeries: (points: [PortfolioChartPoint], baseline: Double) {
+        let samples = equity.map { (date: $0.at, value: Double($0.raw) / 1_000_000) }
+        var points: [PortfolioChartPoint] = []
+        if let cutoff {
+            if let before = samples.last(where: { $0.date < cutoff }) {
+                points.append(PortfolioChartPoint(id: 0, date: cutoff, value: before.value))
+            }
+            for sample in samples where sample.date >= cutoff {
+                points.append(PortfolioChartPoint(id: points.count, date: sample.date, value: sample.value))
+            }
+        } else {
+            points = samples.enumerated().map { PortfolioChartPoint(id: $0.offset, date: $0.element.date, value: $0.element.value) }
+        }
+        if let total {
+            points.append(PortfolioChartPoint(id: points.count, date: .now, value: Double(total.raw) / 1_000_000))
+        }
+        return (points, points.first?.value ?? 0)
     }
 
-    private var usesPnLHistoryChart: Bool {
-        let values = shownEquity.map { Double($0.raw) / 1_000_000 }
-        let pnl = shownEquity.compactMap { $0.pnlRaw.map { Double($0) / 1_000_000 } }
-        return !hasValueMovement(values) && hasValueMovement(pnl)
+    private var series: (points: [PortfolioChartPoint], baseline: Double) {
+        chartMode == .pnl ? pnlSeries : balanceSeries
     }
 
-    private var chartChange: (money: Money, percent: Double)? {
-        let shown = shownEquity
-        guard let first = shown.first, let last = shown.last, first.raw > 0, shown.count >= 2,
-              shown.contains(where: { $0.raw != first.raw }),
-              let delta = Money(raw: last.raw - first.raw) else { return nil }
-        return (delta, Double(last.raw - first.raw) / Double(first.raw) * 100)
-    }
+    private static func money(_ value: Double) -> Money? { Money(raw: Int64((value * 1_000_000).rounded())) }
 
     var body: some View {
         ZStack {
@@ -402,7 +395,7 @@ struct HomeScreen: View {
                             HStack(spacing: 8) { ForEach(0..<5, id: \.self) { _ in Circle().fill(Color.white).frame(width: 11, height: 11) } }
                                 .frame(height: 40)
                         } else {
-                            AmountText(totalPrimary, size: 36).contentTransition(.numericText())
+                            AmountText(scrubbedBalance ?? totalPrimary, size: 36).contentTransition(.numericText())
                         }
                     }
                     .buttonStyle(.plain)
@@ -414,24 +407,47 @@ struct HomeScreen: View {
                     }
                     portfolioCaption
                 }
-                Spacer(minLength: 8)
-                HStack(spacing: 2) {
-                    ForEach(Range.allCases) { item in
-                        Button { withAnimation(.snappy(duration: 0.2)) { range = item } } label: {
-                            Text(item.rawValue)
-                                .font(.system(size: 12, weight: .bold, design: .rounded))
-                                .foregroundStyle(range == item ? DeskColor.nightText.color : DeskColor.nightMuted.color)
-                                .padding(.horizontal, 9)
-                                .frame(height: 26)
-                                .background(range == item ? Color.white.opacity(0.14) : .clear, in: Capsule())
-                                .contentShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
+                Spacer(minLength: 0)
             }
             equityChart.padding(.top, 14)
+            HStack {
+                pills(ChartMode.allCases, selection: chartMode) { chartMode = $0 }
+                Spacer(minLength: 8)
+                pills(Range.allCases, selection: range) { range = $0 }
+            }
+            .padding(.top, 10)
         }
+    }
+
+    private func pills<Item: Identifiable & RawRepresentable & Equatable>(
+        _ items: [Item], selection: Item, choose: @escaping (Item) -> Void
+    ) -> some View where Item.RawValue == String {
+        HStack(spacing: 2) {
+            ForEach(items) { item in
+                Button {
+                    guard item != selection else { return }
+                    Haptics.selection()
+                    scrubbed = nil
+                    withAnimation(.snappy(duration: 0.2)) { choose(item) }
+                } label: {
+                    Text(item.rawValue)
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(item == selection ? DeskColor.nightText.color : DeskColor.nightMuted.color)
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                        .background(item == selection ? Color.white.opacity(0.14) : .clear, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(DeskPressStyle(haptic: false))
+            }
+        }
+        .padding(2)
+        .background(Color.white.opacity(0.06), in: Capsule())
+    }
+
+    private var scrubbedBalance: String? {
+        guard chartMode == .balance, let scrubbed, let money = Self.money(scrubbed.value) else { return nil }
+        return DisplayCurrency.shared.code != "USD" ? money.display() + " AUSD" : DisplayCurrency.shared.format(money)
     }
 
     /// AUSD, like the total above it, unless the display currency is USD.
@@ -441,48 +457,46 @@ struct HomeScreen: View {
     }
 
     private var portfolioCaption: some View {
-        HStack(spacing: 6) {
+        let (points, baseline) = series
+        return HStack(spacing: 6) {
             if hidesBalance {
                 Text("Hidden").foregroundStyle(DeskColor.nightMuted.color)
-            } else if let change = chartChange {
-                Text(captionMoney(change.money) + String(format: " (%+.2f%%)", change.percent))
-                    .foregroundStyle((change.money.isNegative ? DeskColor.fall : DeskColor.rise).color)
-                Text(showsLastActivity ? "last activity" : range.rawValue)
+            } else if let scrubbed {
+                if chartMode == .pnl, let money = Self.money(scrubbed.value) {
+                    Text(captionMoney(money)).foregroundStyle((money.isNegative ? DeskColor.fall : DeskColor.rise).color)
+                    Text("P&L").foregroundStyle(DeskColor.nightMuted.color)
+                }
+                Text(scrubbed.date.formatted(.dateTime.day().month(.abbreviated).hour().minute()))
                     .foregroundStyle(DeskColor.nightMuted.color)
-            } else if (usesPnLHistoryChart || usesTradeHistoryChart), let pnl = totalTradingPnL {
-                Text(captionMoney(pnl))
-                    .foregroundStyle((pnl.isNegative ? DeskColor.fall : DeskColor.rise).color)
-                Text(usesPnLHistoryChart ? "P&L history" : "trade history")
+            } else if let last = points.last, points.count >= 2, let change = Self.money(last.value - baseline) {
+                Text(captionMoney(change)).foregroundStyle((change.isZero ? DeskColor.nightMuted : change.isNegative ? DeskColor.fall : DeskColor.rise).color)
+                Text(chartMode == .pnl ? "P&L · \(range.caption)" : "balance · \(range.caption)")
                     .foregroundStyle(DeskColor.nightMuted.color)
-            } else if let pnl = totalPositionPnL {
-                Text(captionMoney(pnl))
-                    .foregroundStyle((pnl.isNegative ? DeskColor.fall : DeskColor.rise).color)
-                Text("open PnL").foregroundStyle(DeskColor.nightMuted.color)
             } else {
                 Text("AUSD · \(model.network.name)").foregroundStyle(DeskColor.nightMuted.color)
             }
         }
         .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+        .contentTransition(.numericText())
     }
 
     private var equityChart: some View {
-        let points = chartPoints
-        let up = (points.last ?? 0) >= (points.first ?? 0)
+        let (points, baseline) = series
         return ZStack {
-            if points.count >= 2, points.contains(where: { $0 != points[0] }) {
-                Sparkline(values: points, tint: up ? DeskColor.rise : DeskColor.fall)
+            if points.count >= 2, !hidesBalance {
+                PortfolioChart(points: points, baseline: baseline, selected: $scrubbed)
             } else {
                 Rectangle()
                     .fill(Color.white.opacity(0.10))
                     .frame(height: 0.5)
-                Text(points.isEmpty ? "Your record starts with your first trade" : "No change yet")
+                Text(hidesBalance ? "Hidden" : chartMode == .pnl ? "Your record starts with your first trade" : "No change yet")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color.opacity(0.75))
                     .padding(.horizontal, 8)
                     .background(Color.black.opacity(0.6), in: Capsule())
             }
         }
-        .frame(height: 84)
+        .frame(height: 120)
         .frame(maxWidth: .infinity)
     }
 
