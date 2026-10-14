@@ -256,13 +256,17 @@ export function createHandler({
         res.flushHeaders?.();
         res.write(`event: hello\ndata: ${JSON.stringify({ market: instrument, chain: 143, endsIn: STREAM_SECONDS })}\n\n`);
         const stop = subscribeStream(instrument.id, (text) => { res.write(`data: ${text}\n\n`); });
-        const keepalive = setInterval(() => res.write(": keepalive\n\n"), 15_000);
         await new Promise((resolve) => {
           const timer = setTimeout(resolve, STREAM_SECONDS * 1_000);
-          const done = () => { clearTimeout(timer); resolve(); };
-          req.on("close", done); req.on("aborted", done); res.on("close", done);
+          const done = () => { clearTimeout(timer); clearInterval(keepalive); resolve(); };
+          // A reader that left shows as a closed or destroyed response; the keepalive checks
+          // too, since not every runtime raises the close event for a request without a body.
+          const keepalive = setInterval(() => {
+            if (res.destroyed || res.writableEnded || req.destroyed) return done();
+            try { res.write(": keepalive\n\n"); } catch { done(); }
+          }, 10_000);
+          res.on("close", done); res.on("error", done); req.on("close", done); req.on("aborted", done);
         });
-        clearInterval(keepalive);
         stop();
         try { res.write("event: bye\ndata: {}\n\n"); } catch {}
         return res.end();

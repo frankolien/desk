@@ -178,6 +178,11 @@ bundler, sniper, insider, dev and liquidity.
 
 ## New server routes
 
+`GET /api/v1/markets/{market}/stream` — server-sent events relaying Perpl's market-data
+frames for one market: `hello` with the market and its decimals, then `data:` lines of
+Perpl's own JSON (`mt` 9 market state, 15/16 book, 17/18 trades, 100 heartbeat), a `bye`
+before the function's limit. See Live below.
+
 `GET /api/v1/markets` — every open Perpl market, ten-second cache:
 `{ id, name, mark, prev, change, volume24h, openInterest, tvl, fundingRate, fundingIntervalSec,
 maxLeverage, priceDecimals, sizeDecimals, makerFee, takerFee, maintenanceMargin }`.
@@ -215,9 +220,19 @@ connection; token images come from the CDNs the app already trusts.
 
 ## Live
 
-Neither venue sells a socket the web can use: OKX's DEX websocket needs a paid market
-subscription and Perpl's trading socket is sign-in only. So the page polls, and the CDN
-answers most of it:
+Perpl's public market-data socket, `wss://app.perpl.xyz/ws/v1/market-data`, needs no key but
+refuses browser origins it has not whitelisted (403 on the upgrade, which the page sees as a
+1006 close). A server connection carries no origin and subscribes at once, so the page reads
+the same frames through Desk's relay, `GET /api/v1/markets/{market}/stream`: server-sent
+events carrying Perpl's JSON unchanged, the book snapshot and updates, the trades, every
+market's state and the heartbeat. One Perpl connection per function instance serves every
+reader (`_stream.mjs`), joining a market's book and trades when its first reader arrives and
+leaving when the last goes; a late reader gets the state, the book as it stands and the last
+trades before anything else. The response ends after 280 seconds and EventSource reconnects.
+The page's book watcher tries Perpl directly first and falls back to the relay when the
+direct socket closes before a snapshot, so the day trydesk.trade is on Perpl's list (the
+CORS and builder-ID form) nothing changes but the path. OKX's DEX websocket still needs a paid
+market subscription, so spot stays on polling, and the CDN answers most of it:
 
 | What | Source | Every |
 |---|---|---|
