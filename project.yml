@@ -96,6 +96,25 @@ targets:
         INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: Desk saves the portfolio cards and videos you choose to keep.
         INFOPLIST_KEY_NSFaceIDUsageDescription: Desk derives your trading key from your face. Nothing is stored.
 
+  # Gestures checked the way a finger makes them: sheets dragged down from their middle,
+  # pages swiped back from the edge. `xcodebuild test -scheme DeskUITests`.
+  DeskUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: App/DeskUITests
+    dependencies:
+      - target: Desk
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.opia.desk.uitests
+        TEST_TARGET_NAME: Desk
+        SWIFT_STRICT_CONCURRENCY: minimal
+    scheme:
+      testTargets:
+        - DeskUITests
+
   # Home Screen and Lock Screen widget, the auto-copy Live Activity and the Control
   # Center toggle.
   DeskWidgets:
