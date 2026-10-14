@@ -155,5 +155,11 @@ export function createMarkets({ fetchImpl = fetch, now = Date.now, readMark = nu
     return value;
   }
 
-  return { context, candles, marks, book, hasInstrument: async (name) => Boolean(await find(name).catch(() => null)) };
+  /// What the stream needs to name a market and unscale its frames.
+  async function instrument(name) {
+    const market = await find(name);
+    return market ? { id: market.id, name: market.name, priceDecimals: market.priceDecimals, sizeDecimals: market.sizeDecimals } : null;
+  }
+
+  return { context, candles, marks, book, instrument, hasInstrument: async (name) => Boolean(await find(name).catch(() => null)) };
 }

@@ -706,12 +706,14 @@ export default async function mount(el, params) {
       paintBook(); paintQuote();
     }, 2_000);
     state.bookStop = watchBook(m.id, { price: m.priceDecimals, size: m.sizeDecimals }, (book) => {
+      // Live from Perpl's socket or, when the browser's origin is refused, from Desk's relay
+      // of the same frames; both carry the snapshot first.
       if (!book.live || (!book.bids.length && !book.asks.length)) return;
       live = true;
       state.bookFallback?.(); state.bookFallback = null;
       state.book = book;
       paintBook(); paintQuote();
-    });
+    }, m.name);
   }
 
   function paintBook() {

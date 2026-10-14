@@ -13,7 +13,7 @@
       "maxDuration": 60
     },
     "api/v1.mjs": {
-      "maxDuration": 60
+      "maxDuration": 300
     },
     "api/token-details.mjs": {
       "maxDuration": 30
@@ -70,8 +70,14 @@
     {
       "source": "/.well-known/webauthn",
       "headers": [
-        { "key": "Content-Type", "value": "application/json" },
-        { "key": "Cache-Control", "value": "public, max-age=3600" }
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600"
+        }
       ]
     },
     {

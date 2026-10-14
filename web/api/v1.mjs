@@ -1,10 +1,12 @@
 import { createHealth } from "./_health.mjs";
 import { BARS, createMarkets } from "./_markets.mjs";
+import { subscribe as subscribeStream } from "./_stream.mjs";
 import { TIERS, clientIp, rateLimit } from "./_ratelimit.mjs";
 import { redisStore } from "./_store.mjs";
 import { createHandler as activityHandler } from "./activity.mjs";
 import { createHandler as tradersHandler } from "./traders.mjs";
 
+const STREAM_SECONDS = 280;
 const DOCS = "https://trydesk.trade/docs";
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const WINDOWS = new Set(["1h", "6h", "24h"]);
@@ -44,6 +46,7 @@ export const ENDPOINTS = [
   { path: "/api/v1/markets", tier: "default", description: "Every open Perpl market: mark, 24h change and volume, open interest, funding, leverage" },
   { path: "/api/v1/markets/marks", tier: "default", description: "Every market's mark price read off the exchange contract this instant" },
   { path: "/api/v1/markets/{market}/candles", tier: "default", description: "Perpl's own candles for a market. ?bar=1m|5m|15m|1H|4H|1D|1W" },
+  { path: "/api/v1/markets/{market}/stream", tier: "default", description: "Server-sent events: Perpl's market-data frames for a market (book, trades, every mark), relayed live" },
   { path: "/api/v1/traders/top", tier: "default", description: "Top traders on Perpl by unrealised PnL. ?limit=1..25" },
   { path: "/api/v1/traders/{address}/history", tier: "expensive", description: "A trader's closed trades and statistics" },
   { path: "/api/v1/identity/{address}", tier: "default", description: "Names and avatars for an address (.nad, nad.fun, ENS, Farcaster)" },
@@ -233,6 +236,37 @@ export function createHandler({
           return fail(problem("upstream_unavailable", `The book could not be read: ${error.message}`, instance));
         }
       }
+      case "stream": {
+        // Server-sent events carrying Perpl's own market-data frames for this market: the
+        // book snapshot and updates, trades, every market's state and the heartbeat. One
+        // Perpl connection per instance serves every reader (see _stream.mjs). The response
+        // ends before the function's limit; a browser's EventSource reconnects by itself.
+        const source = get("markets", () => createMarkets({ now }));
+        let instrument;
+        try { instrument = await source.instrument(route.market); } catch (error) {
+          return fail(problem("upstream_unavailable", `The market could not be read: ${error.message}`, instance));
+        }
+        if (!instrument) return fail(problem("not_found", `No market called ${route.market}.`, instance));
+        if (method === "HEAD") return send(200, {}, CACHE.none, "text/event-stream");
+        res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+        res.setHeader("Cache-Control", "no-cache, no-transform");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Accel-Buffering", "no");
+        res.status(200);
+        res.flushHeaders?.();
+        res.write(`event: hello\ndata: ${JSON.stringify({ market: instrument, chain: 143, endsIn: STREAM_SECONDS })}\n\n`);
+        const stop = subscribeStream(instrument.id, (text) => { res.write(`data: ${text}\n\n`); });
+        const keepalive = setInterval(() => res.write(": keepalive\n\n"), 15_000);
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, STREAM_SECONDS * 1_000);
+          const done = () => { clearTimeout(timer); resolve(); };
+          req.on("close", done); req.on("aborted", done); res.on("close", done);
+        });
+        clearInterval(keepalive);
+        stop();
+        try { res.write("event: bye\ndata: {}\n\n"); } catch {}
+        return res.end();
+      }
       case "top": {
         const wanted = Math.min(TOP_LIMIT, Math.max(1, Number.parseInt(String(query.limit ?? TOP_LIMIT), 10) || TOP_LIMIT));
         const out = relay(await capture(get("traders", () => tradersHandler({ store })), { view: "top" }), instance);
@@ -278,6 +312,7 @@ function match(segments) {
   if (segments.length === 2 && a === "markets" && b === "marks") return { name: "marks", tier: "default" };
   if (segments.length === 3 && a === "markets" && c === "candles" && /^[A-Za-z0-9]{1,12}$/.test(b)) return { name: "candles", tier: "default", market: b };
   if (segments.length === 3 && a === "markets" && c === "book" && /^[A-Za-z0-9]{1,12}$/.test(b)) return { name: "book", tier: "default", market: b };
+  if (segments.length === 3 && a === "markets" && c === "stream" && /^[A-Za-z0-9]{1,12}$/.test(b)) return { name: "stream", tier: "default", market: b };
   if (segments.length === 2 && a === "traders" && b === "top") return { name: "top", tier: "default" };
   if (segments.length === 3 && a === "traders" && c === "history") return { name: "history", tier: "expensive", address: b };
   if (segments.length === 2 && a === "identity") return { name: "identity", tier: "default", address: b };

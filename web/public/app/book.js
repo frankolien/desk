@@ -3,12 +3,19 @@
 // changes levels, and a level whose order count is zero is gone. Prices and sizes arrive
 // scaled by the market's decimals. The socket allows ten requests a minute, so a market
 // change is one frame that leaves the old stream and joins the new one.
+//
+// Perpl refuses browser origins it has not whitelisted, so when the direct socket closes
+// without ever serving a snapshot the same frames are read from Desk's own relay instead,
+// `/api/v1/markets/{market}/stream`, server-sent events carrying Perpl's JSON unchanged.
 
 const WS_URL = "wss://app.perpl.xyz/ws/v1/market-data";
 const RETRY_MAX_MS = 30_000;
 
 let socket = null;
-let wanted = null;          // { id, decimals }
+let relay = null;           // EventSource to Desk's relay, once the direct socket is refused
+let direct = true;          // whether the direct socket is still worth trying
+let served = false;         // whether the direct socket ever delivered a snapshot
+let wanted = null;          // { id, name, decimals }
 let subscribed = null;      // market id the socket currently streams
 let sid = null;             // subscription id of the current snapshot
 let bids = new Map();
@@ -20,8 +27,10 @@ let listeners = new Set();
 
 const sorted = (map, descending) => [...map.values()].sort((a, b) => (descending ? b.price - a.price : a.price - b.price));
 
+const connected = () => socket?.readyState === WebSocket.OPEN || relay?.readyState === EventSource.OPEN;
+
 export function bookState() {
-  return { bids: sorted(bids, true), asks: sorted(asks, false), at, live: socket?.readyState === WebSocket.OPEN && subscribed === wanted?.id && sid !== null };
+  return { bids: sorted(bids, true), asks: sorted(asks, false), at, live: connected() && subscribed === wanted?.id && sid !== null };
 }
 
 function emit() { const state = bookState(); for (const fn of listeners) fn(state); }
@@ -57,18 +66,37 @@ function subscribe() {
   emit();
 }
 
+function handle(text) {
+  let frame;
+  try { frame = JSON.parse(text); } catch { return; }
+  if (frame.mt === 15) { served = true; apply(frame, true); }
+  else if (frame.mt === 16) apply(frame, false);
+}
+
 function connect() {
+  if (!direct) { connectRelay(); return; }
   if (socket || typeof WebSocket === "undefined") return;
-  try { socket = new WebSocket(WS_URL); } catch { socket = null; scheduleRetry(); return; }
+  try { socket = new WebSocket(WS_URL); } catch { socket = null; direct = false; connectRelay(); return; }
   socket.onopen = () => { retryMs = 1_000; subscribed = null; subscribe(); };
-  socket.onmessage = (event) => {
-    let frame;
-    try { frame = JSON.parse(event.data); } catch { return; }
-    if (frame.mt === 15) apply(frame, true);
-    else if (frame.mt === 16) apply(frame, false);
+  socket.onmessage = (event) => handle(event.data);
+  socket.onclose = () => {
+    socket = null; sid = null; subscribed = null; emit();
+    if (!wanted) return;
+    // Refused before a single snapshot: the origin is not on Perpl's list. Read through Desk.
+    if (!served) { direct = false; connectRelay(); } else scheduleRetry();
   };
-  socket.onclose = () => { socket = null; sid = null; subscribed = null; emit(); if (wanted) scheduleRetry(); };
   socket.onerror = () => { try { socket?.close(); } catch {} };
+}
+
+function connectRelay() {
+  if (relay || !wanted?.name || typeof EventSource === "undefined") return;
+  sid = null; bids = new Map(); asks = new Map();
+  relay = new EventSource(`/api/v1/markets/${encodeURIComponent(wanted.name)}/stream`);
+  const forMarket = wanted.id;
+  relay.onopen = () => { retryMs = 1_000; subscribed = forMarket; emit(); };
+  relay.onmessage = (event) => handle(event.data);
+  relay.addEventListener("bye", () => { try { relay?.close(); } catch {} relay = null; if (wanted) connectRelay(); });
+  relay.onerror = () => { try { relay?.close(); } catch {} relay = null; sid = null; emit(); if (wanted) scheduleRetry(); };
 }
 
 function scheduleRetry() {
@@ -79,11 +107,12 @@ function scheduleRetry() {
 
 /// Streams `marketId`'s book to `onChange` until the returned function is called. Decimals
 /// are the market's `priceDecimals` and `sizeDecimals` from /api/v1/markets.
-export function watchBook(marketId, decimals, onChange) {
+export function watchBook(marketId, decimals, onChange, name = null) {
   listeners.add(onChange);
   const changed = wanted?.id !== marketId;
-  wanted = { id: marketId, decimals };
+  wanted = { id: marketId, name, decimals };
   if (socket?.readyState === WebSocket.OPEN) { if (changed) subscribe(); else onChange(bookState()); }
+  else if (relay) { if (changed) { try { relay.close(); } catch {} relay = null; connectRelay(); } else onChange(bookState()); }
   else connect();
   return () => {
     listeners.delete(onChange);
@@ -91,7 +120,8 @@ export function watchBook(marketId, decimals, onChange) {
       wanted = null;
       clearTimeout(retryTimer); retryTimer = null;
       try { socket?.close(); } catch {}
-      socket = null; sid = null; subscribed = null;
+      try { relay?.close(); } catch {}
+      socket = null; relay = null; sid = null; subscribed = null;
       bids = new Map(); asks = new Map();
     }
   };
