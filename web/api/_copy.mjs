@@ -376,8 +376,7 @@ async function enroll({ deps, store, now, fetchImpl, network, address, id, body 
   const token = tokenFrom(JSON.parse(answer));
 
   const timeZone = typeof body.timeZone === "string" && body.timeZone.length <= 64 ? body.timeZone : "UTC";
-  const push = body.push?.token && /^[0-9a-f]{64,200}$/i.test(body.push.token)
-    ? { token: body.push.token, environment: body.push.environment === "development" ? "development" : "production" } : null;
+  const push = pushFrom(body.push);
   const copier = {
     id, network, address, keyId: signer.keyId, publicKey: pending.publicKey, generation: pending.generation,
     apiKey: seal(token, deps.tokenKey), deviceKey: grant.deviceKey, caps: grant.caps,
@@ -436,6 +435,12 @@ async function authenticate({ req, store, now, action, text }) {
   return { copier, body: parse(text) };
 }
 
+/// The phone's APNs token, in the two environments the sender knows.
+function pushFrom(push) {
+  if (!push?.token || !/^[0-9a-f]{64,200}$/i.test(push.token)) return null;
+  return { token: push.token, environment: push.environment === "sandbox" ? "sandbox" : "production" };
+}
+
 async function writeCopier(store, copier, extra = []) {
   await store.pipeline([["SET", K.copier(copier.id), JSON.stringify(copier)], ["SADD", K.dirty, copier.id], ...extra]);
 }
@@ -478,6 +483,7 @@ const ACTIONS = {
       next.timeZone = body.timeZone;
     }
     if (body.notifyShadow !== undefined) next.notifyShadow = Boolean(body.notifyShadow);
+    if (body.push !== undefined) next.push = pushFrom(body.push);
     await writeCopier(store, next, extra);
     return { copier: publicView(next) };
   },
