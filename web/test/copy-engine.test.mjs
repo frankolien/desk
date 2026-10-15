@@ -217,3 +217,116 @@ test("A book read off the contract: no account, unreadable, and positions as the
   const failing = { ...chain, openPosition: async () => { throw new Error("rpc"); } };
   assert.deepEqual(await readTrader(failing, markets, TRADER), { unreadable: true });
 });
+
+test("Reads of one trader never overlap, and an event mid-read gets a read of its own", async () => {
+  const { engine, books, copier } = setup();
+  await engine.putCopier(copier);
+  let reads = 0, inside = 0, most = 0;
+  const slow = createEngine({
+    store: memoryStore(), markets: async () => openMarkets, logger: { warn() {} },
+    readTrader: async (a) => { reads++; inside++; most = Math.max(most, inside); await new Promise((r) => setTimeout(r, 10)); inside--; return books[a]; },
+  });
+  await slow.putCopier(copier);
+  await Promise.all([slow.processTrader(TRADER), slow.processTrader(TRADER), slow.processTrader(TRADER)]);
+  assert.equal(most, 1);
+  assert.equal(reads, 2, "the first read, then one more for the calls that landed during it");
+});
+
+test("A restart picks up where the last engine stopped: copies, baselines, today's losses and its pauses", async () => {
+  const ctx = await opened({ rules: { stopLossPercent: 60 }, guards: { dailyLossLimit: 5 } });
+  ctx.books[TRADER].positions = {};
+  await ctx.engine.processTrader(TRADER); await ctx.engine.processTrader(TRADER); // closed at the entry: a small loss
+  ctx.books[TRADER].positions = { BTC: btc() };
+  await ctx.engine.processTrader(TRADER);
+  const again = createEngine({
+    store: ctx.store, markets: async () => openMarkets, now: () => ctx.clock.t, logger: { warn() {} },
+    readTrader: async (address) => ctx.books[address],
+  });
+  assert.equal((await again.openCopies(ctx.id)).length, 1);
+  ctx.books[TRADER].positions = { BTC: btc(), ETH: { ...btc(), symbol: "ETH", marketId: 32 } };
+  const found = await again.processTrader(TRADER);
+  assert.deepEqual(found.map((m) => m.kind), ["opened"], "BTC was already in the stored baseline");
+  await ctx.store.set(`copy:pause:${ctx.id}`, "Today's copy losses reached your limit.");
+  const third = createEngine({ store: ctx.store, markets: async () => openMarkets, readTrader: async (a) => ctx.books[a], logger: { warn() {} } });
+  assert.equal(await third.paused(ctx.id), true);
+});
+
+test("Changes the API makes are read on the next refresh, and the engine never writes the copier", async () => {
+  const { engine, store, copier, id, books } = setup();
+  await engine.putCopier(copier);
+  await engine.processTrader(TRADER);
+  const stored = JSON.parse(await store.get(`copy:copier:${id}`));
+  stored.traders[TRADER].rules.closeWithTrader = false;
+  await store.set(`copy:copier:${id}`, JSON.stringify(stored));
+  await store.sadd("copy:dirty", id);
+  assert.equal(await engine.refresh(), 1);
+  assert.deepEqual(await store.smembers("copy:dirty"), []);
+  assert.equal((await engine.copier(id)).traders[TRADER].rules.closeWithTrader, false);
+  books[TRADER].positions = { BTC: btc() };
+  await engine.processTrader(TRADER);
+  const before = await store.get(`copy:copier:${id}`);
+  await engine.sweep();
+  assert.equal(await store.get(`copy:copier:${id}`), before);
+
+  await store.del(`copy:copier:${id}`);
+  await store.sadd("copy:dirty", id);
+  await engine.refresh();
+  assert.equal(await engine.copier(id), null);
+  assert.deepEqual(await engine.traders(), []);
+});
+
+test("Two traders opening at the same moment can't both take a copier's last slot", async () => {
+  const OTHER = "0x1111111111111111111111111111111111111111";
+  const store = memoryStore();
+  const books = {
+    [TRADER]: { accountId: "9", portfolio: 20_000, positions: {} },
+    [OTHER]: { accountId: "10", portfolio: 20_000, positions: {} },
+  };
+  const engine = createEngine({
+    store, markets: async () => openMarkets, logger: { warn() {} },
+    readTrader: async (a) => { await new Promise((r) => setTimeout(r, Math.random() * 5)); return books[a]; },
+  });
+  const rules = { ...DEFAULT_RULES, maxChaseBps: 200 };
+  await engine.putCopier({
+    network: "testnet", address: ME, guards: { ...DEFAULT_GUARDS, maxOpenCopies: 1 },
+    traders: { [TRADER]: { rules, since: 0 }, [OTHER]: { rules, since: 0 } },
+  });
+  await engine.sweep();
+  books[TRADER].positions = { BTC: btc() };
+  books[OTHER].positions = { ETH: { ...btc(), symbol: "ETH", marketId: 32 } };
+  await Promise.all([engine.processTrader(TRADER), engine.processTrader(OTHER)]);
+  const id = copierId("testnet", ME);
+  assert.equal((await engine.openCopies(id)).length, 1);
+  assert.equal((await engine.log(id)).filter((r) => r.kind === "skipped").length, 1);
+});
+
+test("A live copy is held as pending before it is signed, and the executor settles it", async () => {
+  const intents = [];
+  const executor = {
+    quote: async (copier, market) => ({ mark: priceFrom(60_000, market.config.priceDecimals), free: 5_000_000_000n }),
+    submit: async (intent) => { intents.push(intent); },
+    close: async (intent) => { intents.push(intent); },
+  };
+  const store = memoryStore();
+  const books = { [TRADER]: { accountId: "9", portfolio: 20_000, positions: {} } };
+  const notes = [];
+  const engine = createEngine({ store, markets: async () => openMarkets, executor, readTrader: async (a) => books[a], notify: async (c, r) => notes.push(r), logger: { warn() {} } });
+  await engine.putCopier({ network: "testnet", address: ME, guards: DEFAULT_GUARDS, traders: { [TRADER]: { rules: { ...DEFAULT_RULES, mode: "live" }, since: 0 } } });
+  await engine.processTrader(TRADER);
+  books[TRADER].positions = { BTC: btc() };
+  await engine.processTrader(TRADER);
+  const id = copierId("testnet", ME);
+  const [pending] = await engine.openCopies(id);
+  assert.equal(pending.state, "pending");
+  assert.equal(JSON.parse(await store.get(`copy:open:${id}`))[0].state, "pending", "written before the executor runs");
+  await new Promise((r) => setImmediate(r));
+  assert.equal(intents[0].action, "submit");
+  await engine.settle(id, pending.id, { kind: "filled", entry: 60_010, row: { kind: "opened", detail: "Filled." } });
+  assert.equal((await engine.openCopies(id))[0].state, "open");
+  assert.equal(notes.at(-1).kind, "opened");
+  books[TRADER].positions = {};
+  await engine.processTrader(TRADER); await engine.processTrader(TRADER);
+  assert.equal((await engine.openCopies(id))[0].state, "closing");
+  await new Promise((r) => setImmediate(r));
+  assert.equal(intents.at(-1).action, "close");
+});

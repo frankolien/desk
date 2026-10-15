@@ -183,7 +183,37 @@ Server differences from the app, each deliberate:
 
 Two engines would double every copy. `copyd` takes a leader lease in Redis (`SET NX PX 15000`,
 renewed every 5 s, fenced with a token checked on every intent write). A process that loses
-the lease stops signing before it stops anything else.
+the lease stops signing before it stops anything else. One that takes it back forgets what it
+held and loads again before acting, since another engine may have acted in between.
+
+### Memory first, Redis as the record
+
+The leader keeps its working copy in memory: copiers, who follows whom, open copies, baselines,
+today's realised result per copier. It loads them once on taking the lease, decides in memory,
+and writes what changed in one pipeline afterwards. A decision has no `await` between reading a
+copier's state and changing it, so two traders read at the same moment can't both take a
+copier's last slot or both count against the same loss allowance. Reads of one trader never
+overlap; an event that lands mid-read gets one more read after it. The sweep reads 16 traders
+at a time, and chain events go straight to their trader instead of waiting behind a sweep.
+
+The API owns `copy:copier:*` and names a changed copier in `copy:dirty`; the engine reloads
+those each tick. The engine's own pause (the daily loss limit) is `copy:pause:<id>`, which the
+API deletes on resume, so neither side overwrites the other's writes.
+
+Measured on 16 Oct 2026 against mainnet, in shadow mode, with simulated copiers each following
+5 of the 15-21 accounts trading at that moment (mostly bots: the heaviest load there is), the
+store at a 3 ms round trip, and the public RPC:
+
+| Copiers | Sweep | Move to decision, p50 / p95 / max | Before this design |
+|---|---|---|---|
+| 1,000 | 1.4-2.1 s | 0.11 / 0.77 / 1.8 s | sweeps 12-72 s and growing, 15 s per move |
+| 5,000 | 1.6-3.1 s | 0.19 / 1.4 / 2.8 s | not run |
+
+The tail is the RPC (reads p95 1.3-1.7 s on rpc.monad.xyz); production needs a paid endpoint.
+Redis volume follows decisions, not copiers: about 1-2 commands per copier per decision. Copiers
+who follow bots that trade every 30 s generate millions of commands a day, so the engine's Redis
+should be one billed by size, not by command (Railway Redis next to copyd, or an Upstash fixed
+plan).
 
 ## Notifications
 
@@ -203,8 +233,8 @@ Lock Screen stays current with the app closed.
 
 ## Storage
 
-Redis (Upstash) for state and locks, behind a small interface so a database can replace it.
-Writes per copy are a handful; the cost is the sweep reads, which do not touch Redis. Keys:
+Redis for state and locks, behind a small interface so a database can replace it. The engine
+reads it once on taking the lease and writes only what changed; sweeps don't touch it. Keys:
 
 | Key | What |
 |---|---|
@@ -216,6 +246,8 @@ Writes per copy are a handful; the cost is the sweep reads, which do not touch R
 | `copy:intent:<copier>:<id>` | order intents and their states |
 | `copy:log:<copier>` | the Recent list (capped at 400, as the app) |
 | `copy:audit:<copier>` | append-only: every signature requested, its canonical string hash, its result |
+| `copy:dirty` | copiers the API changed since the engine last looked |
+| `copy:pause:<copier>` | why the engine paused a copier (the daily loss limit); the API deletes it on resume |
 | `copy:lease` | the leader lease |
 | `copy:halt` | global halt |
 
