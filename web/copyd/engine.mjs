@@ -25,6 +25,7 @@ const K = {
   base: (trader) => `copy:base:${trader}`,
   open: (id) => `copy:open:${id}`,
   log: (id) => `copy:log:${id}`,
+  account: (id) => `copy:account:${id}`,
 };
 
 export const copierId = (network, address) => `${network}:${address.toLowerCase()}`;
@@ -60,6 +61,7 @@ export function createEngine({ store, readTrader, markets, now = Date.now, notif
   const json = async (key, fallback) => { const text = await store.get(key); return text ? JSON.parse(text) : fallback; };
   const save = (key, value) => store.set(key, JSON.stringify(value));
   const marks = new Map(); // symbol -> latest mark seen on any trader read
+  const accounts = new Map(); // exchange account id -> trader, written to Redis once
 
   async function marketsBySymbol() {
     const bySymbol = new Map();
@@ -133,6 +135,10 @@ export function createEngine({ store, readTrader, markets, now = Date.now, notif
     if (!followers.length) return [];
     const book = await readTrader(trader);
     if (!book || book.unreadable) return [];
+    if (book.accountId && accounts.get(book.accountId) !== trader) {
+      accounts.set(book.accountId, trader);
+      await store.set(K.account(book.accountId), trader);
+    }
     for (const position of Object.values(book.positions)) if (position.mark > 0) marks.set(position.symbol, position.mark);
 
     const base = await json(K.base(trader), null);
@@ -149,7 +155,9 @@ export function createEngine({ store, readTrader, markets, now = Date.now, notif
       return [];
     }
     const found = diff(before, after);
-    await save(K.base(trader), { at: now(), positions: after, emptyOnce: false });
+    // Only a change of shape is written: marks move every read, and the diff only needs which
+    // symbols are held on which side.
+    if (found.length || base.emptyOnce) await save(K.base(trader), { at: now(), positions: after, emptyOnce: false });
     if (!found.length) return [];
 
     for (const id of followers) {
@@ -303,6 +311,8 @@ export function createEngine({ store, readTrader, markets, now = Date.now, notif
     openCopies: (id) => json(K.open(id), []),
     log: (id) => store.lrange(K.log(id), 0, LOG_LIMIT - 1).then((rows) => rows.map((r) => JSON.parse(r))),
     traders: () => store.smembers(K.traders),
+    /// The followed trader behind an exchange account id, once a read has seen them.
+    traderForAccount: async (id) => accounts.get(id) ?? store.get(K.account(id)),
     marks,
   };
 }
