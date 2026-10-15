@@ -5,7 +5,8 @@
 #
 #   tools/testflight.sh            archive, export, upload
 #   tools/testflight.sh archive    archive only, to build/Desk.xcarchive
-#   tools/testflight.sh upload     upload the archive already there
+#   tools/testflight.sh upload     upload the archive already there, if it was built from
+#                                  this exact commit; otherwise archive again first
 #
 # The upload needs App Store Connect access. Either sign an Apple ID with access to
 # the team into Xcode (Settings > Accounts), or export an App Store Connect API key
@@ -24,9 +25,18 @@ if [ -n "${ASC_KEY_ID:-}" ]; then
 fi
 
 ARCHIVE=build/Desk.xcarchive
-if [ "${1:-}" = "upload" ] && [ -d "$ARCHIVE" ]; then
-  echo "using the archive already in $ARCHIVE"
+STAMP="$ARCHIVE/desk-commit"
+HEAD=$(git rev-parse HEAD)
+DIRTY=$(git status --porcelain -- App DeskKit project.yml | head -1)
+[ -n "$DIRTY" ] && echo "note: App, DeskKit or project.yml has uncommitted changes; they are in this build"
+
+# An archive is reused only when it was built from this commit with nothing uncommitted:
+# re-uploading an older archive ships an app without the latest changes and no warning.
+if [ "${1:-}" = "upload" ] && [ -d "$ARCHIVE" ] && [ -z "$DIRTY" ] && [ "$(cat "$STAMP" 2>/dev/null)" = "$HEAD" ]; then
+  echo "using the archive already in $ARCHIVE, built from $(git log -1 --format='%h %s' "$HEAD")"
 else
+  [ "${1:-}" = "upload" ] && [ -d "$ARCHIVE" ] && echo "the archive in $ARCHIVE is not from $(git rev-parse --short HEAD); archiving again"
+  rm -rf "$ARCHIVE"
 xcodegen generate >/dev/null
 
 # shellcheck disable=SC2086
@@ -39,6 +49,7 @@ xcodebuild archive \
   -allowProvisioningUpdates $AUTH \
   | grep -E "error:|warning: .*(sign|provision)|\*\* ARCHIVE" || true
 
+[ -d "$ARCHIVE" ] && { [ -n "$DIRTY" ] && echo "$HEAD+uncommitted" || echo "$HEAD"; } > "$STAMP"
 fi
 
 test -d "$ARCHIVE" || { echo "no archive produced"; exit 1; }
