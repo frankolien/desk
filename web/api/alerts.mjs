@@ -15,6 +15,7 @@ import {
 import { isSolanaAddress } from "./_chains.mjs";
 import { parseWebSubscription, vapidFromEnv, webPayload, webPushClient } from "./_webpush.mjs";
 import { chainReader, describePosition, noAccount, openMarkets, perpIdsFromBitmap } from "./traders.mjs";
+import { createCopyHandler } from "./_copy.mjs";
 
 export const MAX_TRADERS = 20 + MAX_WALLETS;
 const MAX_COPIED = 20;
@@ -632,6 +633,12 @@ export function createHandler(resolve) {
       return res.status(200).json({ publicKey: deps.webpush.publicKey });
     }
 
+    // /api/copy, folded in here to keep a function slot spare.
+    if (req.query?.job === "copy") {
+      if (!deps.copy) return res.status(503).json({ error: "Auto-Copy from the server isn't switched on yet." });
+      return deps.copy(req, res);
+    }
+
     if (!deps.store || !deps.apns) return res.status(503).json({ error: "Trade alerts aren't configured on this server." });
     const { store, apns } = deps;
     const webpush = deps.webpush ?? null;
@@ -752,8 +759,27 @@ export function createHandler(resolve) {
   };
 }
 
+/// The copy API's KMS client, made on first use: the SDK is only loaded when someone turns
+/// Auto-Copy on. Its credentials are desk-copy-api's own, never the process's defaults.
+function copyKms() {
+  const { COPY_AWS_ACCESS_KEY_ID: accessKeyId, COPY_AWS_SECRET_ACCESS_KEY: secretAccessKey } = process.env;
+  if (!accessKeyId || !secretAccessKey) return null;
+  let client = null;
+  return {
+    async send(command) {
+      if (!client) {
+        const { KMSClient } = await import("@aws-sdk/client-kms");
+        client = new KMSClient({ region: process.env.COPY_AWS_REGION || "eu-north-1", credentials: { accessKeyId, secretAccessKey } });
+      }
+      return client.send(command);
+    },
+  };
+}
+
 let production;
+let copyDeps;
 export default createHandler(() => (production ??= {
+  copy: createCopyHandler(() => (copyDeps ??= { store: redisStore(), kms: copyKms(), tokenKey: process.env.COPY_TOKEN_KEY })),
   store: redisStore(),
   apns: apnsClient(),
   webpush: webPushClient(vapidFromEnv()),

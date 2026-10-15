@@ -79,7 +79,8 @@ sharing `api/_*.mjs`. It must run in an EU region: Perpl answers 451 to US addre
    grant, signs the proof of possession over the raw digest **with KMS** (Ed25519 PureEdDSA
    over 32 bytes, `ED25519_SHA_512`, `MessageType RAW`), and posts `api-key/enroll` with
    `typed_data` and `mac` spliced byte for byte. The API-key token comes back once; it is
-   stored encrypted (KMS envelope), though it signs nothing on its own.
+   stored sealed (AES-256-GCM under `COPY_TOKEN_KEY`, shared by Vercel and copyd), though it
+   signs nothing on its own.
 5. Hand-over: the app sends its open copies and its baselines, stops its own engine for this
    account, and from then on shows the server's state. An account is copied by the app or by
    the server, never both: the server holds a per-account lease, and the app's `CopyTrader`
@@ -91,19 +92,57 @@ and the app offers the Perpl revoke page. Re-enabling enrols a new key.
 
 ## Requests from the app
 
-`/api/copy` folds into the existing `v1` or `alerts` function (the Hobby plan's twelve-function
-cap; one slot is left and should stay spare). Every request after enrolment carries:
+`/api/copy/<action>` is served by the `alerts` function (`?job=copy`, `web/api/_copy.mjs`), for
+the Hobby plan's twelve-function cap; one slot is left and stays spare. `prepare` and `enroll`
+take JSON; every request after enrolment sends its body as `text/plain`, exactly the bytes it
+signed, and carries:
 
 ```
-X-Desk-Account: 0x…            X-Desk-Time: <ms>        X-Desk-Nonce: <16 random bytes, b64url>
-X-Desk-Signature: P-256 over "desk-copy\n{chain}\n{METHOD}\n{target}\n{time}\n{nonce}\n{sha256(body)}"
+X-Desk-Network: mainnet|testnet   X-Desk-Account: 0x…   X-Desk-Time: <ms>
+X-Desk-Nonce: <16+ random bytes, b64url>
+X-Desk-Signature: P-256 (DER or raw r‖s, b64url) over
+  "desk-copy\n{chainId}\n POST\n/api/copy/{action}\n{time}\n{nonce}\n{sha256 hex of body}"
 ```
 
 the same canonical shape as Perpl's, signed by the Secure Enclave device key registered in the
-grant. Window ±60 s, nonce single-use for 2 minutes in Redis. Actions: `state` (rules, open
-copies, log, health), `rules` (set per-trader rules and guards), `pause`, `resume`, `close`
-(close one copy now), `disable`. Raising a hard cap needs a fresh wallet-signed grant, which
-means Face ID; lowering one does not.
+grant (65-byte X9.63 point, b64url). Window ±60 s, nonce single-use for 2 minutes in Redis.
+Actions: `state` (rules, open copies, last 100 log rows, the engine's last sweep), `rules`
+(replace followed traders and their rules, guards, time zone), `pause`, `resume` (also clears
+the engine's own `copy:pause`), `close` (`copy:close:<id>`, acted on at the engine's next
+refresh), `disable` (retires the KMS key; the engine drops the copier). Raising a hard cap needs
+a fresh wallet-signed grant, which means Face ID; lowering one does not.
+
+The grant is plain text, line for line, so the server reads back exactly what was signed:
+
+```
+Desk Auto-Copy grant
+I let Desk's server copy trades for this account within these limits.
+Account: 0x…
+Network: testnet
+Server key: 0x<ed25519, 64 hex>
+Device key: <P-256, b64url>
+Max margin per trade: 50 AUSD
+Max leverage: 10x
+Max open copies: 5
+Max open notional: 1000 AUSD
+Max daily loss: 100 AUSD
+Max orders per hour: 30
+Issued: 2026-10-16T12:00:00.000Z
+```
+
+Rules are checked against it: margin per trade (doubled under conviction sizing) and leverage
+per trader, open copies, daily loss and per-market exposure in the guards. `prepare` is limited
+to six an hour per account (each can cost a KMS key) and reuses its key for 20 minutes; a key
+nobody enrolled is retired when the next is made.
+
+Environment (Vercel): `COPY_AWS_ACCESS_KEY_ID`, `COPY_AWS_SECRET_ACCESS_KEY` (desk-copy-api's),
+`COPY_AWS_REGION` (eu-north-1), `COPY_TOKEN_KEY` (32 bytes, base64; copyd needs the same).
+
+Proved on testnet on 16 Oct 2026 with real KMS and Perpl, through the handler: `prepare` (KMS
+key and Perpl's payload, 1.3 s), `enroll` (Perpl registered the key, 0.5 s), signed `wallet`
+and `positions` reads with the KMS key (200), a device-signed `state`, and `disable` (key
+retired). A wallet with no Perpl account gets 404 from `api-key/enroll`; the API says to
+deposit first.
 
 ## The engine
 
@@ -281,9 +320,8 @@ the Paid plan, with a budget alert, before copiers depend on it.
 1. **Pure core** (this branch, first): planner port with the Swift vectors; Perpl REST
    canonical signing with a pluggable signer, matching `CanonicalVectors.json` byte for byte;
    enrolment digest and splicing with the EIP-712 vectors. No network, no keys.
-2. KMS signer and enrolment end to end on **testnet**, with a throwaway account: prepare,
-   Face ID, enroll, one signed read, disable. (The KMS half is done: a real key's signatures
-   verify as Ed25519. Enrolment at Perpl remains.)
+2. ~~KMS signer and enrolment end to end on **testnet**~~: done 16 Oct 2026, through
+   `/api/copy` (see Requests from the app). The app's side (Face ID, device key) remains.
 3. Engine in **shadow** only, one copier, for a week, its log compared with the app's.
 4. Live on testnet, with the halt and the disable path exercised first.
 5. App: the opt-in sheet, device key, server-state screens, `sr: 32` reseed.
