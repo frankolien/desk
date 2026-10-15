@@ -1,63 +1,52 @@
-/// The engine's loop, without the wiring: hold the lease, pick up copiers the API changed, sweep
-/// every followed trader on a schedule, read a trader at once when a chain event names their
-/// account, and leave a heartbeat for the health check. Events don't wait for a sweep: the engine
-/// keeps reads of one trader from overlapping, and its decisions from interleaving.
-const HALT_CACHE_MS = 2_000;
-
-export function createRunner({ engine, lease, store, now = Date.now, logger = console }) {
+/// The engine's loop, without the wiring: one beat keeps the lease, picks up copiers the API
+/// changed and leaves a heartbeat, all in one Redis command (lease.beat); then every followed
+/// trader is swept, and a chain event reads its trader at once. Events don't wait for a sweep:
+/// the engine keeps reads of one trader from overlapping, and its decisions from interleaving.
+///
+/// Redis is billed per command and shared with the worker, so an idle engine costs one command
+/// a beat. Events use the halt as the last beat saw it; only a live order reads it fresh, right
+/// before its signature.
+export function createRunner({ engine, lease, store, logger = console }) {
   let haltNoted = false;
-  let haltCheckedAt = -Infinity;
-  let haltCached = false;
+  let halted = false;
   let sweeping = null;
   let lapsed = false; // held the lease, lost it, and has not swept since taking it back
 
-  async function halted({ fresh = false } = {}) {
-    if (!fresh && now() - haltCheckedAt < HALT_CACHE_MS) return haltCached;
-    const halt = await store.get("copy:halt");
-    if (halt && !haltNoted) logger.warn?.(`copyd: halted (${halt}); nothing is read or copied until copy:halt is cleared`);
-    haltNoted = Boolean(halt);
-    haltCheckedAt = now();
-    haltCached = Boolean(halt);
-    return haltCached;
+  function noteHalt(value) {
+    if (value && !haltNoted) logger.warn?.(`copyd: halted (${value}); nothing is read or copied until copy:halt is cleared`);
+    haltNoted = Boolean(value);
+    halted = Boolean(value);
   }
 
-  /// Keeps or takes the lease. Runs on its own timer, well inside the lease's life: renewed only
-  /// once per sweep, the lease spent its last two seconds of every cycle not held, and events
-  /// landing then were dropped until the next sweep.
-  async function keepLease() {
-    try { return (await lease.renew()) || (await lease.acquire()); }
-    catch (error) { logger.warn?.(`copyd: lease: ${error.message}`); return false; }
-  }
-
-  /// One beat: sweep if this process may act. A sweep still running from the last beat is
-  /// waited for, not doubled.
+  /// One beat: the lease, the halt and the changed copiers in one command, then a sweep. A sweep
+  /// still running from the last beat is waited for, not doubled.
   async function tick() {
-    if (!lease.holds()) await keepLease();
-    if (!lease.holds()) { lapsed = true; return { swept: false, reason: "no lease" }; }
+    let beat;
+    try { beat = await lease.beat(); } catch (error) {
+      logger.warn?.(`copyd: beat: ${error.message}`);
+      return { swept: false, reason: "no lease" };
+    }
+    if (!beat.held || !lease.holds()) { lapsed = true; return { swept: false, reason: "no lease" }; }
     if (lapsed) { engine.reset?.(); lapsed = false; }
-    if (await halted({ fresh: true })) return { swept: false, reason: "halted" };
+    noteHalt(beat.halt);
+    if (halted) return { swept: false, reason: "halted" };
     if (sweeping) { await sweeping; return { swept: false, reason: "busy" }; }
     sweeping = (async () => {
-      await engine.refresh?.();
+      await engine.refresh?.(beat.dirty);
       return engine.sweep();
     })();
-    try {
-      const found = await sweeping;
-      await store.set("copy:heartbeat", String(now()));
-      return { swept: true, found };
-    } finally { sweeping = null; }
+    try { return { swept: true, found: await sweeping }; } finally { sweeping = null; }
   }
 
   const work = new Set();
 
   /// A chain event: read that account's trader now.
   async function onAccount(accountId) {
-    if (!lease.holds() || lapsed) return null;
+    if (!lease.holds() || lapsed || halted) return null;
     const trader = await engine.traderForAccount(accountId);
     if (!trader) return null;
     const job = (async () => {
-      if (await halted()) return null;
-      if (!lease.holds()) return null;
+      if (!lease.holds() || halted) return null;
       return engine.processTrader(trader);
     })().catch((error) => { logger.warn?.(`copyd: event ${trader}: ${error.message}`); return null; });
     work.add(job);
@@ -65,8 +54,12 @@ export function createRunner({ engine, lease, store, now = Date.now, logger = co
     return job;
   }
 
-  /// For the executor, right before every signature: held, and not halted (fresh within 2 s).
-  const mayAct = async () => lease.holds() && !lapsed && !(await halted());
+  /// For the executor, right before every signature: held, and the halt read now.
+  async function mayAct() {
+    if (!lease.holds() || lapsed) return false;
+    noteHalt(await store.get("copy:halt"));
+    return !halted;
+  }
 
-  return { tick, keepLease, onAccount, mayAct, idle: async () => { await sweeping; await Promise.all([...work]); } };
+  return { tick, onAccount, mayAct, idle: async () => { await sweeping; await Promise.all([...work]); } };
 }

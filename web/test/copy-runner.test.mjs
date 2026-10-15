@@ -103,16 +103,44 @@ test("Skips are held to one per trader per hour; devices without a token get not
   assert.deepEqual(await notify({ ...copier, notifyShadow: false }, row({ kind: "opened", isShadow: true })), { skipped: "shadow muted" });
 });
 
-test("The lease is kept between sweeps, so events are never dropped in a sweep's last seconds", async () => {
+test("One beat holds the lease for three beats, so events are never dropped between them", async () => {
   const store = memoryStore();
   const clock = { t: 1_000 };
   const engine = fakeEngine();
-  const runner = createRunner({ engine, lease: createLease({ store, now: () => clock.t, id: "me" }), store, now: () => clock.t, logger: quiet });
+  const runner = createRunner({ engine, lease: createLease({ store, now: () => clock.t, id: "me", ttlMs: 90_000 }), store, logger: quiet });
   await runner.tick();
-  for (let i = 0; i < 6; i++) { clock.t += 5_000; await runner.keepLease(); }
+  clock.t += 29_000;
   await runner.onAccount("9");
   await runner.idle();
-  assert.ok(engine.calls.includes("read 0xtrader"), "30 s after the last sweep, still held");
+  assert.ok(engine.calls.includes("read 0xtrader"), "29 s after the beat, still held");
+  clock.t += 60_000; // two beats missed
+  await runner.onAccount("9");
+  await runner.idle();
+  assert.equal(engine.calls.filter((c) => c.startsWith("read")).length, 1, "within 2 s of lapsing, nothing is done");
+});
+
+test("The beat hands over the copiers the API changed and leaves the set empty", async () => {
+  const store = memoryStore();
+  const engine = fakeEngine();
+  const seen = [];
+  engine.refresh = async (ids) => { seen.push(ids); return ids?.length ?? 0; };
+  const runner = createRunner({ engine, lease: createLease({ store, id: "me" }), store, logger: quiet });
+  await store.sadd("copy:dirty", "testnet:0xa");
+  await store.sadd("copy:dirty", "testnet:0xb");
+  await runner.tick();
+  assert.deepEqual(seen[0].sort(), ["testnet:0xa", "testnet:0xb"]);
+  assert.deepEqual(await store.smembers("copy:dirty"), []);
+  await runner.tick();
+  assert.deepEqual(seen[1], []);
+});
+
+test("A live order reads the halt fresh, even between beats", async () => {
+  const store = memoryStore();
+  const runner = createRunner({ engine: fakeEngine(), lease: createLease({ store, id: "me" }), store, logger: quiet });
+  await runner.tick();
+  assert.equal(await runner.mayAct(), true);
+  await store.set("copy:halt", "incident 2");
+  assert.equal(await runner.mayAct(), false);
 });
 
 test("Taking the lease back after losing it reloads the engine before it acts", async () => {

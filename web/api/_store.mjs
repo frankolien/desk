@@ -52,6 +52,8 @@ export function redisStore({
     zadd: (key, score, member) => command("ZADD", key, String(score), member),
     zcount: (key, min, max) => command("ZCOUNT", key, String(min), String(max)),
     zremrangebyscore: (key, min, max) => command("ZREMRANGEBYSCORE", key, String(min), String(max)),
+    /// A Lua script, one command on Upstash's bill however much it does.
+    eval: (script, keys, args) => command("EVAL", script, String(keys.length), ...keys, ...args.map(String)),
     /// Several commands in one round trip, e.g. `[["SET", k, v], ["LPUSH", k, a, b]]`. Upstash still
     /// bills each one; what this saves is the wait.
     async pipeline(commands) {
@@ -93,7 +95,8 @@ export function memoryStore() {
       if (value === "") values.delete(key); else values.set(key, String(value));
       return true;
     },
-    del: async (key) => Number(values.delete(key)),
+    // As Redis: a key of any type.
+    del: async (key) => Number([values, sets, lists, zsets].map((map) => map.delete(key)).some(Boolean)),
     mget: async (keys) => keys.map((key) => values.get(key) ?? null),
     smembers: async (key) => [...(sets.get(key) ?? [])],
     async sadd(key, member) {

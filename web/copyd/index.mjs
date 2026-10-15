@@ -2,7 +2,8 @@
 /// region (Perpl refuses US addresses), from the same image:  node copyd/index.mjs
 ///
 /// Env: KV_REST_API_URL / KV_REST_API_TOKEN (required), MONAD_MAINNET_RPC, MONAD_WS,
-/// COPYD_SWEEP_MS (15000), and APNS_* for notifications. Live copies additionally need
+/// COPYD_SWEEP_MS (30000), DESK_API and CRON_SECRET (to retire abandoned keys), and APNS_*
+/// for notifications. Live copies additionally need
 /// COPYD_AWS_ACCESS_KEY_ID / COPYD_AWS_SECRET_ACCESS_KEY (desk-copyd's), COPY_AWS_REGION and
 /// COPY_TOKEN_KEY; without them, or with COPY_HALT set, copyd runs shadow copies only.
 import { redisStore } from "../api/_store.mjs";
@@ -16,7 +17,8 @@ import { readTrader } from "./books.mjs";
 import { watchPositions } from "./watcher.mjs";
 import { createExecutor } from "./executor.mjs";
 
-const SWEEP_MS = Number(process.env.COPYD_SWEEP_MS || 15_000);
+const SWEEP_MS = Number(process.env.COPYD_SWEEP_MS || 30_000);
+const PENDING_SWEEP_MS = 10 * 60_000;
 
 const store = redisStore();
 if (!store) { console.error("copyd: KV_REST_API_URL and KV_REST_API_TOKEN are required"); process.exit(1); }
@@ -44,7 +46,8 @@ function liveKms() {
   };
 }
 
-const lease = createLease({ store });
+// Three beats' grace: a holder that misses two still holds; one that stops is replaced.
+const lease = createLease({ store, ttlMs: SWEEP_MS * 3 });
 let runner = null;
 const kms = liveKms();
 const executor = kms
@@ -63,9 +66,18 @@ const watcher = watchPositions({
   onState: (up) => console.log(`copyd: position events ${up ? "streaming" : "lost; the sweep covers the gap"}`),
 });
 
-const LEASE_MS = 5_000;
 let stopping = false;
-const leaseTimer = setInterval(() => { if (!stopping) runner.keepLease(); }, LEASE_MS);
+
+/// Keys prepared for an enrolment nobody finished are retired by the API (only desk-copy-api
+/// may retire keys); copyd asks it to look every ten minutes.
+const pendingTimer = process.env.DESK_API && process.env.CRON_SECRET
+  ? setInterval(() => {
+    if (stopping || !lease.holds()) return;
+    fetch(`${process.env.DESK_API}/api/copy/sweep`, { method: "POST", headers: { authorization: `Bearer ${process.env.CRON_SECRET}`, "content-type": "text/plain" } })
+      .then((r) => r.json()).then((r) => { if (r.retired) console.log(`copyd: retired ${r.retired} abandoned key(s)`); })
+      .catch((error) => console.warn(`copyd: pending sweep: ${error.message}`));
+  }, PENDING_SWEEP_MS)
+  : null;
 
 async function loop() {
   while (!stopping) {
@@ -85,7 +97,7 @@ async function shutdown(signal) {
   stopping = true;
   console.log(`copyd: ${signal}, stopping`);
   watcher.stop();
-  clearInterval(leaseTimer);
+  clearInterval(pendingTimer);
   await runner.idle();
   executor?.stop();
   await lease.release().catch(() => {});

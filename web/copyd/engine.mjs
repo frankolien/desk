@@ -181,11 +181,12 @@ export function createEngine({
 
   /// Copiers the API changed since the last tick. Removing the names before reading them means a
   /// change made in between is either read now or named again for the next tick.
-  async function refresh() {
+  async function refresh(taken = null) {
     await ready();
-    const ids = await store.smembers(K.dirty);
+    // The runner's beat takes the set in the same command as the lease; alone, read it here.
+    const ids = taken ?? (await store.smembers(K.dirty));
     if (!ids.length) return 0;
-    await store.srem(K.dirty, ...ids);
+    if (!taken) await store.srem(K.dirty, ...ids);
     await adopt(ids);
     await closeRequested(ids);
     return ids.length;
