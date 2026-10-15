@@ -275,46 +275,69 @@ struct HomeScreen: View {
         Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
     }
 
+    /// Three columns, the outer two the same width, so the account pill stays centred and only
+    /// ever gets the room between the buttons. Laid over them instead, the testnet pill ran into
+    /// the share button.
     private var topBar: some View {
-        ZStack {
-            HStack {
-                glassCircle(symbol: "gearshape.fill", label: "Account", action: onAccount)
-                Spacer()
-                HStack(spacing: 8) {
-                    glassCircle(
-                        symbol: "square.and.arrow.up",
-                        label: "Replay and share portfolio",
-                        action: { showsPortfolioReplay = true })
-                    glassCircle(symbol: "clock.fill", label: "Activity", action: onActivity)
-                }
+        let side: CGFloat = 42 * 2 + 8
+        return HStack(spacing: 8) {
+            glassCircle(symbol: "gearshape.fill", label: "Account", action: onAccount)
+                .frame(width: side, alignment: .leading)
+            accountPill
+                .frame(maxWidth: .infinity)
+            HStack(spacing: 8) {
+                glassCircle(
+                    symbol: "square.and.arrow.up",
+                    label: "Replay and share portfolio",
+                    action: { showsPortfolioReplay = true })
+                glassCircle(symbol: "clock.fill", label: "Activity", action: onActivity)
             }
-
-            Button(action: onAccount) {
-                HStack(spacing: 8) {
-                    AddressAvatar(address: model.address?.checksummed ?? "", size: 21)
-                        .grayscale(1)
-                    Text(model.addressShort)
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                    // Mainnet is the normal state and carries no label; only testnet is marked.
-                    if !model.network.holdsRealFunds {
-                        Text("Testnet")
-                            .font(.system(size: 10, weight: .heavy, design: .rounded))
-                            .foregroundStyle(DeskColor.nightText.color)
-                            .padding(.horizontal, 7)
-                            .frame(height: 18)
-                            .background(Color.white.opacity(0.14), in: Capsule())
-                    }
-                }
-                .foregroundStyle(DeskColor.nightText.color)
-                .padding(.horizontal, 14)
-                .frame(height: 42)
-                .contentShape(Capsule())
-            }
-            .buttonStyle(DeskPressStyle())
-            .homeGlass(interactive: true, in: Capsule())
-            .accessibilityLabel("Your account, \(model.addressShort)")
+            .frame(width: side, alignment: .trailing)
         }
+    }
+
+    private var accountPill: some View {
+        Button(action: onAccount) {
+            // Where the address and the testnet mark don't both fit, the mark stays: the address
+            // is right below, under the name.
+            ViewThatFits(in: .horizontal) {
+                accountPillContent(showsAddress: true)
+                accountPillContent(showsAddress: false)
+            }
+            .foregroundStyle(DeskColor.nightText.color)
+            .padding(.horizontal, 14)
+            .frame(height: 42)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(DeskPressStyle())
+        .homeGlass(interactive: true, in: Capsule())
+        .accessibilityLabel("Your account, \(model.addressShort)\(model.network.holdsRealFunds ? "" : ", testnet")")
+    }
+
+    private func accountPillContent(showsAddress: Bool) -> some View {
+        HStack(spacing: 8) {
+            AddressAvatar(address: model.address?.checksummed ?? "", size: 21)
+                .grayscale(1)
+            if showsAddress {
+                Text(model.addressShort)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            // Mainnet is the normal state and carries no label; only testnet is marked.
+            if !model.network.holdsRealFunds {
+                Text("Testnet")
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, 7)
+                    .frame(height: 18)
+                    .background(Color.white.opacity(0.14), in: Capsule())
+            }
+        }
+        .fixedSize()
     }
 
     private func glassCircle(symbol: String, label: String, action: @escaping () -> Void) -> some View {
