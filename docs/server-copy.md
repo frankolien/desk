@@ -177,7 +177,9 @@ Server differences from the app, each deliberate:
   open notional, orders per hour, daily loss. Checked again immediately before signing, outside
   the planner, so a planner bug cannot exceed them.
 - A global halt (`copy:halt` in Redis, and an env flag) checked before every signature.
-- KMS key policy lets only the `copyd` role call `Sign`, and only that key's alias family.
+- Only `desk-copyd` can call `Sign`, only on keys tagged `desk:purpose=auto-copy`, and only
+  with Ed25519; `desk-copy-api`, which creates and retires those keys, is denied `Sign`
+  outright. See AWS below.
 
 ### One engine at a time
 
@@ -253,13 +255,35 @@ reads it once on taking the lease and writes only what changed; sweeps don't tou
 
 The Upstash free tier is already spent by the worker (`RUNBOOK.md`); this needs the paid tier.
 
+## AWS
+
+One AWS account, in **eu-north-1 (Stockholm)**: EU, as Perpl requires. It is an AWS "new
+experience" project, so it sits in an AWS-managed organisation whose guardrails refuse other
+regions outright. Two IAM users, made by `web/copyd/iam/setup.sh` from the policies beside it:
+
+| Identity | Used by | Allowed | Refused |
+|---|---|---|---|
+| `desk-copy-api` | Vercel `/api/copy` | create Ed25519 `SIGN_VERIFY` keys tagged `desk:purpose=auto-copy` (only those three tag keys), name them `alias/desk-copy/*`, read their public keys, disable and schedule their deletion | `Sign` (explicit deny), untagged or non-Ed25519 keys, other regions, aliases outside `desk-copy/`, untagging, key policies |
+| `desk-copyd` | Railway `copyd` | `Sign` with `ED25519_SHA_512` and read public keys, on Desk-tagged keys only | creating, tagging, naming, disabling, re-enabling or deleting any key |
+
+Neither has a password, and access keys are made only at deploy, straight into each host's
+environment. Checked on 16 Oct 2026 with IAM's policy simulator, 20 of 20 cases as intended,
+and with a real key: `kms.mjs` created one, signed REST and socket sign-in messages that verify
+as Ed25519 (0.2-0.5 s per signature from Lagos), found it again by alias, retired it, and a
+retired key refused to sign.
+
+The account is on AWS's Free plan: $100 of credits and a six-month window (to April 2027), no
+card charges, and it closes when either runs out. Keys cost about $1 a month each. Upgrade to
+the Paid plan, with a budget alert, before copiers depend on it.
+
 ## Order of work
 
 1. **Pure core** (this branch, first): planner port with the Swift vectors; Perpl REST
    canonical signing with a pluggable signer, matching `CanonicalVectors.json` byte for byte;
    enrolment digest and splicing with the EIP-712 vectors. No network, no keys.
 2. KMS signer and enrolment end to end on **testnet**, with a throwaway account: prepare,
-   Face ID, enroll, one signed read, disable. Prove a KMS signature verifies as Ed25519.
+   Face ID, enroll, one signed read, disable. (The KMS half is done: a real key's signatures
+   verify as Ed25519. Enrolment at Perpl remains.)
 3. Engine in **shadow** only, one copier, for a week, its log compared with the app's.
 4. Live on testnet, with the halt and the disable path exercised first.
 5. App: the opt-in sheet, device key, server-state screens, `sr: 32` reseed.

@@ -1,0 +1,19 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Sid": "CreateOnlyDeskEd25519SigningKeys", "Effect": "Allow", "Action": "kms:CreateKey", "Resource": "*",
+     "Condition": {
+       "StringEquals": {"kms:KeySpec": "ECC_NIST_EDWARDS25519", "kms:KeyUsage": "SIGN_VERIFY", "aws:RequestTag/desk:purpose": "auto-copy", "aws:RequestedRegion": "${REGION}"},
+       "Bool": {"kms:BypassPolicyLockoutSafetyCheck": "false"},
+       "ForAllValues:StringEquals": {"aws:TagKeys": ["desk:purpose", "desk:network", "desk:account"]}}},
+    {"Sid": "TagOnlyAsDeskKeys", "Effect": "Allow", "Action": "kms:TagResource", "Resource": "arn:aws:kms:${REGION}:${ACCOUNT_ID}:key/*",
+     "Condition": {"StringEquals": {"aws:RequestTag/desk:purpose": "auto-copy"},
+                   "ForAllValues:StringEquals": {"aws:TagKeys": ["desk:purpose", "desk:network", "desk:account"]}}},
+    {"Sid": "NameThemUnderDeskCopy", "Effect": "Allow", "Action": "kms:CreateAlias", "Resource": "arn:aws:kms:${REGION}:${ACCOUNT_ID}:alias/desk-copy/*"},
+    {"Sid": "ManageOnlyDeskKeys", "Effect": "Allow",
+     "Action": ["kms:CreateAlias", "kms:DescribeKey", "kms:GetPublicKey", "kms:DisableKey", "kms:ScheduleKeyDeletion"],
+     "Resource": "arn:aws:kms:${REGION}:${ACCOUNT_ID}:key/*",
+     "Condition": {"StringEquals": {"aws:ResourceTag/desk:purpose": "auto-copy"}}},
+    {"Sid": "NeverSign", "Effect": "Deny", "Action": ["kms:Sign", "kms:PutKeyPolicy", "kms:UntagResource", "kms:DeleteAlias", "kms:UpdateAlias"], "Resource": "*"}
+  ]
+}
