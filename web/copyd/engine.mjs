@@ -17,9 +17,10 @@
 /// The engine never writes `copy:copier:*`, which the API owns: a pause it makes for the daily
 /// loss limit is `copy:pause:<id>`, and the API deletes that key when the copier resumes.
 ///
-/// Executor contract, for live copies: `quote(copier, market)` → `{mark, free}` is awaited
-/// before deciding; `submit(intent)` and `close(intent)` run after, and report back through
-/// `settle(copierId, copyId, result)`.
+/// Executor contract, for live copies (copyd/executor.mjs): `quote(copier, market, {mark})` →
+/// `{mark, free}` is awaited before deciding; `submit(intent)` and `close(intent)` run after and
+/// report back through `settle(copierId, copyId, {kind: filled|refused|closed|closeFailed, row})`;
+/// `reconcile` settles what a previous engine left pending or closing.
 import { randomUUID } from "node:crypto";
 import {
   plan, moves as diff, sentence, shadowFill, shadowPnL, shadowTriggered, chaseBps, marketFromContext, scaled,
@@ -157,8 +158,25 @@ export function createEngine({
 
   /// Everything, once: the lease holder's starting point.
   function ready() {
-    loading ??= (async () => adopt(await store.smembers(K.copiers)))().catch((error) => { loading = null; throw error; });
+    loading ??= (async () => {
+      await adopt(await store.smembers(K.copiers));
+      reconcileLive().catch((error) => logger.warn?.(`copyd: reconcile: ${error.message}`));
+    })().catch((error) => { loading = null; throw error; });
     return loading;
+  }
+
+  /// Live copies a previous engine left pending or closing: the executor asks the account what
+  /// it holds and settles them. Nothing is sent again.
+  async function reconcileLive() {
+    if (!executor?.reconcile) return;
+    const unsure = [];
+    for (const [id, open] of openBy) for (const copy of open) if (!copy.isShadow && (copy.state === "pending" || copy.state === "closing")) unsure.push([id, copy]);
+    if (!unsure.length) return;
+    const bySymbol = await marketsBySymbol();
+    await inPool(unsure, 4, async ([id, copy]) => {
+      const copier = copiers.get(id);
+      if (copier) await executor.reconcile({ copier, copy, market: bySymbol.get(copy.symbol) }).catch((error) => logger.warn?.(`copyd: reconcile ${id}: ${error.message}`));
+    });
   }
 
   /// Copiers the API changed since the last tick. Removing the names before reading them means a
@@ -202,7 +220,7 @@ export function createEngine({
           keep.push(copy);
           if (executor && copy.state !== "closing") {
             copy.state = "closing";
-            intents.push({ action: "close", copier, copy, verb: "manual", reason: "Closed from the app." });
+            intents.push({ action: "close", copier, copy, market: bySymbol.get(copy.symbol), verb: "manual", reason: "Closed from the app." });
           }
         }
       }
@@ -425,7 +443,9 @@ export function createEngine({
   async function liveQuotes(trader, found, bySymbol) {
     const quotes = new Map();
     if (!executor) return quotes;
-    const symbols = found.filter((m) => m.kind !== "closed").map((m) => m.position.symbol);
+    const opened = found.filter((m) => m.kind !== "closed");
+    const markOf = new Map(opened.map((m) => [m.position.symbol, m.position.mark]));
+    const symbols = opened.map((m) => m.position.symbol);
     const wanted = [];
     for (const id of followers.get(trader) ?? []) {
       const copier = copiers.get(id);
@@ -434,7 +454,7 @@ export function createEngine({
       for (const symbol of symbols) if (bySymbol.has(symbol)) wanted.push([copier, symbol]);
     }
     await inPool(wanted, readConcurrency, async ([copier, symbol]) => {
-      try { quotes.set(`${copier.id}|${symbol}`, await executor.quote(copier, bySymbol.get(symbol))); }
+      try { quotes.set(`${copier.id}|${symbol}`, await executor.quote(copier, bySymbol.get(symbol), { mark: markOf.get(symbol) })); }
       catch (error) { logger.warn?.(`copyd: quote ${copier.id} ${symbol}: ${error.message}`); }
     });
     return quotes;
@@ -494,7 +514,10 @@ export function createEngine({
     } else {
       // Held as pending before anything is signed, so the slot and the margin are taken now.
       copy.state = "pending";
-      intents.push({ action: "submit", copier, copy, market, plan: copyPlan, position, details });
+      intents.push({
+        action: "submit", copier, copy, market, plan: copyPlan, position, details,
+        open: [...open, copy], realisedToday: tallyOf(copier).live,
+      });
     }
     openBy.set(copier.id, [...open, copy]);
     touch(K.open(copier.id));
@@ -525,7 +548,7 @@ export function createEngine({
     if (live && executor) {
       live.state = "closing";
       touch(K.open(copier.id));
-      intents.push({ action: "close", copier, copy: live, verb, reason });
+      intents.push({ action: "close", copier, copy: live, market: bySymbol.get(symbol), verb, reason });
     }
   }
 
@@ -537,7 +560,13 @@ export function createEngine({
     const open = openBy.get(id) ?? [];
     const copy = open.find((c) => c.id === copyId);
     if (!copy) return;
-    if (result.kind === "filled") Object.assign(copy, { state: "open", entry: result.entry, sizeRaw: result.sizeRaw ?? copy.sizeRaw });
+    // filled: the copy is open on the venue; closeFailed: still open, as before the close;
+    // refused and closed: gone.
+    if (result.kind === "filled") {
+      Object.assign(copy, { state: "open", entry: result.entry ?? copy.entry ?? null, sizeRaw: result.sizeRaw ?? copy.sizeRaw });
+      if (result.rq) copy.rq = result.rq;
+      if (result.feeRaw) copy.feeRaw = result.feeRaw;
+    } else if (result.kind === "closeFailed") copy.state = "open";
     else openBy.set(id, open.filter((c) => c !== copy));
     touch(K.open(id));
     if (result.row) record(copier, { trader: copy.trader, symbol: copy.symbol, isLong: copy.isLong, leverage: copy.leverage, margin: copy.margin, ...result.row }, out);

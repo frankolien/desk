@@ -65,5 +65,8 @@ export function createRunner({ engine, lease, store, now = Date.now, logger = co
     return job;
   }
 
-  return { tick, keepLease, onAccount, idle: async () => { await sweeping; await Promise.all([...work]); } };
+  /// For the executor, right before every signature: held, and not halted (fresh within 2 s).
+  const mayAct = async () => lease.holds() && !lapsed && !(await halted());
+
+  return { tick, keepLease, onAccount, mayAct, idle: async () => { await sweeping; await Promise.all([...work]); } };
 }

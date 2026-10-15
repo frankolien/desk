@@ -204,6 +204,23 @@ Server differences from the app, each deliberate:
    rules (new position on this market and side, size within the plan, no hand order to
    explain it), never re-sent blindly.
 
+Built in `web/copyd/executor.mjs`: the engine awaits `quote` (the account's free balance off
+`/v1/trading/wallet`, the mark from the trader's read) before deciding, holds a live copy as
+`pending` in the open list, then hands it over. Per order: the grant's caps again (margin,
+leverage, open copies, open notional, today's loss) and an hourly order count in Redis; the
+intent (`copy:intent:<copier>:<copy>:open|close`) written as `planned`, then `sent`, then its
+fate; the lease and halt checked again (`runner.mayAct`) right before the KMS signature; opener
+plus stop and take in one `mt:30` batch, the triggers linked by `tr`. The copier's trading
+socket (signed in with the KMS key, closed after a quiet minute) decides by the tracker's rules;
+if it is silent for 20 s, `/v1/trading/positions` decides. Closes use close types for the
+copy's size, and the result is margin-free P&L from the fills less both fees. On restart,
+`reconcile` settles `pending` and `closing` copies from the positions endpoint, never by sending
+again.
+
+Proved live on testnet on 16 Oct 2026 (review wallet, KMS key in eu-north-1): a 10 AUSD 2x BTC
+long with a 25% stop filled at 82,165.5 in 2.0 s, confirmed on the socket; the close filled at
+82,162.1 in 1.5 s (P&L −0.014 AUSD, the fees); then `disable` retired the key.
+
 `rq` is per account and shared with the phone and browser. The server uses
 `max(lfr + 1, last + 1, Date.now())`. The app must learn to reseed from `lfr` and retry once on
 `sr: 32` (the browser already causes this today), a change worth making on `main` regardless.
