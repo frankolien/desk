@@ -52,8 +52,18 @@ export function redisStore({
     zadd: (key, score, member) => command("ZADD", key, String(score), member),
     zcount: (key, min, max) => command("ZCOUNT", key, String(min), String(max)),
     zremrangebyscore: (key, min, max) => command("ZREMRANGEBYSCORE", key, String(min), String(max)),
+    /// Replaces the value only while it still equals `expected`, atomically: a lease is renewed
+    /// or released by its holder alone. An empty `value` deletes the key.
+    async swap(key, expected, value, { ex } = {}) {
+      return Number(await command("EVAL", SWAP_SCRIPT, "1", key, expected, value, String(ex ?? 0))) === 1;
+    },
   };
 }
+
+const SWAP_SCRIPT = `if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+if ARGV[2] == "" then redis.call("DEL", KEYS[1]) return 1 end
+if tonumber(ARGV[3]) > 0 then redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3]) else redis.call("SET", KEYS[1], ARGV[2]) end
+return 1`;
 
 export function memoryStore() {
   const values = new Map();
@@ -67,6 +77,11 @@ export function memoryStore() {
     async set(key, value, { nx } = {}) {
       if (nx && values.has(key)) return false;
       values.set(key, String(value));
+      return true;
+    },
+    async swap(key, expected, value) {
+      if (values.get(key) !== expected) return false;
+      if (value === "") values.delete(key); else values.set(key, String(value));
       return true;
     },
     del: async (key) => Number(values.delete(key)),
