@@ -53,3 +53,29 @@ export function createNotifier({ send, names = () => null, now = Date.now }) {
     return send(copier.push, payload, { collapseId: `copy-${row.id}`.slice(0, 64) });
   };
 }
+
+/// Sends through Desk's API (/api/copy/notify), which holds the APNs key, so copyd needs none.
+/// Pushes made within 250 ms go together, up to 100 a request.
+export function apiSender({ base, secret, fetchImpl = fetch, waitMs = 250 }) {
+  let queue = [];
+  let timer = null;
+  async function flush() {
+    timer = null;
+    const batch = queue.splice(0, 100);
+    if (queue.length) timer = setTimeout(flush, 0);
+    try {
+      const response = await fetchImpl(`${base}/api/copy/notify`, {
+        method: "POST", headers: { authorization: `Bearer ${secret}`, "content-type": "text/plain" },
+        body: JSON.stringify({ items: batch.map(({ push, payload, options }) => ({ push, payload, collapseId: options?.collapseId })) }),
+      });
+      const answer = await response.json().catch(() => ({}));
+      batch.forEach((item, i) => item.resolve(answer.results?.[i] ?? { status: response.status }));
+    } catch (error) {
+      batch.forEach((item) => item.resolve({ status: 0, error: error.message }));
+    }
+  }
+  return (push, payload, options) => new Promise((resolve) => {
+    queue.push({ push, payload, options, resolve });
+    timer ??= setTimeout(flush, waitMs);
+  });
+}

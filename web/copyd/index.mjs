@@ -2,17 +2,16 @@
 /// region (Perpl refuses US addresses), from the same image:  node copyd/index.mjs
 ///
 /// Env: KV_REST_API_URL / KV_REST_API_TOKEN (required), MONAD_MAINNET_RPC, MONAD_WS,
-/// COPYD_SWEEP_MS (30000), DESK_API and CRON_SECRET (to retire abandoned keys), and APNS_*
-/// for notifications. Live copies additionally need
+/// COPYD_SWEEP_MS (30000), DESK_API and CRON_SECRET (to retire abandoned keys and to send
+/// notifications through the API, which holds the APNs key). Live copies additionally need
 /// COPYD_AWS_ACCESS_KEY_ID / COPYD_AWS_SECRET_ACCESS_KEY (desk-copyd's), COPY_AWS_REGION and
 /// COPY_TOKEN_KEY; without them, or with COPY_HALT set, copyd runs shadow copies only.
 import { redisStore } from "../api/_store.mjs";
 import { chainReader, openMarkets } from "../api/traders.mjs";
-import { apnsClient } from "../api/_apns.mjs";
 import { createEngine } from "./engine.mjs";
 import { createLease } from "./lease.mjs";
 import { createRunner } from "./runner.mjs";
-import { createNotifier } from "./notify.mjs";
+import { createNotifier, apiSender } from "./notify.mjs";
 import { readTrader } from "./books.mjs";
 import { watchPositions } from "./watcher.mjs";
 import { createExecutor } from "./executor.mjs";
@@ -24,10 +23,10 @@ const store = redisStore();
 if (!store) { console.error("copyd: KV_REST_API_URL and KV_REST_API_TOKEN are required"); process.exit(1); }
 
 const chain = chainReader();
-const apns = process.env.APNS_KEY_ID ? apnsClient() : null;
-const notify = apns
-  ? createNotifier({ send: (push, payload, options) => apns.send(push, payload, options) })
-  : async () => ({ skipped: "APNs not configured" });
+// Notifications go out through Desk's API, which holds the APNs key; copyd keeps none.
+const notify = process.env.DESK_API && process.env.CRON_SECRET
+  ? createNotifier({ send: apiSender({ base: process.env.DESK_API, secret: process.env.CRON_SECRET }) })
+  : async () => ({ skipped: "notifications not configured" });
 
 /// Live copies need desk-copyd's own AWS credentials (it may only Sign with Desk keys) and the
 /// key that opens Perpl tokens. Without them, live rules are skipped and shadow copies run.
@@ -101,7 +100,6 @@ async function shutdown(signal) {
   await runner.idle();
   executor?.stop();
   await lease.release().catch(() => {});
-  apns?.close?.();
   process.exit(0);
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));

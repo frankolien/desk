@@ -364,3 +364,24 @@ test("The token at rest opens only with its key", () => {
   assert.throws(() => unseal(sealed, randomBytes(32).toString("base64")));
   assert.throws(() => seal("x", "short"));
 });
+
+test("copyd's notifications go out with the API's APNs key, and only copyd may send them", async () => {
+  const sent = [];
+  const store = memoryStore();
+  const handler = createCopyHandler(() => ({ store, cronSecret: "cron", apns: { send: async (push, payload, options) => { sent.push({ push, payload, options }); return { status: 200 }; } } }));
+  const call = async (headers, body) => {
+    const res = { status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; }, setHeader() {} };
+    await handler({ method: "POST", query: { action: "notify" }, headers, body }, res);
+    return res;
+  };
+  const items = [
+    { push: { token: "ab".repeat(32), environment: "sandbox" }, payload: { aps: { alert: { title: "Copied" } } }, collapseId: "copy-1" },
+    { push: { token: "nope" }, payload: {} },
+  ];
+  assert.equal((await call({}, JSON.stringify({ items }))).code, 401);
+  const ok = await call({ authorization: "Bearer cron" }, JSON.stringify({ items }));
+  assert.deepEqual(ok.body.results.map((r) => r.status), [200, 400]);
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0].push, { token: "ab".repeat(32), environment: "sandbox" });
+  assert.equal(sent[0].options.collapseId, "copy-1");
+});

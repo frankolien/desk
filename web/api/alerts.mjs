@@ -778,10 +778,13 @@ function copyKms() {
 
 let production;
 let copyDeps;
+const sharedApns = apnsClient();
 export default createHandler(() => (production ??= {
-  copy: createCopyHandler(() => (copyDeps ??= { store: redisStore(), kms: copyKms(), tokenKey: process.env.COPY_TOKEN_KEY, cronSecret: process.env.CRON_SECRET })),
+  copy: createCopyHandler(() => (copyDeps ??= {
+    store: redisStore(), kms: copyKms(), tokenKey: process.env.COPY_TOKEN_KEY, cronSecret: process.env.CRON_SECRET, apns: sharedApns,
+  })),
   store: redisStore(),
-  apns: apnsClient(),
+  apns: sharedApns,
   webpush: webPushClient(vapidFromEnv()),
   hypersync: hypersyncClient({ token: indexToken() }),
   receipts: {

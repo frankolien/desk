@@ -270,6 +270,7 @@ export function createCopyHandler(resolve) {
       }
 
       if (action === "sweep") return res.status(200).json(await sweepPending({ req, deps, store, now }));
+      if (action === "notify") return res.status(200).json(await relayNotifications({ req, deps, text }));
 
       const signed = ["state", "rules", "pause", "resume", "close", "disable"];
       if (!signed.includes(action)) refuse(404, "No such Auto-Copy action.");
@@ -394,12 +395,34 @@ async function enroll({ deps, store, now, fetchImpl, network, address, id, body 
   return { enabled: true, copier: publicView(copier) };
 }
 
-/// Keys made by prepare that nobody enrolled within the hour are retired, so an abandoned setup
-/// isn't billed every month. Called by copyd with CRON_SECRET.
-async function sweepPending({ req, deps, store, now }) {
+const fromCopyd = (req, deps) => {
   const expected = Buffer.from(`Bearer ${deps.cronSecret ?? ""}`);
   const given = Buffer.from(String(req.headers?.authorization ?? ""));
   if (!deps.cronSecret || given.length !== expected.length || !timingSafeEqual(given, expected)) refuse(401, "Unauthorized.");
+};
+
+/// copyd's notifications, sent with the APNs key this function already holds, so the key lives
+/// in one place. Up to 100 a request: {items: [{push: {token, environment}, payload, collapseId}]}.
+async function relayNotifications({ req, deps, text }) {
+  fromCopyd(req, deps);
+  if (!deps.apns) refuse(503, "Notifications aren't configured on this server.");
+  const body = text === null ? req.body : parse(text);
+  const items = Array.isArray(body?.items) ? body.items.slice(0, 100) : refuse(400, "Send items.");
+  const results = await Promise.all(items.map(async (item) => {
+    const push = { token: String(item?.push?.token ?? ""), environment: item?.push?.environment === "sandbox" ? "sandbox" : "production" };
+    if (!/^[0-9a-f]{64,200}$/i.test(push.token) || typeof item.payload !== "object") return { status: 400 };
+    try {
+      const sent = await deps.apns.send(push, item.payload, { collapseId: typeof item.collapseId === "string" ? item.collapseId.slice(0, 64) : undefined });
+      return { status: sent?.status ?? 200 };
+    } catch (error) { return { status: 502, error: String(error?.message ?? error).slice(0, 120) }; }
+  }));
+  return { results };
+}
+
+/// Keys made by prepare that nobody enrolled within the hour are retired, so an abandoned setup
+/// isn't billed every month. Called by copyd with CRON_SECRET.
+async function sweepPending({ req, deps, store, now }) {
+  fromCopyd(req, deps);
   const ids = await store.smembers(C.pendings);
   let retired = 0;
   for (const id of ids) {

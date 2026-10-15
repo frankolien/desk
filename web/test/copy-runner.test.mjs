@@ -158,3 +158,19 @@ test("Taking the lease back after losing it reloads the engine before it acts", 
   await runner.tick();
   assert.deepEqual(engine.calls, ["refresh", "sweep", "reset", "refresh", "sweep"]);
 });
+
+test("copyd's sender batches pushes into one request to the API", async () => {
+  const { apiSender } = await import("../copyd/notify.mjs");
+  const requests = [];
+  const send = apiSender({ base: "https://desk.example", secret: "cron", waitMs: 5, fetchImpl: async (url, init) => {
+    requests.push({ url, init });
+    const items = JSON.parse(init.body).items;
+    return Response.json({ results: items.map(() => ({ status: 200 })) });
+  } });
+  const push = { token: "ab".repeat(32), environment: "production" };
+  const results = await Promise.all([send(push, { a: 1 }, { collapseId: "x" }), send(push, { a: 2 })]);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "https://desk.example/api/copy/notify");
+  assert.equal(requests[0].init.headers.authorization, "Bearer cron");
+  assert.deepEqual(results, [{ status: 200 }, { status: 200 }]);
+});
