@@ -296,8 +296,16 @@ async function prepare({ req, deps, store, now, fetchImpl, network, address, id 
   } else {
     // An earlier key nobody enrolled is retired before a new one is made.
     if (pending) await retireKey({ client: deps.kms, keyId: pending.keyId, commands: deps.kmsCommands }).catch(() => {});
-    generation = await store.incr(C.generation(id));
-    signer = await createKey({ client: deps.kms, network, address, generation, commands: deps.kmsCommands });
+    // The counter lives in Redis and KMS outlives it: a name already taken moves to the next.
+    for (let attempt = 0; ; attempt++) {
+      generation = await store.incr(C.generation(id));
+      try {
+        signer = await createKey({ client: deps.kms, network, address, generation, commands: deps.kmsCommands });
+        break;
+      } catch (error) {
+        if (!/AlreadyExists|already exists/i.test(`${error?.name} ${error?.message}`) || attempt >= 20) throw error;
+      }
+    }
   }
 
   const response = await fetchImpl(`${base}/v1/api-key/payload`, {

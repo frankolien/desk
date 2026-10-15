@@ -58,7 +58,13 @@ export async function createKey({ client, network, address, generation, commands
     ],
   }));
   const keyId = created.KeyMetadata.KeyId;
-  await client.send(new c.CreateAliasCommand({ AliasName: aliasFor({ network, address, generation }), TargetKeyId: keyId }));
+  try {
+    await client.send(new c.CreateAliasCommand({ AliasName: aliasFor({ network, address, generation }), TargetKeyId: keyId }));
+  } catch (error) {
+    // A key without its name would be found by nobody and billed every month.
+    await retireKey({ client, keyId, commands: c }).catch(() => {});
+    throw error;
+  }
   return kmsSigner({ client, keyId, commands: c });
 }
 

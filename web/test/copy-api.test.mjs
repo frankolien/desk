@@ -158,6 +158,25 @@ test("A second prepare offers the same key; a stale one is retired before a new 
   assert.equal((await ctx.call("prepare", { network: "testnet", address: ME })).code, 429, "six an hour");
 });
 
+test("A key name KMS already holds moves to the next, and the unnamed key is retired", async () => {
+  const kms = fakeKms();
+  const taken = new Set(["alias/desk-copy/testnet/0x50b240678777451befd67b7e8c3b4366482ba8f9/1", "alias/desk-copy/testnet/0x50b240678777451befd67b7e8c3b4366482ba8f9/2"]);
+  const send = kms.send.bind(kms);
+  kms.send = async (command) => {
+    if (command.constructor.name === "CreateAliasCommand" && taken.has(command.input.AliasName)) {
+      throw Object.assign(new Error(`An alias with the name ${command.input.AliasName} already exists`), { name: "AlreadyExistsException" });
+    }
+    return send(command);
+  };
+  const ctx = setup({ kms });
+  const prepared = await ctx.call("prepare", { network: "testnet", address: ME });
+  assert.equal(prepared.code, 200, JSON.stringify(prepared.body));
+  assert.equal(JSON.parse(await ctx.store.get(`copy:pending:${ctx.id}`)).generation, 3);
+  assert.equal(kms.keys.get("key-1").enabled, false);
+  assert.equal(kms.keys.get("key-2").enabled, false);
+  assert.equal(kms.keys.get("key-3").enabled, true);
+});
+
 test("The grant must be this wallet's, for this server key, and fresh", async () => {
   const stranger = privateKeyToAccount(`0x${"22".repeat(32)}`);
   const ctx = setup();
