@@ -238,6 +238,13 @@ final class AppModel {
     }
 
     @discardableResult
+    /// One Face ID for a flow that signs more than once with the wallet (Auto-Copy on the
+    /// server signs a request, Perpl's registration and a grant); the key is gone after.
+    func withWallet<T: Sendable>(_ body: @escaping @Sendable (WalletKey) async throws -> T) async throws -> T {
+        let passkey = passkey
+        return try await passkey.withKeys { wallet, _ in try await body(wallet) }
+    }
+
     func saveProfile(name: String, image: Data?) async throws -> String? {
         guard let address else { return nil }
         let passkey = passkey

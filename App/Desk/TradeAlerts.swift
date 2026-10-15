@@ -74,6 +74,19 @@ final class TradeAlerts {
     var opensProfile = false
 
     private var deviceToken: String?
+
+    struct PushRegistration: Sendable { let token: String; let environment: String }
+
+    /// This iPhone's APNs token and its environment, for Auto-Copy on Desk's server to notify.
+    var pushRegistration: PushRegistration? {
+        guard let deviceToken else { return nil }
+        #if DEBUG
+        return PushRegistration(token: deviceToken, environment: "sandbox")
+        #else
+        return PushRegistration(token: deviceToken, environment: "production")
+        #endif
+    }
+
     private var confirmOnSync = false
     private var syncTask: Task<Void, Never>?
     @ObservationIgnored private var needsSync = UserDefaults.standard.bool(forKey: "desk.alerts.needsSync") {

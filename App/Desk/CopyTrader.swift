@@ -84,6 +84,9 @@ final class CopyTrader {
     var onEvent: ((String) -> Void)?
 
     let network: DeskNetwork
+    /// Auto-Copy on Desk's server for this account. While it's on, this copier stands aside:
+    /// no reads, no orders, no away wakes; its rules and pause go to the server instead.
+    let server: ServerCopy
     private var baselines: [String: [String: ObservedPosition]] = [:]
     private var unconfirmedFlat: Set<String> = []
     private var pendingRealised: [UUID: Int64] = [:]
@@ -111,6 +114,7 @@ final class CopyTrader {
 
     init(network: DeskNetwork) {
         self.network = network
+        server = ServerCopy(network: network)
         traders = Self.load([CopiedTrader].self, key: "desk.copy.traders", network: network) ?? []
         guards = Self.load(CopyGuards.self, key: "desk.copy.guards", network: network) ?? CopyGuards()
         log = Self.load([CopyLogEntry].self, key: "desk.copy.log", network: network) ?? []
@@ -155,6 +159,7 @@ final class CopyTrader {
     func setPaused(_ paused: Bool) {
         isPaused = paused
         AutoCopySwitch.isPaused = paused
+        if server.isOn { Task { await server.setPaused(paused) } }
         persist()
         ControlCenter.shared.reloadControls(ofKind: AutoCopyControl.controlKind)
     }
@@ -190,9 +195,13 @@ final class CopyTrader {
         let averageSlippageBps: Double?
     }
 
+    /// What the screens show: the server's copies and log while it runs this account.
+    var shownLog: [CopyLogEntry] { server.isOn ? server.log : log }
+    var shownOpen: [OpenCopy] { server.isOn ? server.open : open }
+
     func figures(shadow: Bool) -> Figures {
         let dayStart = Calendar.current.startOfDay(for: .now)
-        let entries = log.filter { $0.shadowed == shadow }
+        let entries = shownLog.filter { $0.shadowed == shadow }
         let closed = entries.compactMap(\.pnl)
         let fills = entries.compactMap(\.fillSeconds)
         let slips = entries.compactMap(\.slippageBps)
@@ -209,7 +218,7 @@ final class CopyTrader {
     /// Whether the person has any money in this: a live trader or a live copy. Every
     /// summary shows one mode; paper and money are never added into one figure.
     var showsLiveFigures: Bool {
-        traders.contains { $0.rules.mode == .live } || open.contains { !$0.shadowed }
+        traders.contains { $0.rules.mode == .live } || shownOpen.contains { !$0.shadowed }
     }
 
     var realisedToday: Double { figures(shadow: !showsLiveFigures).today }
@@ -249,15 +258,23 @@ final class CopyTrader {
         Self.current = self
         defer { stream.stop(); if Self.current === self { Self.current = nil } }
         var lastCycle = Date.distantPast
+        var lastServerLook = Date.distantPast
         var streaming = false
         while !Task.isCancelled {
+            server.bind(address: model.address?.checksummed)
             if AutoCopySwitch.isPaused != isPaused {
                 isPaused = AutoCopySwitch.isPaused
+                if server.isOn { let paused = isPaused; Task { await server.setPaused(paused) } }
                 record(CopyLogEntry(
                     id: UUID(), date: .now, trader: "", symbol: "", isLong: true, kind: isPaused ? .paused : .resumed,
                     detail: isPaused ? "Auto-copy paused from outside Desk." : "Auto-copy resumed from outside Desk."))
             }
-            let active = !traders.isEmpty || basket != nil || !open.isEmpty
+            if server.isOn, Date.now.timeIntervalSince(lastServerLook) >= Self.pollWhileStreaming {
+                lastServerLook = .now
+                server.syncRules(traders: traders, guards: guards)
+                await server.refresh()
+            }
+            let active = !server.isOn && (!traders.isEmpty || basket != nil || !open.isEmpty)
             if active != streaming {
                 streaming = active
                 if active {
@@ -277,7 +294,7 @@ final class CopyTrader {
                 baselines = [:]
                 readProblem = nil
             }
-            let copying = AutoCopyAway.isOn ? traders.map { $0.address.lowercased() }.sorted() : []
+            let copying = AutoCopyAway.isOn && !server.isOn ? traders.map { $0.address.lowercased() }.sorted() : []
             if copying != syncedCopying {
                 syncedCopying = copying
                 TradeAlerts.shared.setCopying(copying)
@@ -871,6 +888,7 @@ final class CopyTrader {
         Self.save(log, key: "desk.copy.log", network: network)
         Self.save(open, key: "desk.copy.open", network: network)
         Self.save(basket, key: "desk.copy.basket", network: network)
+        server.syncRules(traders: traders, guards: guards)
     }
 
     private static func load<T: Decodable>(_ type: T.Type, key: String, network: DeskNetwork) -> T? {

@@ -207,7 +207,7 @@ struct SignalsScreen: View {
                     .toolbar(.hidden, for: .tabBar)
             }
             .navigationDestination(isPresented: $showsCopying) {
-                CopyActivityScreen(copier: copier, directory: directory)
+                CopyActivityScreen(model: model, copier: copier, directory: directory)
                     .toolbar(.hidden, for: .tabBar)
             }
             .navigationDestination(isPresented: $showsSmartMoney) {

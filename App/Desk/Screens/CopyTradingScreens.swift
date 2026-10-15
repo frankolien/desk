@@ -388,6 +388,7 @@ private func pnlTint(_ value: Double) -> Color {
 }
 
 struct CopyActivityScreen: View {
+    let model: AppModel
     let copier: CopyTrader
     let directory: TraderDirectory
 
@@ -399,12 +400,12 @@ struct CopyActivityScreen: View {
     @State private var goingLive: CopiedTrader?
 
     private var figures: CopyTrader.Figures { copier.figures(shadow: showsShadow) }
-    private var openCopies: [OpenCopy] { copier.open.filter { $0.shadowed == showsShadow } }
-    private var entries: [CopyLogEntry] { copier.log.filter { $0.shadowed == showsShadow } }
+    private var openCopies: [OpenCopy] { copier.shownOpen.filter { $0.shadowed == showsShadow } }
+    private var entries: [CopyLogEntry] { copier.shownLog.filter { $0.shadowed == showsShadow } }
 
     private var records: [String: Double] {
         var out: [String: Double] = [:]
-        for entry in copier.log {
+        for entry in copier.shownLog {
             guard let pnl = entry.pnl else { continue }
             let shadow = entry.shadowed
             let key = "\(entry.trader.lowercased())-\(shadow)"
@@ -463,7 +464,9 @@ struct CopyActivityScreen: View {
                         OpenCopyRow(copy: copy, name: directory.name(for: copy.trader),
                                     pnl: copy.shadowPnL(takerFeeMicros: copier.takerFee(for: copy.symbol)))
                             .contextMenu {
-                                if copy.shadowed {
+                                if copier.server.isOn {
+                                    Button("Close Now", systemImage: "xmark.circle") { Task { await copier.server.close(copy) } }
+                                } else if copy.shadowed {
                                     Button("Close Shadow Copy", systemImage: "xmark.circle") { copier.closeShadow(copy) }
                                 }
                             }
@@ -510,7 +513,7 @@ struct CopyActivityScreen: View {
             AutoCopySheet(address: trader.address, name: directory.name(for: trader.address), copier: copier)
         }
         .sheet(isPresented: $showsBasket) { CopyBasketSheet(copier: copier) }
-        .sheet(isPresented: $showsSettings) { CopySettingsSheet(copier: copier) }
+        .sheet(isPresented: $showsSettings) { CopySettingsSheet(model: model, copier: copier) }
         .confirmationDialog(
             "Go live copying \(goingLive.map { directory.name(for: $0.address) } ?? "")?",
             isPresented: Binding(get: { goingLive != nil }, set: { if !$0 { goingLive = nil } }),
@@ -572,15 +575,16 @@ struct CopyActivityScreen: View {
             }
             .padding(.top, 2)
 
-            Button { copier.setPaused(!copier.isPaused) } label: {
-                Label(copier.isPaused ? "Resume" : "Pause", systemImage: copier.isPaused ? "play.fill" : "pause.fill")
+            let paused = copier.server.isOn ? copier.server.isPaused : copier.isPaused
+            Button { copier.setPaused(!paused) } label: {
+                Label(paused ? "Resume" : "Pause", systemImage: paused ? "play.fill" : "pause.fill")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(copier.isPaused ? DeskColor.onAction.color : .white)
+                    .foregroundStyle(paused ? DeskColor.onAction.color : .white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 2)
             }
             .controlSize(.large)
-            .modifier(PauseButtonStyle(isPaused: copier.isPaused))
+            .modifier(PauseButtonStyle(isPaused: paused))
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -611,6 +615,11 @@ struct CopyActivityScreen: View {
     private var isLive: Bool { !copier.isPaused && copier.readProblem == nil && !copier.traders.isEmpty }
 
     private var statusText: String {
+        if copier.server.isOn {
+            if copier.server.isPaused { return copier.server.snapshot?.copier.pausedBy == "you" ? "Paused on Desk's server" : "Paused: daily loss limit" }
+            if copier.server.problem != nil { return "Can't reach Desk's server" }
+            return copier.traders.isEmpty ? "On Desk's server · nobody to copy" : "Copying on Desk's server"
+        }
         if copier.isPaused { return "Paused" }
         if copier.readProblem != nil { return "Reconnecting" }
         if copier.traders.isEmpty { return "Nobody to copy yet" }
@@ -618,6 +627,10 @@ struct CopyActivityScreen: View {
     }
 
     private var statusTint: Color {
+        if copier.server.isOn {
+            if copier.server.isPaused || copier.server.problem != nil { return DeskColor.action.color }
+            return copier.traders.isEmpty ? .secondary : DeskColor.rise.color
+        }
         if copier.isPaused || copier.readProblem != nil { return DeskColor.action.color }
         return copier.traders.isEmpty ? .secondary : DeskColor.rise.color
     }
@@ -684,7 +697,11 @@ private struct PauseButtonStyle: ViewModifier {
 }
 
 struct CopySettingsSheet: View {
+    let model: AppModel
     let copier: CopyTrader
+    @State private var showsServerSheet = false
+    @State private var confirmsTurnOff = false
+    @State private var turnOffProblem: String?
 
     private static func ago(_ date: Date?) -> String {
         guard let date else { return "Not yet" }
@@ -721,6 +738,9 @@ struct CopySettingsSheet: View {
                     }
                 }
 
+                serverSection
+
+                if !copier.server.isOn {
                 GlassSection(footer: "Woken by a silent push when a trader you copy moves, until iOS closes Desk.") {
                     Toggle(isOn: $copiesWhileAway) {
                         GlassRow("Keep copying when I leave", subtitle: "Woken by a silent push") { EmptyView() }
@@ -733,6 +753,7 @@ struct CopySettingsSheet: View {
                         GlassRow("Live Activity", subtitle: "Lock Screen and Dynamic Island") { EmptyView() }
                     }
                 }
+                }
             }
             .tint(DeskColor.rise.color)
             .navigationTitle("Auto-Copy Settings")
@@ -740,9 +761,48 @@ struct CopySettingsSheet: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
+            .sheet(isPresented: $showsServerSheet) { ServerCopySheet(model: model, copier: copier) }
+            #if DEBUG
+            .task { if ProcessInfo.processInfo.arguments.contains("-server-copy-sheet") { showsServerSheet = true } }
+            #endif
+            .confirmationDialog("Stop copying on Desk's server?", isPresented: $confirmsTurnOff, titleVisibility: .visible) {
+                Button("Turn Off", role: .destructive) {
+                    Task {
+                        do { try await copier.server.disable(); turnOffProblem = nil }
+                        catch { turnOffProblem = error.localizedDescription }
+                    }
+                }
+            } message: {
+                Text("The server stops at once and its key is retired. Open copies stay open with the stops Perpl holds for them; Desk on this iPhone copies again while it's open.")
+            }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+    }
+
+    @ViewBuilder private var serverSection: some View {
+        let server = copier.server
+        if server.isOn {
+            GlassSection("Desk's server", footer: turnOffProblem ?? server.problem ?? "Copies run on Desk's server even with your phone off, inside the limits you approved with Face ID.") {
+                GlassRow("Status", value: server.isPaused ? "Paused" : "Copying")
+                GlassRow("Last checked", value: Self.ago(server.checkedAt))
+                if let caps = server.caps {
+                    GlassRow("Most per copy", value: "\(caps.maxMarginPerTrade) AUSD · \(caps.maxLeverage)×")
+                    GlassRow("Daily loss cap", value: "\(caps.maxDailyLoss) AUSD")
+                }
+                Button("Turn Off Server Copying", role: .destructive) { confirmsTurnOff = true }
+            }
+        } else {
+            GlassSection("Desk's server", footer: "Your rules run on Desk's server, so copies happen with your phone off or out of signal. One Face ID signs the limits; the server can't go past them.") {
+                Button { showsServerSheet = true } label: {
+                    GlassRow("Run on Desk's server", subtitle: "Copy with your phone off") {
+                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     private func guardBinding(_ keyPath: WritableKeyPath<CopyGuards, Int>) -> Binding<Int> {
