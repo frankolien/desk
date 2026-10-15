@@ -2,13 +2,15 @@
 /// Served by the alerts function (`?job=copy&action=…`), since the Hobby plan's function slots
 /// are spoken for.
 ///
-/// prepare  makes this enrolment's KMS key and asks Perpl for the registration to sign.
+/// prepare  makes this enrolment's KMS key and asks Perpl for the registration to sign. The
+///          wallet signs a short request for it first (the same Face ID), so nobody can make
+///          Desk create keys for wallets that aren't theirs.
 /// enroll   takes the one Face ID's two signatures: Perpl's EIP-712 registration and Desk's
 ///          grant (EIP-191), which names the server key, the phone's device key and the hard
 ///          caps. The server checks both, proves possession with KMS and registers the key.
 /// Everything after is signed by the device key (P-256, Secure Enclave), not the wallet:
 /// state, rules, pause, resume, close, disable.
-import { createCipheriv, createDecipheriv, createHash, createPublicKey, randomBytes, verify as cryptoVerify } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createPublicKey, randomBytes, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
 import { getAddress, isAddress, recoverMessageAddress } from "viem";
 import { NETWORKS, payloadBody, enrolBody, tokenFrom, jsonSpan, checkEnrolmentPayload, PerplError } from "../copyd/perpl.mjs";
 import { createKey, kmsSigner, retireKey } from "../copyd/kms.mjs";
@@ -18,7 +20,9 @@ import { rateLimit, clientIp } from "./_ratelimit.mjs";
 
 export const LABEL = "Desk Auto-Copy (server)";
 const PENDING_FRESH_MS = 20 * 60_000; // a prepared key is offered again for this long
-const PENDING_KEEP_S = 6 * 3600; // and remembered this long, so an abandoned one is retired
+const PENDING_KEEP_S = 24 * 3600; // and remembered this long, so an abandoned one is retired
+const PENDING_RETIRE_MS = 60 * 60_000; // the sweep retires a key nobody enrolled after this
+const PREPARE_SKEW_MS = 5 * 60_000;
 const GRANT_SKEW_MS = 10 * 60_000;
 const REQUEST_WINDOW_MS = 60_000;
 const NONCE_TTL_S = 120;
@@ -26,6 +30,7 @@ const PREPARES_PER_HOUR = 6;
 
 const C = {
   pending: (id) => `copy:pending:${id}`,
+  pendings: "copy:pendings",
   generation: (id) => `copy:generation:${id}`,
   prepares: (id, hour) => `copy:prepares:${id}:${hour}`,
   nonce: (id, nonce) => `copy:nonce:${id}:${nonce}`,
@@ -88,6 +93,19 @@ export function parseGrant(text) {
   const parsed = { account: getAddress(account), network, serverKey, deviceKey, caps, issuedAt };
   if (grantText(parsed) !== text) fail();
   return parsed;
+}
+
+/// What the wallet signs to ask for a server key (EIP-191).
+export function prepareText({ account, network, issuedAt }) {
+  return ["Desk Auto-Copy: prepare a server key", `Account: ${getAddress(account)}`, `Network: ${network}`, `Issued: ${new Date(issuedAt).toISOString()}`].join("\n");
+}
+
+async function verifyPrepare({ account, network, issuedAt, signature, now }) {
+  if (!signature) refuse(401, "The request isn't signed by this wallet.");
+  if (!Number.isFinite(issuedAt) || Math.abs(now - issuedAt) > PREPARE_SKEW_MS) refuse(400, "This request's clock is off. Try again.");
+  let signer;
+  try { signer = await recoverMessageAddress({ message: prepareText({ account, network, issuedAt }), signature }); } catch { refuse(401, "The request isn't signed by this wallet."); }
+  if (getAddress(signer) !== getAddress(account)) refuse(401, "The request isn't signed by this wallet.");
 }
 
 export async function verifyGrant({ text, signature, account }) {
@@ -246,10 +264,12 @@ export function createCopyHandler(resolve) {
         if (!deps.kms) refuse(503, "Auto-Copy from the server isn't switched on yet.");
         if (!deps.tokenKey) refuse(503, "Auto-Copy from the server isn't switched on yet.");
         const result = action === "prepare"
-          ? await prepare({ req, deps, store, now, fetchImpl, network, address, id })
+          ? await prepare({ req, deps, store, now, fetchImpl, network, address, id, body })
           : await enroll({ deps, store, now, fetchImpl, network, address, id, body });
         return res.status(200).json(result);
       }
+
+      if (action === "sweep") return res.status(200).json(await sweepPending({ req, deps, store, now }));
 
       const signed = ["state", "rules", "pause", "resume", "close", "disable"];
       if (!signed.includes(action)) refuse(404, "No such Auto-Copy action.");
@@ -274,9 +294,10 @@ async function activeCopier(store, id) {
   return copier && !copier.disabled ? copier : null;
 }
 
-async function prepare({ req, deps, store, now, fetchImpl, network, address, id }) {
+async function prepare({ req, deps, store, now, fetchImpl, network, address, id, body }) {
   const limit = await rateLimit({ store, tier: "expensive", ip: clientIp(req.headers ?? {}), now: now() });
   if (!limit.allowed) refuse(429, `Too many tries. Try again in ${limit.retryAfter}s.`);
+  await verifyPrepare({ account: address, network, issuedAt: Number(body.issuedAt), signature: body.signature, now: now() });
   // Each prepare can cost a KMS key, so one account gets a handful an hour.
   const hour = Math.floor(now() / 3_600_000);
   const tries = await store.incr(C.prepares(id, hour));
@@ -318,6 +339,7 @@ async function prepare({ req, deps, store, now, fetchImpl, network, address, id 
 
   const createdAt = reused ? pending.createdAt : now();
   await store.set(C.pending(id), JSON.stringify({ keyId: signer.keyId, publicKey: signer.publicKey.toString("hex"), generation, payloadText, createdAt }), { ex: PENDING_KEEP_S });
+  await store.sadd(C.pendings, id);
   return { serverKey: `0x${signer.publicKey.toString("hex")}`, payload: payloadText, label: LABEL, expiresAt: createdAt + PENDING_FRESH_MS };
 }
 
@@ -368,8 +390,29 @@ async function enroll({ deps, store, now, fetchImpl, network, address, id, body 
     ["SADD", K.copiers, id],
     ["SADD", K.dirty, id],
     ["DEL", C.pending(id)],
+    ["SREM", C.pendings, id],
   ]);
   return { enabled: true, copier: publicView(copier) };
+}
+
+/// Keys made by prepare that nobody enrolled within the hour are retired, so an abandoned setup
+/// isn't billed every month. Called by copyd with CRON_SECRET.
+async function sweepPending({ req, deps, store, now }) {
+  const expected = Buffer.from(`Bearer ${deps.cronSecret ?? ""}`);
+  const given = Buffer.from(String(req.headers?.authorization ?? ""));
+  if (!deps.cronSecret || given.length !== expected.length || !timingSafeEqual(given, expected)) refuse(401, "Unauthorized.");
+  const ids = await store.smembers(C.pendings);
+  let retired = 0;
+  for (const id of ids) {
+    const text = await store.get(C.pending(id));
+    if (!text) { await store.srem(C.pendings, id); continue; }
+    const pending = JSON.parse(text);
+    if (now() - pending.createdAt < PENDING_RETIRE_MS) continue;
+    if (deps.kms) await retireKey({ client: deps.kms, keyId: pending.keyId, commands: deps.kmsCommands }).catch(() => {});
+    await store.pipeline([["DEL", C.pending(id)], ["SREM", C.pendings, id]]);
+    retired += 1;
+  }
+  return { pending: ids.length - retired, retired };
 }
 
 /// Every request after enrolment: signed by the device key the grant registered, within a

@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign as cryptoSign } from "node:crypto";
 import { privateKeyToAccount } from "viem/accounts";
 import { memoryStore } from "../api/_store.mjs";
-import { createCopyHandler, grantText, parseGrant, deviceCanonical, seal, unseal, checkedRules, LABEL } from "../api/_copy.mjs";
+import { createCopyHandler, grantText, parseGrant, deviceCanonical, seal, unseal, checkedRules, prepareText, LABEL } from "../api/_copy.mjs";
 import { enrolmentDigest, jsonSpan, verifyEd25519 } from "../copyd/perpl.mjs";
 import { createEngine, copierId } from "../copyd/engine.mjs";
 import { DEFAULT_RULES } from "../copyd/planner.mjs";
@@ -87,7 +87,7 @@ function device() {
 function setup({ kms = fakeKms(), clock = { t: Date.UTC(2026, 9, 16, 12) } } = {}) {
   const store = memoryStore();
   const perpl = fakePerpl();
-  const handler = createCopyHandler(() => ({ store, kms, tokenKey: TOKEN_KEY, fetchImpl: perpl.fetchImpl, now: () => clock.t }));
+  const handler = createCopyHandler(() => ({ store, kms, tokenKey: TOKEN_KEY, fetchImpl: perpl.fetchImpl, now: () => clock.t, cronSecret: "cron" }));
   const phone = device();
   async function call(action, body, { headers = {}, raw = false } = {}) {
     const res = { code: 0, body: null, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; }, setHeader() {} };
@@ -104,8 +104,13 @@ function setup({ kms = fakeKms(), clock = { t: Date.UTC(2026, 9, 16, 12) } } = {
       headers: { "x-desk-network": "testnet", "x-desk-account": ME, "x-desk-time": String(time), "x-desk-nonce": nonce, "x-desk-signature": signature },
     });
   }
+  /// The wallet's short signed request for a server key, as the app sends it.
+  async function prepare({ signer = wallet, issuedAt = clock.t } = {}) {
+    const signature = await signer.signMessage({ message: prepareText({ account: ME, network: "testnet", issuedAt }) });
+    return call("prepare", { network: "testnet", address: ME, issuedAt, signature });
+  }
   async function enable({ caps = CAPS, grantFor = null } = {}) {
-    const prepared = await call("prepare", { network: "testnet", address: ME });
+    const prepared = await prepare();
     assert.equal(prepared.code, 200, JSON.stringify(prepared.body));
     const typed = JSON.parse(jsonSpan(prepared.body.payload, "typed_data"));
     const walletSignature = await wallet.sign({ hash: enrolmentDigest(typed) });
@@ -116,7 +121,7 @@ function setup({ kms = fakeKms(), clock = { t: Date.UTC(2026, 9, 16, 12) } } = {
     });
     return { prepared, enrolled };
   }
-  return { store, kms, perpl, call, signed, enable, phone, clock, id: copierId("testnet", ME) };
+  return { store, kms, perpl, call, signed, enable, prepare, phone, clock, id: copierId("testnet", ME) };
 }
 
 test("One Face ID turns it on: a KMS key, Perpl's registration, and a copier the engine can read", async () => {
@@ -140,22 +145,47 @@ test("One Face ID turns it on: a KMS key, Perpl's registration, and a copier the
   assert.equal(await ctx.store.get(`copy:pending:${ctx.id}`), null);
   assert.deepEqual(ctx.kms.keys.get("key-1").tags.find((t) => t.TagKey === "desk:purpose"), { TagKey: "desk:purpose", TagValue: "auto-copy" });
 
-  const again = await ctx.call("prepare", { network: "testnet", address: ME });
+  const again = await ctx.prepare();
   assert.equal(again.code, 409);
 });
 
 test("A second prepare offers the same key; a stale one is retired before a new one is made", async () => {
   const ctx = setup();
-  const a = await ctx.call("prepare", { network: "testnet", address: ME });
-  const b = await ctx.call("prepare", { network: "testnet", address: ME });
+  const a = await ctx.prepare();
+  const b = await ctx.prepare();
   assert.equal(a.body.serverKey, b.body.serverKey);
   assert.equal(ctx.kms.calls.filter((c) => c === "CreateKeyCommand").length, 1);
   ctx.clock.t += 30 * 60_000;
-  const c = await ctx.call("prepare", { network: "testnet", address: ME });
+  const c = await ctx.prepare();
   assert.notEqual(c.body.serverKey, a.body.serverKey);
   assert.equal(ctx.kms.keys.get("key-1").enabled, false, "the abandoned key can no longer sign");
-  for (let i = 0; i < 3; i++) await ctx.call("prepare", { network: "testnet", address: ME });
-  assert.equal((await ctx.call("prepare", { network: "testnet", address: ME })).code, 429, "six an hour");
+  for (let i = 0; i < 3; i++) await ctx.prepare();
+  assert.equal((await ctx.prepare()).code, 429, "six an hour");
+});
+
+test("Only the wallet itself can ask for a server key, and only just now", async () => {
+  const stranger = privateKeyToAccount(`0x${"22".repeat(32)}`);
+  const ctx = setup();
+  assert.equal((await ctx.call("prepare", { network: "testnet", address: ME })).code, 401, "unsigned");
+  assert.equal((await ctx.prepare({ signer: stranger })).code, 401, "someone else's wallet");
+  assert.equal((await ctx.prepare({ issuedAt: ctx.clock.t - 10 * 60_000 })).code, 400, "stale");
+  assert.equal(ctx.kms.calls.filter((c) => c === "CreateKeyCommand").length, 0, "no key was made for any of them");
+  assert.equal((await ctx.prepare()).code, 200);
+});
+
+test("The sweep retires keys nobody enrolled within the hour, and only answers copyd", async () => {
+  const ctx = setup();
+  await ctx.prepare();
+  const sweep = (authorization) => ctx.call("sweep", "", { raw: true, headers: authorization ? { authorization } : {} });
+  assert.equal((await sweep()).code, 401);
+  assert.equal((await sweep("Bearer nope")).code, 401);
+  assert.deepEqual((await sweep("Bearer cron")).body, { pending: 1, retired: 0 });
+  ctx.clock.t += 61 * 60_000;
+  assert.deepEqual((await sweep("Bearer cron")).body, { pending: 0, retired: 1 });
+  assert.equal(ctx.kms.keys.get("key-1").enabled, false);
+  assert.equal(await ctx.store.get(`copy:pending:${ctx.id}`), null);
+  await ctx.enable();
+  assert.deepEqual(await ctx.store.smembers("copy:pendings"), [], "an enrolled key isn't pending");
 });
 
 test("A key name KMS already holds moves to the next, and the unnamed key is retired", async () => {
@@ -169,7 +199,7 @@ test("A key name KMS already holds moves to the next, and the unnamed key is ret
     return send(command);
   };
   const ctx = setup({ kms });
-  const prepared = await ctx.call("prepare", { network: "testnet", address: ME });
+  const prepared = await ctx.prepare();
   assert.equal(prepared.code, 200, JSON.stringify(prepared.body));
   assert.equal(JSON.parse(await ctx.store.get(`copy:pending:${ctx.id}`)).generation, 3);
   assert.equal(kms.keys.get("key-1").enabled, false);
@@ -180,7 +210,7 @@ test("A key name KMS already holds moves to the next, and the unnamed key is ret
 test("The grant must be this wallet's, for this server key, and fresh", async () => {
   const stranger = privateKeyToAccount(`0x${"22".repeat(32)}`);
   const ctx = setup();
-  const prepared = await ctx.call("prepare", { network: "testnet", address: ME });
+  const prepared = await ctx.prepare();
   const typed = JSON.parse(jsonSpan(prepared.body.payload, "typed_data"));
   const walletSignature = await wallet.sign({ hash: enrolmentDigest(typed) });
   const grant = (over = {}) => grantText({ account: ME, network: "testnet", serverKey: prepared.body.serverKey, deviceKey: ctx.phone.key, caps: CAPS, issuedAt: ctx.clock.t, ...over });
@@ -301,7 +331,7 @@ test("The engine follows what the API writes: new copiers, rules, a close from t
   await engine.refresh();
   assert.equal(await engine.copier(ctx.id), null);
   assert.equal((await ctx.signed("state")).code, 404, "nothing answers for a copier that is off");
-  assert.equal((await ctx.call("prepare", { network: "testnet", address: ME })).code, 200, "and it can be turned on again, with a new key");
+  assert.equal((await ctx.prepare()).code, 200, "and it can be turned on again, with a new key");
   assert.equal(ctx.kms.calls.filter((c) => c === "CreateKeyCommand").length, 2);
 });
 
@@ -311,7 +341,7 @@ test("A wallet Perpl has no account for is told to deposit first", async () => {
   const handler = createCopyHandler(() => ({ store: ctx.store, kms: ctx.kms, tokenKey: TOKEN_KEY, now: () => ctx.clock.t,
     fetchImpl: (url, init) => (url.endsWith("/enroll") ? Promise.resolve(new Response("not found", { status: 404 })) : real(url, init)) }));
   const res = { status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; }, setHeader() {} };
-  const prepared = await ctx.call("prepare", { network: "testnet", address: ME });
+  const prepared = await ctx.prepare();
   const typed = JSON.parse(jsonSpan(prepared.body.payload, "typed_data"));
   const text = grantText({ account: ME, network: "testnet", serverKey: prepared.body.serverKey, deviceKey: ctx.phone.key, caps: CAPS, issuedAt: ctx.clock.t });
   await handler({ method: "POST", query: { action: "enroll" }, headers: {}, body: {
@@ -323,7 +353,7 @@ test("A wallet Perpl has no account for is told to deposit first", async () => {
 
 test("Without AWS configured it says so instead of half-enrolling", async () => {
   const ctx = setup({ kms: null });
-  const res = await ctx.call("prepare", { network: "testnet", address: ME });
+  const res = await ctx.prepare();
   assert.equal(res.code, 503);
   assert.equal(ctx.perpl.seen.payloads.length, 0);
 });

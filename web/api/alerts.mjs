@@ -779,7 +779,7 @@ function copyKms() {
 let production;
 let copyDeps;
 export default createHandler(() => (production ??= {
-  copy: createCopyHandler(() => (copyDeps ??= { store: redisStore(), kms: copyKms(), tokenKey: process.env.COPY_TOKEN_KEY })),
+  copy: createCopyHandler(() => (copyDeps ??= { store: redisStore(), kms: copyKms(), tokenKey: process.env.COPY_TOKEN_KEY, cronSecret: process.env.CRON_SECRET })),
   store: redisStore(),
   apns: apnsClient(),
   webpush: webPushClient(vapidFromEnv()),
