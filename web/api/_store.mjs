@@ -46,12 +46,21 @@ export function redisStore({
       const results = await call("/pipeline", entries.map(([key, value, ttl]) => ["SET", key, value, "EX", String(ttl ?? ex)]));
       if (results.some((entry) => entry.error)) throw new Error("redis pipeline");
     },
-    lpush: (key, value) => command("LPUSH", key, value),
+    lpush: (key, ...values) => command("LPUSH", key, ...values),
     ltrim: (key, start, stop) => command("LTRIM", key, String(start), String(stop)),
     lrange: (key, start, stop) => command("LRANGE", key, String(start), String(stop)),
     zadd: (key, score, member) => command("ZADD", key, String(score), member),
     zcount: (key, min, max) => command("ZCOUNT", key, String(min), String(max)),
     zremrangebyscore: (key, min, max) => command("ZREMRANGEBYSCORE", key, String(min), String(max)),
+    /// Several commands in one round trip, e.g. `[["SET", k, v], ["LPUSH", k, a, b]]`. Upstash still
+    /// bills each one; what this saves is the wait.
+    async pipeline(commands) {
+      if (!commands.length) return [];
+      const results = await call("/pipeline", commands.map((entry) => entry.map(String)));
+      const failed = results.find((entry) => entry.error);
+      if (failed) throw new Error(`redis pipeline: ${failed.error}`);
+      return results.map((entry) => entry.result);
+    },
     /// Replaces the value only while it still equals `expected`, atomically: a lease is renewed
     /// or released by its holder alone. An empty `value` deletes the key.
     async swap(key, expected, value, { ex } = {}) {
@@ -109,20 +118,27 @@ export function memoryStore() {
     },
     lists,
     zsets,
-    async lpush(key, value) {
+    async lpush(key, ...values) {
       const list = lists.get(key) ?? [];
-      list.unshift(String(value));
+      values.forEach((value) => list.unshift(String(value)));
       lists.set(key, list);
       return list.length;
     },
-    async ltrim(key, start, stop) {
+    async ltrim(key, from, to) {
+      const [start, stop] = [Number(from), Number(to)];
       const list = lists.get(key) ?? [];
       lists.set(key, list.slice(start, stop < 0 ? list.length + stop + 1 : stop + 1));
       return "OK";
     },
-    async lrange(key, start, stop) {
+    async lrange(key, from, to) {
+      const [start, stop] = [Number(from), Number(to)];
       const list = lists.get(key) ?? [];
       return list.slice(start, stop < 0 ? list.length + stop + 1 : stop + 1);
+    },
+    async pipeline(commands) {
+      const out = [];
+      for (const [name, ...args] of commands) out.push(await this[name.toLowerCase()](...args));
+      return out;
     },
     async zadd(key, score, member) {
       const set = zsets.get(key) ?? new Map();
