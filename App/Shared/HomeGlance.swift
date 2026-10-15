@@ -15,6 +15,7 @@ struct PortfolioGlance: Codable, Hashable, Sendable {
 
     var addressShort: String
     var network: String
+    /// The whole balance, open positions included; the name predates that.
     var collateralText: String
     var positions: [Position]
     var updatedAt: Date

@@ -67,8 +67,8 @@ struct HomeScreen: View {
     }
 
     private var total: Money? {
-        guard let collateral = model.collateral.value else { return nil }
-        return collateral + (model.walletAUSD.value ?? .zero)
+        let tokens = Showcase.spotTrading ? spot.holdings.compactMap(\.value).reduce(0, +) : 0
+        return PositionContext.worth(model: model, market: market, tokensUSD: tokens)
     }
 
     private var totalInCurrency: String {

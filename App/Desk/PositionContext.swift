@@ -24,4 +24,28 @@ struct PositionContext: Identifiable {
         guard !contexts.isEmpty else { return nil }
         return contexts.reduce(.zero) { $0 + $1.figures.unrealisedPnL }
     }
+
+    /// What the open positions would hand back if closed at the current mark: each one's margin
+    /// and what it is up or down, never below nothing. One without a readable mark counts at its
+    /// margin, so a missing price can't make money vanish from the total.
+    @MainActor static func openValue(model: AppModel, market: MarketModel) -> Money {
+        model.openPositions.reduce(.zero) { sum, held in
+            let margin = Money(raw: held.collateralRaw) ?? .zero
+            guard let item = market.market(id: held.marketID),
+                  let mark = market.price(for: item),
+                  let figures = PositionFigures(position: held, market: item.config, mark: mark)
+            else { return sum + margin }
+            let value = figures.collateral + figures.unrealisedPnL
+            return sum + (value.isNegative ? .zero : value)
+        }
+    }
+
+    /// Everything the wallet holds through Desk: AUSD free to trade, AUSD in the wallet, the open
+    /// positions at their current value, and tokens bought here (in dollars). Opening a trade
+    /// moves money into a position; it doesn't take it out of this figure.
+    @MainActor static func worth(model: AppModel, market: MarketModel, tokensUSD: Double = 0) -> Money? {
+        guard let free = model.collateral.value else { return nil }
+        let tokens = Money(raw: Int64((tokensUSD * 1_000_000).rounded())) ?? .zero
+        return free + (model.walletAUSD.value ?? .zero) + openValue(model: model, market: market) + tokens
+    }
 }

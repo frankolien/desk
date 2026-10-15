@@ -31,7 +31,7 @@ final class HomeGlancePublisher {
     /// Nil until the exchange balance has arrived: a glance written from a still-loading
     /// balance would put "--" on the Home Screen as if it were the figure.
     private static func portfolio(model: AppModel, market: MarketModel) -> PortfolioGlance? {
-        guard model.address != nil, let collateral = model.collateral.value else { return nil }
+        guard model.address != nil, let worth = PositionContext.worth(model: model, market: market) else { return nil }
         let positions = model.openPositions.compactMap { held -> PortfolioGlance.Position? in
             guard let item = market.market(id: held.marketID),
                   let mark = market.price(for: item),
@@ -49,7 +49,7 @@ final class HomeGlancePublisher {
         return PortfolioGlance(
             addressShort: model.addressShort,
             network: model.network.name,
-            collateralText: DisplayCurrency.shared.format(collateral),
+            collateralText: DisplayCurrency.shared.format(worth),
             positions: positions,
             updatedAt: .now)
     }

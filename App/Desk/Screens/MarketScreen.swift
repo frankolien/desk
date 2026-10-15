@@ -223,11 +223,8 @@ struct MarketScreen: View {
     /// Everything the wallet is worth through Desk: the desk, the AUSD beside it, the tokens
     /// bought here, and what the open perps are up or down right now.
     private var everything: Double? {
-        guard let collateral = model.collateral.value else { return nil }
-        let wallet = model.walletAUSD.value ?? .zero
         let tokens = spot.holdings.compactMap(\.value).reduce(0, +)
-        let perps = PositionContext.totalPnL(PositionContext.all(model: model, market: market)).map { Double($0.raw) / 1_000_000 } ?? 0
-        return Double(collateral.raw + wallet.raw) / 1_000_000 + tokens + perps
+        return PositionContext.worth(model: model, market: market, tokensUSD: tokens).map { Double($0.raw) / 1_000_000 }
     }
 
     /// Open perps' unrealised PnL plus what the tokens have done since they were bought.

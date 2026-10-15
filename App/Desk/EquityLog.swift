@@ -13,7 +13,13 @@ enum EquityLog {
     private static let minimumGap: TimeInterval = 600
     private static let keep: TimeInterval = 365 * 86_400
 
+    /// v2 counts open positions at their value; v1 points left them out, so a v1 history would
+    /// show every open trade as a drop and its margin as a gain the day this changed.
     private static func key(_ network: String, _ address: String) -> String {
+        "desk.equity.v2.\(network).\(address.lowercased())"
+    }
+
+    private static func legacyKey(_ network: String, _ address: String) -> String {
         "desk.equity.\(network).\(address.lowercased())"
     }
 
@@ -43,10 +49,12 @@ enum EquityLog {
         points.removeAll { now.timeIntervalSince($0.at) > keep }
         if let data = try? JSONEncoder().encode(points) {
             UserDefaults.standard.set(data, forKey: key(network, address))
+            UserDefaults.standard.removeObject(forKey: legacyKey(network, address))
         }
     }
 
     static func forget(network: String, address: String) {
         UserDefaults.standard.removeObject(forKey: key(network, address))
+        UserDefaults.standard.removeObject(forKey: legacyKey(network, address))
     }
 }
