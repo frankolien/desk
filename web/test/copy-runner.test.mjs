@@ -13,8 +13,9 @@ function fakeEngine() {
   const calls = [];
   return {
     calls,
+    async refresh() { calls.push("refresh"); return 0; },
     async sweep() { calls.push("sweep"); return {}; },
-    async traderForAccount(id) { return id === "9" ? "0xtrader" : null; },
+    traderForAccount(id) { return id === "9" ? "0xtrader" : null; },
     async processTrader(trader) { calls.push(`read ${trader}`); await new Promise((r) => setTimeout(r, 5)); return []; },
   };
 }
@@ -31,7 +32,7 @@ test("Only the lease holder sweeps, and each sweep leaves a heartbeat", async ()
   clock.t += 20_000; // the other holder stopped renewing
   const result = await runner.tick();
   assert.equal(result.swept, true);
-  assert.deepEqual(engine.calls, ["sweep"]);
+  assert.deepEqual(engine.calls, ["refresh", "sweep"]);
   assert.equal(await store.get("copy:heartbeat"), String(clock.t));
 });
 
@@ -45,14 +46,22 @@ test("copy:halt stops everything until it is cleared", async () => {
   assert.equal((await runner.tick()).swept, true);
 });
 
-test("A burst of events for one trader is one read, and unknown accounts are ignored", async () => {
+test("An event reads its trader without waiting for a sweep; unknown accounts and a halt stop it", async () => {
   const store = memoryStore();
   const engine = fakeEngine();
+  let release;
+  engine.sweep = async () => { engine.calls.push("sweep"); await new Promise((r) => { release = r; }); return {}; };
   const runner = createRunner({ engine, lease: createLease({ store, id: "me" }), store, logger: quiet });
+  const tick = runner.tick();
+  await new Promise((r) => setTimeout(r, 5));
+  await Promise.all([runner.onAccount("9"), runner.onAccount("123")]);
+  assert.deepEqual(engine.calls, ["refresh", "sweep", "read 0xtrader"], "the read did not wait for the sweep");
+  release(); await tick;
+  await store.set("copy:halt", "incident");
   await runner.tick();
-  await Promise.all([runner.onAccount("9"), runner.onAccount("9"), runner.onAccount("9"), runner.onAccount("123")]);
+  await runner.onAccount("9");
   await runner.idle();
-  assert.deepEqual(engine.calls, ["sweep", "read 0xtrader"]);
+  assert.equal(engine.calls.filter((c) => c.startsWith("read")).length, 1);
 });
 
 test("A log frame yields its account id; anything else yields nothing", () => {
@@ -83,9 +92,8 @@ test("Each result reads plainly, and a paper copy says so", () => {
 });
 
 test("Skips are held to one per trader per hour; devices without a token get nothing", async () => {
-  const store = memoryStore();
   const sent = [];
-  const notify = createNotifier({ send: async (push, payload) => { sent.push(payload); return { status: 200 }; }, store, now: () => 7_200_000 });
+  const notify = createNotifier({ send: async (push, payload) => { sent.push(payload); return { status: 200 }; }, now: () => 7_200_000 });
   const copier = { id: "mainnet:0xme", push: { token: "ab".repeat(32), environment: "production" } };
   await notify(copier, row({ kind: "skipped", detail: "x" }));
   assert.deepEqual(await notify(copier, row({ kind: "skipped", detail: "y" })), { skipped: "throttled" });
@@ -93,4 +101,32 @@ test("Skips are held to one per trader per hour; devices without a token get not
   assert.equal(sent.length, 2);
   assert.deepEqual(await notify({ id: "x" }, row({ kind: "opened" })), { skipped: "no device" });
   assert.deepEqual(await notify({ ...copier, notifyShadow: false }, row({ kind: "opened", isShadow: true })), { skipped: "shadow muted" });
+});
+
+test("The lease is kept between sweeps, so events are never dropped in a sweep's last seconds", async () => {
+  const store = memoryStore();
+  const clock = { t: 1_000 };
+  const engine = fakeEngine();
+  const runner = createRunner({ engine, lease: createLease({ store, now: () => clock.t, id: "me" }), store, now: () => clock.t, logger: quiet });
+  await runner.tick();
+  for (let i = 0; i < 6; i++) { clock.t += 5_000; await runner.keepLease(); }
+  await runner.onAccount("9");
+  await runner.idle();
+  assert.ok(engine.calls.includes("read 0xtrader"), "30 s after the last sweep, still held");
+});
+
+test("Taking the lease back after losing it reloads the engine before it acts", async () => {
+  const store = memoryStore();
+  const clock = { t: 1_000 };
+  const engine = fakeEngine();
+  engine.reset = () => engine.calls.push("reset");
+  const runner = createRunner({ engine, lease: createLease({ store, now: () => clock.t, id: "me" }), store, now: () => clock.t, logger: quiet });
+  await runner.tick();
+  const other = createLease({ store, now: () => clock.t, id: "other" });
+  clock.t += 20_000;
+  await other.acquire();
+  assert.equal((await runner.tick()).reason, "no lease");
+  clock.t += 20_000;
+  await runner.tick();
+  assert.deepEqual(engine.calls, ["refresh", "sweep", "reset", "refresh", "sweep"]);
 });

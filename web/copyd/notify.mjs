@@ -33,15 +33,20 @@ export function copyPayload(row, { name } = {}) {
   };
 }
 
-/// `send(push, payload, {collapseId})` is the APNs client's send; `store` holds the skip throttle.
-export function createNotifier({ send, store, names = () => null, now = Date.now }) {
+/// `send(push, payload, {collapseId})` is the APNs client's send. The skip throttle is kept in
+/// memory: a restart can let one extra skip through per trader, which costs less than a Redis
+/// write for every skip of every copier.
+export function createNotifier({ send, names = () => null, now = Date.now }) {
+  const skipNoted = new Map(); // `${copier}|${trader}` -> hour
   return async function notify(copier, row) {
     if (!copier.push?.token) return { skipped: "no device" };
     if (row.isShadow && copier.notifyShadow === false) return { skipped: "shadow muted" };
     if (row.kind === "skipped") {
       const hour = Math.floor(now() / 3_600_000);
-      const fresh = await store.set(`copy:skipnote:${copier.id}:${row.trader}:${hour}`, "1", { nx: true, ex: 3_700 });
-      if (!fresh) return { skipped: "throttled" };
+      const key = `${copier.id}|${row.trader}`;
+      if (skipNoted.get(key) === hour) return { skipped: "throttled" };
+      skipNoted.set(key, hour);
+      if (skipNoted.size > 50_000) for (const [k, h] of skipNoted) if (h !== hour) skipNoted.delete(k);
     }
     const payload = copyPayload(row, { name: names(row.trader) });
     if (!payload) return { skipped: "silent kind" };

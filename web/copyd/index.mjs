@@ -22,7 +22,7 @@ if (!store) { console.error("copyd: KV_REST_API_URL and KV_REST_API_TOKEN are re
 const chain = chainReader();
 const apns = process.env.APNS_KEY_ID ? apnsClient() : null;
 const notify = apns
-  ? createNotifier({ send: (push, payload, options) => apns.send(push, payload, options), store })
+  ? createNotifier({ send: (push, payload, options) => apns.send(push, payload, options) })
   : async () => ({ skipped: "APNs not configured" });
 
 const engine = createEngine({
@@ -38,7 +38,10 @@ const watcher = watchPositions({
   onState: (up) => console.log(`copyd: position events ${up ? "streaming" : "lost; the sweep covers the gap"}`),
 });
 
+const LEASE_MS = 5_000;
 let stopping = false;
+const leaseTimer = setInterval(() => { if (!stopping) runner.keepLease(); }, LEASE_MS);
+
 async function loop() {
   while (!stopping) {
     const started = Date.now();
@@ -57,6 +60,7 @@ async function shutdown(signal) {
   stopping = true;
   console.log(`copyd: ${signal}, stopping`);
   watcher.stop();
+  clearInterval(leaseTimer);
   await runner.idle();
   await lease.release().catch(() => {});
   apns?.close?.();
