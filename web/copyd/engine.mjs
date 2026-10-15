@@ -40,6 +40,7 @@ export const K = {
   open: (id) => `copy:open:${id}`,
   log: (id) => `copy:log:${id}`,
   pause: (id) => `copy:pause:${id}`,
+  close: (id) => `copy:close:${id}`,
 };
 
 export const copierId = (network, address) => `${network}:${address.toLowerCase()}`;
@@ -139,7 +140,7 @@ export function createEngine({
     ids.forEach((id, i) => {
       unindex(id);
       const copier = parse(stored[i]);
-      if (!copier) { copiers.delete(id); openBy.delete(id); today.delete(id); pauses.delete(id); return; }
+      if (!copier || copier.disabled) { copiers.delete(id); openBy.delete(id); today.delete(id); pauses.delete(id); return; }
       copiers.set(id, copier);
       if (paused[i]) pauses.set(id, paused[i]); else pauses.delete(id);
       if (!openBy.has(id)) openBy.set(id, parse(opens[i]) ?? []);
@@ -168,7 +169,49 @@ export function createEngine({
     if (!ids.length) return 0;
     await store.srem(K.dirty, ...ids);
     await adopt(ids);
+    await closeRequested(ids);
     return ids.length;
+  }
+
+  /// Copies the app asked to close now (`copy:close:<id>`, set by the API): a shadow at the
+  /// latest mark, a live one through the executor.
+  async function closeRequested(ids) {
+    const asked = await Promise.all(ids.map((id) => store.smembers(K.close(id))));
+    if (!asked.some((list) => list.length)) return;
+    const bySymbol = await marketsBySymbol();
+    const out = [];
+    const intents = [];
+    const commands = [];
+    ids.forEach((id, i) => {
+      if (!asked[i].length) return;
+      commands.push(["SREM", K.close(id), ...asked[i]]);
+      const copier = copiers.get(id);
+      if (!copier) return;
+      const open = openBy.get(id) ?? [];
+      const keep = [];
+      for (const copy of open) {
+        if (!asked[i].includes(copy.id)) { keep.push(copy); continue; }
+        if (copy.isShadow) {
+          const fee = bySymbol.get(copy.symbol)?.config.takerFeeMicros ?? DEFAULT_TAKER_FEE;
+          const price = marks.get(copy.symbol) ?? copy.lastMark ?? copy.shadow.entry;
+          record(copier, {
+            trader: copy.trader, symbol: copy.symbol, isLong: copy.isLong, kind: "closed", detail: "Closed from the app.",
+            isShadow: true, leverage: copy.leverage, margin: copy.margin, pnl: shadowPnL(copy.shadow, price, fee),
+          }, out);
+        } else {
+          keep.push(copy);
+          if (executor && copy.state !== "closing") {
+            copy.state = "closing";
+            intents.push({ action: "close", copier, copy, verb: "manual", reason: "Closed from the app." });
+          }
+        }
+      }
+      openBy.set(id, keep);
+      touch(K.open(id));
+    });
+    await store.pipeline(commands);
+    await settleEffects(out);
+    for (const intent of intents) executor[intent.action](intent).catch((error) => logger.warn?.(`copyd: close ${intent.copier.id}: ${error.message}`));
   }
 
   // ---------- writing ----------
