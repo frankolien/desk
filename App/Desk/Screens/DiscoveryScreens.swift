@@ -145,6 +145,7 @@ struct MarketSearchScreen: View {
     @State private var query = ""
     @State private var showsMarket = false
     @State private var selectedSpot: TrendingSpotToken?
+    @State private var buysOnOpen = false
     @State private var selectedPerson: SpotWallet?
     @State private var person: (address: String, identity: Identity?)?
     @State private var isLookingUpName = false
@@ -403,8 +404,9 @@ struct MarketSearchScreen: View {
             }
             #endif
             .navigationDestination(item: $selectedSpot) { token in
-                SpotTokenDetailScreen(token: token, model: model)
+                SpotTokenDetailScreen(token: token, model: model, opensBuy: buysOnOpen)
                     .navigationTransition(.zoom(sourceID: "spot-\(token.id)", in: navigationSpace))
+                    .onDisappear { buysOnOpen = false }
                     .toolbar(.hidden, for: .tabBar)
             }
             .task { if Showcase.spotTrading { await discovery.run() } }
@@ -454,6 +456,7 @@ struct MarketSearchScreen: View {
                 guard let target = TokenOpenRequest.shared.pending else { return }
                 let token = await discovery.find(target)
                 guard !Task.isCancelled else { return }
+                buysOnOpen = target.opensBuy
                 selectedSpot = token
                 _ = TokenOpenRequest.shared.take()
             }
@@ -966,9 +969,12 @@ private struct SpotTokenDetailScreen: View {
         SpotWatchlistStorage.contains(token, in: savedSpotData)
     }
 
-    init(token: TrendingSpotToken, model: AppModel) {
+    private let opensBuy: Bool
+
+    init(token: TrendingSpotToken, model: AppModel, opensBuy: Bool = false) {
         self.token = token
         self.model = model
+        self.opensBuy = opensBuy
         _feed = StateObject(wrappedValue: SpotLiveFeed(
             symbol: token.symbol, chainIndex: token.chainIndex, contract: token.contract
         ))
@@ -1023,6 +1029,12 @@ private struct SpotTokenDetailScreen: View {
             RiskSheet(symbol: token.symbol, risk: risk.risk, fallback: quickRisk, failed: risk.failed)
                 .fittedSheet()
                 .presentationDragIndicator(.visible)
+        }
+        .task {
+            // Opened from Buy the Same: the ticket comes up once the page has settled.
+            guard opensBuy else { return }
+            try? await Task.sleep(for: .milliseconds(600))
+            tradeSide = "Buy"
         }
         #if DEBUG
         .task {

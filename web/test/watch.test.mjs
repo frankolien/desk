@@ -100,7 +100,9 @@ test("an alert reads like a sentence, and the four shapes are exact", () => {
   const payload = walletPayload({}, wallet, { kind: "first", token: GRIZZLE, symbol: "GRIZZLE", amount: 12_400, value: 310, gain: null, count: 1 });
   assert.equal(payload.aps.alert.title, "0x06b6…6911");
   assert.equal(payload.aps["thread-id"], `wallet-${WHALE}`);
-  assert.equal(payload.aps.category, "desk.wallet");
+  assert.equal(payload.aps.category, "desk.wallet.buy", "a buy offers Buy the Same");
+  assert.equal(walletPayload({}, wallet, { kind: "sell", token: GRIZZLE, symbol: "GRIZZLE", amount: 1, value: 1, count: 1 }).aps.category, "desk.wallet");
+  assert.equal(walletPayload({}, wallet, { kind: "buy", symbol: "X", amount: 1, value: 1, count: 1 }).aps.category, "desk.wallet", "no token, nothing to buy");
   assert.deepEqual([payload.desk.type, payload.desk.event, payload.desk.wallet, payload.desk.chainIndex, payload.desk.valueUsd], ["wallet", "first", WHALE, "143", 310]);
   assert.equal(walletPayload({}, { address: WHALE, name: "Whale" }, { kind: "first", symbol: "X", amount: 1, value: 1 }).aps.alert.title, "Whale");
 

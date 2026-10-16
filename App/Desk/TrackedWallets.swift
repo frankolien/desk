@@ -92,6 +92,8 @@ final class TokenOpenRequest {
         let chainIndex: String
         let contract: String
         var symbol: String? = nil
+        /// From a notification's Buy the Same: the token opens with its buy ticket up.
+        var opensBuy = false
     }
 
     static let shared = TokenOpenRequest()

@@ -120,6 +120,7 @@ final class TradeAlerts {
     nonisolated static let copyAction = "desk.copy"
     nonisolated static let viewAction = "desk.view"
     nonisolated static let muteAction = "desk.mute"
+    nonisolated static let buySameAction = "desk.buySame"
 
     private init() {
         alerted = UserDefaults.standard.stringArray(forKey: Self.storageKey) ?? []
@@ -138,8 +139,13 @@ final class TradeAlerts {
         let mute = UNNotificationAction(
             identifier: muteAction, title: "Mute This Trader", options: [.destructive, .authenticationRequired],
             icon: UNNotificationActionIcon(systemImageName: "bell.slash"))
+        // A followed wallet's buy: the same token, from the notification, behind Face ID.
+        let buySame = UNNotificationAction(
+            identifier: buySameAction, title: "Buy the Same", options: [.foreground, .authenticationRequired],
+            icon: UNNotificationActionIcon(systemImageName: "cart.badge.plus"))
         UNUserNotificationCenter.current().setNotificationCategories([
             UNNotificationCategory(identifier: "desk.trade", actions: [copy, view, mute], intentIdentifiers: []),
+            UNNotificationCategory(identifier: "desk.wallet.buy", actions: [buySame], intentIdentifiers: []),
             UNNotificationCategory(identifier: "desk.trade.closed", actions: [view, mute], intentIdentifiers: []),
             UNNotificationCategory(identifier: "desk.receipt", actions: [], intentIdentifiers: []),
         ])
@@ -627,8 +633,9 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UN
     }
 
     #if DEBUG
-    /// `-tap-notification trade|summary|wallet|price` runs the tap handler at launch with the
-    /// payload the server sends for that alert, the way a cold-start tap would.
+    /// `-tap-notification trade|summary|wallet|wallet-buy|price` runs the tap handler at launch
+    /// with the payload the server sends for that alert, the way a cold-start tap would;
+    /// `wallet-buy` presses the notification's Buy the Same.
     static func debugTap() {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: "-tap-notification"), index + 1 < arguments.count else { return }
@@ -636,6 +643,7 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UN
             "trade": ["type": "trade", "event": "opened", "trader": "0x03508bb71268bba25ecacc8f620e01866650532c", "market": "BTC", "side": "long", "leverage": 5, "entry": "82100", "value": "500", "observedAt": 1791504000000],
             "summary": ["type": "trade", "event": "summary", "trader": "0x95D2602d30DA1179fd13274839e60345857ca648"],
             "wallet": ["type": "wallet", "wallet": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045", "token": "0x527d86b0820a72f7dfb937fe1da0c649019b7777", "symbol": "GOCHI", "chainIndex": "143"],
+            "wallet-buy": ["type": "wallet", "event": "buy", "wallet": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045", "token": "0x527d86b0820a72f7dfb937fe1da0c649019b7777", "symbol": "GOCHI", "chainIndex": "143"],
             "price": ["type": "price", "kind": "target", "market": "BTC", "level": 82000.0, "direction": "up", "mark": 82010.5],
         ]
         guard let desk = payloads[arguments[index + 1]], let data = try? JSONSerialization.data(withJSONObject: desk) else { return }
@@ -643,11 +651,12 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UN
             try? await Task.sleep(for: .seconds(2))
             // Re-read from JSON inside the task: a `[String: Any]` cannot cross into it.
             guard let desk = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
-            await handleTap(userInfo: ["desk": desk], action: UNNotificationDefaultActionIdentifier)
+            let pressed = arguments[index + 1] == "wallet-buy" ? TradeAlerts.buySameAction : UNNotificationDefaultActionIdentifier
+            await handleTap(userInfo: ["desk": desk], action: pressed)
             // The follow guards stop here on a phone that follows nobody; the screens a real tap
             // reaches are opened anyway, so they get exercised too.
             switch desk["type"] as? String {
-            case "wallet": TokenOpenRequest.shared.open(.init(chainIndex: "143", contract: desk["token"] as? String ?? "", symbol: desk["symbol"] as? String))
+            case "wallet": TokenOpenRequest.shared.open(.init(chainIndex: "143", contract: desk["token"] as? String ?? "", symbol: desk["symbol"] as? String, opensBuy: pressed == TradeAlerts.buySameAction))
             case "trade" where desk["event"] as? String == "summary": TradeAlerts.shared.openedTrader = desk["trader"] as? String
             case "trade": TradeAlerts.shared.opened = TradeAlert(userInfo: ["desk": desk])
             default: break
@@ -671,7 +680,8 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UN
             let chainIndex = desk["chainIndex"] as? String ?? "143"
             guard await TrackedWallets.shared.isTracking(wallet) else { return }
             let symbol = desk["symbol"] as? String
-            await MainActor.run { TokenOpenRequest.shared.open(.init(chainIndex: chainIndex, contract: token, symbol: symbol)) }
+            let buys = action == TradeAlerts.buySameAction
+            await MainActor.run { TokenOpenRequest.shared.open(.init(chainIndex: chainIndex, contract: token, symbol: symbol, opensBuy: buys)) }
             return
         }
         if let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "receipt" {

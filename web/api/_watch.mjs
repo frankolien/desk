@@ -129,7 +129,8 @@ export function walletPayload(record, wallet, event) {
       alert: { title, body: body(event).slice(0, 100) },
       sound: "default",
       "thread-id": digest ? "wallet-digest" : `wallet-${address}`,
-      category: "desk.wallet",
+      // A buy carries "Buy the Same" on the notification itself; sells and closes don't.
+      category: (event.kind === "buy" || event.kind === "first") && event.token ? "desk.wallet.buy" : "desk.wallet",
       "relevance-score": 0.7,
     },
     desk: {
