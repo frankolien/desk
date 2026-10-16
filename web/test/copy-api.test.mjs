@@ -45,6 +45,11 @@ function fakeKms() {
           return { Signature: new Uint8Array(cryptoSign(null, Buffer.from(input.Message), key.priv)) };
         }
         case "DisableKeyCommand": keys.get(input.KeyId).enabled = false; return {};
+        case "TagResourceCommand": {
+          const key = keys.get(input.KeyId);
+          key.tags = [...key.tags.filter((t) => !input.Tags.some((n) => n.TagKey === t.TagKey)), ...input.Tags];
+          return {};
+        }
         case "ScheduleKeyDeletionCommand": return {};
         default: throw new Error(`unexpected ${name}`);
       }
@@ -144,6 +149,7 @@ test("One Face ID turns it on: a KMS key, Perpl's registration, and a copier the
   assert.deepEqual(await ctx.store.smembers("copy:dirty"), [ctx.id]);
   assert.equal(await ctx.store.get(`copy:pending:${ctx.id}`), null);
   assert.deepEqual(ctx.kms.keys.get("key-1").tags.find((t) => t.TagKey === "desk:purpose"), { TagKey: "desk:purpose", TagValue: "auto-copy" });
+  assert.equal(ctx.kms.keys.get("key-1").tags.find((t) => t.TagKey === "desk:stage").TagValue, "enrolled", "handed to copyd once Perpl took it");
 
   const again = await ctx.prepare();
   assert.equal(again.code, 409);
@@ -384,4 +390,33 @@ test("copyd's notifications go out with the API's APNs key, and only copyd may s
   assert.equal(sent.length, 1);
   assert.deepEqual(sent[0].push, { token: "ab".repeat(32), environment: "sandbox" });
   assert.equal(sent[0].options.collapseId, "copy-1");
+});
+
+test("A key is made pending, and one made before stages existed is replaced rather than offered", async () => {
+  const ctx = setup();
+  await ctx.prepare();
+  assert.equal(ctx.kms.keys.get("key-1").tags.find((t) => t.TagKey === "desk:stage").TagValue, "pending");
+  const pending = JSON.parse(await ctx.store.get(`copy:pending:${ctx.id}`));
+  delete pending.stage;
+  await ctx.store.set(`copy:pending:${ctx.id}`, JSON.stringify(pending));
+  const again = await ctx.prepare();
+  assert.equal(again.code, 200);
+  assert.equal(ctx.kms.keys.get("key-1").enabled, false);
+  assert.ok(ctx.kms.keys.has("key-2"));
+});
+
+test("If the key can't be handed to copyd, it's retired and nothing is left half on", async () => {
+  const kms = fakeKms();
+  const send = kms.send.bind(kms);
+  kms.send = async (command) => {
+    if (command.constructor.name === "TagResourceCommand") throw new Error("AccessDeniedException");
+    return send(command);
+  };
+  const ctx = setup({ kms });
+  const { enrolled } = await ctx.enable();
+  assert.equal(enrolled.code, 502);
+  assert.match(enrolled.body.error, /Start again/);
+  assert.equal(kms.keys.get("key-1").enabled, false);
+  assert.equal(await ctx.store.get(`copy:copier:${ctx.id}`), null);
+  assert.equal(await ctx.store.get(`copy:pending:${ctx.id}`), null);
 });

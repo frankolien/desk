@@ -1,8 +1,8 @@
 {
   "Version": "2012-10-17",
   "Statement": [
-    {"Sid": "SignWithDeskKeysOnly", "Effect": "Allow", "Action": "kms:Sign", "Resource": "arn:aws:kms:${REGION}:${ACCOUNT_ID}:key/*",
-     "Condition": {"StringEquals": {"aws:ResourceTag/desk:purpose": "auto-copy", "kms:SigningAlgorithm": "ED25519_SHA_512"}}},
+    {"Sid": "SignWithEnrolledDeskKeysOnly", "Effect": "Allow", "Action": "kms:Sign", "Resource": "arn:aws:kms:${REGION}:${ACCOUNT_ID}:key/*",
+     "Condition": {"StringEquals": {"aws:ResourceTag/desk:purpose": "auto-copy", "aws:ResourceTag/desk:stage": "enrolled", "kms:SigningAlgorithm": "ED25519_SHA_512"}}},
     {"Sid": "ReadDeskPublicKeys", "Effect": "Allow", "Action": ["kms:GetPublicKey", "kms:DescribeKey"], "Resource": "arn:aws:kms:${REGION}:${ACCOUNT_ID}:key/*",
      "Condition": {"StringEquals": {"aws:ResourceTag/desk:purpose": "auto-copy"}}},
     {"Sid": "NothingElse", "Effect": "Deny",

@@ -13,7 +13,7 @@
 import { createCipheriv, createDecipheriv, createHash, createPublicKey, randomBytes, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
 import { getAddress, isAddress, recoverMessageAddress } from "viem";
 import { NETWORKS, payloadBody, enrolBody, tokenFrom, jsonSpan, checkEnrolmentPayload, PerplError } from "../copyd/perpl.mjs";
-import { createKey, kmsSigner, retireKey } from "../copyd/kms.mjs";
+import { createKey, kmsSigner, retireKey, markEnrolled } from "../copyd/kms.mjs";
 import { decodeRules, decodeGuards, DEFAULT_GUARDS } from "../copyd/planner.mjs";
 import { K, copierId, LOG_LIMIT } from "../copyd/engine.mjs";
 import { rateLimit, clientIp } from "./_ratelimit.mjs";
@@ -311,7 +311,8 @@ async function prepare({ req, deps, store, now, fetchImpl, network, address, id,
   const pending = pendingText ? JSON.parse(pendingText) : null;
   let signer;
   let generation;
-  const reused = Boolean(pending) && now() - pending.createdAt < PENDING_FRESH_MS;
+  // A key made before keys carried a stage can't sign its proof any more; it's replaced.
+  const reused = Boolean(pending) && pending.stage === "pending" && now() - pending.createdAt < PENDING_FRESH_MS;
   if (reused) {
     signer = await kmsSigner({ client: deps.kms, keyId: pending.keyId, commands: deps.kmsCommands });
     generation = pending.generation;
@@ -339,7 +340,7 @@ async function prepare({ req, deps, store, now, fetchImpl, network, address, id,
   checkEnrolmentPayload(JSON.parse(jsonSpan(payloadText, "typed_data")), { address, publicKey: signer.publicKey, chainId });
 
   const createdAt = reused ? pending.createdAt : now();
-  await store.set(C.pending(id), JSON.stringify({ keyId: signer.keyId, publicKey: signer.publicKey.toString("hex"), generation, payloadText, createdAt }), { ex: PENDING_KEEP_S });
+  await store.set(C.pending(id), JSON.stringify({ keyId: signer.keyId, publicKey: signer.publicKey.toString("hex"), generation, payloadText, createdAt, stage: "pending" }), { ex: PENDING_KEEP_S });
   await store.sadd(C.pendings, id);
   return { serverKey: `0x${signer.publicKey.toString("hex")}`, payload: payloadText, label: LABEL, expiresAt: createdAt + PENDING_FRESH_MS };
 }
@@ -375,6 +376,15 @@ async function enroll({ deps, store, now, fetchImpl, network, address, id, body 
   if (response.status === 404) refuse(409, "This wallet has no Perpl account yet. Make a first deposit, then turn Auto-Copy on.");
   if (!response.ok) throw new PerplError(`Perpl answered ${response.status} to the enrolment`, { status: response.status, body: answer });
   const token = tokenFrom(JSON.parse(answer));
+  // From here only copyd can sign with the key. If the change doesn't take, the key can't be
+  // used by anyone who should, so it's retired and the person starts again.
+  try {
+    await markEnrolled({ client: deps.kms, keyId: pending.keyId, commands: deps.kmsCommands });
+  } catch {
+    await retireKey({ client: deps.kms, keyId: pending.keyId, commands: deps.kmsCommands }).catch(() => {});
+    await store.pipeline([["DEL", C.pending(id)], ["SREM", C.pendings, id]]);
+    refuse(502, "Perpl took the key but Desk couldn't hand it to the copy engine. Start again.");
+  }
 
   const timeZone = typeof body.timeZone === "string" && body.timeZone.length <= 64 ? body.timeZone : "UTC";
   const push = pushFrom(body.push);

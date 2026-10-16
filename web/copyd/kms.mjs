@@ -55,6 +55,7 @@ export async function createKey({ client, network, address, generation, commands
       { TagKey: "desk:purpose", TagValue: "auto-copy" },
       { TagKey: "desk:network", TagValue: network },
       { TagKey: "desk:account", TagValue: address.toLowerCase() },
+      { TagKey: "desk:stage", TagValue: "pending" },
     ],
   }));
   const keyId = created.KeyMetadata.KeyId;
@@ -66,6 +67,14 @@ export async function createKey({ client, network, address, generation, commands
     throw error;
   }
   return kmsSigner({ client, keyId, commands: c });
+}
+
+/// A key starts `pending`: only the API may sign with it, and only to prove possession to Perpl.
+/// Once Perpl has registered it, it becomes `enrolled`, and only copyd may sign with it. IAM lets
+/// the API make that change one way and nobody reverse it (web/copyd/iam/).
+export async function markEnrolled({ client, keyId, commands }) {
+  const c = commands ?? await kmsCommands();
+  await client.send(new c.TagResourceCommand({ KeyId: keyId, Tags: [{ TagKey: "desk:stage", TagValue: "enrolled" }] }));
 }
 
 /// Off at once, gone after the shortest wait KMS allows. A disabled key cannot sign, so this is

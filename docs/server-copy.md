@@ -319,8 +319,15 @@ regions outright. Two IAM users, made by `web/copyd/iam/setup.sh` from the polic
 
 | Identity | Used by | Allowed | Refused |
 |---|---|---|---|
-| `desk-copy-api` | Vercel `/api/copy` | create Ed25519 `SIGN_VERIFY` keys tagged `desk:purpose=auto-copy` (only those three tag keys), name them `alias/desk-copy/*`, read their public keys, disable and schedule their deletion | `Sign` (explicit deny), untagged or non-Ed25519 keys, other regions, aliases outside `desk-copy/`, untagging, key policies |
-| `desk-copyd` | Railway `copyd` | `Sign` with `ED25519_SHA_512` and read public keys, on Desk-tagged keys only | creating, tagging, naming, disabling, re-enabling or deleting any key |
+| `desk-copy-api` | Vercel `/api/copy` | create Ed25519 `SIGN_VERIFY` keys tagged `desk:purpose=auto-copy` and `desk:stage=pending`, name them `alias/desk-copy/*`, sign with a **pending** key (the enrolment's proof of possession), change a pending key to `enrolled`, read public keys, disable and schedule deletion | signing with any key not pending, taking a key back to pending, untagged or non-Ed25519 keys, other regions, aliases outside `desk-copy/`, untagging, key policies |
+| `desk-copyd` | Railway `copyd` | `Sign` with `ED25519_SHA_512` on **enrolled** Desk keys, read public keys | signing with a pending key, creating, tagging, naming, disabling, re-enabling or deleting any key |
+
+A key is pending from `prepare` until Perpl has registered it: the API alone can sign with it,
+and only the proof of possession needs that, since a key Perpl hasn't registered can't trade.
+`enroll` then tags it enrolled, a change IAM lets the API make one way and nobody undo, and from
+then only copyd can sign with it. (The first deploy denied the API every signature, so enrolment
+failed in production: the proof of possession is a signature too.) Policies are applied as new
+versions with `web/copyd/iam/update.sh`; the 16 Oct 2026 set passed 15 of 15 simulated cases.
 
 Neither has a password, and access keys are made only at deploy, straight into each host's
 environment. Checked on 16 Oct 2026 with IAM's policy simulator, 20 of 20 cases as intended,

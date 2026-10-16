@@ -1,19 +1,29 @@
 {
   "Version": "2012-10-17",
   "Statement": [
-    {"Sid": "CreateOnlyDeskEd25519SigningKeys", "Effect": "Allow", "Action": "kms:CreateKey", "Resource": "*",
+    {"Sid": "CreateOnlyDeskEd25519SigningKeysAsPending", "Effect": "Allow", "Action": "kms:CreateKey", "Resource": "*",
      "Condition": {
-       "StringEquals": {"kms:KeySpec": "ECC_NIST_EDWARDS25519", "kms:KeyUsage": "SIGN_VERIFY", "aws:RequestTag/desk:purpose": "auto-copy", "aws:RequestedRegion": "${REGION}"},
+       "StringEquals": {"kms:KeySpec": "ECC_NIST_EDWARDS25519", "kms:KeyUsage": "SIGN_VERIFY", "aws:RequestTag/desk:purpose": "auto-copy", "aws:RequestTag/desk:stage": "pending", "aws:RequestedRegion": "${REGION}"},
        "Bool": {"kms:BypassPolicyLockoutSafetyCheck": "false"},
-       "ForAllValues:StringEquals": {"aws:TagKeys": ["desk:purpose", "desk:network", "desk:account"]}}},
-    {"Sid": "TagOnlyAsDeskKeys", "Effect": "Allow", "Action": "kms:TagResource", "Resource": "arn:aws:kms:${REGION}:${ACCOUNT_ID}:key/*",
-     "Condition": {"StringEquals": {"aws:RequestTag/desk:purpose": "auto-copy"},
-                   "ForAllValues:StringEquals": {"aws:TagKeys": ["desk:purpose", "desk:network", "desk:account"]}}},
+       "ForAllValues:StringEquals": {"aws:TagKeys": ["desk:purpose", "desk:network", "desk:account", "desk:stage"]}}},
+    {"Sid": "TagANewKeyAsAPendingDeskKey", "Effect": "Allow", "Action": "kms:TagResource", "Resource": "arn:aws:kms:${REGION}:${ACCOUNT_ID}:key/*",
+     "Condition": {"Null": {"aws:ResourceTag/desk:purpose": "true"},
+                   "StringEquals": {"aws:RequestTag/desk:purpose": "auto-copy", "aws:RequestTag/desk:stage": "pending"},
+                   "ForAllValues:StringEquals": {"aws:TagKeys": ["desk:purpose", "desk:network", "desk:account", "desk:stage"]}}},
+    {"Sid": "MarkAPendingKeyEnrolled", "Effect": "Allow", "Action": "kms:TagResource", "Resource": "arn:aws:kms:${REGION}:${ACCOUNT_ID}:key/*",
+     "Condition": {"StringEquals": {"aws:ResourceTag/desk:purpose": "auto-copy", "aws:ResourceTag/desk:stage": "pending", "aws:RequestTag/desk:stage": "enrolled"},
+                   "ForAllValues:StringEquals": {"aws:TagKeys": ["desk:stage"]}}},
+    {"Sid": "SignOnlyWithPendingKeysToProvePossession", "Effect": "Allow", "Action": "kms:Sign", "Resource": "arn:aws:kms:${REGION}:${ACCOUNT_ID}:key/*",
+     "Condition": {"StringEquals": {"aws:ResourceTag/desk:purpose": "auto-copy", "aws:ResourceTag/desk:stage": "pending", "kms:SigningAlgorithm": "ED25519_SHA_512"}}},
     {"Sid": "NameThemUnderDeskCopy", "Effect": "Allow", "Action": "kms:CreateAlias", "Resource": "arn:aws:kms:${REGION}:${ACCOUNT_ID}:alias/desk-copy/*"},
     {"Sid": "ManageOnlyDeskKeys", "Effect": "Allow",
      "Action": ["kms:CreateAlias", "kms:DescribeKey", "kms:GetPublicKey", "kms:DisableKey", "kms:ScheduleKeyDeletion"],
      "Resource": "arn:aws:kms:${REGION}:${ACCOUNT_ID}:key/*",
      "Condition": {"StringEquals": {"aws:ResourceTag/desk:purpose": "auto-copy"}}},
-    {"Sid": "NeverSign", "Effect": "Deny", "Action": ["kms:Sign", "kms:PutKeyPolicy", "kms:UntagResource", "kms:DeleteAlias", "kms:UpdateAlias"], "Resource": "*"}
+    {"Sid": "NeverSignWithAnEnrolledKey", "Effect": "Deny", "Action": "kms:Sign", "Resource": "*",
+     "Condition": {"StringNotEquals": {"aws:ResourceTag/desk:stage": "pending"}}},
+    {"Sid": "NeverTakeAKeyBackToPending", "Effect": "Deny", "Action": "kms:TagResource", "Resource": "*",
+     "Condition": {"StringEquals": {"aws:ResourceTag/desk:stage": "enrolled"}}},
+    {"Sid": "NothingElse", "Effect": "Deny", "Action": ["kms:PutKeyPolicy", "kms:UntagResource", "kms:DeleteAlias", "kms:UpdateAlias", "kms:EnableKey"], "Resource": "*"}
   ]
 }

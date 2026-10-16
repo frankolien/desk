@@ -764,6 +764,11 @@ struct CopySettingsSheet: View {
             .sheet(isPresented: $showsServerSheet) { ServerCopySheet(model: model, copier: copier) }
             #if DEBUG
             .task { if ProcessInfo.processInfo.arguments.contains("-server-copy-sheet") { showsServerSheet = true } }
+            .task {
+                guard ProcessInfo.processInfo.arguments.contains("-server-copy-off") else { return }
+                try? await Task.sleep(for: .seconds(2))
+                if copier.server.isOn { try? await copier.server.disable() }
+            }
             #endif
             .confirmationDialog("Stop copying on Desk's server?", isPresented: $confirmsTurnOff, titleVisibility: .visible) {
                 Button("Turn Off", role: .destructive) {

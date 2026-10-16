@@ -86,6 +86,9 @@ struct ServerCopySheet: View {
         }
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(isWorking)
+        #if DEBUG
+        .task { if ProcessInfo.processInfo.arguments.contains("-server-copy-enable") { await turnOn() } }
+        #endif
     }
 
     private func turnOn() async {
