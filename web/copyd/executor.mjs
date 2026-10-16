@@ -296,7 +296,8 @@ export function createExecutor({
     const s = sessionFor(copier);
     const back = (detail) => settle(copier.id, copy.id, { kind: "closeFailed", row: { kind: "failed", detail } });
     if (!market) return back(`${copy.symbol} isn't listed any more, so the copy stays open with its stop.`);
-    if (!(await takeOrderSlot(copier))) return back("The hour's order limit is used up; the copy stays open with its stop.");
+    // Counted, never refused: a close only takes risk off, and a busy hour mustn't strand one.
+    await takeOrderSlot(copier);
     const connection = connect(copier);
     const held = await account(copier, market, { fresh: true });
     if (!held || held.frozen) return back("Perpl isn't taking orders for this account right now; the copy stays open with its stop.");

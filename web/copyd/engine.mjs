@@ -556,7 +556,12 @@ export function createEngine({
     }
     if (shadows.length) { openBy.set(copier.id, open.filter((c) => !shadows.includes(c))); touch(K.open(copier.id)); }
     const live = open.find((c) => !c.isShadow && c.trader === trader && c.symbol === symbol && c.state !== "closing");
-    if (live && executor) {
+    if (live && executor && live.state === "pending") {
+      // Its order is still in flight: a close now would be sized for a position that may not
+      // exist yet, and the fill landing after would leave it open. It closes when it fills.
+      live.closeWhenFilled = { verb, reason };
+      touch(K.open(copier.id));
+    } else if (live && executor) {
       live.state = "closing";
       touch(K.open(copier.id));
       intents.push({ action: "close", copier, copy: live, market: bySymbol.get(symbol), verb, reason });
@@ -573,15 +578,25 @@ export function createEngine({
     if (!copy) return;
     // filled: the copy is open on the venue; closeFailed: still open, as before the close;
     // refused and closed: gone.
+    let closeNow = null;
     if (result.kind === "filled") {
       Object.assign(copy, { state: "open", entry: result.entry ?? copy.entry ?? null, sizeRaw: result.sizeRaw ?? copy.sizeRaw });
       if (result.rq) copy.rq = result.rq;
       if (result.feeRaw) copy.feeRaw = result.feeRaw;
+      if (copy.closeWhenFilled) {
+        closeNow = copy.closeWhenFilled;
+        delete copy.closeWhenFilled;
+        copy.state = "closing";
+      }
     } else if (result.kind === "closeFailed") copy.state = "open";
     else openBy.set(id, open.filter((c) => c !== copy));
     touch(K.open(id));
     if (result.row) record(copier, { trader: copy.trader, symbol: copy.symbol, isLong: copy.isLong, leverage: copy.leverage, margin: copy.margin, ...result.row }, out);
     await settleEffects(out);
+    if (closeNow && executor) {
+      const market = (await marketsBySymbol(copier.network)).get(copy.symbol);
+      executor.close({ copier, copy, market, ...closeNow }).catch((error) => logger.warn?.(`copyd: close ${id}: ${error.message}`));
+    }
   }
 
   // ---------- shadow triggers ----------

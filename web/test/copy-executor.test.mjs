@@ -194,6 +194,12 @@ test("Closing sends a close for the copy's size and reports what it made; a fail
   const units = 8 / 10 ** btc.config.sizeDecimals;
   assert.ok(Math.abs(done.row.pnl - ((61_000 - 60_000) * units - 0.695)) < 1e-9);
 
+  const busy = setup({ onOrders: (specs, socket) => { queueMicrotask(() => socket.frame(fill(specs[0].rq, { size: specs[0].s }))); } });
+  await busy.store.set(`copy:orders:${busy.copier.id}:${Math.floor(Date.now() / 3_600_000)}`, "99");
+  await busy.executor.close({ copier: busy.copier, copy, market: btc, reason: "Closed with the trader." });
+  assert.equal(busy.settled[0].kind, "closed", "a used-up hour never strands a close");
+  busy.executor.stop();
+
   const stuck = setup({ onOrders: () => ({ statuses: [{ code: 2, error: "account frozen" }] }) });
   await stuck.executor.close({ copier: stuck.copier, copy, market: btc, reason: "x" });
   assert.equal(stuck.settled[0].kind, "closeFailed");

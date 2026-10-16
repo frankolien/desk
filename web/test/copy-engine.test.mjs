@@ -353,3 +353,31 @@ test("A copier trades on its own network's market, wherever its trader is read",
   assert.equal((await engine.openCopies(copierId("testnet", ME)))[0].marketId, 16);
   assert.equal((await engine.openCopies(copierId("mainnet", ME)))[0].marketId, 1, "the mainnet copier's shadow uses mainnet's");
 });
+
+test("A close that lands while the copy's order is in flight waits for the fill, then closes it", async () => {
+  const calls = [];
+  let fill;
+  const executor = {
+    quote: async (copier, market) => ({ mark: priceFrom(60_000, market.config.priceDecimals), free: 5_000_000_000n }),
+    submit: (intent) => { calls.push(["submit", intent.copy.id]); return new Promise((resolve) => { fill = resolve; }); },
+    close: async (intent) => { calls.push(["close", intent.copy.id, intent.copy.sizeRaw, intent.reason]); },
+  };
+  const store = memoryStore();
+  const books = { [TRADER]: { accountId: "9", portfolio: 20_000, positions: {} } };
+  const engine = createEngine({ store, markets: async () => openMarkets, executor, readTrader: async (a) => books[a], logger: { warn() {} } });
+  await engine.putCopier({ network: "testnet", address: ME, guards: DEFAULT_GUARDS, traders: { [TRADER]: { rules: { ...DEFAULT_RULES, mode: "live" }, since: 0 } } });
+  const id = copierId("testnet", ME);
+  await engine.processTrader(TRADER);
+  books[TRADER].positions = { BTC: btc() };
+  await engine.processTrader(TRADER);
+  books[TRADER].positions = {};
+  await engine.processTrader(TRADER); await engine.processTrader(TRADER); // the trader closed before the copy filled
+  assert.deepEqual(calls.map((c) => c[0]), ["submit"], "no close is sent for an order still in flight");
+  const [pending] = await engine.openCopies(id);
+  assert.ok(pending.closeWhenFilled);
+  await engine.settle(id, pending.id, { kind: "filled", entry: 60_010, sizeRaw: "7", row: { kind: "opened", detail: "Filled." } });
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(calls.at(-1), ["close", pending.id, "7", "Closed with the trader."], "closed at once, for the size that filled");
+  assert.equal((await engine.openCopies(id))[0].state, "closing");
+  fill?.();
+});
