@@ -98,7 +98,7 @@ export function tradingConnection({ url, signin, onFrame, WebSocketImpl = global
 /// order's fate is awaited on the socket before the positions decide), commands (tests).
 export function createExecutor({
   store, kms, tokenKey, mayAct = () => true, fetchImpl = fetch, WebSocketImpl = globalThis.WebSocket,
-  now = Date.now, logger = console, deadlineMs = 20_000, commands,
+  now = Date.now, logger = console, deadlineMs = 20_000, commands, venueMark = null,
 }) {
   let settle = async () => {};
   const sessions = new Map(); // copier id -> session
@@ -214,10 +214,15 @@ export function createExecutor({
 
   // ---------- what the engine calls ----------
 
+  /// Sized at the venue the copy fills on (`venueMark`); the trader's own mark when that venue's
+  /// can't be read.
   async function quote(copier, market, { mark } = {}) {
-    const held = await account(copier, market);
+    const [held, venue] = await Promise.all([
+      account(copier, market),
+      venueMark ? venueMark(copier, market).catch(() => null) : null,
+    ]);
     if (!held) throw new Error("no Perpl account");
-    return { mark: priceFrom(mark, market.config.priceDecimals), free: held.free };
+    return { mark: priceFrom(venue ?? mark, market.config.priceDecimals), free: held.free };
   }
 
   async function submit({ copier, copy, market, plan, details, open, realisedToday }) {

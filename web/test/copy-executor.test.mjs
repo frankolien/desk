@@ -76,7 +76,7 @@ function setup({ onOrders, positions, mayAct = () => true, deadlineMs = 60 } = {
   });
   executor.attach({ settle: async (id, copyId, result) => { settled.push({ id, copyId, ...result }); } });
   const copier = { id: "testnet:0xme", network: "testnet", address: "0xme", keyId: "key-1", apiKey: seal("tok", TOKEN_KEY), caps: CAPS };
-  return { executor, perpl, store, settled, copier };
+  return { executor, perpl, store, settled, copier, kms };
 }
 
 const position = { symbol: "BTC", side: "long", size: 0.5, entry: 60_000, mark: 60_000, collateral: 2_000, leverage: 5, marketId: 16 };
@@ -227,4 +227,29 @@ test("The tracker's rules and the account snapshot, alone", () => {
   assert.equal(applyUpdate(e, { st: 7 }), e, "decided is final");
   assert.equal(applyUpdate({ phase: "sent" }, { st: 6, os: 10, fs: 0 }).phase, "unfilled");
   assert.deepEqual(accountFrom({ as: [{ id: 5, in: 1, lfr: "9", b: "100", lb: "40", fw: true }] }, 1), { id: 5, lastForwarded: 9n, free: 60n, forwarding: true, frozen: false });
+});
+
+test("Perpl's context per network: markets cached, marks fresh, and a copy sized at its venue", async () => {
+  const { createMarketBook } = await import("../copyd/markets.mjs");
+  const clock = { t: 0 };
+  const calls = [];
+  const raw = context.markets.find((m) => m.id === 16);
+  const book = createMarketBook({ now: () => clock.t, fetchImpl: async (url) => {
+    calls.push(url);
+    return Response.json({ markets: [{ ...raw, state: { mrk: 821_000 + calls.length } }] });
+  } });
+  assert.equal((await book.markets("testnet")).get(16).id, 16);
+  assert.match(calls[0], /^https:\/\/testnet\.perpl\.xyz\/api\/v1\/pub\/context$/);
+  assert.equal(await book.mark("testnet", 16), 82_100.1);
+  clock.t += 6_000;
+  assert.equal(await book.mark("testnet", 16), 82_100.2, "a mark older than five seconds is read again");
+  assert.equal((await book.markets("testnet")).size, 1);
+  assert.equal(calls.length, 2, "markets came from the same read");
+
+  const ctx = setup();
+  const venue = createExecutor({ store: ctx.store, kms: ctx.kms, tokenKey: TOKEN_KEY, fetchImpl: ctx.perpl.fetchImpl, WebSocketImpl: ctx.perpl.FakeSocket,
+    venueMark: async () => 82_100, logger: { warn() {} } });
+  const quote = await venue.quote(ctx.copier, btc, { mark: 60_000 });
+  assert.equal(quote.mark.raw, 821_000n, "the venue's price, not the trader's");
+  venue.stop(); ctx.executor.stop();
 });

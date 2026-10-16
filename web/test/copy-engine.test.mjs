@@ -330,3 +330,26 @@ test("A live copy is held as pending before it is signed, and the executor settl
   await new Promise((r) => setImmediate(r));
   assert.equal(intents.at(-1).action, "close");
 });
+
+test("A copier trades on its own network's market, wherever its trader is read", async () => {
+  const mainnetBtc = { ...openMarkets.get(16), id: 1 };
+  const markets = async (network) => (network === "mainnet" ? new Map([[1, mainnetBtc]]) : openMarkets);
+  const intents = [];
+  const executor = {
+    quote: async (copier, market) => ({ mark: priceFrom(60_000, market.config.priceDecimals), free: 5_000_000_000n }),
+    submit: async (intent) => intents.push(intent), close: async () => {},
+  };
+  const store = memoryStore();
+  const books = { [TRADER]: { accountId: "9", portfolio: 20_000, positions: {} } };
+  const engine = createEngine({ store, markets, executor, readTrader: async (a) => books[a], logger: { warn() {} } });
+  const live = { ...DEFAULT_RULES, mode: "live" };
+  await engine.putCopier({ network: "testnet", address: ME, guards: DEFAULT_GUARDS, traders: { [TRADER]: { rules: live, since: 0 } } });
+  await engine.putCopier({ network: "mainnet", address: ME, guards: DEFAULT_GUARDS, traders: { [TRADER]: { rules: { ...DEFAULT_RULES }, since: 0 } } });
+  await engine.processTrader(TRADER);
+  books[TRADER].positions = { BTC: { ...btc(), marketId: 1 } };
+  await engine.processTrader(TRADER);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(intents[0].market.id, 16, "the testnet copier's order goes to testnet's BTC");
+  assert.equal((await engine.openCopies(copierId("testnet", ME)))[0].marketId, 16);
+  assert.equal((await engine.openCopies(copierId("mainnet", ME)))[0].marketId, 1, "the mainnet copier's shadow uses mainnet's");
+});

@@ -15,6 +15,7 @@ import { createNotifier, apiSender } from "./notify.mjs";
 import { readTrader } from "./books.mjs";
 import { watchPositions } from "./watcher.mjs";
 import { createExecutor } from "./executor.mjs";
+import { createMarketBook } from "./markets.mjs";
 
 const SWEEP_MS = Number(process.env.COPYD_SWEEP_MS || 30_000);
 const PENDING_SWEEP_MS = 10 * 60_000;
@@ -49,12 +50,16 @@ function liveKms() {
 const lease = createLease({ store, ttlMs: SWEEP_MS * 3 });
 let runner = null;
 const kms = liveKms();
+const marketBook = createMarketBook();
 const executor = kms
-  ? createExecutor({ store, kms, tokenKey: process.env.COPY_TOKEN_KEY, mayAct: () => runner?.mayAct() ?? false })
+  ? createExecutor({
+    store, kms, tokenKey: process.env.COPY_TOKEN_KEY, mayAct: () => runner?.mayAct() ?? false,
+    venueMark: (copier, market) => marketBook.mark(copier.network, market.id),
+  })
   : null;
 const engine = createEngine({
   store, notify, executor,
-  markets: () => openMarkets(),
+  markets: (network) => marketBook.markets(network),
   readTrader: async (address) => readTrader(chain, await openMarkets(), address),
 });
 executor?.attach(engine);

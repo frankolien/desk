@@ -172,10 +172,10 @@ export function createEngine({
     const unsure = [];
     for (const [id, open] of openBy) for (const copy of open) if (!copy.isShadow && (copy.state === "pending" || copy.state === "closing")) unsure.push([id, copy]);
     if (!unsure.length) return;
-    const bySymbol = await marketsBySymbol();
+    const byNetwork = await marketsByNetwork(unsure.map(([id]) => copiers.get(id)?.network));
     await inPool(unsure, 4, async ([id, copy]) => {
       const copier = copiers.get(id);
-      if (copier) await executor.reconcile({ copier, copy, market: bySymbol.get(copy.symbol) }).catch((error) => logger.warn?.(`copyd: reconcile ${id}: ${error.message}`));
+      if (copier) await executor.reconcile({ copier, copy, market: byNetwork[copier.network]?.get(copy.symbol) }).catch((error) => logger.warn?.(`copyd: reconcile ${id}: ${error.message}`));
     });
   }
 
@@ -197,7 +197,7 @@ export function createEngine({
   async function closeRequested(ids) {
     const asked = await Promise.all(ids.map((id) => store.smembers(K.close(id))));
     if (!asked.some((list) => list.length)) return;
-    const bySymbol = await marketsBySymbol();
+    const byNetwork = await marketsByNetwork(ids.map((id) => copiers.get(id)?.network));
     const out = [];
     const intents = [];
     const commands = [];
@@ -206,6 +206,7 @@ export function createEngine({
       commands.push(["SREM", K.close(id), ...asked[i]]);
       const copier = copiers.get(id);
       if (!copier) return;
+      const bySymbol = byNetwork[copier.network] ?? new Map();
       const open = openBy.get(id) ?? [];
       const keep = [];
       for (const copy of open) {
@@ -354,13 +355,21 @@ export function createEngine({
 
   // ---------- reading traders ----------
 
-  async function marketsBySymbol() {
+  /// A copier trades on its own network, whatever network its traders are read on: BTC is
+  /// market 1 on mainnet and 16 on testnet. `markets(network)` is cached by its caller.
+  async function marketsBySymbol(network = "mainnet") {
     const bySymbol = new Map();
-    for (const raw of (await markets()).values()) {
+    for (const raw of (await markets(network)).values()) {
       const market = marketFromContext(raw);
       bySymbol.set(market.symbol, market);
     }
     return bySymbol;
+  }
+
+  async function marketsByNetwork(networks) {
+    const out = {};
+    for (const network of new Set(networks.filter(Boolean))) out[network] = await marketsBySymbol(network);
+    return out;
   }
 
   /// One read of a trader and what follows from it. Reads of the same trader never overlap: a
@@ -388,7 +397,7 @@ export function createEngine({
     const book = await readTrader(trader);
     if (!book || book.unreadable) return [];
     if (book.accountId) accounts.set(String(book.accountId), trader);
-    const bySymbol = await marketsBySymbol();
+    const byNetwork = await marketsByNetwork([...(followers.get(trader) ?? [])].map((id) => copiers.get(id)?.network));
     for (const position of Object.values(book.positions)) if (position.mark > 0) marks.set(position.symbol, position.mark);
 
     const base = bases.get(trader);
@@ -415,7 +424,7 @@ export function createEngine({
     if (!found.length) { await flush(); return []; }
 
     // Everything else that needs the network happens before deciding.
-    const quotes = await liveQuotes(trader, found, bySymbol);
+    const quotes = await liveQuotes(trader, found, byNetwork);
 
     const out = [];
     const intents = [];
@@ -424,7 +433,7 @@ export function createEngine({
       if (!copier) continue;
       const rules = rulesFor(copier, trader);
       if (!rules) continue;
-      const context = { copier, trader, rules, portfolio: book.portfolio, bySymbol, quotes, out, intents };
+      const context = { copier, trader, rules, portfolio: book.portfolio, bySymbol: byNetwork[copier.network] ?? new Map(), quotes, out, intents };
       for (const move of found) {
         if (move.kind === "opened") openCopy(context, move.position);
         else if (move.kind === "flipped") {
@@ -441,7 +450,7 @@ export function createEngine({
   }
 
   /// Live copiers' marks and free margin for the symbols this read opened, fetched together.
-  async function liveQuotes(trader, found, bySymbol) {
+  async function liveQuotes(trader, found, byNetwork) {
     const quotes = new Map();
     if (!executor) return quotes;
     const opened = found.filter((m) => m.kind !== "closed");
@@ -452,10 +461,11 @@ export function createEngine({
       const copier = copiers.get(id);
       const rules = copier && rulesFor(copier, trader);
       if (!rules || isPaused(copier) || rules.mode === "shadow") continue;
-      for (const symbol of symbols) if (bySymbol.has(symbol)) wanted.push([copier, symbol]);
+      const bySymbol = byNetwork[copier.network] ?? new Map();
+      for (const symbol of symbols) if (bySymbol.has(symbol)) wanted.push([copier, symbol, bySymbol.get(symbol)]);
     }
-    await inPool(wanted, readConcurrency, async ([copier, symbol]) => {
-      try { quotes.set(`${copier.id}|${symbol}`, await executor.quote(copier, bySymbol.get(symbol), { mark: markOf.get(symbol) })); }
+    await inPool(wanted, readConcurrency, async ([copier, symbol, market]) => {
+      try { quotes.set(`${copier.id}|${symbol}`, await executor.quote(copier, market, { mark: markOf.get(symbol) })); }
       catch (error) { logger.warn?.(`copyd: quote ${copier.id} ${symbol}: ${error.message}`); }
     });
     return quotes;
@@ -611,12 +621,10 @@ export function createEngine({
       try { found[trader] = await processTrader(trader); }
       catch (error) { logger.warn?.(`copyd: ${trader}: ${error.message}`); }
     });
-    const bySymbol = await marketsBySymbol();
+    const holding = [...openBy].filter(([id, open]) => open.length && copiers.has(id)).map(([id]) => copiers.get(id));
+    const byNetwork = await marketsByNetwork(holding.map((copier) => copier.network));
     const out = [];
-    for (const [id, open] of openBy) {
-      const copier = copiers.get(id);
-      if (copier && open.length) priceShadows(copier, bySymbol, out);
-    }
+    for (const copier of holding) priceShadows(copier, byNetwork[copier.network] ?? new Map(), out);
     await settleEffects(out);
     return found;
   }
