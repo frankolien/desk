@@ -114,12 +114,17 @@ stays low; upgrading the plan is the real fix. The Upstash console shows command
 
 ### Current settings (16 Oct 2026)
 
-Upstash is on pay-as-you-go, so the worker runs for speed, not the free tier:
-`WORKER_PAUSE_MS=90000 WORKER_SCAN_MS=60000 WORKER_INDEX_MS=900000` (the defaults) and
-`WORKER_FAST_MS=30000`. The fast lane is slower than its 12 s default on purpose: with five
-wallets on push it made about 25 HyperSync requests a minute by itself, and HyperSync's free 30
-answered 429. At 30 s the worker saw two 429s in five minutes (retried next round) and no wallet
-fell behind. Paying for HyperSync is what would let the fast lane go back to 12 s.
+Upstash is on pay-as-you-go and HyperSync on Envio's Starter package (100 requests a minute), so
+the worker runs at its defaults: `WORKER_PAUSE_MS=90000 WORKER_FAST_MS=12000
+WORKER_SCAN_MS=60000 WORKER_INDEX_MS=900000`. `HYPERSYNC_TOKEN` (worker and Vercel) is the
+Starter token; the worker's `HYPERSYNC_INDEX_TOKEN` is the old Free-package token (15 a minute),
+so the trader index has its own budget. Five minutes at these settings: no 429s, no wallet
+behind. On the Free token alone the 12 s fast lane was rate-limited. A new token goes in with
+`tools/hypersync-token.sh`, which reads it from the clipboard.
+
+The fast lane costs at least two requests per wallet with pushes per round, so at 12 s each
+such wallet adds about 10 a minute: around a dozen of them fill the Starter package. Batching
+the fast lane into one query for all of them is the fix that scales.
 
 ## HyperSync budget
 
