@@ -705,6 +705,7 @@ struct CopySettingsSheet: View {
 
     private static func ago(_ date: Date?) -> String {
         guard let date else { return "Not yet" }
+        if abs(date.timeIntervalSinceNow) < 5 { return "Just now" }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         return formatter.localizedString(for: date, relativeTo: .now)

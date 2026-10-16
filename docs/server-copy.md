@@ -351,8 +351,15 @@ the Paid plan, with a budget alert, before copiers depend on it.
 2. ~~KMS signer and enrolment end to end on **testnet**~~: done 16 Oct 2026, through
    `/api/copy` (see Requests from the app). The app's side (Face ID, device key) remains.
 3. Engine in **shadow** only, one copier, for a week, its log compared with the app's.
+   Deployed 16 Oct 2026: the API on Vercel production, copyd on Railway (service `copyd`, one
+   replica in europe-west4). Proved from the app in the simulator against production on
+   testnet: Turn On with one (stub) Face ID enrolled the review wallet, the key went from
+   pending to enrolled, the server took the phone's rules and the signed caps, the Auto-Copy
+   screen showed the server's state, and Turn Off retired the key and handed copying back to
+   the phone.
 4. Live on testnet, with the halt and the disable path exercised first.
-5. App: the opt-in sheet, device key, server-state screens, `sr: 32` reseed.
+5. App: the opt-in sheet, device key, server-state screens (built 16 Oct 2026); `sr: 32`
+   reseed still to do.
 6. Mainnet, opt-in, after a week's soak.
 
 ## Open questions to settle with Perpl
