@@ -374,12 +374,16 @@ struct CopyStatusCard: View {
     }
 
     private var headline: String {
-        if copier.isPaused { return "Auto-Copy Paused" }
+        if copier.server.isOn ? copier.server.isPaused : copier.isPaused { return "Auto-Copy Paused" }
         let count = copier.traders.count
         return "Copying \(count) \(count == 1 ? "Trader" : "Traders")" + (copier.basket != nil ? " · Basket" : "")
     }
 
     private var detail: String {
+        if copier.server.isOn {
+            if let problem = copier.server.problem { return problem }
+            return "\(copier.shownOpen.count) open · on Desk's server"
+        }
         if let problem = copier.readProblem { return problem }
         return "\(copier.open.count) open · \(copier.isStreaming ? "live from the chain" : "checking every few seconds")"
     }
