@@ -328,6 +328,10 @@ and only the proof of possession needs that, since a key Perpl hasn't registered
 then only copyd can sign with it. (The first deploy denied the API every signature, so enrolment
 failed in production: the proof of possession is a signature too.) Policies are applied as new
 versions with `web/copyd/iam/update.sh`; the 16 Oct 2026 set passed 15 of 15 simulated cases.
+Tagging a key as it is created needs `kms:TagResource` over every key in the account (KMS
+can't condition it on tags the key doesn't have yet), so the API may tag any key `pending`
+Desk key, except an enrolled one. The account must hold only Desk's keys: a key of anything
+else's there could be tagged pending and then signed with by a compromised API.
 
 Neither has a password, and access keys are made only at deploy, straight into each host's
 environment. Checked on 16 Oct 2026 with IAM's policy simulator, 20 of 20 cases as intended,
