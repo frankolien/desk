@@ -112,6 +112,15 @@ for its rate limit and counter, and a `/status` tab left open polls health every
 at about ten commands a poll, about 7,000 a day. So those values fit only while API traffic
 stays low; upgrading the plan is the real fix. The Upstash console shows commands per day.
 
+### Current settings (16 Oct 2026)
+
+Upstash is on pay-as-you-go, so the worker runs for speed, not the free tier:
+`WORKER_PAUSE_MS=90000 WORKER_SCAN_MS=60000 WORKER_INDEX_MS=900000` (the defaults) and
+`WORKER_FAST_MS=30000`. The fast lane is slower than its 12 s default on purpose: with five
+wallets on push it made about 25 HyperSync requests a minute by itself, and HyperSync's free 30
+answered 429. At 30 s the worker saw two 429s in five minutes (retried next round) and no wallet
+fell behind. Paying for HyperSync is what would let the fast lane go back to 12 s.
+
 ## HyperSync budget
 
 The free tier allows 30 requests a minute, shared by the wallet rotation, the fast lane,
