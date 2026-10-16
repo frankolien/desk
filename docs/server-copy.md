@@ -358,6 +358,14 @@ the Paid plan, with a budget alert, before copiers depend on it.
    screen showed the server's state, and Turn Off retired the key and handed copying back to
    the phone.
 4. Live on testnet, with the halt and the disable path exercised first.
+   Live end to end on 16 Oct 2026 (testnet copier, following a mainnet account that flips a
+   small BTC position every few seconds, rules live 10 AUSD 5x, the grant's 30 orders an hour):
+   five copies opened within about a second of the trader and closed with them (P&L the fees,
+   about -0.01 AUSD each), a flip closed the copy first, short copies were skipped because the
+   account held its own BTC long, a copy stranded by the first run was settled on restart, and
+   the hourly cap stopped new copies after about fifteen minutes while closes went on. The
+   account's own long was unchanged across the run. The first run found two bugs, both fixed
+   with tests: a close during an open, and Perpl netting a copy into the account's own position.
 5. App: the opt-in sheet, device key, server-state screens (built 16 Oct 2026); `sr: 32`
    reseed still to do.
 6. Mainnet, opt-in, after a week's soak.
