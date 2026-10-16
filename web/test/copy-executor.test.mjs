@@ -266,6 +266,7 @@ test("Perpl nets a market into one position: a copy against what the account hol
   assert.equal(ctx.perpl.placed.length, 0);
   assert.equal(ctx.settled[0].kind, "refused");
   assert.match(ctx.settled[0].row.detail, /You hold a short in BTC on this account\. A long copy would close part of it/);
+  assert.equal(ctx.settled[0].row.kind, "skipped", "a decision, not a failure");
   const same = setup({ positions: () => [{ mkt: 16, sd: 1, s: 2589, st: 1 }], onOrders: (specs, socket) => { queueMicrotask(() => socket.frame(fill(specs[0].rq, { size: specs[0].s }))); } });
   await same.executor.submit({ copier: same.copier, ...intentFor() });
   assert.equal(same.settled[0].kind, "filled", "the same side adds to it");

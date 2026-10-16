@@ -216,7 +216,9 @@ export function createExecutor({
     return held && held.side === side ? held.sizeRaw : 0n;
   }
 
-  const refuse = (copier, copy, detail) => settle(copier.id, copy.id, { kind: "refused", row: { kind: "failed", detail } });
+  // A decision not to copy (a cap, the account's own position) reads as a skip; a venue that
+  // wouldn't take the order reads as a failure.
+  const refuse = (copier, copy, detail, kind = "failed") => settle(copier.id, copy.id, { kind: "refused", row: { kind, detail } });
 
   // ---------- what the engine calls ----------
 
@@ -233,13 +235,14 @@ export function createExecutor({
 
   async function submit({ copier, copy, market, plan, details, open, realisedToday }) {
     const s = sessionFor(copier);
-    const fail = async (detail, state = "refused") => {
+    const fail = async (detail, state = "refused", kind = "failed") => {
       await writeIntent(copier, copy, { kind: "open", state, detail });
-      return refuse(copier, copy, detail);
+      return refuse(copier, copy, detail, kind);
     };
+    const skip = (detail) => fail(detail, "skipped", "skipped");
     const capped = await capsRefuse({ copier, plan, open, realisedToday });
-    if (capped) return fail(capped);
-    if (!(await takeOrderSlot(copier))) return fail(`${copier.caps.maxOrdersPerHour} orders this hour is the most you approved.`);
+    if (capped) return skip(capped);
+    if (!(await takeOrderSlot(copier))) return skip(`${copier.caps.maxOrdersPerHour} orders this hour is the most you approved.`);
 
     const connection = connect(copier);
     const held = await account(copier, market, { fresh: true });
@@ -252,7 +255,7 @@ export function createExecutor({
     const holding = await positionIn(copier, market).catch(() => undefined);
     if (holding === undefined) return fail(`Couldn't read your ${copy.symbol} position on Perpl, so nothing was sent.`);
     if (holding && holding.side !== draft.side) {
-      return fail(`You hold a ${holding.side} in ${copy.symbol} on this account. A ${draft.side} copy would close part of it, so it wasn't copied.`);
+      return skip(`You hold a ${holding.side} in ${copy.symbol} on this account. A ${draft.side} copy would close part of it, so it wasn't copied.`);
     }
     const rq = s.nextRq(held.lastForwarded);
     const specs = [marketOpen({ market, account: held.id, side: draft.side, size: draft.size, leverageHundredths: draft.leverageHundredths, slippageBps: draft.slippageBps, rq })];
