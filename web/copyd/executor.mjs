@@ -201,13 +201,19 @@ export function createExecutor({
   const writeIntent = (copier, copy, intent) =>
     store.set(intentKey(copier.id, copy.id, intent.kind), JSON.stringify({ ...intent, at: now() }), { ex: INTENT_TTL_S });
 
-  /// The positions endpoint's word on a market and side: the size held, or 0.
-  async function heldSize(copier, market, side) {
+  /// What the account holds on a market, from the positions endpoint: Perpl keeps one position
+  /// per market per account, so this is the copies and the person's own trades netted together.
+  async function positionIn(copier, market) {
     const answer = await (await sessionFor(copier).rest).positions();
-    const rows = answer.json?.d ?? answer.json?.positions ?? [];
-    const sd = side === "long" ? 1 : 2;
-    return rows.filter((p) => Number(p.mkt) === Number(market.id) && Number(p.sd) === sd && Number(p.st ?? 1) === 1)
-      .reduce((sum, p) => sum + big(p.s), 0n);
+    const rows = (answer.json?.d ?? answer.json?.positions ?? [])
+      .filter((p) => Number(p.mkt) === Number(market.id) && Number(p.st ?? 1) === 1 && big(p.s) > 0n);
+    if (!rows.length) return null;
+    return { side: Number(rows[0].sd) === 2 ? "short" : "long", sizeRaw: rows.reduce((sum, p) => sum + big(p.s), 0n) };
+  }
+
+  async function heldSize(copier, market, side) {
+    const held = await positionIn(copier, market);
+    return held && held.side === side ? held.sizeRaw : 0n;
   }
 
   const refuse = (copier, copy, detail) => settle(copier.id, copy.id, { kind: "refused", row: { kind: "failed", detail } });
@@ -241,6 +247,13 @@ export function createExecutor({
     if (held.frozen || !held.forwarding) return fail("Perpl isn't taking orders for this account right now.");
 
     const { draft } = plan;
+    // A copy on the other side of what the account already holds wouldn't open anything: Perpl
+    // would net it into that position and close part of it.
+    const holding = await positionIn(copier, market).catch(() => undefined);
+    if (holding === undefined) return fail(`Couldn't read your ${copy.symbol} position on Perpl, so nothing was sent.`);
+    if (holding && holding.side !== draft.side) {
+      return fail(`You hold a ${holding.side} in ${copy.symbol} on this account. A ${draft.side} copy would close part of it, so it wasn't copied.`);
+    }
     const rq = s.nextRq(held.lastForwarded);
     const specs = [marketOpen({ market, account: held.id, side: draft.side, size: draft.size, leverageHundredths: draft.leverageHundredths, slippageBps: draft.slippageBps, rq })];
     const protection = draft.protection ?? {};
@@ -294,14 +307,23 @@ export function createExecutor({
 
   async function close({ copier, copy, market, reason }) {
     const s = sessionFor(copier);
-    const back = (detail) => settle(copier.id, copy.id, { kind: "closeFailed", row: { kind: "failed", detail } });
+    const side = copy.isLong ? "long" : "short";
+    // A refused close is checked against what the account holds: with nothing on the copy's
+    // side left, there's nothing to close (Perpl netted it, or it closed another way), and the
+    // copy is done rather than retried for ever.
+    const back = async (detail) => {
+      const left = market ? await heldSize(copier, market, side).catch(() => null) : null;
+      if (left === 0n) {
+        return settle(copier.id, copy.id, { kind: "closed", row: { kind: "closed", detail: `Nothing left to close on Perpl; the ${copy.symbol} ${side} was already gone.` } });
+      }
+      return settle(copier.id, copy.id, { kind: "closeFailed", row: { kind: "failed", detail } });
+    };
     if (!market) return back(`${copy.symbol} isn't listed any more, so the copy stays open with its stop.`);
     // Counted, never refused: a close only takes risk off, and a busy hour mustn't strand one.
     await takeOrderSlot(copier);
     const connection = connect(copier);
     const held = await account(copier, market, { fresh: true });
     if (!held || held.frozen) return back("Perpl isn't taking orders for this account right now; the copy stays open with its stop.");
-    const side = copy.isLong ? "long" : "short";
     const size = scaled(BigInt(copy.sizeRaw), market.config.sizeDecimals);
     const rq = s.nextRq(held.lastForwarded);
     const spec = marketClose({ market, account: held.id, side, size, slippageBps: Math.min(CLOSE_SLIPPAGE_BPS, market.maxMarketSlippageBps), rq });

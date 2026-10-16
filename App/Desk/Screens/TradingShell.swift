@@ -1,3 +1,4 @@
+import DeskFlow
 import DeskUI
 import SwiftUI
 
@@ -137,6 +138,12 @@ struct TradingShell: View {
             copier.onEvent = { message in toast(message) }
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-copy-demo") { copier.seedForReview() }
+            // End-to-end runs: follow one trader, live, with small rules, and nobody else.
+            let arguments = ProcessInfo.processInfo.arguments
+            if let index = arguments.firstIndex(of: "-copy-follow"), index + 1 < arguments.count {
+                for trader in copier.traders { copier.stop(trader.address) }
+                copier.start(arguments[index + 1], rules: CopyRules(mode: .live, marginPerTrade: 10, maxLeverage: 5, stopLossPercent: 25))
+            }
             #endif
             await copier.run(model: model, market: market, session: session)
         }

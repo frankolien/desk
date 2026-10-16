@@ -200,7 +200,7 @@ test("Closing sends a close for the copy's size and reports what it made; a fail
   assert.equal(busy.settled[0].kind, "closed", "a used-up hour never strands a close");
   busy.executor.stop();
 
-  const stuck = setup({ onOrders: () => ({ statuses: [{ code: 2, error: "account frozen" }] }) });
+  const stuck = setup({ positions: () => [{ mkt: 16, sd: 1, s: 8, st: 1 }], onOrders: () => ({ statuses: [{ code: 2, error: "account frozen" }] }) });
   await stuck.executor.close({ copier: stuck.copier, copy, market: btc, reason: "x" });
   assert.equal(stuck.settled[0].kind, "closeFailed");
   assert.match(stuck.settled[0].row.detail, /stays open with its stop/);
@@ -258,4 +258,25 @@ test("Perpl's context per network: markets cached, marks fresh, and a copy sized
   const quote = await venue.quote(ctx.copier, btc, { mark: 60_000 });
   assert.equal(quote.mark.raw, 821_000n, "the venue's price, not the trader's");
   venue.stop(); ctx.executor.stop();
+});
+
+test("Perpl nets a market into one position: a copy against what the account holds isn't sent", async () => {
+  const ctx = setup({ positions: () => [{ mkt: 16, sd: 2, s: 2589, st: 1 }] });
+  await ctx.executor.submit({ copier: ctx.copier, ...intentFor() });
+  assert.equal(ctx.perpl.placed.length, 0);
+  assert.equal(ctx.settled[0].kind, "refused");
+  assert.match(ctx.settled[0].row.detail, /You hold a short in BTC on this account\. A long copy would close part of it/);
+  const same = setup({ positions: () => [{ mkt: 16, sd: 1, s: 2589, st: 1 }], onOrders: (specs, socket) => { queueMicrotask(() => socket.frame(fill(specs[0].rq, { size: specs[0].s }))); } });
+  await same.executor.submit({ copier: same.copier, ...intentFor() });
+  assert.equal(same.settled[0].kind, "filled", "the same side adds to it");
+  ctx.executor.stop(); same.executor.stop();
+});
+
+test("A refused close with nothing left on that side ends the copy instead of retrying it for ever", async () => {
+  const ctx = setup({ positions: () => [{ mkt: 16, sd: 1, s: 2589, st: 1 }], onOrders: () => ({ statuses: [{ code: 3, error: "reason 11" }] }) });
+  const copy = { id: "c9", symbol: "BTC", isLong: false, sizeRaw: "12", entry: 82_000, state: "closing", isShadow: false };
+  await ctx.executor.close({ copier: ctx.copier, copy, market: btc, reason: "Closed with the trader." });
+  assert.equal(ctx.settled[0].kind, "closed");
+  assert.match(ctx.settled[0].row.detail, /Nothing left to close on Perpl; the BTC short was already gone/);
+  ctx.executor.stop();
 });
