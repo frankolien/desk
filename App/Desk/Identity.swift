@@ -191,9 +191,9 @@ final class IdentityDirectory {
     }
 
     #if DEBUG
-    func seedForReview(_ address: String, name: String, source: String, avatar: String?, bio: String? = nil, x: String? = nil) {
+    func seedForReview(_ address: String, name: String, source: String, avatar: String?, bio: String? = nil, x: String? = nil, perplAccount: String? = nil) {
         identities[address.lowercased()] = Identity(address: address.lowercased(), name: name, source: source,
-                                                    avatar: avatar, bio: bio, x: x, farcaster: nil, perplAccount: nil)
+                                                    avatar: avatar, bio: bio, x: x, farcaster: nil, perplAccount: perplAccount)
         fetchedAt[address.lowercased()] = .now
         pinned.insert(address.lowercased())
     }

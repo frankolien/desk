@@ -1048,7 +1048,8 @@ private struct SpotTokenDetailScreen: View {
             let first = feed.holders[0].wallet
             IdentityDirectory.shared.seedForReview(first.address, name: "salmo.nad", source: "nad",
                                                    avatar: "https://euc.li/vitalik.eth",
-                                                   bio: "Building on Monad. Long everything purple.", x: "salmo")
+                                                   bio: "Building on Monad. Long everything purple.", x: "salmo",
+                                                   perplAccount: ProcessInfo.processInfo.arguments.contains("-wallet-perps") ? "42" : nil)
             withAnimation { tab = .holders }
             try? await Task.sleep(for: .seconds(4))
             selectedWallet = first
@@ -3362,6 +3363,7 @@ private struct WalletProfileScreen: View {
     @State private var draftName = ""
     @State private var copied = false
     @State private var editsAlerts = false
+    @State private var showsAutoCopy = false
 
     private enum Tab: String, CaseIterable { case positions = "Positions", closed = "Closed", activity = "Activity" }
 
@@ -3519,6 +3521,15 @@ private struct WalletProfileScreen: View {
                             .padding(.top, 10)
                     }
 
+                    // Spot buys can't be copied (that would need the wallet's own key on a
+                    // server), but a wallet that also trades perps on Perpl can be Auto-Copied there.
+                    if isEVM, identity?.perplAccount != nil, let copier = CopyTrader.current {
+                        AutoCopyButton(rules: copier.rules(for: wallet.address), idleSummary: "Copy their perp trades on Perpl") {
+                            showsAutoCopy = true
+                        }
+                        .padding(.top, 12)
+                    }
+
                     tabs.padding(.top, 18)
                     content.padding(.top, 4)
                 }.padding(.horizontal, 20).padding(.bottom, 40)
@@ -3529,6 +3540,11 @@ private struct WalletProfileScreen: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .sheet(isPresented: $showsAutoCopy) {
+            if let copier = CopyTrader.current {
+                AutoCopySheet(address: wallet.address, name: name, copier: copier)
+            }
+        }
         .sheet(isPresented: $showsPerpl) {
             if let copier = CopyTrader.current {
                 TraderProfileScreen(

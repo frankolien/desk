@@ -293,6 +293,8 @@ struct CopyBasketSheet: View {
 
 struct AutoCopyButton: View {
     let rules: CopyRules?
+    /// What it says before anyone is copied; a wallet profile says it's their perps.
+    var idleSummary = "Shadow or live, follow or fade, with your own limits"
     let action: () -> Void
 
     var body: some View {
@@ -327,7 +329,7 @@ struct AutoCopyButton: View {
     }
 
     private var summary: String {
-        guard let rules else { return "Shadow or live, follow or fade, with your own limits" }
+        guard let rules else { return idleSummary }
         var parts = ["\(rules.marginPerTrade) AUSD", "up to \(rules.maxLeverage)×"]
         if rules.sizing == .conviction { parts.append("conviction") }
         if let stop = rules.stopLossPercent { parts.append("stop −\(stop)%") }
