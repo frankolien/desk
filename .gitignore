@@ -98,3 +98,10 @@ Branding/launch-overlays/
 Branding/olien2.mp4
 docs/marketing-plan.md
 tools/render-marketing-overlays.py
+
+# --- Foundry (contracts/) ---------------------------------------------------
+# forge-std is fetched by `forge install foundry-rs/forge-std --no-git` (see contracts/README.md).
+contracts/out/
+contracts/cache/
+contracts/lib/
+contracts/broadcast/
