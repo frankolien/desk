@@ -3366,6 +3366,7 @@ private struct WalletProfileScreen: View {
     @State private var copied = false
     @State private var editsAlerts = false
     @State private var showsAutoCopy = false
+    @State private var showsSpotCopy = false
 
     private enum Tab: String, CaseIterable { case positions = "Positions", closed = "Closed", activity = "Activity" }
 
@@ -3523,8 +3524,12 @@ private struct WalletProfileScreen: View {
                             .padding(.top, 10)
                     }
 
-                    // Spot buys can't be copied (that would need the wallet's own key on a
-                    // server), but a wallet that also trades perps on Perpl can be Auto-Copied there.
+                    // Token trades are copied from Desk's server behind a key fenced on-chain
+                    // (docs/spot-copy.md); a wallet that also trades perps can be copied on Perpl too.
+                    if isEVM {
+                        SpotCopyButton(rules: SpotCopier.shared.rules(for: wallet.address)) { showsSpotCopy = true }
+                            .padding(.top, 12)
+                    }
                     if isEVM, identity?.perplAccount != nil, let copier = CopyTrader.current {
                         AutoCopyButton(rules: copier.rules(for: wallet.address), idleSummary: "Copy their perp trades on Perpl") {
                             showsAutoCopy = true
@@ -3546,6 +3551,9 @@ private struct WalletProfileScreen: View {
             if let copier = CopyTrader.current {
                 AutoCopySheet(address: wallet.address, name: name, copier: copier)
             }
+        }
+        .sheet(isPresented: $showsSpotCopy) {
+            SpotCopySheet(model: model, leader: wallet.address, name: name)
         }
         .sheet(isPresented: $showsPerpl) {
             if let copier = CopyTrader.current {
@@ -3591,7 +3599,12 @@ private struct WalletProfileScreen: View {
             SpotTokenDetailScreen(token: token, model: model)
         }
         #if DEBUG
-        .onAppear { if ProcessInfo.processInfo.arguments.contains("-wallet-activity") { tab = .activity } }
+        .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("-wallet-activity") { tab = .activity }
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-spot-copy-sheet") { showsSpotCopy = true }
+            #endif
+        }
         #endif
     }
 

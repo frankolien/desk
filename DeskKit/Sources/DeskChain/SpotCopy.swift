@@ -110,6 +110,12 @@ public enum SpotCopy {
             ])
     }
 
+    /// The digest the wallet signs for one of these batches. Only batches built here can be
+    /// signed this way, so a server answer can't slip another call in.
+    public static func batchDigest(wallet address: String, calls: [Call], nonce: String, deadline: UInt64, executor: String) throws -> Data {
+        try EIP712.digest(batchTypedData(wallet: address, calls: calls, nonce: nonce, deadline: deadline, executor: executor))
+    }
+
     /// The EIP-7702 authorization delegating the wallet to Calibur on Monad at `nonce`.
     public static func authorizationDigest(nonce: UInt64) -> Data {
         let fields: [RLP.Item] = [RLP.quantity(chainID), .bytes(AUSDSwap.bytes(GaslessSale.calibur)!), RLP.quantity(nonce)]
