@@ -22,10 +22,13 @@ struct SmartMoneyTrade: Decodable, Identifiable, Sendable {
     let liquidity: Double?
     let winRate: Double?
     let realized: Double?
+    var side: String? = nil
 }
 
 @MainActor @Observable final class SmartMoneyFeedModel {
-    private struct Response: Decodable { let trades: [SmartMoneyTrade] }
+    private struct Response: Decodable { let trades: [SmartMoneyTrade]; let monad: [SmartMoneyTrade]? }
+    /// Monad's own smart money (Mobula), then OKX's on Base, BNB Chain and Ethereum.
+    private(set) var monad: [SmartMoneyTrade] = []
     private(set) var trades: [SmartMoneyTrade] = []
     private(set) var loaded = false
     private(set) var failed = false
@@ -41,10 +44,12 @@ struct SmartMoneyTrade: Decodable, Identifiable, Sendable {
         let url = URL(string: "https://web-lovat-nine-49.vercel.app/api/token-details?view=smart-money")!
         do {
             let (data, _) = try await ResponseCache.shared.data(from: url)
-            trades = try JSONDecoder().decode(Response.self, from: data).trades
+            let body = try JSONDecoder().decode(Response.self, from: data)
+            monad = body.monad ?? []
+            trades = body.trades
             failed = false
         } catch {
-            failed = trades.isEmpty
+            failed = trades.isEmpty && monad.isEmpty
         }
         loaded = true
     }
@@ -59,7 +64,7 @@ struct SmartMoneyFeedView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Large buys by wallets with a consistent 30-day record.")
+                Text("Trades by wallets with a winning 30-day record.")
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
                 Spacer(minLength: 8)
@@ -71,17 +76,27 @@ struct SmartMoneyFeedView: View {
             }
             .padding(.bottom, 8)
 
-            if feed.trades.isEmpty {
-                Text(feed.failed ? "Smart money couldn't load. Pull down to try again." : feed.loaded ? "No smart-money buys right now." : "Loading smart money…")
+            if feed.trades.isEmpty && feed.monad.isEmpty {
+                Text(feed.failed ? "Smart money couldn't load. Pull down to try again." : feed.loaded ? "No smart-money trades right now." : "Loading smart money…")
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
                     .frame(maxWidth: .infinity, minHeight: 120)
             }
-            ForEach(feed.trades) { trade in
-                Button { onOpen(trade) } label: { row(trade) }
-                    .buttonStyle(.plain)
+            if !feed.monad.isEmpty {
+                sectionTitle("On Monad", detail: "Wallets that made money on Monad over the last 30 days")
+                ForEach(feed.monad) { trade in
+                    Button { onOpen(trade) } label: { row(trade) }
+                        .buttonStyle(.plain)
+                }
             }
-            Text("Base, BNB Chain and Ethereum, scored by OKX. Monad wallets aren't scored yet.")
+            if !feed.trades.isEmpty {
+                if !feed.monad.isEmpty { sectionTitle("Elsewhere", detail: "Base, BNB Chain and Ethereum, scored by OKX").padding(.top, 14) }
+                ForEach(feed.trades) { trade in
+                    Button { onOpen(trade) } label: { row(trade) }
+                        .buttonStyle(.plain)
+                }
+            }
+            Text("Monad wallets are scored on their own 30-day record. Other chains by OKX.")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(DeskColor.nightMuted.color)
                 .frame(maxWidth: .infinity)
@@ -107,7 +122,7 @@ struct SmartMoneyFeedView: View {
             HStack(spacing: 12) {
                 MarketTokenLogo(symbol: trade.symbol, size: 46, remoteURL: TokenArtwork.url(trade.logoURL))
                 VStack(alignment: .leading, spacing: 3) {
-                    (Text("Bought ").foregroundStyle(DeskColor.rise.color)
+                    (Text(trade.side == "sell" ? "Sold " : "Bought ").foregroundStyle(trade.side == "sell" ? DeskColor.fall.color : DeskColor.rise.color)
                         + Text("\(trade.usd.map { CoinRow.compact($0) } ?? "") \(trade.symbol)").foregroundStyle(DeskColor.nightText.color))
                         .font(.system(size: 17, weight: .bold, design: .rounded))
                         .lineLimit(1)
@@ -136,6 +151,14 @@ struct SmartMoneyFeedView: View {
         .contentShape(Rectangle())
     }
 
+    private func sectionTitle(_ title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(DeskColor.nightText.color)
+            Text(detail).font(.system(size: 12, weight: .medium, design: .rounded)).foregroundStyle(DeskColor.nightMuted.color)
+        }
+        .padding(.top, 8)
+    }
+
     private func walletLine(_ trade: SmartMoneyTrade) -> String {
         let short = trade.wallet.map { "\($0.prefix(6))…\($0.suffix(4))" } ?? "Smart money"
         let others = (trade.walletCount ?? 1) - 1
@@ -146,6 +169,7 @@ struct SmartMoneyFeedView: View {
         var parts: [String] = []
         if let change = trade.change24h { parts.append(String(format: "24H %+.2f%%", change)) }
         if let liquidity = trade.liquidity { parts.append("LIQ \(CoinRow.compact(liquidity))") }
+        else if let cap = trade.marketCap { parts.append("MC \(CoinRow.compact(cap))") }
         if let sold = trade.soldPercent, sold >= 1 { parts.append("\(Int(sold.rounded()))% sold since") }
         return parts.joined(separator: " · ")
     }

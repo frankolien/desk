@@ -1,5 +1,6 @@
 import { okxGet, okxPost } from "./_okx.mjs";
 import { chainName } from "./_chains.mjs";
+import { redisStore } from "./_store.mjs";
 import { handleHoldings } from "./_holdings.mjs";
 import { handleRisk } from "./_risk.mjs";
 import { handleEarly } from "./_early.mjs";
@@ -154,15 +155,117 @@ export async function smartMoneyFeed({ get = okxGet, post = okxPost, limit = 30 
   });
 }
 
+// ---------- Smart money on Monad, through Mobula ----------
+
+const MOBULA = "https://api.mobula.io";
+const SKIP_LABELS = new Set(["bundler", "sniper", "insider", "dev", "fresh", "freshTrader", "freshTrader30d"]);
+const SKIP_SYMBOLS = new Set(["USDC", "USDT", "AUSD", "USDT0", "MON", "WMON", "SHMON", "GMON", "APRMON", "SMON", "LVMON"]);
+const SCORE_TTL_S = 12 * 3600;
+const MIN_REALIZED_USD = 100;
+/// Dollars, yield wrappers and MON itself aren't a trader's call.
+const skipSymbol = (symbol) => { const upper = String(symbol ?? "").toUpperCase(); return SKIP_SYMBOLS.has(upper) || upper.includes("USD"); };
+const MONAD_MIN_USD = 50;
+
+/// A wallet's last 30 days on Monad, from Mobula's wallet analysis: realized PnL, and the
+/// share of tokens closed in profit (its win-rate buckets).
+export function monadScore(data) {
+  const stat = data?.stat ?? {};
+  const buckets = data?.winRateDistribution ?? {};
+  const wins = [">500%", "200%-500%", "50%-200%", "0%-50%"].reduce((sum, key) => sum + (Number(buckets[key]) || 0), 0);
+  const total = Object.values(buckets).reduce((sum, value) => sum + (Number(value) || 0), 0);
+  return {
+    realized: number(stat.periodRealizedPnlUSD) ?? 0,
+    winRate: total ? (wins / total) * 100 : null,
+    tokens: total,
+    labels: Array.isArray(data?.labels) ? data.labels : [],
+  };
+}
+
+/// Monad's trending tokens' recent trades (Mobula, last 72 h, $50 and up), kept to the wallets
+/// whose last 30 days on Monad realized $100+ winning at least half their tokens. Scores are
+/// cached 12 h, so a refresh costs one Mobula call per token (20) plus one per wallet seen for
+/// the first time (25 at most), at most every ten minutes at the edge.
+export async function monadSmartMoney({ key, store, get = okxGet, fetchImpl = fetch, now = Date.now(), tokens = 20, wallets = 25 }) {
+  const mobula = async (path) => {
+    const response = await fetchImpl(MOBULA + path, { headers: { Authorization: key } });
+    if (!response.ok) throw new Error(`mobula ${response.status}`);
+    return (await response.json()).data;
+  };
+  const hot = await get("/api/v6/dex/market/token/hot-token", {
+    chainIndex: "143", rankingType: "4", rankingTimeFrame: "4", riskFilter: "true", stableTokenFilter: "true", limit: "30",
+  }).catch(() => []);
+  const picked = (Array.isArray(hot) ? hot : [])
+    .filter((row) => /^0x[a-fA-F0-9]{40}$/.test(String(row.tokenContractAddress ?? "")) && !skipSymbol(row.tokenSymbol))
+    .slice(0, tokens);
+  const since = now - 72 * 3600_000;
+  const trades = (await Promise.all(picked.map((row) =>
+    mobula(`/api/2/token/trades?blockchain=monad&address=${row.tokenContractAddress}&mode=asset&limit=100`).catch(() => []))))
+    .flat()
+    .filter((trade) => trade && trade.date >= since && (trade.baseTokenAmountUSD ?? 0) >= MONAD_MIN_USD
+      && !(trade.labels ?? []).some((label) => SKIP_LABELS.has(label)) && !skipSymbol(trade.baseToken?.symbol));
+  // The account that sent the transaction: the recipient can be an aggregator's router.
+  const walletOf = (trade) => String(trade.transactionSenderAddress || trade.swapRecipient || "").toLowerCase();
+  const candidates = [...new Set(trades.map(walletOf).filter((w) => /^0x[a-f0-9]{40}$/.test(w)))];
+
+  const cacheKey = (wallet) => `mobula:score:${wallet}`;
+  const cached = candidates.length && store ? await store.mget(candidates.map(cacheKey)) : [];
+  const scores = new Map();
+  const fresh = [];
+  candidates.forEach((wallet, index) => {
+    if (cached[index]) scores.set(wallet, JSON.parse(cached[index]));
+    else fresh.push(wallet);
+  });
+  const scored = await Promise.all(fresh.slice(0, wallets).map(async (wallet) => {
+    try { return [wallet, monadScore(await mobula(`/api/2/wallet/analysis?wallet=${wallet}&blockchains=monad&period=30d`))]; }
+    catch { return null; }
+  }));
+  for (const entry of scored.filter(Boolean)) {
+    scores.set(entry[0], entry[1]);
+    if (store) await store.set(cacheKey(entry[0]), JSON.stringify(entry[1]), { ex: SCORE_TTL_S }).catch(() => {});
+  }
+
+  const smart = (score) => score && score.realized >= MIN_REALIZED_USD && (score.winRate ?? 0) >= 50 && score.tokens >= 3
+    && !score.labels.some((label) => SKIP_LABELS.has(label));
+  // One row per wallet, token and side within an hour: eight fills of one sell are one sell.
+  const groups = new Map();
+  for (const trade of trades.filter((t) => smart(scores.get(walletOf(t)))).sort((a, b) => b.date - a.date)) {
+    const group = `${walletOf(trade)}:${trade.baseToken?.address}:${trade.type}:${Math.floor(trade.date / 3600_000)}`;
+    const row = groups.get(group);
+    if (row) row.baseTokenAmountUSD += trade.baseTokenAmountUSD ?? 0;
+    else groups.set(group, { ...trade });
+  }
+  return [...groups.values()]
+    .slice(0, 30)
+    .map((trade) => {
+      const score = scores.get(walletOf(trade));
+      return {
+        id: String(trade.transactionHash ?? trade.id), wallet: walletOf(trade), walletCount: 1,
+        chainIndex: "143", chainName: "Monad", token: String(trade.baseToken?.address ?? "").toLowerCase(),
+        symbol: String(trade.baseToken?.symbol ?? "").toUpperCase(), name: String(trade.baseToken?.name ?? ""),
+        logoURL: String(trade.baseToken?.logo ?? ""), side: trade.type === "sell" ? "sell" : "buy",
+        usd: number(trade.baseTokenAmountUSD), time: number(trade.date), soldPercent: null,
+        marketCap: number(trade.baseTokenMarketCapUSD), holders: null, change24h: null, liquidity: null,
+        winRate: score.winRate, realized: score.realized,
+      };
+    });
+}
+
 async function handleSmartMoney(req, res) {
   try {
-    const trades = await smartMoneyFeed();
-    res.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=90");
-    return res.status(200).json({ observedAt: Date.now(), trades });
+    const key = process.env.MOBULA_API_KEY;
+    const store = redisStore();
+    const [monad, trades] = await Promise.all([
+      key ? monadSmartMoney({ key, store }).catch(() => []) : [],
+      smartMoneyFeed().catch(() => []),
+    ]);
+    // Ten minutes at the edge: each fresh answer spends up to ~45 Mobula credits.
+    res.setHeader("Cache-Control", "public, s-maxage=600, stale-while-revalidate=1200");
+    return res.status(200).json({ observedAt: Date.now(), monad, trades });
   } catch (error) {
     return res.status(502).json({ error: error.message });
   }
 }
+
 
 async function handleProfile(req, res) {
   const chainIndex = String(req.query.chainIndex ?? "");

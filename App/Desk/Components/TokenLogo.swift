@@ -50,7 +50,7 @@ struct TokenLogo: View {
 enum TokenArtwork {
     /// Matched on the registrable suffix, so a subdomain of a known CDN passes and a host that merely
     /// ends in the same letters does not.
-    private static let hosts = ["coingecko.com", "oklink.com", "okx.com", "coinall.ltd", "nadapp.net", "raw.githubusercontent.com"]
+    private static let hosts = ["coingecko.com", "oklink.com", "okx.com", "coinall.ltd", "nadapp.net", "raw.githubusercontent.com", "mobula.io"]
 
     static func url(_ text: String?) -> URL? {
         guard let text, let url = URL(string: text), url.scheme?.lowercased() == "https",
