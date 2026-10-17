@@ -793,10 +793,13 @@ struct TraderProfileScreen: View {
     let onCopy: (TraderPosition) -> Void
 
     private enum Tab: String, CaseIterable { case positions = "Positions", closed = "Closed", stats = "Stats" }
+    /// Their perps on Perpl, or the tokens their wallet holds: the same address trades both.
+    private enum HoldingKind: String, CaseIterable { case perps = "Perps", tokens = "Tokens" }
 
     @Environment(\.dismiss) private var dismiss
     @State private var snapshot: TraderSnapshot?
     @State private var tab: Tab = .positions
+    @State private var holdingKind: HoldingKind = .perps
     @State private var isNaming = false
     @State private var reportsProfile = false
     @State private var draftName = ""
@@ -1108,7 +1111,13 @@ struct TraderProfileScreen: View {
     private var content: some View {
         switch tab {
         case .positions:
-            if trader.positions.isEmpty {
+            holdingKindPicker
+            if holdingKind == .tokens {
+                TraderTokensList(address: trader.address) { holding in
+                    dismiss()
+                    TokenOpenRequest.shared.open(.init(chainIndex: holding.chainIndex, contract: holding.contract, symbol: holding.symbol))
+                }
+            } else if trader.positions.isEmpty {
                 emptyState(snapshot == nil ? "Loading positions…" : "Nothing open right now.",
                            detail: snapshot == nil ? nil : "Positions appear here the moment this trader opens one.")
             } else {
@@ -1125,6 +1134,32 @@ struct TraderProfileScreen: View {
         case .stats:
             TraderStatsView(history: history, loaded: historyLoaded)
         }
+    }
+
+    private var holdingKindPicker: some View {
+        HStack(spacing: 8) {
+            ForEach(HoldingKind.allCases, id: \.self) { kind in
+                Button {
+                    UISelectionFeedbackGenerator().selectionChanged()
+                    withAnimation(.snappy(duration: 0.2)) { holdingKind = kind }
+                } label: {
+                    Text(kind == .perps && !trader.positions.isEmpty ? "Perps · \(trader.positions.count)" : kind.rawValue)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(holdingKind == kind ? Color.white : Color.white.opacity(0.55))
+                        .padding(.horizontal, 12)
+                        .frame(height: 30)
+                        .background(holdingKind == kind ? Color.white.opacity(0.10) : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(Color.white.opacity(holdingKind == kind ? 0.18 : 0.10), lineWidth: 1))
+                        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
     }
 
     private func emptyState(_ title: String, detail: String?) -> some View {
@@ -1281,5 +1316,99 @@ struct NotificationsOffLine: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// The tokens a trader's wallet holds, from the same wallet feed a wallet profile reads.
+struct TraderTokensList: View {
+    struct Holding: Decodable, Identifiable {
+        let chainIndex: String
+        let chain: String?
+        let contract: String
+        let symbol: String
+        let balance: Double
+        let value: Double?
+        var id: String { chainIndex + ":" + contract }
+    }
+    private struct Resource: Decodable {
+        let holdings: [Holding]
+        let logos: [String: String]?
+    }
+
+    let address: String
+    let onOpen: (Holding) -> Void
+
+    @State private var holdings: [Holding]?
+    @State private var logos: [String: String] = [:]
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let holdings, !holdings.isEmpty {
+                LazyVStack(spacing: 0) {
+                    ForEach(holdings) { holding in
+                        Button { onOpen(holding) } label: { row(holding) }
+                            .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+            } else {
+                VStack(spacing: 6) {
+                    Text(failed ? "Their tokens couldn't load." : holdings == nil ? "Loading tokens…" : "No tokens worth over $1.")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                    if failed {
+                        Text("Pull down to try again.").font(.system(size: 13, design: .rounded)).foregroundStyle(Color.white.opacity(0.5))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 40)
+            }
+        }
+        .task(id: address) { await load() }
+    }
+
+    private func row(_ holding: Holding) -> some View {
+        HStack(spacing: 12) {
+            MarketTokenLogo(symbol: holding.symbol, size: 38,
+                            remoteURL: logos["\(holding.chainIndex):\(holding.chainIndex == "501" ? holding.contract : holding.contract.lowercased())"].flatMap(TokenArtwork.url))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(holding.symbol).font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(1)
+                Text("\(holding.balance.formatted(.number.notation(.compactName).precision(.significantDigits(1...3)))) · \(holding.chain ?? ChainTable.name(holding.chainIndex))")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.5))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if let value = holding.value {
+                Text(DisplayCurrency.shared.format(value))
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+            }
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+
+    private func load() async {
+        var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/activity")!
+        components.queryItems = [
+            URLQueryItem(name: "view", value: "wallet"), URLQueryItem(name: "address", value: address),
+            URLQueryItem(name: "chainIndex", value: "143"), URLQueryItem(name: "contract", value: ""),
+        ]
+        guard let url = components.url else { return }
+        do {
+            let (data, _) = try await ResponseCache.shared.data(from: url, maxStale: 300)
+            let resource = try JSONDecoder().decode(Resource.self, from: data)
+            logos = resource.logos ?? [:]
+            holdings = resource.holdings
+                .filter { $0.chainIndex != "501" && ($0.value ?? 0) >= 1 }
+                .sorted { ($0.value ?? 0) > ($1.value ?? 0) }
+            failed = false
+        } catch {
+            failed = holdings == nil
+        }
     }
 }
