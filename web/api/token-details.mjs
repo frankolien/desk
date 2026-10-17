@@ -1,4 +1,5 @@
 import { okxGet, okxPost } from "./_okx.mjs";
+import { chainName } from "./_chains.mjs";
 import { handleHoldings } from "./_holdings.mjs";
 import { handleRisk } from "./_risk.mjs";
 import { handleEarly } from "./_early.mjs";
@@ -52,8 +53,120 @@ async function handleSparklines(req, res) {
   return res.status(200).json({ observedAt: Date.now(), series });
 }
 
+// CoinGecko's and DexScreener's names for the chains Desk shows tokens on.
+const GECKO_PLATFORM = { "1": "ethereum", "10": "optimistic-ethereum", "56": "binance-smart-chain", "137": "polygon-pos", "143": "monad", "8453": "base", "42161": "arbitrum-one" };
+const DEX_CHAIN = { "1": "ethereum", "10": "optimism", "56": "bsc", "137": "polygon", "143": "monad", "8453": "base", "42161": "arbitrum" };
+
+/// The first paragraph of CoinGecko's description, as plain text, at most a few sentences.
+export function plainDescription(html) {
+  const text = String(html ?? "").split(/\r?\n\r?\n/)[0].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  if (text.length <= 320) return text || null;
+  const cut = text.slice(0, 320);
+  return cut.slice(0, Math.max(cut.lastIndexOf(". ") + 1, 200)).trim() + (cut.lastIndexOf(". ") > 200 ? "" : "…");
+}
+
+/// What a token is and who made it, for the token page's Info tab: OKX's advanced info
+/// (creator, launch time, top-10 share), CoinGecko's description and supply, and the
+/// project's own links from CoinGecko or DexScreener. Each part is optional.
+export async function tokenProfile({ chainIndex, address, get = okxGet, fetchImpl = fetch }) {
+  const json = (url) => fetchImpl(url, { headers: { accept: "application/json" } }).then((r) => (r.ok ? r.json() : null));
+  const platform = GECKO_PLATFORM[chainIndex];
+  const dexChain = DEX_CHAIN[chainIndex];
+  const [advanced, gecko, dex] = await Promise.allSettled([
+    get("/api/v6/dex/market/token/advanced-info", { chainIndex, tokenContractAddress: address }),
+    platform ? json(`https://api.coingecko.com/api/v3/coins/${platform}/contract/${address.toLowerCase()}`) : null,
+    dexChain ? json(`https://api.dexscreener.com/tokens/v1/${dexChain}/${address}`) : null,
+  ]);
+  const okx = advanced.status === "fulfilled" ? (Array.isArray(advanced.value) ? advanced.value[0] : advanced.value) ?? {} : {};
+  const coin = gecko.status === "fulfilled" && gecko.value && !gecko.value.error ? gecko.value : null;
+  const info = dex.status === "fulfilled" && Array.isArray(dex.value) ? dex.value.find((pair) => pair?.info)?.info ?? null : null;
+  const site = coin?.links?.homepage?.find((url) => /^https?:\/\//.test(url ?? ""))
+    ?? info?.websites?.find((w) => /^https?:\/\//.test(w?.url ?? ""))?.url ?? null;
+  const twitterUrl = info?.socials?.find((social) => social?.type === "twitter")?.url;
+  const handle = coin?.links?.twitter_screen_name || (twitterUrl ? String(twitterUrl).split("/").filter(Boolean).pop() : null);
+  const created = number(okx.createTime);
+  return {
+    description: plainDescription(coin?.description?.en),
+    website: site,
+    x: handle ? String(handle).replace(/^@/, "") : null,
+    creator: /^0x[a-fA-F0-9]{40}$/.test(String(okx.creatorAddress ?? "")) ? okx.creatorAddress : null,
+    createdAt: created && created > 1e12 ? created : created ? created * 1000 : null,
+    top10Percent: number(okx.top10HoldPercent),
+    maxSupply: [coin?.market_data?.max_supply, coin?.market_data?.total_supply].map(number).find((v) => v > 0) ?? null,
+  };
+}
+
+const percentOf = (value) => { const n = number(value); return n === null ? null : n <= 1 ? n * 100 : n; };
+
+/// Chains OKX scores smart money on that Desk can buy on (through Relay). Monad isn't one yet.
+export const SMART_CHAINS = ["8453", "56", "1"];
+
+/// Signals' Smart Money feed: OKX's smart-money buy signals (wallets it rates as consistently
+/// profitable) on Base, BNB Chain and Ethereum, newest first. Each is one token bought by one or
+/// more such wallets, with the total in USD and the share they've sold since; the token's day
+/// move and liquidity come from price-info, and the lead wallet's 30-day win rate and realized
+/// PnL from its portfolio overview (at most 10 wallets a refresh).
+export async function smartMoneyFeed({ get = okxGet, post = okxPost, limit = 30 } = {}) {
+  const lists = await Promise.all(SMART_CHAINS.map((chainIndex) =>
+    post("/api/v6/dex/market/signal/list", { chainIndex, walletType: "1", minAmountUsd: "100", limit: "30" }).catch(() => [])));
+  const signals = lists.flat()
+    .filter((row) => row?.token?.tokenAddress && /^0x[a-fA-F0-9]{40}$/.test(row.token.tokenAddress))
+    .sort((a, b) => Number(b.timestamp) - Number(a.timestamp))
+    .slice(0, limit);
+  const key = (chainIndex, address) => `${chainIndex}:${String(address).toLowerCase()}`;
+  const ids = [...new Map(signals.map((row) => [key(row.chainIndex, row.token.tokenAddress), { chainIndex: String(row.chainIndex), tokenContractAddress: row.token.tokenAddress }])).values()];
+  const leads = [...new Map(signals.map((row) => {
+    const lead = String(row.triggerWalletAddress ?? "").split(",")[0];
+    return [key(row.chainIndex, lead), { chainIndex: String(row.chainIndex), lead }];
+  })).values()].filter((row) => /^0x[a-fA-F0-9]{40}$/.test(row.lead)).slice(0, 10);
+  const [prices, overviews] = await Promise.all([
+    ids.length ? post("/api/v6/dex/market/price-info", ids.slice(0, 20)).catch(() => []) : [],
+    Promise.all(leads.map(({ chainIndex, lead }) => get("/api/v6/dex/market/portfolio/overview", { chainIndex, walletAddress: lead, timeFrame: "4" })
+      .then((value) => [key(chainIndex, lead), Array.isArray(value) ? value[0] : value]).catch(() => null))),
+  ]);
+  const live = new Map((Array.isArray(prices) ? prices : []).map((row) => [key(row.chainIndex, row.tokenContractAddress), row]));
+  const stats = new Map(overviews.filter(Boolean));
+  return signals.map((row) => {
+    const chainIndex = String(row.chainIndex);
+    const wallets = String(row.triggerWalletAddress ?? "").split(",").filter((w) => /^0x[a-fA-F0-9]{40}$/.test(w));
+    const price = live.get(key(chainIndex, row.token.tokenAddress)) ?? {};
+    const wallet = stats.get(key(chainIndex, wallets[0] ?? ""));
+    return {
+      id: String(row.cursor ?? `${chainIndex}:${row.token.tokenAddress}:${row.timestamp}`),
+      wallet: wallets[0] ?? null, walletCount: number(row.triggerWalletCount) ?? wallets.length,
+      chainIndex, chainName: chainName(chainIndex), token: row.token.tokenAddress,
+      symbol: String(row.token.symbol ?? "").toUpperCase(), name: String(row.token.name ?? row.token.symbol ?? ""),
+      logoURL: String(row.token.logo ?? ""), side: "buy", usd: number(row.amountUsd), time: number(row.timestamp),
+      soldPercent: number(row.soldRatioPercent), marketCap: number(row.token.marketCapUsd), holders: number(row.token.holders),
+      change24h: number(price.priceChange24H), liquidity: number(price.liquidity),
+      winRate: percentOf(wallet?.winRate), realized: number(wallet?.realizedPnlUsd),
+    };
+  });
+}
+
+async function handleSmartMoney(req, res) {
+  try {
+    const trades = await smartMoneyFeed();
+    res.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=90");
+    return res.status(200).json({ observedAt: Date.now(), trades });
+  } catch (error) {
+    return res.status(502).json({ error: error.message });
+  }
+}
+
+async function handleProfile(req, res) {
+  const chainIndex = String(req.query.chainIndex ?? "");
+  const address = String(req.query.address ?? "");
+  if (!/^\d{1,10}$/.test(chainIndex) || !/^0x[a-fA-F0-9]{40}$/.test(address)) return res.status(400).json({ error: "Valid token identity required" });
+  const profile = await tokenProfile({ chainIndex, address });
+  res.setHeader("Cache-Control", "public, s-maxage=3600, stale-while-revalidate=86400");
+  return res.status(200).json(profile);
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
+  if (req.query.view === "profile") return handleProfile(req, res);
+  if (req.query.view === "smart-money") return handleSmartMoney(req, res);
   if (req.query.view === "holdings") return handleHoldings(req, res);
   if (req.query.view === "sparklines") return handleSparklines(req, res);
   if (req.query.view === "risk") return handleRisk(req, res);
