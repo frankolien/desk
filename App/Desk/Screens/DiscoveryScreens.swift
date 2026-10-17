@@ -955,6 +955,9 @@ private struct SpotTokenDetailScreen: View {
     @Environment(\.dismiss) private var dismiss
     @State private var tab: SpotDetailTab = .transactions
     @State private var range = "1H"
+    @State private var showsCap = false
+    @State private var profile: TokenProfile?
+    @Environment(\.openURL) private var openURL
     @State private var selectedWallet: SpotWallet?
     @State private var risk = TokenRiskModel()
     @State private var showsRisk = false
@@ -995,6 +998,13 @@ private struct SpotTokenDetailScreen: View {
                 .padding(.bottom, 120)
             }
             .refreshable { await feed.refreshNow() }
+            #if DEBUG
+            .onAppear {
+                let arguments = ProcessInfo.processInfo.arguments
+                if arguments.contains("-token-info") { tab = .info }
+                if arguments.contains("-token-cap") { showsCap = true }
+            }
+            #endif
             tradeBar
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
@@ -1091,20 +1101,33 @@ private struct SpotTokenDetailScreen: View {
                 }
             }
 
-            HStack(alignment: .firstTextBaseline) {
-                AmountText((feed.latestPrice ?? token.price).map(spotPrice) ?? "$—", size: 36)
+            HStack(alignment: .center) {
+                AmountText(headline, size: 36)
                     .minimumScaleFactor(0.7)
+                    .contentTransition(.numericText())
+                Spacer()
+                if supply != nil {
+                    Picker("Show", selection: $showsCap.animation(.snappy(duration: 0.2))) {
+                        Text("Price").tag(false)
+                        Text("MC").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 124)
+                }
+            }
+            HStack(spacing: 8) {
+                Text(changeText)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(feed.changePercent == nil ? Color.secondary : (feed.isUp ? DeskColor.rise.color : DeskColor.fall.color))
+                Text(range == "LIVE" ? "LIVE" : range)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Color.white.opacity(0.2), lineWidth: 1))
                 Spacer()
                 Button { showsRisk = true } label: { RiskChip(level: risk.risk?.level ?? quickRisk) }
                     .buttonStyle(.plain)
-                Text("SPOT")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded)).tracking(1)
-                    .padding(.horizontal, 12).padding(.vertical, 7)
-                    .perpSearchGlass(in: Capsule())
             }
-            Text(changeStatusText)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundStyle(feed.changePercent == nil ? Color.secondary : (feed.isUp ? DeskColor.rise.color : DeskColor.fall.color))
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 20)
@@ -1113,7 +1136,12 @@ private struct SpotTokenDetailScreen: View {
 
     private var chart: some View {
         VStack(alignment: .leading, spacing: 8) {
-            CandlestickChart(candles: feed.candles.map(\.chartCandle))
+            CandlestickChart(candles: feed.candles.map { candle in
+                let chart = candle.chartCandle
+                guard showsCap, let supply else { return chart }
+                return ChartCandle(open: chart.open * supply, high: chart.high * supply, low: chart.low * supply,
+                                   close: chart.close * supply, volume: chart.volume, time: chart.time)
+            })
                 .frame(height: 286)
                 .accessibilityLabel("Live candlestick chart for \(token.symbol)")
             if !feed.candles.isEmpty && feed.candles.count < 12 {
@@ -1126,9 +1154,18 @@ private struct SpotTokenDetailScreen: View {
         .padding(.top, 14)
     }
 
-    private var changeStatusText: String {
-        guard let change = feed.changePercent else { return "—  ·  \(feed.stateText)" }
-        return String(format: "%@ %.2f%%  ·  %@", change >= 0 ? "↑" : "↓", abs(change), feed.stateText)
+    private var supply: Double? { feed.details?.supply }
+
+    /// The price, or with MC picked the market cap at that price, as the inspo's toggle does.
+    private var headline: String {
+        guard let price = feed.latestPrice ?? token.price else { return "$—" }
+        if showsCap, let supply { return CoinRow.compact(price * supply) }
+        return spotPrice(price)
+    }
+
+    private var changeText: String {
+        guard let change = feed.changePercent else { return "—" }
+        return String(format: "%@ %.2f%%", change >= 0 ? "↑" : "↓", abs(change))
     }
 
     private var ranges: some View {
@@ -1255,35 +1292,134 @@ private struct SpotTokenDetailScreen: View {
     }
 
     private var info: some View {
-        VStack(spacing: 0) {
-            infoRow("Contract Address", token.contract, "number")
-            infoRow("Market Cap", feed.details?.marketCap ?? "—", "chart.pie.fill")
-            infoRow("24h Volume", feed.details?.volume24H ?? "—", "chart.bar.fill")
-            infoRow("Liquidity", feed.details?.liquidity ?? "—", "drop.fill")
-            infoRow("Holders", feed.details?.holderCount ?? "—", "person.2.fill")
-            infoRow("Network", token.chainName, "network")
-            Button { showsRisk = true } label: {
-                HStack {
-                    Label("Risk", systemImage: "shield.lefthalf.filled").foregroundStyle(.secondary)
-                    Spacer()
-                    RiskChip(level: risk.risk?.level ?? quickRisk)
-                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
-                }
-                .font(.system(size: 14, design: .rounded)).frame(height: 58)
-                .padding(.horizontal, 14)
-                .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-                .padding(.bottom, 7)
-                .contentShape(Rectangle())
+        VStack(alignment: .leading, spacing: 0) {
+            Text("What is \(token.symbol)?")
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+            if let description = profile?.description {
+                Text(description)
+                    .font(.system(size: 15, weight: .regular, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
             }
-            .buttonStyle(.plain)
+            VStack(spacing: 0) {
+                let rows = infoRows
+                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                    row.view
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 58)
+                        .background(index.isMultiple(of: 2) ? Color.white.opacity(0.06) : Color.clear)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.top, 18)
             if let first = risk.risk?.reasons.first {
                 Text(first.text)
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(first.severity == "high" ? DeskColor.fall.color : DeskColor.action.color)
-                    .padding(.bottom, 4)
+                    .padding(.top, 10)
             }
-            liveCaption("OKX token snapshot · refreshed every 30 seconds")
-        }.padding(.horizontal, 20)
+            liveCaption("OKX, CoinGecko and DexScreener · refreshed every 30 seconds")
+        }
+        .padding(.horizontal, 20)
+        .task(id: token.contract) { profile = await TokenProfile.load(chainIndex: token.chainIndex, contract: token.contract) }
+    }
+
+    private struct InfoRow { let view: AnyView }
+
+    private var infoRows: [InfoRow] {
+        var rows: [InfoRow] = []
+        let short = token.contract.count > 12 ? "\(token.contract.prefix(6))…\(token.contract.suffix(4))" : token.contract
+        rows.append(InfoRow(view: AnyView(HStack {
+            Label("Contract Address", systemImage: "number").foregroundStyle(.secondary)
+            Spacer()
+            Button {
+                UIPasteboard.general.string = token.contract
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            } label: {
+                HStack(spacing: 8) {
+                    Text(short).fontWeight(.semibold)
+                    Image(systemName: "doc.on.doc").foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+        })))
+        if let creator = profile?.creator {
+            rows.append(InfoRow(view: AnyView(Button {
+                selectedWallet = SpotWallet(address: creator, emoji: "◉", portfolio: "—")
+            } label: {
+                HStack {
+                    Label("Developer", systemImage: "person.crop.circle.fill").foregroundStyle(.secondary)
+                    Spacer()
+                    TraderAvatar(address: creator, size: 26)
+                    Text("\(creator.prefix(6))…\(creator.suffix(4))").fontWeight(.semibold)
+                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }.buttonStyle(.plain))))
+        }
+        if let site = profile?.website, let url = URL(string: site) {
+            rows.append(linkRow("Website", detail: url.host()?.replacingOccurrences(of: "www.", with: "") ?? site, icon: "globe", url: url))
+        }
+        if let handle = profile?.x, let url = URL(string: "https://x.com/\(handle)") {
+            rows.append(linkRow("X", detail: "@\(handle)", icon: "at", url: url))
+        }
+        rows.append(valueRow("Market Cap", feed.details?.marketCap ?? "—", "chart.pie.fill"))
+        rows.append(valueRow("24h Volume", feed.details?.volume24H ?? "—", "chart.bar.fill"))
+        rows.append(valueRow("Liquidity", feed.details?.liquidity ?? "—", "drop.fill"))
+        rows.append(valueRow("Holders", feed.details?.holderCount ?? "—", "person.2.fill"))
+        if let supply = profile?.maxSupply {
+            rows.append(valueRow("Max Supply", CoinRow.compact(supply).replacingOccurrences(of: "$", with: ""), "arrow.triangle.2.circlepath"))
+        }
+        if let created = profile?.createdAt {
+            rows.append(valueRow("Age", Self.age(since: Date(timeIntervalSince1970: created / 1000)), "clock.fill"))
+        }
+        if let top = profile?.top10Percent {
+            rows.append(valueRow("Top 10 Holders", "\(Int(top.rounded()))%", "person.3.fill"))
+        }
+        rows.append(valueRow("Network", token.chainName, "network"))
+        rows.append(InfoRow(view: AnyView(Button { showsRisk = true } label: {
+            HStack {
+                Label("Risk", systemImage: "shield.lefthalf.filled").foregroundStyle(.secondary)
+                Spacer()
+                RiskChip(level: risk.risk?.level ?? quickRisk)
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }.buttonStyle(.plain))))
+        return rows
+    }
+
+    private func valueRow(_ label: String, _ value: String, _ icon: String) -> InfoRow {
+        InfoRow(view: AnyView(HStack {
+            Label(label, systemImage: icon).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).fontWeight(.bold).monospacedDigit()
+        }.font(.system(size: 15, design: .rounded))))
+    }
+
+    private func linkRow(_ label: String, detail: String, icon: String, url: URL) -> InfoRow {
+        InfoRow(view: AnyView(Button { openURL(url) } label: {
+            HStack {
+                Image(systemName: icon).foregroundStyle(.secondary).frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label).fontWeight(.semibold)
+                    Text(detail).font(.system(size: 13, design: .rounded)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "arrow.up.right").foregroundStyle(.secondary)
+            }
+            .font(.system(size: 15, design: .rounded))
+            .contentShape(Rectangle())
+        }.buttonStyle(.plain)))
+    }
+
+    /// "3d", "5mo", "2y": how long the token has existed.
+    static func age(since date: Date) -> String {
+        let days = max(0, Date().timeIntervalSince(date) / 86_400)
+        if days < 1 { return "\(max(1, Int(days * 24)))h" }
+        if days < 31 { return "\(Int(days))d" }
+        if days < 365 { return "\(Int(days / 30.4))mo" }
+        return "\(Int(days / 365))y"
     }
 
     private func infoRow(_ label: String, _ value: String, _ icon: String) -> some View {
@@ -1332,6 +1468,8 @@ private final class SpotLiveFeed: ObservableObject {
         let liquidity: String
         let volume24H: String
         let holderCount: String
+        /// Market cap over price: what turns a live price into a live market cap.
+        var supply: Double? = nil
     }
 
     struct Holder: Identifiable, Sendable {
@@ -1486,7 +1624,8 @@ private final class SpotLiveFeed: ObservableObject {
             marketCap: compactUSD(number(info?["marketCap"])),
             liquidity: compactUSD(number(info?["liquidity"])),
             volume24H: compactUSD(number(info?["volume24H"])),
-            holderCount: count(number(info?["holders"]))
+            holderCount: count(number(info?["holders"])),
+            supply: number(info?["marketCap"]).flatMap { cap in price.flatMap { $0 > 0 && cap > 0 ? cap / $0 : nil } }
         )
         let holders = (root["holders"] as? [[String: Any]] ?? []).compactMap { row -> Holder? in
             guard let address = row["holderWalletAddress"] as? String, !address.isEmpty else { return nil }
@@ -4134,5 +4273,24 @@ private struct TokenPositionContent: View {
                 .fittedSheet()
                 .presentationDragIndicator(.visible)
         }
+    }
+}
+
+/// What a token is and who's behind it, from /api/token-details?view=profile.
+struct TokenProfile: Decodable, Sendable {
+    let description: String?
+    let website: String?
+    let x: String?
+    let creator: String?
+    let createdAt: Double?
+    let top10Percent: Double?
+    let maxSupply: Double?
+
+    static func load(chainIndex: String, contract: String) async -> TokenProfile? {
+        guard contract.hasPrefix("0x") else { return nil }
+        var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/token-details")!
+        components.queryItems = [.init(name: "view", value: "profile"), .init(name: "chainIndex", value: chainIndex), .init(name: "address", value: contract)]
+        guard let url = components.url, let (data, _) = try? await ResponseCache.shared.data(from: url, maxStale: 3600) else { return nil }
+        return try? JSONDecoder().decode(TokenProfile.self, from: data)
     }
 }
