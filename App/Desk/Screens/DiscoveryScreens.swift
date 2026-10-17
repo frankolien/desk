@@ -3562,7 +3562,7 @@ private struct WalletProfileScreen: View {
             SpotCopySheet(model: model, leader: wallet.address, name: name)
         }
         .sheet(isPresented: $sending) {
-            WithdrawSheet(model: model, sendTo: wallet.address, sendToName: name == wallet.displayAddress ? nil : name) { sending = false }
+            SendSheet(model: model, recipient: wallet.address, name: name == wallet.displayAddress ? nil : name) { sending = false }
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showsPerpl) {
@@ -3613,6 +3613,7 @@ private struct WalletProfileScreen: View {
             if ProcessInfo.processInfo.arguments.contains("-wallet-activity") { tab = .activity }
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-spot-copy-sheet") { showsSpotCopy = true }
+            if ProcessInfo.processInfo.arguments.contains("-send-sheet") { sending = true }
             #endif
         }
         #endif

@@ -877,7 +877,7 @@ struct TraderProfileScreen: View {
         .task { await alerts.refreshPermission() }
         .sheet(isPresented: $sending) {
             if let model = AppModel.current {
-                WithdrawSheet(model: model, sendTo: trader.address, sendToName: directory.name(for: trader.address)) { sending = false }
+                SendSheet(model: model, recipient: trader.address, name: directory.name(for: trader.address)) { sending = false }
                     .presentationDragIndicator(.visible)
             }
         }
