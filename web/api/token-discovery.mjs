@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { chainName, isBuyable, isQuotable, nativeToken, CHAINS } from "./_chains.mjs";
+import { okxPost } from "./_okx.mjs";
 
 function authHeaders(timestamp, requestPath) {
   const signature = crypto.createHmac("sha256", process.env.OKX_SECRET_KEY)
@@ -104,21 +105,71 @@ export function homeFirst(tokens) {
     .map(({ token }) => token);
 }
 
+/// Explore's "Crypto" chip: the established coins people mean by crypto, Monad's own first,
+/// so the list is never just whatever memecoin is hot. Names say what the wrapped token is.
+export const CRYPTO = [
+  { chainIndex: "143", contract: "0x3bd359c1119da7da1d913d1c4d2b7c461115433a", name: "Monad" },
+  { chainIndex: "143", contract: "0xee8c0e9f1bffb4eb878d8f15f368a02a35481242", name: "Ethereum" },
+  { chainIndex: "143", contract: "0x0555e30da8f98308edb960aa94c0db47230d2b9c", name: "Bitcoin" },
+  { chainIndex: "56", contract: "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", name: "BNB" },
+  { chainIndex: "1", contract: "0x514910771af9ca656af840dff83e8264ecf986ca", name: "Chainlink" },
+  { chainIndex: "1", contract: "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984", name: "Uniswap" },
+  { chainIndex: "1", contract: "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9", name: "Aave" },
+  { chainIndex: "56", contract: "0xba2ae424d960c26247dd6c32edc70b295c744c43", name: "Dogecoin" },
+  { chainIndex: "1", contract: "0x6982508145454ce325ddbe47a25d4ec3d2311933", name: "Pepe" },
+  { chainIndex: "1", contract: "0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce", name: "Shiba Inu" },
+  { chainIndex: "1", contract: "0xfaba6f8e4a5e8ab82f62fe7c39859fa577269be3", name: "Ondo" },
+];
+
+/// The curated coins, named by OKX's basic info and priced by its price info in two calls.
+export async function cryptoTokens({ post = okxPost } = {}) {
+  const identities = CRYPTO.map(({ chainIndex, contract }) => ({ chainIndex, tokenContractAddress: contract }));
+  const [basics, prices] = await Promise.all([
+    post("/api/v6/dex/market/token/basic-info", identities).catch(() => []),
+    post("/api/v6/dex/market/price-info", identities),
+  ]);
+  const key = (row) => `${row.chainIndex}:${String(row.tokenContractAddress ?? "").toLowerCase()}`;
+  const basic = new Map((Array.isArray(basics) ? basics : []).map((row) => [key(row), row]));
+  const price = new Map((Array.isArray(prices) ? prices : []).map((row) => [key(row), row]));
+  return CRYPTO.map((entry) => {
+    const id = `${entry.chainIndex}:${entry.contract}`;
+    const info = basic.get(id) ?? {};
+    const live = price.get(id);
+    if (!live) return null;
+    return normalize({
+      ...info, ...live, chainIndex: entry.chainIndex, tokenContractAddress: entry.contract,
+      tokenName: entry.name, tokenSymbol: info.tokenSymbol ?? entry.name,
+      change: live.priceChange24H, volume: live.volume24H,
+    });
+  }).filter(Boolean);
+}
+
+/// Most held: Monad's busy tokens, ordered by how many wallets hold them.
+export const byHolders = (tokens) => [...tokens].sort((a, b) => (b.holders ?? 0) - (a.holders ?? 0));
+
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
   const query = String(req.query.q || "").trim().slice(0, 100);
   // `chain` narrows the trending list to one chain, so Monad has its own page of movers
   // instead of the few that make the global twenty.
   const chain = /^\d{1,10}$/.test(String(req.query.chain ?? "")) ? String(req.query.chain) : "";
+  // `sort`: crypto (the curated coins), holders (Monad's tokens by holders); default trending.
+  const sort = String(req.query.sort ?? "");
   try {
+    if (!query && sort === "crypto") {
+      res.setHeader("Cache-Control", "s-maxage=60, stale-while-revalidate=180");
+      return res.status(200).json({ mode: "crypto", observedAt: Date.now(), tokens: await cryptoTokens() });
+    }
+    const listChain = sort === "holders" ? (chain || MONAD) : chain;
     const rows = query
       ? await searchTokens(query)
       : await okxGet("/api/v6/dex/market/token/hot-token", {
-          ...(chain ? { chainIndex: chain } : {}),
+          ...(listChain ? { chainIndex: listChain } : {}),
           rankingType: "4", rankingTimeFrame: "4", riskFilter: "true",
-          stableTokenFilter: "true", limit: chain ? "40" : "20",
+          stableTokenFilter: "true", limit: listChain ? "40" : "20",
         });
-    const tokens = homeFirst(rows.map(normalize).filter((token) => token.symbol && token.contract));
+    let tokens = homeFirst(rows.map(normalize).filter((token) => token.symbol && token.contract));
+    if (sort === "holders") tokens = byHolders(tokens);
     res.setHeader("Cache-Control", query
       ? "s-maxage=10, stale-while-revalidate=30"
       : "s-maxage=30, stale-while-revalidate=90");

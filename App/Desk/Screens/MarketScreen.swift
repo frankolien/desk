@@ -5,7 +5,7 @@ import SwiftUI
 
 struct MarketScreen: View {
     private enum Shelf: String, CaseIterable, Identifiable {
-        case perps = "Perps", trending = "Trending", watchlist = "Watchlist"
+        case perps = "Perps", tokens = "Tokens", watchlist = "Watchlist"
         var id: String { rawValue }
     }
 
@@ -20,6 +20,9 @@ struct MarketScreen: View {
 
     @State fileprivate var showsMarket = false
     @State private var shelf: Shelf = .perps
+    @State private var perpGroup: PerpGroup = .crypto
+    @State private var tokenShelf: TokenShelves.Kind = .crypto
+    @State private var tokenShelves = TokenShelves()
     @State private var selectedTrader: TraderSnapshot?
     @State private var openToken: TokenOpenRequest.Target?
     @State private var directory = TraderDirectory()
@@ -44,8 +47,8 @@ struct MarketScreen: View {
                         header.padding(.horizontal, 16)
                         if !Self.tradersOnly {
                             hotMarkets.padding(.top, 10)
-                            if Showcase.spotTrading && !discovery.trending.isEmpty {
-                                TrendingTicker(tokens: Array(discovery.trending.prefix(10)), sparklines: sparklines) { token in
+                            if Showcase.spotTrading && !tickerTokens.isEmpty {
+                                TrendingTicker(tokens: Array(tickerTokens.prefix(10)), sparklines: sparklines) { token in
                                     openToken = .init(chainIndex: token.chainIndex, contract: token.contract, symbol: token.symbol)
                                 }
                                 .padding(.top, 18)
@@ -108,9 +111,10 @@ struct MarketScreen: View {
             .task(id: model.address) { if Showcase.spotTrading { await spot.run(for: model.address) } }
             .task { if Showcase.spotTrading { await discovery.run() } }
             .task { if Showcase.news { await news.run() } }
-            .task(id: discovery.trending.prefix(10).map(\.id).joined(separator: ",")) {
-                await sparklines.load(discovery.trending)
+            .task(id: tickerTokens.prefix(10).map(\.id).joined(separator: ",")) {
+                await sparklines.load(tickerTokens)
             }
+            .task { if Showcase.spotTrading { await tokenShelves.load(.trending) } }
             .sheet(item: $article) { item in
                 NewsArticleScreen(item: item, market: market) { symbol in
                     article = nil
@@ -289,13 +293,16 @@ struct MarketScreen: View {
             .frame(width: 262, height: 108)
     }
 
+    /// Monad's movers when they've loaded; the global list until then.
+    private var tickerTokens: [TrendingSpotToken] { tokenShelves.lists[.trending] ?? discovery.trending }
+
     private var savedMarketIDs: Set<UInt32> { Set(savedIDs.split(separator: ",").compactMap { UInt32($0) }) }
 
     private var explore: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("Explore Markets")
             HStack(spacing: 8) {
-                ForEach(Shelf.allCases.filter { Showcase.spotTrading || $0 != .trending }) { item in
+                ForEach(Shelf.allCases.filter { Showcase.spotTrading || $0 != .tokens }) { item in
                     Button {
                         UISelectionFeedbackGenerator().selectionChanged()
                         withAnimation(.snappy(duration: 0.2)) { shelf = item }
@@ -312,11 +319,84 @@ struct MarketScreen: View {
                 }
             }
             switch shelf {
-            case .perps: perpRows(market.allMarkets)
-            case .trending: trendingRows
+            case .perps:
+                subChips(PerpGroup.allCases, selected: perpGroup) { perpGroup = $0 }
+                perpGroupRows
+            case .tokens:
+                subChips(TokenShelves.Kind.allCases, selected: tokenShelf) { tokenShelf = $0 }
+                tokenRows
             case .watchlist: watchlistRows
             }
         }
+        .task(id: tokenShelf) { await tokenShelves.load(tokenShelf) }
+    }
+
+    /// The second row under Perps and Tokens: quieter than the shelves above it.
+    private func subChips<Item: RawRepresentable & Hashable>(_ items: [Item], selected: Item, select: @escaping (Item) -> Void) -> some View where Item.RawValue == String {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(items, id: \.self) { item in
+                    Button {
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        withAnimation(.snappy(duration: 0.2)) { select(item) }
+                    } label: {
+                        Text(item.rawValue)
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(selected == item ? DeskColor.nightText.color : DeskColor.nightMuted.color)
+                            .padding(.horizontal, 12)
+                            .frame(height: 30)
+                            .background(selected == item ? Color.white.opacity(0.10) : Color.clear,
+                                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .stroke(Color.white.opacity(selected == item ? 0.18 : 0.10), lineWidth: 1))
+                            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .scrollClipDisabled()
+    }
+
+    @ViewBuilder
+    private var perpGroupRows: some View {
+        let markets = market.allMarkets.filter { PerpGroup.of($0.symbol) == perpGroup }
+        if market.allMarkets.isEmpty || !markets.isEmpty {
+            perpRows(markets)
+        } else {
+            emptyShelf(perpGroup == .stocks
+                ? "Perpl doesn't list stock perps yet. They'll show up here the day it does."
+                : "Perpl doesn't list commodity perps yet. Gold, oil and the rest land here when it does.")
+        }
+    }
+
+    @ViewBuilder
+    private var tokenRows: some View {
+        let tokens = tokenShelves.lists[tokenShelf] ?? []
+        if tokens.isEmpty {
+            if tokenShelves.failed.contains(tokenShelf) {
+                emptyShelf("This list couldn't load. Pull down to try again.")
+            } else {
+                placeholderRows(3)
+            }
+        } else {
+            VStack(spacing: 8) {
+                ForEach(tokens.prefix(10)) { token in
+                    Button { openToken = .init(chainIndex: token.chainIndex, contract: token.contract, symbol: token.symbol) } label: {
+                        TrendingSpotRow(token: token)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func emptyShelf(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 14, weight: .medium, design: .rounded))
+            .foregroundStyle(DeskColor.nightMuted.color)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity, minHeight: 88)
     }
 
     @ViewBuilder
@@ -328,22 +408,6 @@ struct MarketScreen: View {
                 ForEach(markets, id: \.id) { item in
                     Button { open(item) } label: { PerpMarketRow(market: item, model: market) }
                         .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var trendingRows: some View {
-        if discovery.trending.isEmpty {
-            placeholderRows(3)
-        } else {
-            VStack(spacing: 8) {
-                ForEach(discovery.trending.prefix(8)) { token in
-                    Button { openToken = .init(chainIndex: token.chainIndex, contract: token.contract, symbol: token.symbol) } label: {
-                        TrendingSpotRow(token: token)
-                    }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -1245,5 +1309,63 @@ extension MarketScreen {
         market.select(found)
         await session.selectMarket(found)
         showsMarket = true
+    }
+}
+
+/// Perpl's markets, grouped for Explore. Perpl lists crypto only today; stocks and commodities
+/// sort themselves in here by symbol as soon as it lists them.
+enum PerpGroup: String, CaseIterable, Hashable {
+    case crypto = "Crypto", stocks = "Stocks", commodities = "Commodities"
+
+    private static let stockSymbols: Set<String> = [
+        "TSLA", "NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "GOOG", "META", "NFLX", "AMD", "COIN", "MSTR", "HOOD",
+        "PLTR", "SPX", "SPY", "QQQ", "NDX", "NASDAQ", "SP500", "DJI", "CRCL",
+    ]
+    private static let commoditySymbols: Set<String> = [
+        "XAU", "GOLD", "XAG", "SILVER", "OIL", "WTI", "BRENT", "CL", "NATGAS", "NG", "COPPER", "HG", "XPT", "PLATINUM", "PAXG", "XAUT",
+    ]
+
+    static func of(_ symbol: String) -> PerpGroup {
+        let base = symbol.uppercased().split(whereSeparator: { "-/_:".contains($0) }).first.map(String.init) ?? symbol.uppercased()
+        if stockSymbols.contains(base) { return .stocks }
+        if commoditySymbols.contains(base) { return .commodities }
+        return .crypto
+    }
+}
+
+/// The lists behind Explore's Tokens chips, from /api/token-discovery. Each loads when first
+/// picked (Crypto on appear) and refreshes each time it's picked again.
+@MainActor @Observable final class TokenShelves {
+    enum Kind: String, CaseIterable, Hashable {
+        case crypto = "Crypto", trending = "Trending", mostHeld = "Most held"
+        /// Crypto: the curated coins. Trending: Monad's movers. Most held: Monad's by holders.
+        var query: URLQueryItem {
+            switch self {
+            case .crypto: URLQueryItem(name: "sort", value: "crypto")
+            case .trending: URLQueryItem(name: "chain", value: "143")
+            case .mostHeld: URLQueryItem(name: "sort", value: "holders")
+            }
+        }
+    }
+
+    private struct Response: Decodable { let tokens: [TrendingSpotToken] }
+    private(set) var lists: [Kind: [TrendingSpotToken]] = [:]
+    private(set) var failed: Set<Kind> = []
+
+    func load(_ kind: Kind) async {
+        var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/token-discovery")!
+        components.queryItems = [kind.query]
+        let url = components.url!
+        if lists[kind] == nil, let cached = await ResponseCache.shared.cached(url),
+           let tokens = try? JSONDecoder().decode(Response.self, from: cached).tokens {
+            lists[kind] = tokens.filter { $0.chainIndex != "501" }
+        }
+        do {
+            let (data, _) = try await ResponseCache.shared.data(from: url)
+            lists[kind] = try JSONDecoder().decode(Response.self, from: data).tokens.filter { $0.chainIndex != "501" }
+            failed.remove(kind)
+        } catch {
+            if lists[kind]?.isEmpty ?? true { failed.insert(kind) }
+        }
     }
 }
