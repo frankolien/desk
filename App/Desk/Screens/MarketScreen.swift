@@ -23,6 +23,7 @@ struct MarketScreen: View {
     @State private var perpGroup: PerpGroup = .crypto
     @State private var tokenShelf: TokenShelves.Kind = .crypto
     @State private var tokenShelves = TokenShelves()
+    @State private var tokensExpanded = false
     @State private var selectedTrader: TraderSnapshot?
     @State private var openToken: TokenOpenRequest.Target?
     @State private var directory = TraderDirectory()
@@ -136,6 +137,7 @@ struct MarketScreen: View {
                 }
             }
             .task { if ProcessInfo.processInfo.arguments.contains("-crowd-demo") { directory.seedCrowdForReview() } }
+            .task { if ProcessInfo.processInfo.arguments.contains("-explore-tokens") { shelf = .tokens } }
             .task {
                 guard ProcessInfo.processInfo.arguments.contains("-open-news") else { return }
                 while news.items.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
@@ -323,7 +325,7 @@ struct MarketScreen: View {
                 subChips(PerpGroup.allCases, selected: perpGroup) { perpGroup = $0 }
                 perpGroupRows
             case .tokens:
-                subChips(TokenShelves.Kind.allCases, selected: tokenShelf) { tokenShelf = $0 }
+                subChips(TokenShelves.Kind.allCases, selected: tokenShelf) { tokenShelf = $0; tokensExpanded = false }
                 tokenRows
             case .watchlist: watchlistRows
             }
@@ -380,12 +382,27 @@ struct MarketScreen: View {
                 placeholderRows(3)
             }
         } else {
-            VStack(spacing: 8) {
-                ForEach(tokens.prefix(10)) { token in
+            VStack(spacing: 0) {
+                ForEach(tokensExpanded ? tokens : Array(tokens.prefix(10))) { token in
                     Button { openToken = .init(chainIndex: token.chainIndex, contract: token.contract, symbol: token.symbol) } label: {
-                        TrendingSpotRow(token: token)
+                        CoinRow(token: token, verified: tokenShelf == .crypto)
                     }
                     .buttonStyle(.plain)
+                }
+                if tokens.count > 10 {
+                    Button {
+                        withAnimation(.snappy(duration: 0.25)) { tokensExpanded.toggle() }
+                    } label: {
+                        Text(tokensExpanded ? "Show less" : "Show all \(tokens.count)")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DeskColor.nightText.color)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 40)
+                            .background(Color.white.opacity(0.06), in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 8)
                 }
             }
         }
@@ -1367,5 +1384,68 @@ enum PerpGroup: String, CaseIterable, Hashable {
         } catch {
             if lists[kind]?.isEmpty ?? true { failed.insert(kind) }
         }
+    }
+}
+
+/// A coin in Explore's token lists, laid out like the perp rows: logo, symbol and market cap,
+/// then price and the day's move. The Crypto list marks its coins as the established ones.
+struct CoinRow: View {
+    let token: TrendingSpotToken
+    var verified = false
+
+    var body: some View {
+        HStack(spacing: 13) {
+            MarketTokenLogo(symbol: token.symbol, size: 42, remoteURL: token.artworkURL)
+                .overlay(alignment: .bottomTrailing) {
+                    if verified {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 13, weight: .bold))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, DeskColor.action.color)
+                            .background(Circle().fill(Color.black).padding(1))
+                            .offset(x: 3, y: 3)
+                    }
+                }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(token.symbol)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .lineLimit(1)
+                Text(token.marketCap.map { "\(Self.compact($0)) MC" } ?? token.name)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(token.price.map(spotPrice) ?? "$—")
+                    .font(.system(size: 16, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .lineLimit(1)
+                if let change = token.change {
+                    HStack(spacing: 3) {
+                        Image(systemName: change >= 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                            .font(.system(size: 8, weight: .bold))
+                        Text(String(format: "%.2f%%", abs(change)))
+                            .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                    }
+                    .foregroundStyle(change >= 0 ? DeskColor.rise.color : DeskColor.fall.color)
+                    .lineLimit(1)
+                }
+            }
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+
+    /// $1.61T, $293.6B, $9.28M: three significant figures, as market caps read.
+    static func compact(_ value: Double) -> String {
+        let units: [(Double, String)] = [(1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K")]
+        for (size, suffix) in units where value >= size {
+            let scaled = value / size
+            let digits = scaled >= 100 ? 1 : scaled >= 10 ? 1 : 2
+            return "$" + String(format: "%.\(digits)f", scaled).replacingOccurrences(of: #"\.?0+$"#, with: "", options: .regularExpression) + suffix
+        }
+        return "$" + String(format: "%.0f", value)
     }
 }

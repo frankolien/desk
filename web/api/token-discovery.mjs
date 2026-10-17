@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import { chainName, isBuyable, isQuotable, nativeToken, CHAINS } from "./_chains.mjs";
-import { okxPost } from "./_okx.mjs";
 
 function authHeaders(timestamp, requestPath) {
   const signature = crypto.createHmac("sha256", process.env.OKX_SECRET_KEY)
@@ -105,43 +104,69 @@ export function homeFirst(tokens) {
     .map(({ token }) => token);
 }
 
-/// Explore's "Crypto" chip: the established coins people mean by crypto, Monad's own first,
-/// so the list is never just whatever memecoin is hot. Names say what the wrapped token is.
-export const CRYPTO = [
-  { chainIndex: "143", contract: "0x3bd359c1119da7da1d913d1c4d2b7c461115433a", name: "Monad" },
-  { chainIndex: "143", contract: "0xee8c0e9f1bffb4eb878d8f15f368a02a35481242", name: "Ethereum" },
-  { chainIndex: "143", contract: "0x0555e30da8f98308edb960aa94c0db47230d2b9c", name: "Bitcoin" },
-  { chainIndex: "56", contract: "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", name: "BNB" },
-  { chainIndex: "1", contract: "0x514910771af9ca656af840dff83e8264ecf986ca", name: "Chainlink" },
-  { chainIndex: "1", contract: "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984", name: "Uniswap" },
-  { chainIndex: "1", contract: "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9", name: "Aave" },
-  { chainIndex: "56", contract: "0xba2ae424d960c26247dd6c32edc70b295c744c43", name: "Dogecoin" },
-  { chainIndex: "1", contract: "0x6982508145454ce325ddbe47a25d4ec3d2311933", name: "Pepe" },
-  { chainIndex: "1", contract: "0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce", name: "Shiba Inu" },
-  { chainIndex: "1", contract: "0xfaba6f8e4a5e8ab82f62fe7c39859fa577269be3", name: "Ondo" },
-];
+/// Explore's "Crypto" chip: the big coins, ranked by their real market cap (CoinGecko), each
+/// opening the token Desk can actually trade: Monad's own where one exists (BTC, ETH, MON),
+/// otherwise the 1:1 peg on BNB Chain or Ethereum. Every peg here was checked to price within
+/// 1% of its coin (17 Oct 2026); ATOM, TON and RENDER were left out for missing that.
+export const CRYPTO_PEGS = {
+  "bitcoin": ["143", "0x0555e30da8f98308edb960aa94c0db47230d2b9c"],
+  "ethereum": ["143", "0xee8c0e9f1bffb4eb878d8f15f368a02a35481242"],
+  "binancecoin": ["56", "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"],
+  "ripple": ["56", "0x1d2f0da169ceb9fc7b3144628db156f3f6c60dbe"],
+  "solana": ["56", "0x570a5d26f7765ecb712c0924e4de545b89fd43df"],
+  "tron": ["56", "0xce7de646e7208a4ef112cb6ed5038fa6cc6b12e3"],
+  "zcash": ["56", "0x1ba42e5193dfa8b03d15dd1b86a3113bbbef8eeb"],
+  "dogecoin": ["56", "0xba2ae424d960c26247dd6c32edc70b295c744c43"],
+  "chainlink": ["1", "0x514910771af9ca656af840dff83e8264ecf986ca"],
+  "cardano": ["56", "0x3ee2200efb3400fabb9aacf31297cbdd1d435d47"],
+  "near": ["56", "0x1fa4a73a3f0133f0025378af00236f3abdee5d63"],
+  "bitcoin-cash": ["56", "0x8ff795a6f4d97e7887c79bea79aba5cc76444adf"],
+  "litecoin": ["56", "0x4338665cbb7b2485a8855a139b75d5e34ab0db94"],
+  "uniswap": ["1", "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984"],
+  "avalanche-2": ["56", "0x1ce0c2827e2ef14d5c4f29a091d735a204794041"],
+  "shiba-inu": ["1", "0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce"],
+  "tether-gold": ["1", "0x68749665ff8d2d112fa859aa293f07a622782f38"],
+  "bittensor": ["1", "0x77e06c9eccf2e797fd462a92b6d7642ef85b0a44"],
+  "quant-network": ["1", "0x4a220e6096b25eadb88358cb44068a3248254675"],
+  "crypto-com-chain": ["1", "0xa0b73e1ff0b80914ab6fe0444e65848c4c34450b"],
+  "aave": ["1", "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9"],
+  "pepe": ["1", "0x6982508145454ce325ddbe47a25d4ec3d2311933"],
+  "ondo-finance": ["1", "0xfaba6f8e4a5e8ab82f62fe7c39859fa577269be3"],
+  "polkadot": ["56", "0x7083609fce4d1d8dc0c979aab8c869ea2c873402"],
+  "world-liberty-financial": ["1", "0xda5e1988097297dcdc1f90d4dfe7909e847cbef6"],
+  "mantle": ["1", "0x3c3a81e81dc49a522a592e7622a7e711c06bf354"],
+  "pax-gold": ["1", "0x45804880de22913dafe09f4980848ece6ecbaf78"],
+  "arbitrum": ["1", "0xb50721bcf8d664c30412cfbc6cf7a15145234ad1"],
+  "ethena": ["1", "0x57e114b691db790c35207b2e685d4a43181e6061"],
+  "pendle": ["1", "0x808507121b80c02388fad14726482e061b8da827"],
+  "fetch-ai": ["1", "0xaea46a60368a7bd060eec7df8cba43b7ef41ad85"],
+  "worldcoin-wld": ["1", "0x163f8c2467924be0ae7b5347228cabf260318753"],
+  "ethereum-classic": ["56", "0x3d6545b08693dae087e957cb1180ee38b9e3c25e"],
+  "filecoin": ["56", "0x0d8ce2a99bb6e3b7db580ed848240e4a0f9ae153"],
+  "monad": ["143", "0x3bd359c1119da7da1d913d1c4d2b7c461115433a"]
+};
 
-/// The curated coins, named by OKX's basic info and priced by its price info in two calls.
-export async function cryptoTokens({ post = okxPost } = {}) {
-  const identities = CRYPTO.map(({ chainIndex, contract }) => ({ chainIndex, tokenContractAddress: contract }));
-  const [basics, prices] = await Promise.all([
-    post("/api/v6/dex/market/token/basic-info", identities).catch(() => []),
-    post("/api/v6/dex/market/price-info", identities),
-  ]);
-  const key = (row) => `${row.chainIndex}:${String(row.tokenContractAddress ?? "").toLowerCase()}`;
-  const basic = new Map((Array.isArray(basics) ? basics : []).map((row) => [key(row), row]));
-  const price = new Map((Array.isArray(prices) ? prices : []).map((row) => [key(row), row]));
-  return CRYPTO.map((entry) => {
-    const id = `${entry.chainIndex}:${entry.contract}`;
-    const info = basic.get(id) ?? {};
-    const live = price.get(id);
-    if (!live) return null;
-    return normalize({
-      ...info, ...live, chainIndex: entry.chainIndex, tokenContractAddress: entry.contract,
-      tokenName: entry.name, tokenSymbol: info.tokenSymbol ?? entry.name,
-      change: live.priceChange24H, volume: live.volume24H,
-    });
-  }).filter(Boolean);
+const COINGECKO = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=150&page=1&price_change_percentage=24h";
+
+function cryptoToken(coin, [chainIndex, contract]) {
+  return {
+    id: `${chainIndex}:${contract}`, chainIndex, chainName: chainName(chainIndex),
+    quotable: isQuotable(chainIndex), buyable: isBuyable(chainIndex), nativeSymbol: nativeToken(chainIndex)?.symbol ?? null,
+    symbol: String(coin.symbol ?? "").toUpperCase(), name: String(coin.name ?? coin.symbol ?? ""),
+    logoURL: String(coin.image ?? ""), contract, decimals: null, explorerURL: "",
+    price: numeric(coin.current_price), change: numeric(coin.price_change_percentage_24h),
+    marketCap: numeric(coin.market_cap), volume24H: numeric(coin.total_volume),
+    liquidity: null, holders: null, communityRecognized: true, riskLevel: null,
+  };
+}
+
+export async function cryptoTokens({ fetchImpl = fetch } = {}) {
+  const response = await fetchImpl(COINGECKO, { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`coingecko ${response.status}`);
+  const coins = await response.json();
+  return (Array.isArray(coins) ? coins : [])
+    .filter((coin) => CRYPTO_PEGS[coin.id])
+    .map((coin) => cryptoToken(coin, CRYPTO_PEGS[coin.id]));
 }
 
 /// Most held: Monad's busy tokens, ordered by how many wallets hold them.
@@ -157,7 +182,8 @@ export default async function handler(req, res) {
   const sort = String(req.query.sort ?? "");
   try {
     if (!query && sort === "crypto") {
-      res.setHeader("Cache-Control", "s-maxage=60, stale-while-revalidate=180");
+      // CoinGecko's free tier is rate limited; the edge serves one answer a minute to everyone.
+      res.setHeader("Cache-Control", "s-maxage=60, stale-while-revalidate=600");
       return res.status(200).json({ mode: "crypto", observedAt: Date.now(), tokens: await cryptoTokens() });
     }
     const listChain = sort === "holders" ? (chain || MONAD) : chain;
