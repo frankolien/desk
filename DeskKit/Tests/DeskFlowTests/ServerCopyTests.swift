@@ -56,3 +56,21 @@ import Testing
         #expect(!fitted.allows(rules: rules))
     }
 }
+
+@Suite("Spot Auto-Copy grant")
+struct SpotCopyGrantTests {
+    /// Printed by web/api/_spot.mjs `spotGrantText` for these inputs, lowercase addresses in.
+    @Test func grantMatchesTheServer() {
+        let text = SpotCopyProtocol.grantText(
+            wallet: "0x8da208f0c0a36c7f11bba1a7e0b54f7900201c4b", desk: "0x515b2e45b143aed58ff7e4d583303c0e6aecba18",
+            deviceKey: "BPdev", limits: .init(perTrade: 25, perDay: 100), expiry: 1_794_800_000, issuedAt: 1_792_209_000_123)
+        #expect(text == "Desk Spot Auto-Copy\nI let Desk's key copy token trades for this wallet, within these limits, until the date below.\nWallet: 0x8Da208F0c0A36c7F11bBa1A7e0B54F7900201c4B\nDesk key: 0x515b2e45b143AED58Ff7e4D583303c0E6aeCBa18\nDevice key: BPdev\nMax per buy: 25 AUSD\nMax per day: 100 AUSD\nUntil: 2026-11-16T03:33:20.000Z\nIssued: 2026-10-17T03:50:00.123Z")
+    }
+
+    @Test func rulesEncodeAsTheServerReadsThem() throws {
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(SpotCopyProtocol.Rules())) as? [String: Any]
+        #expect(json?["sizing"] as? String == "fixed")
+        #expect(json?["slippageBps"] as? Int == 500)
+        #expect(json?["maxLeaderUsd"] == nil)
+    }
+}
