@@ -800,6 +800,7 @@ struct TraderProfileScreen: View {
     @State private var snapshot: TraderSnapshot?
     @State private var tab: Tab = .positions
     @State private var holdingKind: HoldingKind = .perps
+    @State private var sending = false
     @State private var isNaming = false
     @State private var reportsProfile = false
     @State private var draftName = ""
@@ -874,6 +875,12 @@ struct TraderProfileScreen: View {
             Text("Only you see this name.")
         }
         .task { await alerts.refreshPermission() }
+        .sheet(isPresented: $sending) {
+            if let model = AppModel.current {
+                WithdrawSheet(model: model, sendTo: trader.address, sendToName: directory.name(for: trader.address)) { sending = false }
+                    .presentationDragIndicator(.visible)
+            }
+        }
         .sheet(isPresented: $showsAutoCopy) {
             AutoCopySheet(address: trader.address, name: directory.name(for: trader.address), copier: copier)
                 .presentationDetents([.large])
@@ -1041,6 +1048,9 @@ struct TraderProfileScreen: View {
 
     private var actions: some View {
         HStack(spacing: 10) {
+            if let model = AppModel.current, trader.address.lowercased() != model.address?.checksummed.lowercased() {
+                outlineButton("Send", symbol: "paperplane.fill") { sending = true }
+            }
             outlineButton(following ? "Following" : "Follow", symbol: nil) {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 let starting = !following

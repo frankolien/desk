@@ -91,8 +91,13 @@ final class AppModel {
     private(set) var mainnetMON = LastGood<NativeAmount>()
     private var mainnetSender: TransactionSender?
 
+    /// The app's one model, for screens opened from places that weren't handed it (a trader's
+    /// profile sheet, say) and need the wallet, as `CopyTrader.current` is for copying.
+    static weak var current: AppModel?
+
     init(passkey: any PasskeyService) {
         self.passkey = passkey
+        Self.current = self
         #if DEBUG
         if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-network"),
            index + 1 < ProcessInfo.processInfo.arguments.count,
