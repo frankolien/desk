@@ -280,6 +280,7 @@ struct SpotCopyActivityScreen: View {
     let model: AppModel
 
     @State private var spot = SpotCopier.shared
+    @State private var boardDirectory = TraderDirectory()
     @State private var limits = SpotCopyProtocol.Limits(perTrade: 25, perDay: 100)
     @State private var days = 30
     @State private var editsLimits = false
@@ -323,6 +324,11 @@ struct SpotCopyActivityScreen: View {
                 }
                 ForEach(spot.leaders.keys.sorted(), id: \.self) { address in
                     let entry = spot.leaders[address]
+                    NavigationLink {
+                        if let copier = CopyTrader.current {
+                            CopyBoardScreen(address: address, model: model, copier: copier, directory: boardDirectory)
+                        }
+                    } label: {
                     HStack(spacing: 10) {
                         TraderAvatar(address: address, size: 26)
                         Text(entry?.name ?? "\(address.prefix(6))…\(address.suffix(4))").font(.subheadline).lineLimit(1)
@@ -330,7 +336,11 @@ struct SpotCopyActivityScreen: View {
                         if let rules = entry?.rules {
                             Text(rules.sizing == .fixed ? "\(Int(rules.amount)) AUSD" : "≤ \(Int(rules.maxPerBuy)) AUSD").font(.caption).foregroundStyle(.secondary)
                         }
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                     }
+                    .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 

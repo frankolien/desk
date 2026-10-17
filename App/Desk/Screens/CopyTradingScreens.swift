@@ -399,6 +399,7 @@ struct CopyActivityScreen: View {
     let directory: TraderDirectory
 
     @State private var editing: CopiedTrader?
+    @State private var boarding: CopiedTrader?
     @State private var showsBasket = false
     @State private var showsSettings = false
     @State private var showsShadow = true
@@ -433,7 +434,7 @@ struct CopyActivityScreen: View {
             GlassSection("Copying") {
                 let records = records
                 ForEach(copier.traders) { trader in
-                    Button { editing = trader } label: { traderRow(trader, records) }
+                    Button { boarding = trader } label: { traderRow(trader, records) }
                         .buttonStyle(.plain)
                         .contextMenu {
                             if trader.rules.mode == .shadow {
@@ -515,6 +516,12 @@ struct CopyActivityScreen: View {
                 Button("Settings", systemImage: "slider.horizontal.3") { showsSettings = true }
             }
         }
+        .navigationDestination(item: $boarding) { trader in
+            CopyBoardScreen(address: trader.address, model: model, copier: copier, directory: directory)
+        }
+        #if DEBUG
+        .task { if ProcessInfo.processInfo.arguments.contains("-copy-board") { boarding = copier.traders.first } }
+        #endif
         .sheet(item: $editing) { trader in
             AutoCopySheet(address: trader.address, name: directory.name(for: trader.address), copier: copier)
         }
