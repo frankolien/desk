@@ -18,7 +18,12 @@ final class TickerSparklines {
     static func key(_ token: TrendingSpotToken) -> String { "\(token.chainIndex):\(token.contract)" }
 
     func load(_ tokens: [TrendingSpotToken]) async {
-        let ids = tokens.prefix(10).map(Self.key)
+        await load(ids: tokens.prefix(10).map(Self.key))
+    }
+
+    /// Hourly closes over the last day for `chain:contract` ids, ten at most.
+    func load(ids: [String]) async {
+        let ids = Array(ids.prefix(10))
         guard !ids.isEmpty else { return }
         var components = URLComponents(string: Self.endpoint)!
         components.queryItems = [

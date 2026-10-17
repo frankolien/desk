@@ -152,6 +152,9 @@ struct MarketSearchScreen: View {
     @State private var nameWasNotFound = false
     @State private var nameLookupUnavailable = false
     @StateObject private var discovery = TokenDiscoveryModel()
+    @State private var monadTrending = TokenShelves()
+    @State private var perpSparks = TickerSparklines()
+    @State private var coinSparks = TickerSparklines()
     @Namespace private var navigationSpace
 
     private var looksLikeAName: Bool {
@@ -192,8 +195,16 @@ struct MarketSearchScreen: View {
 
     private var spotResults: [TrendingSpotToken] {
         query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? discovery.trending : discovery.searchResults
+            ? (monadTrending.lists[.trending] ?? discovery.trending) : discovery.searchResults
     }
+
+    /// A perp market's sparkline borrows its coin's token chart: the same asset, priced on-chain.
+    private static let perpTokens: [String: String] = [
+        "BTC": "143:0x0555e30da8f98308edb960aa94c0db47230d2b9c", "ETH": "143:0xee8c0e9f1bffb4eb878d8f15f368a02a35481242",
+        "MON": "143:0x3bd359c1119da7da1d913d1c4d2b7c461115433a", "SOL": "56:0x570a5d26f7765ecb712c0924e4de545b89fd43df",
+        "ZEC": "56:0x1ba42e5193dfa8b03d15dd1b86a3113bbbef8eeb", "NEAR": "56:0x1fa4a73a3f0133f0025378af00236f3abdee5d63",
+        "UNI": "1:0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
+    ]
 
     var body: some View {
         NavigationStack {
@@ -281,7 +292,8 @@ struct MarketSearchScreen: View {
                         HStack(spacing: 12) {
                             ForEach(Array(market.allMarkets.prefix(4)), id: \.id) { entry in
                                 Button { open(entry) } label: {
-                                    SearchMarketCard(model: market, market: entry)
+                                    SearchMarketCard(model: market, market: entry,
+                                                     closes: Self.perpTokens[entry.symbol.uppercased()].flatMap { perpSparks.closes[$0] })
                                 }
                                 .buttonStyle(DeskPressStyle())
                             }
@@ -304,7 +316,7 @@ struct MarketSearchScreen: View {
                         LazyVStack(spacing: 10) {
                             ForEach(spotResults) { token in
                                 Button { selectedSpot = token } label: {
-                                    TrendingSpotRow(token: token)
+                                    TrendingSpotRow(token: token, closes: coinSparks.closes[TickerSparklines.key(token)])
                                         .contentShape(Rectangle())
                                         .matchedTransitionSource(id: "spot-\(token.id)", in: navigationSpace)
                                 }
@@ -410,6 +422,9 @@ struct MarketSearchScreen: View {
                     .toolbar(.hidden, for: .tabBar)
             }
             .task { if Showcase.spotTrading { await discovery.run() } }
+            .task { if Showcase.spotTrading { await monadTrending.load(.trending) } }
+            .task { await perpSparks.load(ids: Array(Set(Self.perpTokens.values))) }
+            .task(id: spotResults.prefix(10).map(\.id).joined(separator: ",")) { await coinSparks.load(spotResults) }
             .task(id: query) { if Showcase.spotTrading { await discovery.search(query) } }
             .task(id: query) {
                 person = nil
@@ -627,6 +642,8 @@ final class TokenDiscoveryModel: ObservableObject {
 
 struct TrendingSpotRow: View {
     let token: TrendingSpotToken
+    /// The last day's hourly closes: drawn in place of the chevron when there.
+    var closes: [Double]? = nil
 
     var body: some View {
         HStack(spacing: 13) {
@@ -659,9 +676,14 @@ struct TrendingSpotRow: View {
                         .lineLimit(1)
                 }
             }
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(DeskColor.nightMuted.color)
+            if let closes, closes.count >= 2 {
+                Sparkline(values: closes, tint: (closes.last ?? 0) >= (closes.first ?? 0) ? DeskColor.rise : DeskColor.fall)
+                    .frame(width: 64, height: 34)
+            } else {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+            }
         }
         .padding(.horizontal, 14)
         .frame(height: 76)
@@ -871,6 +893,7 @@ private struct MarketRow: View {
 private struct SearchMarketCard: View {
     let model: MarketModel
     let market: Market
+    var closes: [Double]? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -883,7 +906,13 @@ private struct SearchMarketCard: View {
                         .foregroundStyle(change >= 0 ? DeskColor.rise.color : DeskColor.fall.color)
                 }
             }
-            Spacer()
+            if let closes, closes.count >= 2 {
+                Sparkline(values: closes, tint: (closes.last ?? 0) >= (closes.first ?? 0) ? DeskColor.rise : DeskColor.fall)
+                    .frame(height: 56)
+                    .padding(.vertical, 8)
+            } else {
+                Spacer()
+            }
             Text(market.symbol)
                 .font(.system(size: 21, weight: .bold, design: .rounded))
             HStack {

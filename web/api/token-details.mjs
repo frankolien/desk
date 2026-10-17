@@ -40,16 +40,26 @@ async function handleSparklines(req, res) {
   const ids = [...new Set(String(req.query.tokens ?? "").split(",").map((v) => v.trim()).filter(Boolean))].slice(0, SPARKLINE_BATCH);
   const parsed = ids.map((id) => TOKEN_ID.exec(id)).filter(Boolean).map((m) => ({ chainIndex: m[1], contract: m[2] }));
   if (!parsed.length) return res.status(400).json({ error: "tokens must be chain:address pairs." });
-  const series = await Promise.all(parsed.map(async ({ chainIndex, contract }) => {
-    try {
-      const rows = await okxGet("/api/v6/dex/market/candles", { chainIndex, tokenContractAddress: contract, bar: "1H", limit: "24" });
-      const closes = (Array.isArray(rows) ? rows : []).map((row) => number(row[4])).filter((v) => v !== null).reverse();
-      return { chainIndex, contract, closes };
-    } catch {
-      return { chainIndex, contract, closes: [] };
+  // One at a time, with one retry: OKX's per-key limit is shared with the rest of Desk, and ten
+  // candle calls at once came back mostly refused.
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const one = async ({ chainIndex, contract }) => {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const rows = await okxGet("/api/v6/dex/market/candles", { chainIndex, tokenContractAddress: contract, bar: "1H", limit: "24" });
+        const closes = (Array.isArray(rows) ? rows : []).map((row) => number(row[4])).filter((v) => v !== null).reverse();
+        return { chainIndex, contract, closes };
+      } catch {
+        if (attempt === 0) await pause(600);
+      }
     }
-  }));
-  res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=900");
+    return { chainIndex, contract, closes: [] };
+  };
+  const series = [];
+  for (const id of parsed) series.push(await one(id));
+  // A gap is likely a refusal, not a token without trades: don't keep it for five minutes.
+  const complete = series.every((row) => row.closes.length > 0);
+  res.setHeader("Cache-Control", complete ? "public, s-maxage=300, stale-while-revalidate=900" : "public, s-maxage=15");
   return res.status(200).json({ observedAt: Date.now(), series });
 }
 
