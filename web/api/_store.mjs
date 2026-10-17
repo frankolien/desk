@@ -49,6 +49,8 @@ export function redisStore({
     lpush: (key, ...values) => command("LPUSH", key, ...values),
     ltrim: (key, start, stop) => command("LTRIM", key, String(start), String(stop)),
     lrange: (key, start, stop) => command("LRANGE", key, String(start), String(stop)),
+    rpush: (key, ...values) => command("RPUSH", key, ...values),
+    lpop: (key) => command("LPOP", key),
     zadd: (key, score, member) => command("ZADD", key, String(score), member),
     zcount: (key, min, max) => command("ZCOUNT", key, String(min), String(max)),
     zremrangebyscore: (key, min, max) => command("ZREMRANGEBYSCORE", key, String(min), String(max)),
@@ -126,6 +128,16 @@ export function memoryStore() {
       values.forEach((value) => list.unshift(String(value)));
       lists.set(key, list);
       return list.length;
+    },
+    async rpush(key, ...values) {
+      const list = lists.get(key) ?? [];
+      values.forEach((value) => list.push(String(value)));
+      lists.set(key, list);
+      return list.length;
+    },
+    async lpop(key) {
+      const list = lists.get(key) ?? [];
+      return list.length ? list.shift() : null;
     },
     async ltrim(key, from, to) {
       const [start, stop] = [Number(from), Number(to)];
