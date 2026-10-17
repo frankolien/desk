@@ -284,12 +284,71 @@ async function swap(req, res) {
   return res.status(200).json(summarizeSwap(quote, transaction, wei, side));
 }
 
+/// Desk's spot copy engine asks here for its 0x quotes (docs/spot-copy.md), so the 0x key stays
+/// in Vercel. CRON_SECRET only. `kind=price` is the round-trip check: no transaction, no fee.
+/// Copies carry Desk's fee, taken in AUSD, when SPOT_FEE_RECIPIENT and COPY_FEE_BPS are set.
+export function copyQuoteParams(query, env = process.env) {
+  const address = (value) => /^0x[a-fA-F0-9]{40}$/.test(String(value ?? "")) ? String(value).toLowerCase() : null;
+  const taker = address(query.taker);
+  const sellToken = address(query.sellToken);
+  const buyToken = address(query.buyToken);
+  const sellAmount = String(query.sellAmount ?? "");
+  const slippageBps = Number(query.slippageBps ?? 500);
+  const kind = query.kind === "price" ? "price" : "quote";
+  if (!taker || !sellToken || !buyToken || sellToken === buyToken || !/^[1-9]\d{0,40}$/.test(sellAmount)) return null;
+  if (sellToken !== AUSD && buyToken !== AUSD) return null;
+  if (!Number.isInteger(slippageBps) || slippageBps < 10 || slippageBps > 3000) return null;
+  const params = new URLSearchParams({ chainId: MONAD, sellToken, buyToken, sellAmount, taker, slippageBps: String(slippageBps) });
+  const feeBps = Number(env.COPY_FEE_BPS ?? 0);
+  const recipient = address(env.SPOT_FEE_RECIPIENT);
+  if (kind === "quote" && recipient && Number.isInteger(feeBps) && feeBps > 0 && feeBps <= 300) {
+    params.set("swapFeeRecipient", recipient);
+    params.set("swapFeeBps", String(feeBps));
+    params.set("swapFeeToken", AUSD);
+  }
+  return { kind, params };
+}
+
+async function copyQuote(req, res) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers?.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: "Not for you." });
+  if (!zeroXConfigured()) return res.status(503).json({ error: "No quote provider is configured.", reason: "unavailable" });
+  const asked = copyQuoteParams(req.query);
+  if (!asked) return res.status(400).json({ error: "Valid quote parameters required", reason: "invalid" });
+  let quote;
+  try {
+    const response = await fetch(`https://api.0x.org/swap/allowance-holder/${asked.kind}?${asked.params}`, {
+      headers: { "0x-api-key": process.env.ZEROX_API_KEY, "0x-version": "v2" },
+    });
+    quote = await response.json();
+    if (!response.ok) return res.status(422).json({ error: "No live quote.", reason: "unavailable", detail: String(quote?.name ?? response.status) });
+  } catch {
+    return res.status(502).json({ error: "The quote service could not be reached.", reason: "unreachable" });
+  }
+  if (quote.liquidityAvailable === false) return res.status(422).json({ error: "Not enough liquidity.", reason: "no-liquidity" });
+  const out = {
+    buyAmount: String(quote.buyAmount ?? "0"), minBuyAmount: String(quote.minBuyAmount ?? "0"),
+    fee: String(quote.fees?.integratorFee?.amount ?? "0"),
+    sources: Array.isArray(quote.route?.fills) ? [...new Set(quote.route.fills.map((fill) => fill.source).filter(Boolean))] : [],
+  };
+  if (asked.kind === "quote") {
+    const tx = quote.transaction;
+    if (String(tx?.to ?? "").toLowerCase() !== ALLOWANCE_HOLDER || String(tx?.value ?? "0") !== "0" || !/^0x2213bc0b/i.test(String(tx?.data ?? ""))) {
+      return res.status(422).json({ error: "This route needs a transaction Desk's copy key can't send.", reason: "unsupported-route" });
+    }
+    out.to = tx.to;
+    out.data = tx.data;
+  }
+  return res.status(200).json(out);
+}
+
 export default async function handler(req, res) {
   // Card and Apple Pay deposits share this function: funding, like the swap, with no thirteenth.
   if (req.query.view === "onramp") return handleOnramp(req, res);
   if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
   res.setHeader("Cache-Control", "private, no-store");
   if (req.query.view === "swap") return swap(req, res);
+  if (req.query.view === "copy") return copyQuote(req, res);
   const chainIndex = String(req.query.chainIndex || "");
   const tokenAddress = String(req.query.tokenAddress || "");
   const side = String(req.query.side || "buy").toLowerCase();
