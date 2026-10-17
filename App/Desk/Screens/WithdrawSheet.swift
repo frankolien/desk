@@ -6,6 +6,9 @@ import UIKit
 
 struct WithdrawSheet: View {
     let model: AppModel
+    /// Opened from someone's profile: send to them, with their name in the title.
+    var sendTo: String? = nil
+    var sendToName: String? = nil
     let onClose: () -> Void
 
     private enum Destination: Hashable { case wallet, address }
@@ -76,7 +79,14 @@ struct WithdrawSheet: View {
         .task { if ProcessInfo.processInfo.arguments.contains("-withdraw-sent") { model.seedWithdrawalSentForReview() } }
         #endif
         .onAppear {
-            if tradingBalance.isZero && !walletBalance.isZero { source = .wallet }
+            if let sendTo {
+                // From the wallet first: it's one transaction instead of two.
+                source = walletBalance.isZero && !tradingBalance.isZero ? .trading : .wallet
+                destination = .address
+                recipientText = sendTo
+            } else if tradingBalance.isZero && !walletBalance.isZero {
+                source = .wallet
+            }
         }
         .onChange(of: source) { _, newValue in
             // Wallet AUSD can only go somewhere else; sending it to itself is nothing.
@@ -87,8 +97,10 @@ struct WithdrawSheet: View {
 
     private var header: some View {
         HStack {
-            Text("Withdraw")
+            Text(sendTo == nil ? "Withdraw" : "Send to \(sendToName ?? "\(sendTo!.prefix(6))…\(sendTo!.suffix(4))")")
                 .font(.system(size: 22, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
                 .foregroundStyle(DeskColor.nightText.color)
             if !model.network.holdsRealFunds {
                 Text("Testnet")

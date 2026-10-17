@@ -3367,6 +3367,7 @@ private struct WalletProfileScreen: View {
     @State private var editsAlerts = false
     @State private var showsAutoCopy = false
     @State private var showsSpotCopy = false
+    @State private var sending = false
 
     private enum Tab: String, CaseIterable { case positions = "Positions", closed = "Closed", activity = "Activity" }
 
@@ -3495,11 +3496,16 @@ private struct WalletProfileScreen: View {
                                 }
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             }
+                            if isEVM, wallet.address.lowercased() != model.address?.checksummed.lowercased() {
+                                action("Send", symbol: "paperplane.fill") { sending = true }
+                            }
                             if identity?.source != "sns" {
-                                action("Set Name", symbol: "pencil") {
+                                // An icon only, so Follow and Send keep their room beside the name.
+                                action("", symbol: "pencil") {
                                     draftName = tracked?.name ?? ""
                                     naming = true
                                 }
+                                .accessibilityLabel("Set Name")
                             }
                         }
                     }.padding(.top, 20)
@@ -3554,6 +3560,10 @@ private struct WalletProfileScreen: View {
         }
         .sheet(isPresented: $showsSpotCopy) {
             SpotCopySheet(model: model, leader: wallet.address, name: name)
+        }
+        .sheet(isPresented: $sending) {
+            WithdrawSheet(model: model, sendTo: wallet.address, sendToName: name == wallet.displayAddress ? nil : name) { sending = false }
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showsPerpl) {
             if let copier = CopyTrader.current {
@@ -3654,7 +3664,7 @@ private struct WalletProfileScreen: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 if let symbol { Image(systemName: symbol).font(.system(size: 11, weight: .semibold)) }
-                Text(title).font(.system(size: 13, weight: .semibold, design: .rounded))
+                if !title.isEmpty { Text(title).font(.system(size: 13, weight: .semibold, design: .rounded)) }
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 13)
