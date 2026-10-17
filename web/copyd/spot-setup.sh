@@ -14,6 +14,10 @@ P="--profile desk"
 REGION=eu-north-1
 ALIAS=alias/desk-spot-copy
 FEE_BPS="${FEE_BPS:-50}"
+if [ -n "${FEE_TO:-}" ] && ! [[ "$FEE_TO" =~ ^0x[0-9a-fA-F]{40}$ ]]; then
+  echo "FEE_TO must be a 0x address (42 characters), not \"$FEE_TO\"."
+  exit 1
+fi
 
 key=$(aws kms describe-key $P --region $REGION --key-id $ALIAS --query KeyMetadata.KeyId --output text 2>/dev/null || true)
 if [ -z "$key" ] || [ "$key" = "None" ]; then
