@@ -16,6 +16,10 @@ import { readTrader } from "./books.mjs";
 import { watchPositions } from "./watcher.mjs";
 import { createExecutor } from "./executor.mjs";
 import { createMarketBook } from "./markets.mjs";
+import { hookAddress, kmsAccount } from "./spot-chain.mjs";
+import { apiQuote, monadClients, spotChain, spotReads } from "./spot-node.mjs";
+import { createSpotExecutor } from "./spot-executor.mjs";
+import { S as SPOT_KEYS, createSpotEngine } from "./spot-engine.mjs";
 
 const SWEEP_MS = Number(process.env.COPYD_SWEEP_MS || 30_000);
 const PENDING_SWEEP_MS = 10 * 60_000;
@@ -29,11 +33,10 @@ const notify = process.env.DESK_API && process.env.CRON_SECRET
   ? createNotifier({ send: apiSender({ base: process.env.DESK_API, secret: process.env.CRON_SECRET }) })
   : async () => ({ skipped: "notifications not configured" });
 
-/// Live copies need desk-copyd's own AWS credentials (it may only Sign with Desk keys) and the
-/// key that opens Perpl tokens. Without them, live rules are skipped and shadow copies run.
-function liveKms() {
-  const { COPYD_AWS_ACCESS_KEY_ID: accessKeyId, COPYD_AWS_SECRET_ACCESS_KEY: secretAccessKey, COPY_TOKEN_KEY } = process.env;
-  if (!accessKeyId || !secretAccessKey || !COPY_TOKEN_KEY || process.env.COPY_HALT) return null;
+/// desk-copyd's KMS client, for both kinds of copying; null without its credentials.
+function copydKms() {
+  const { COPYD_AWS_ACCESS_KEY_ID: accessKeyId, COPYD_AWS_SECRET_ACCESS_KEY: secretAccessKey } = process.env;
+  if (!accessKeyId || !secretAccessKey) return null;
   let client = null;
   return {
     async send(command) {
@@ -44,6 +47,13 @@ function liveKms() {
       return client.send(command);
     },
   };
+}
+
+/// Live copies need desk-copyd's own AWS credentials (it may only Sign with Desk keys) and the
+/// key that opens Perpl tokens. Without them, live rules are skipped and shadow copies run.
+function liveKms() {
+  if (!process.env.COPY_TOKEN_KEY || process.env.COPY_HALT) return null;
+  return copydKms();
 }
 
 // Three beats' grace: a holder that misses two still holds; one that stops is replaced.
@@ -71,6 +81,58 @@ const watcher = watchPositions({
 });
 
 let stopping = false;
+
+/// Spot copy (docs/spot-copy.md): Desk's one secp256k1 key in KMS sends every copy and pays the
+/// gas, fenced on each wallet by DeskCopyHook. Needs SPOT_KEY_ID, SPOT_HOOK, desk-copyd's AWS
+/// credentials, DESK_API and CRON_SECRET (for quotes).
+const SPOT_TICK_MS = Number(process.env.SPOT_TICK_MS || 3_000);
+const SPOT_LOW_MON = 10n ** 18n * 5n;
+async function startSpot() {
+  const hook = hookAddress();
+  const client = copydKms();
+  if (!hook || !process.env.SPOT_KEY_ID || !client || !process.env.DESK_API || !process.env.CRON_SECRET || process.env.SPOT_HALT) {
+    console.log("copyd: spot copy off (needs SPOT_KEY_ID, SPOT_HOOK, desk-copyd credentials, DESK_API, CRON_SECRET)");
+    return null;
+  }
+  const account = await kmsAccount({ client, keyId: process.env.SPOT_KEY_ID });
+  const { reader, writer } = monadClients({ account });
+  const reads = spotReads({ reader, hook, desk: account.address });
+  const spotExecutor = createSpotExecutor({ store, chain: spotChain({ reader, writer }), quote: apiQuote(), hook, desk: account.address });
+  const send = createNotifierSend();
+  const spot = createSpotEngine({ store, reads, executor: spotExecutor, desk: { address: account.address, hook }, send });
+  // The API reads Desk's key and the hook from here, so neither is configured twice.
+  await store.set(SPOT_KEYS.desk, JSON.stringify({ address: account.address, hook, feeBps: Number(process.env.COPY_FEE_BPS || 0) }));
+  let lastBalanceCheck = 0;
+  (async () => {
+    while (!stopping) {
+      const started = Date.now();
+      if (lease.holds()) {
+        try {
+          const { relayed, played } = await spot.tick();
+          if (relayed || played) console.log(`copyd: spot relayed ${relayed}, played ${played}`);
+        } catch (error) { console.error(`copyd: spot tick: ${error.message}`); }
+        if (Date.now() - lastBalanceCheck > 10 * 60_000) {
+          lastBalanceCheck = Date.now();
+          reads.balance(account.address).then((balance) => {
+            if (balance < SPOT_LOW_MON) console.warn(`copyd: spot key ${account.address} is down to ${Number(balance) / 1e18} MON; top it up`);
+          }).catch(() => {});
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.max(250, SPOT_TICK_MS - (Date.now() - started))));
+    }
+  })();
+  console.log(`copyd: spot copy on, key ${account.address}, hook ${hook}`);
+  return spot;
+}
+
+function createNotifierSend() {
+  return process.env.DESK_API && process.env.CRON_SECRET
+    ? apiSender({ base: process.env.DESK_API, secret: process.env.CRON_SECRET })
+    : async () => ({ skipped: "notifications not configured" });
+}
+
+let spotEngine = null;
+startSpot().then((engine) => { spotEngine = engine; }).catch((error) => console.error(`copyd: spot copy didn't start: ${error.message}`));
 
 /// Keys prepared for an enrolment nobody finished are retired by the API (only desk-copy-api
 /// may retire keys); copyd asks it to look every ten minutes.
@@ -103,6 +165,7 @@ async function shutdown(signal) {
   watcher.stop();
   clearInterval(pendingTimer);
   await runner.idle();
+  await spotEngine?.idle();
   executor?.stop();
   await lease.release().catch(() => {});
   process.exit(0);

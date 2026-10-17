@@ -136,6 +136,21 @@ They read `HYPERSYNC_INDEX_TOKEN` (or `HYPERSYNC_TOKEN`) on Vercel. The cursor l
 one height request and sends nothing. A query that fails or takes over 8 s keeps the cursor,
 skips deposits for that scan, and shows in `railway logs` as `worker: scan skipped receipts …`.
 
+## Spot Auto-Copy (docs/spot-copy.md)
+
+- **Setup, once:** `FEE_TO=0x… bash web/copyd/spot-setup.sh`. It makes the KMS key `alias/desk-spot-copy`,
+  applies desk-copyd's policy, asks for MON on the key, deploys DeskCopyHook from it and sets
+  `SPOT_KEY_ID`, `SPOT_HOOK` and `COPY_FEE_BPS` on Railway copyd and `SPOT_FEE_RECIPIENT` and
+  `COPY_FEE_BPS` on Vercel. Re-run it after sending the MON. Then run `copyd/deploy.sh` and redeploy Vercel.
+- **Gas:** Desk's key pays every copy and every setup/turn-off relay. A copy costs about 0.05 MON.
+  copyd logs `spot key … is down to N MON` under 5 MON, checked every 10 min. Top it up from any wallet.
+- **Stop all spot copies:** set `SPOT_HALT=1` on copyd. Or set Redis `copy:halt` (which stops perps too),
+  and each copy is logged as skipped.
+- **A user's key:** every wallet's key expires on its own (30 days by default). Turning off in the app
+  relays a wallet-signed `revoke`. If copyd is down, the app can send the same revoke with the wallet's own gas.
+- **State:** `copy:spot:<wallet>` holds the copier, `copy:spot:log:<wallet>` the log, `copy:spot:jobs`
+  the batches waiting to be relayed, and `copy:spot:leaders` the leaders the worker's fast lane re-indexes first.
+
 ## Health checks: `GET /api/v1/health` (page: `/status`)
 
 | Check | Means | When it fails |

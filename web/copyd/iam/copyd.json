@@ -3,8 +3,10 @@
   "Statement": [
     {"Sid": "SignWithEnrolledDeskKeysOnly", "Effect": "Allow", "Action": "kms:Sign", "Resource": "arn:aws:kms:${REGION}:${ACCOUNT_ID}:key/*",
      "Condition": {"StringEquals": {"aws:ResourceTag/desk:purpose": "auto-copy", "aws:ResourceTag/desk:stage": "enrolled", "kms:SigningAlgorithm": "ED25519_SHA_512"}}},
+    {"Sid": "SignWithTheSpotCopyKeyOnly", "Effect": "Allow", "Action": "kms:Sign", "Resource": "arn:aws:kms:${REGION}:${ACCOUNT_ID}:key/*",
+     "Condition": {"StringEquals": {"aws:ResourceTag/desk:purpose": "spot-copy", "kms:SigningAlgorithm": "ECDSA_SHA_256", "kms:MessageType": "DIGEST"}}},
     {"Sid": "ReadDeskPublicKeys", "Effect": "Allow", "Action": ["kms:GetPublicKey", "kms:DescribeKey"], "Resource": "arn:aws:kms:${REGION}:${ACCOUNT_ID}:key/*",
-     "Condition": {"StringEquals": {"aws:ResourceTag/desk:purpose": "auto-copy"}}},
+     "Condition": {"StringEquals": {"aws:ResourceTag/desk:purpose": ["auto-copy", "spot-copy"]}}},
     {"Sid": "NothingElse", "Effect": "Deny",
      "Action": ["kms:CreateKey", "kms:TagResource", "kms:UntagResource", "kms:PutKeyPolicy", "kms:CreateAlias", "kms:DeleteAlias", "kms:UpdateAlias", "kms:ScheduleKeyDeletion", "kms:EnableKey", "kms:DisableKey"],
      "Resource": "*"}

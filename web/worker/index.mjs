@@ -6,6 +6,7 @@ import { metaReader, priceReader } from "../api/_wallet.mjs";
 import { openMarkets } from "../api/traders.mjs";
 import { indexBackoffMs, selectWallets } from "./queue.mjs";
 
+const SPOT_LEADERS_KEY = "copy:spot:leaders";
 const ROUND_PAUSE_MS = Number(process.env.WORKER_PAUSE_MS || 90_000);
 const FAST_PAUSE_MS = Number(process.env.WORKER_FAST_MS || 12_000);
 const SCAN_PAUSE_MS = Number(process.env.WORKER_SCAN_MS || 60_000);
@@ -116,11 +117,17 @@ async function rotation() {
 }
 
 let watchedCache = { at: 0, wallets: [] };
+/// Followed wallets with alerts, plus every leader a wallet spot-copies: money moves on those.
 async function watchedWallets() {
   if (Date.now() - watchedCache.at < WATCHED_REFRESH_MS) return watchedCache.wallets;
-  const raw = await store.get(WATCHED_KEY).catch(() => undefined);
+  const [raw, copied] = await Promise.all([
+    store.get(WATCHED_KEY).catch(() => undefined),
+    store.smembers(SPOT_LEADERS_KEY).catch(() => []),
+  ]);
   if (raw === undefined) return watchedCache.wallets;
-  watchedCache = { at: Date.now(), wallets: raw ? JSON.parse(raw) : [] };
+  const alerted = raw ? JSON.parse(raw) : [];
+  const known = new Set(alerted.map((address) => address.toLowerCase()));
+  watchedCache = { at: Date.now(), wallets: [...copied.filter((address) => !known.has(address)), ...alerted] };
   return watchedCache.wallets;
 }
 
