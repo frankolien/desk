@@ -39,9 +39,10 @@ address=$(node --input-type=module -e "
   console.log(a.address);")
 echo "Desk's spot copy key: $address"
 
-balance=$(cast balance "$address" --rpc-url https://rpc.monad.xyz)
-if [ "$balance" -lt 2000000000000000000 ]; then
-  echo "It holds $(cast from-wei "$balance") MON. Send it 20 MON (it pays the gas for every copy), then run this again."
+# In MON, compared by awk: wei overflows bash's integers past about 9.2 MON.
+balance=$(cast balance "$address" --rpc-url https://rpc.monad.xyz --ether)
+if awk -v b="$balance" 'BEGIN { exit !(b < 2) }'; then
+  echo "It holds $balance MON. Send it 20 MON (it pays the gas for every copy), then run this again."
   exit 0
 fi
 
