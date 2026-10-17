@@ -12,9 +12,9 @@ struct SignalsScreen: View {
     @Binding var opensTop: Bool
 
     private enum Section: String, CaseIterable, Identifiable {
-        case traders = "Following", top = "Top traders", watchlist = "Watchlist", market = "Market"
+        case traders = "Following", smart = "Smart Money", top = "Top traders", watchlist = "Watchlist", market = "Market"
         var id: String { rawValue }
-        static var shown: [Section] { Showcase.signalsExtras ? allCases : [.traders, .top] }
+        static var shown: [Section] { Showcase.signalsExtras ? allCases : [.traders, .smart, .top] }
     }
 
     @State private var section: Section = .traders
@@ -30,6 +30,7 @@ struct SignalsScreen: View {
     @State private var showsCopying = false
     @State private var afterAlert: (() -> Void)?
     @State private var smartMoney = SignalsModel()
+    @State private var smartFeed = SmartMoneyFeedModel()
     @State private var followingFeed = FollowingFeedModel()
     @Namespace private var pickerSpace
     @State private var trackedEditing: TrackedWallet?
@@ -79,6 +80,13 @@ struct SignalsScreen: View {
                                           onOpen: { selectedFollowingTrade = $0 },
                                           onOpenPerp: { openPerpMarket($0.market) })
                                 .padding(.bottom, 130)
+                        case .smart:
+                            SmartMoneyFeedView(feed: smartFeed) { trade in
+                                openToken = .init(chainIndex: trade.chainIndex, contract: trade.token, symbol: trade.symbol)
+                            }
+                            .padding(.top, 16)
+                            .padding(.bottom, 130)
+                            .task { await smartFeed.run() }
                         case .top:
                             if Showcase.smartMoney {
                             Button { showsSmartMoney = true } label: {
@@ -133,7 +141,8 @@ struct SignalsScreen: View {
                     async let top: Void = directory.refreshTop()
                     async let following: Void = directory.refreshFollowing()
                     async let activity: Void = followingFeed.load(addresses: TrackedWallets.shared.list.map(\.address))
-                    _ = await (top, following, activity)
+                    async let smart: Void = smartFeed.load()
+                    _ = await (top, following, activity, smart)
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -150,6 +159,7 @@ struct SignalsScreen: View {
                 }
                 if arguments.contains("-smart-money") { section = .top; showsSmartMoney = true }
                 if arguments.contains("watchlist") { section = .watchlist }
+                if arguments.contains("-smart-feed") { section = .smart }
             }
             #endif
             .sheet(item: $trackedEditing) { wallet in
