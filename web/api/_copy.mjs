@@ -269,6 +269,16 @@ export function createCopyHandler(resolve) {
         return res.status(200).json(result);
       }
 
+      if (action.startsWith("spot-")) {
+        const { handleSpot, SpotRefusal } = await import("./_spot.mjs");
+        try {
+          return res.status(200).json(await handleSpot({ action, req, deps, text, now, header: (name) => header(req, name) }));
+        } catch (error) {
+          if (error instanceof SpotRefusal) return res.status(error.status).json({ error: error.message });
+          throw error;
+        }
+      }
+
       if (action === "sweep") return res.status(200).json(await sweepPending({ req, deps, store, now }));
       if (action === "notify") return res.status(200).json(await relayNotifications({ req, deps, text }));
 

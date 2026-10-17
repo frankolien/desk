@@ -16,6 +16,7 @@ import { isSolanaAddress } from "./_chains.mjs";
 import { parseWebSubscription, vapidFromEnv, webPayload, webPushClient } from "./_webpush.mjs";
 import { chainReader, describePosition, noAccount, openMarkets, perpIdsFromBitmap } from "./traders.mjs";
 import { createCopyHandler } from "./_copy.mjs";
+import { monadClients, spotReads } from "../copyd/spot-node.mjs";
 
 export const MAX_TRADERS = 20 + MAX_WALLETS;
 const MAX_COPIED = 20;
@@ -776,12 +777,22 @@ function copyKms() {
   };
 }
 
+/// Spot copy's chain reads over Monad, one reader for every request.
+function spotReadsFor() {
+  let reader = null;
+  return (desk) => {
+    reader ??= monadClients({}).reader;
+    return spotReads({ reader, hook: desk.hook, desk: desk.address });
+  };
+}
+
 let production;
 let copyDeps;
 const sharedApns = apnsClient();
 export default createHandler(() => (production ??= {
   copy: createCopyHandler(() => (copyDeps ??= {
     store: redisStore(), kms: copyKms(), tokenKey: process.env.COPY_TOKEN_KEY, cronSecret: process.env.CRON_SECRET, apns: sharedApns,
+    spotReads: spotReadsFor(),
   })),
   store: redisStore(),
   apns: sharedApns,
