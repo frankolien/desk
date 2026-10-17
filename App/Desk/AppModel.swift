@@ -531,11 +531,26 @@ final class AppModel {
         guard let address else { return }
         do {
             let rpc = MonadRPC(configuration: try .mainnet())
+            async let code = rpc.code(of: address)
             mainnetMON.record(NativeAmount(bigEndian: try await rpc.balance(of: address)))
+            if let code = try? await code { monadDelegated = code.starts(with: [0xef, 0x01, 0x00]) }
         } catch {
             mainnetMON.recordFailure("Monad mainnet could not be reached.")
         }
     }
+
+    /// True once the wallet runs a smart-account delegation on Monad (EIP-7702), as spot
+    /// Auto-Copy sets up. Monad then refuses any transaction whose MON sent out leaves the
+    /// wallet under 10 MON, so what the app offers to spend keeps that much back.
+    private(set) var monadDelegated = false
+    static let delegatedReserve = NativeAmount(decimalText: "10") ?? .zero
+
+    /// MON kept back from anything the app spends in MON: gas, plus Monad's reserve once delegated.
+    var monKeptBack: NativeAmount {
+        monadDelegated ? NativeAmount(raw: Self.gasReserve.raw + Self.delegatedReserve.raw) ?? Self.gasReserve : Self.gasReserve
+    }
+
+    func noteMonadDelegated() { monadDelegated = true }
 
     func buy(_ deposit: RelayDeposit) async throws {
         let sender: TransactionSender
@@ -619,8 +634,9 @@ final class AppModel {
     }
 
     var swappableMON: NativeAmount? {
-        guard network.holdsRealFunds, let held = walletMON.value, held.raw > Self.gasReserve.raw,
-              let spare = NativeAmount(raw: held.raw - Self.gasReserve.raw), spare.raw >= 1_000_000_000_000_000_000
+        let kept = monKeptBack
+        guard network.holdsRealFunds, let held = walletMON.value, held.raw > kept.raw,
+              let spare = NativeAmount(raw: held.raw - kept.raw), spare.raw >= 1_000_000_000_000_000_000
         else { return nil }
         return spare
     }

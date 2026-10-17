@@ -1614,7 +1614,9 @@ private struct SpotBuyTicket: View {
             return ausdBalance < typedAUSD
         }
         guard let typed, let balance else { return false }
-        return balance.raw < typed.raw + Self.gasReserve.raw
+        // A delegated wallet on Monad can't send MON that leaves it under 10.
+        let reserve = model.monadDelegated ? AppModel.delegatedReserve.raw : 0
+        return balance.raw < typed.raw + Self.gasReserve.raw + reserve
     }
     /// Paying in AUSD still burns a little MON as gas.
     private var lacksGas: Bool { paysAUSD && balance.map { $0.raw < Self.gasReserve.raw } == true }

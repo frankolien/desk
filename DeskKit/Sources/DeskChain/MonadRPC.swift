@@ -61,6 +61,14 @@ public actor MonadRPC {
         }
     }
 
+    /// The account's code: empty for a plain EOA, `0xef0100 ‖ address` once it delegates (EIP-7702).
+    public func code(of address: EthereumAddress) async throws -> Data {
+        try await call("eth_getCode", [.string(address.checksummed), .string("latest")]) { value in
+            guard let text = value.stringValue else { throw Failure.malformedResponse("eth_getCode") }
+            return text == "0x" ? Data() : try ABIWord.hexBytes(text)
+        }
+    }
+
     /// Monad's `pending` equals `latest`, so in-flight transactions are not counted; see `NonceRegistry`.
     public func transactionCount(of address: EthereumAddress) async throws -> UInt64 {
         try await quantity("eth_getTransactionCount", [.string(address.checksummed), .string("latest")])

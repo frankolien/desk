@@ -466,7 +466,7 @@ struct NadConfirmView: View {
     private var price: NativeAmount? { status.priceWei }
     /// The price plus room for the gas of a heavy registration.
     private var needed: NativeAmount? {
-        guard let price, let reserve = NativeAmount(decimalText: "1") else { return nil }
+        guard let price, let reserve = NativeAmount(decimalText: model.monadDelegated ? "11" : "1") else { return nil }
         return NativeAmount(raw: price.raw + reserve.raw)
     }
     private var held: NativeAmount? { model.mainnetMON.value }

@@ -179,7 +179,7 @@ struct SwapSheet: View {
         case .toAUSD:
             return tooMuch
                 ? "More than the \(availableMON.display(fractionDigits: 2)) MON available"
-                : "\(availableMON.display(fractionDigits: 2)) MON available · \(AppModel.gasReserve.display(fractionDigits: 2)) kept for fees"
+                : "\(availableMON.display(fractionDigits: 2)) MON available · \(model.monKeptBack.display(fractionDigits: 2)) kept\(model.monadDelegated ? " (Monad's 10 MON reserve and fees)" : " for fees")"
         case .toMON:
             if lacksGas { return "Needs about \(Self.feeFloor.display(fractionDigits: 2)) MON in the wallet for the two fees" }
             return tooMuch
