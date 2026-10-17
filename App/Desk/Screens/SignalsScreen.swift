@@ -14,7 +14,8 @@ struct SignalsScreen: View {
     private enum Section: String, CaseIterable, Identifiable {
         case traders = "Following", smart = "Smart Money", top = "Top traders", watchlist = "Watchlist", market = "Market"
         var id: String { rawValue }
-        static var shown: [Section] { Showcase.signalsExtras ? allCases : [.traders, .smart, .top] }
+        /// Watchlist lives on Home's Explore Markets; Signals is people and the market's mood.
+        static var shown: [Section] { [.traders, .smart, .top, .market] }
     }
 
     @State private var section: Section = .traders
