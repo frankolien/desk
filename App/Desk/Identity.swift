@@ -199,7 +199,7 @@ final class IdentityDirectory {
     func matches(_ query: String, limit: Int = 3) -> [Identity] {
         let wanted = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard wanted.count >= 2 else { return [] }
-        return Array(identities.values.filter { ($0.name ?? "").lowercased().contains(wanted) }.prefix(limit))
+        return Array(identities.values.filter { ($0.name ?? "").lowercased().contains(wanted) || ($0.tag ?? "").lowercased().contains(wanted.replacingOccurrences(of: "@", with: "")) }.prefix(limit))
     }
 
     private func persist() {

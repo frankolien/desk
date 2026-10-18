@@ -124,17 +124,219 @@ struct NadNameSheet: View {
     }
 }
 
-struct NadOnboardingScreen: View {
+/// The first screen after a new sign-in: a free Desk tag, found the way a .nad name is, and
+/// claimed with the same Face ID that signs the profile.
+struct ClaimTagScreen: View {
     let model: AppModel
     let onFinish: () -> Void
-    @State private var names = NadNamesModel()
+
+    @State private var typed = ""
+    @State private var check: Check = .idle
+    @State private var phase: Phase = .typing
+    @State private var problem: String?
+    @FocusState private var focused: Bool
+
+    private enum Check: Equatable { case idle, checking, free, taken, invalid(String) }
+    private enum Phase: Equatable { case typing, claiming, done }
+
+    private var address: String { model.address?.checksummed ?? "" }
+    private var label: String { typed.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: "@", with: "") }
+    private var valid: Bool { MarketSearchScreen.looksLikeATag(label) }
+    private var tint: Color {
+        guard !label.isEmpty else { return Color.white.opacity(0.2) }
+        guard valid else { return DeskColor.fall.color }
+        switch check {
+        case .free: return DeskColor.rise.color
+        case .taken, .invalid: return DeskColor.fall.color
+        case .idle, .checking: return Color.white.opacity(0.35)
+        }
+    }
 
     var body: some View {
         NavigationStack {
-            NadFindNameView(model: model, names: names, onSkip: onFinish)
-                .navigationBarTitleDisplayMode(.inline)
+            ZStack(alignment: .top) {
+                DeskBackground()
+                DeskAurora(height: 420).ignoresSafeArea()
+                if phase == .done { claimed } else { finder }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .tabBar)
+            .toolbar {
+                if phase == .typing {
+                    ToolbarItem(placement: .confirmationAction) { Button("Later", action: onFinish).fontWeight(.semibold) }
+                }
+            }
         }
         .preferredColorScheme(.dark)
+        .animation(.snappy(duration: 0.3), value: phase)
+        .task {
+            // A profile made on another phone already has its tag: nothing to claim here.
+            await IdentityDirectory.shared.refresh(address)
+            if IdentityDirectory.shared.identity(for: address)?.tag != nil { onFinish() }
+        }
+        .task(id: label) {
+            guard !label.isEmpty, valid else { check = .idle; return }
+            check = .checking
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            let result = await IdentityDirectory.shared.tagAvailability(label)
+            guard !Task.isCancelled else { return }
+            switch result {
+            case .free, .unknown: check = .free
+            case .taken(let owner): check = owner.lowercased() == address.lowercased() ? .free : .taken
+            case .invalid(let reason): check = .invalid(reason)
+            }
+        }
+    }
+
+    private var finder: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 40)
+            Text("Claim your name")
+                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .foregroundStyle(DeskColor.nightText.color)
+            Text("Your free Desk tag. Friends find you by it and send to @you.")
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundStyle(DeskColor.nightMuted.color)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+                .padding(.top, 6)
+
+            HStack(spacing: 2) {
+                Text("@")
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightText.color.opacity(0.7))
+                TextField("yourname", text: $typed)
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.asciiCapable)
+                    .submitLabel(.done)
+                    .focused($focused)
+                    .fixedSize()
+                    .frame(minWidth: 40)
+                    .disabled(phase != .typing)
+            }
+            .padding(.horizontal, 24)
+            .frame(height: 64)
+            .background(Color.white.opacity(0.06), in: Capsule())
+            .overlay(TravellingBorder(tint: tint))
+            .background {
+                Capsule().fill(tint.opacity(0.22)).blur(radius: 46).padding(-14)
+            }
+            .padding(.top, 34)
+            .animation(.snappy(duration: 0.25), value: tint)
+
+            Group {
+                if let problem {
+                    Text(problem).foregroundStyle(DeskColor.fall.color)
+                } else if !label.isEmpty, !valid {
+                    Text("Letters, digits and underscores, 3 to 20, starting with a letter")
+                } else if case .invalid(let reason) = check {
+                    Text(reason)
+                } else if check == .taken {
+                    Text("@\(label) is taken. Try another.")
+                } else if check == .free {
+                    Text("@\(label) is free. One Face ID makes it yours.")
+                } else {
+                    Text(" ")
+                }
+            }
+            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .foregroundStyle(DeskColor.nightMuted.color)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 32)
+            .padding(.top, 16)
+
+            Spacer()
+
+            HStack {
+                statusChip
+                Spacer()
+                Button {
+                    Task { await claim() }
+                } label: {
+                    HStack(spacing: 8) {
+                        if phase == .claiming { ProgressView().tint(DeskColor.onAction.color) }
+                        Label(label.isEmpty ? "Claim" : "Claim @\(label)", systemImage: "faceid")
+                    }
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                    .padding(.horizontal, 6)
+                }
+                .controlSize(.large)
+                .deskProminentButton()
+                .disabled(check != .free || phase != .typing)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 14)
+        }
+        .onAppear { focused = true }
+    }
+
+    private var claimed: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 64, weight: .semibold))
+                .foregroundStyle(DeskColor.rise.color)
+                .symbolEffect(.bounce, value: phase)
+            Text("You're @\(label)")
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .foregroundStyle(DeskColor.nightText.color)
+            Text("Friends can find you in Search and send to @\(label).")
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundStyle(DeskColor.nightMuted.color)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        .task {
+            try? await Task.sleep(for: .milliseconds(1_600))
+            onFinish()
+        }
+    }
+
+    private var statusChip: some View {
+        let (text, colour, symbol): (String, Color, String) = {
+            if label.isEmpty { return ("Enter a name", DeskColor.nightMuted.color, "textformat") }
+            if !valid { return ("Invalid", DeskColor.fall.color, "xmark.circle.fill") }
+            switch check {
+            case .idle, .checking: return ("Checking…", DeskColor.nightMuted.color, "hourglass")
+            case .free: return ("Free", DeskColor.rise.color, "checkmark.circle.fill")
+            case .taken: return ("Taken", DeskColor.fall.color, "xmark.circle.fill")
+            case .invalid: return ("Reserved", DeskColor.action.color, "lock.fill")
+            }
+        }()
+        return HStack(spacing: 6) {
+            Image(systemName: symbol).font(.system(size: 12, weight: .bold))
+            Text(text)
+        }
+        .font(.system(size: 13, weight: .bold, design: .rounded))
+        .foregroundStyle(colour)
+        .padding(.horizontal, 14).frame(height: 40)
+        .deskGlass(in: Capsule())
+    }
+
+    private func claim() async {
+        guard check == .free, phase == .typing else { return }
+        phase = .claiming
+        problem = nil
+        focused = false
+        do {
+            _ = try await model.saveProfile(name: "", image: nil, tag: label)
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            phase = .done
+        } catch PasskeyFailure.cancelledByUser {
+            phase = .typing
+        } catch {
+            problem = error.localizedDescription
+            phase = .typing
+            if error.localizedDescription.localizedCaseInsensitiveContains("taken") { check = .taken }
+        }
     }
 }
 

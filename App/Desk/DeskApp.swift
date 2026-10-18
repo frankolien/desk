@@ -78,8 +78,8 @@ struct RootView: View {
                 case .needsDesk:
                     FundScreen(model: model)
                 case .trading:
-                    if model.showsNameOnboarding && Showcase.nadNames {
-                        NadOnboardingScreen(model: model) { model.finishNameOnboarding() }
+                    if model.showsNameOnboarding {
+                        ClaimTagScreen(model: model) { model.finishNameOnboarding() }
                             .transition(.opacity)
                     } else {
                         TradingShell(model: model)
