@@ -71,6 +71,14 @@ public struct PriceAxis: Sendable, Equatable {
         return topInset + usableHeight * CGFloat(1 - fraction)
     }
 
+    /// The inverse of `y`: the price under a point, so a crosshair can rest anywhere.
+    public func value(atY y: CGFloat) -> Double {
+        let span = high - low
+        guard span > 0 else { return low }
+        let fraction = 1 - Double((y - topInset) / usableHeight)
+        return low + span * fraction
+    }
+
     public func place(_ value: Double) -> Placement {
         let top = topInset
         let bottom = topInset + usableHeight

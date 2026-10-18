@@ -727,8 +727,8 @@ struct StudioPainter {
     private func drawCrosshair(in context: inout GraphicsContext) {
         guard let crosshair = frame.crosshair else { return }
         let plot = geometry.plot
-        let slot = geometry.slot(atX: min(max(crosshair.x, 0), plot.maxX - 1))
-        let x = geometry.x(slot: slot)
+        // The lines sit under the finger; only the magnet, when on, pulls the price to a candle.
+        let x = min(max(crosshair.x, 0), plot.maxX - 1)
         let price = crosshairPrice(at: crosshair)
         let y = min(max(geometry.scale.y(price), plot.minY), plot.maxY)
         var cross = Path()
@@ -745,7 +745,7 @@ struct StudioPainter {
         context.stroke(mark, with: .color(DeskColor.identity.color), lineWidth: 1.6)
         axisTag(PriceAxis.label(price), y: y, fill: .white.opacity(0.92), text: .black, in: &context)
 
-        if let time = time(atFractionalIndex: Double(frame.window.index(atSlot: slot))) {
+        if let time = time(atFractionalIndex: geometry.fractionalIndex(atX: x)) {
             let when = context.resolve(
                 Text(Self.full.string(from: Date(timeIntervalSince1970: time)))
                     .font(.system(size: 10, weight: .bold, design: .rounded).monospacedDigit())

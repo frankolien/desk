@@ -24,7 +24,8 @@ struct CandlestickChart: View {
     let candles: [ChartCandle]
     var guides: [PriceGuide] = []
     var marks: [ChartMark] = []
-    @State private var scrubbed: Int?
+    /// Where the finger is: the crosshair follows it exactly, the candle it reads is the nearest.
+    @State private var scrub: CGPoint?
 
     private static let stamp: DateFormatter = {
         let formatter = DateFormatter()
@@ -32,16 +33,20 @@ struct CandlestickChart: View {
         return formatter
     }()
 
+    private static func nearest(_ x: CGFloat, layout: CandleLayout, count: Int) -> Int {
+        min(max(Int(x / layout.step) - layout.leading, 0), count - 1)
+    }
+
     var body: some View {
         GeometryReader { proxy in
             canvas
                 .gesture(ScrubPress { location in
-                    guard let location else { scrubbed = nil; return }
+                    guard let location else { scrub = nil; return }
                     let samples = Array(candles.suffix(25))
                     let layout = CandleLayout(count: samples.count, width: proxy.size.width - 62)
-                    let index = min(max(Int(location.x / layout.step) - layout.leading, 0), samples.count - 1)
-                    if index != scrubbed {
-                        scrubbed = index
+                    let before = scrub.map { Self.nearest($0.x, layout: layout, count: samples.count) }
+                    scrub = location
+                    if Self.nearest(location.x, layout: layout, count: samples.count) != before {
                         UISelectionFeedbackGenerator().selectionChanged()
                     }
                 })
@@ -175,19 +180,26 @@ struct CandlestickChart: View {
                     at: CGPoint(x: plotWidth + 31, y: guideY), anchor: .center)
             }
 
-            if let scrubbed, samples.indices.contains(scrubbed) {
-                let candle = samples[scrubbed]
-                let x = layout.x(scrubbed)
-                let y = axis.y(candle.close)
+            if let scrub {
+                let candle = samples[Self.nearest(scrub.x, layout: layout, count: samples.count)]
+                let x = min(max(scrub.x, 0), plotWidth)
+                let y = min(max(scrub.y, 0), priceHeight)
+                let value = axis.value(atY: y)
                 var cross = Path()
                 cross.move(to: CGPoint(x: x, y: 0))
                 cross.addLine(to: CGPoint(x: x, y: size.height))
                 cross.move(to: CGPoint(x: 0, y: y))
                 cross.addLine(to: CGPoint(x: plotWidth, y: y))
                 context.stroke(cross, with: .color(.white.opacity(0.7)), style: StrokeStyle(lineWidth: 0.8, dash: [3, 3]))
+                var mark = Path()
+                mark.move(to: CGPoint(x: x - 7, y: y))
+                mark.addLine(to: CGPoint(x: x + 7, y: y))
+                mark.move(to: CGPoint(x: x, y: y - 7))
+                mark.addLine(to: CGPoint(x: x, y: y + 7))
+                context.stroke(mark, with: .color(DeskColor.identity.color), lineWidth: 1.4)
 
                 let price = context.resolve(
-                    Text(PriceAxis.label(candle.close)).font(.system(size: 10, weight: .bold, design: .rounded))
+                    Text(PriceAxis.label(value)).font(.system(size: 10, weight: .bold, design: .rounded))
                         .foregroundStyle(.white))
                 let priceSize = price.measure(in: CGSize(width: 80, height: 20))
                 let priceTag = CGRect(x: plotWidth + 4, y: y - priceSize.height / 2 - 3,

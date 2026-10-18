@@ -94,6 +94,16 @@ struct PriceAxisTests {
         }
     }
 
+    @Test("A point on the plot reads back the price that put it there")
+    func inverseMapping() {
+        let axis = sample(guides: [])
+        for value in stride(from: axis.low, through: axis.high, by: (axis.high - axis.low) / 7) {
+            #expect(abs(axis.value(atY: axis.y(value)) - value) < 0.0001)
+        }
+        #expect(abs(axis.value(atY: 7) - axis.high) < 0.0001)
+        #expect(abs(axis.value(atY: axis.height - 7) - axis.low) < 0.0001)
+    }
+
     @Test("A guide above the market reports the top edge")
     func guideAboveClamps() {
         let axis = sample(guides: [140])
