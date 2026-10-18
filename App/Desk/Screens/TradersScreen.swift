@@ -1015,7 +1015,7 @@ struct TraderProfileScreen: View {
                     .accessibilityLabel("Score \(score). Show stats")
                 }
                 if let label = resolved?.sourceLabel {
-                    Text(label)
+                    Text(resolved?.handle.map { resolved?.name == $0 ? label : "\($0) · \(label)" } ?? label)
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .foregroundStyle(Color.white.opacity(0.6))
                         .padding(.horizontal, 7)

@@ -4,6 +4,7 @@ import Foundation
 struct DeskProfile: Sendable {
     struct Saved: Decodable, Sendable {
         let name: String?
+        let tag: String?
         let avatar: String?
     }
 
@@ -42,9 +43,10 @@ struct DeskProfile: Sendable {
         }
     }
 
-    /// `image` nil keeps the current picture; empty removes it.
+    /// `image` nil keeps the current picture; empty removes it. `tag` nil keeps the current tag;
+    /// empty lets it go.
     static func save(
-        address: EthereumAddress, name: String, image: Data?,
+        address: EthereumAddress, name: String, image: Data?, tag: String? = nil,
         sign: @Sendable (Data) async throws -> EthereumSignature
     ) async throws -> Saved {
         let timestamp = Int64(Date.now.timeIntervalSince1970 * 1000)
@@ -56,6 +58,7 @@ struct DeskProfile: Sendable {
             "signature": "0x" + signature.serialized.map { String(format: "%02x", $0) }.joined(),
         ]
         if let image { payload["image"] = image.base64EncodedString() }
+        if let tag { payload["tag"] = tag }
         var request = URLRequest(url: endpoint, timeoutInterval: 30)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

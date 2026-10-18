@@ -250,10 +250,10 @@ final class AppModel {
         return try await passkey.withKeys { wallet, _ in try await body(wallet) }
     }
 
-    func saveProfile(name: String, image: Data?) async throws -> String? {
+    func saveProfile(name: String, image: Data?, tag: String? = nil) async throws -> String? {
         guard let address else { return nil }
         let passkey = passkey
-        let saved = try await DeskProfile.save(address: address, name: name, image: image) { digest in
+        let saved = try await DeskProfile.save(address: address, name: name, image: image, tag: tag) { digest in
             try await passkey.withKeys { wallet, _ in try WalletSigner.sign(digest: digest, with: wallet) }
         }
         await IdentityDirectory.shared.refresh(address.checksummed)

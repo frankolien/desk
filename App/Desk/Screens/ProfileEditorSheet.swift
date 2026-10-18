@@ -8,6 +8,8 @@ struct ProfileEditorSheet: View {
     let onClose: () -> Void
 
     @State private var name = ""
+    @State private var tag = ""
+    @State private var tagCheck: TagCheck = .idle
     @State private var picked: PhotosPickerItem?
     @State private var image: UIImage?
     @State private var removesPicture = false
@@ -15,10 +17,30 @@ struct ProfileEditorSheet: View {
     @State private var problem: String?
     @State private var saved = false
 
+    enum TagCheck: Equatable { case idle, checking, free, mine, taken, invalid(String) }
+
     private var address: String { model.address?.checksummed ?? "" }
     private var current: Identity? { IdentityDirectory.shared.identity(for: address) }
+    private var cleanTag: String { tag.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: "@", with: "") }
+    private var tagChanged: Bool { cleanTag != (current?.tag ?? "") }
+    private var tagBlocks: Bool {
+        guard tagChanged, !cleanTag.isEmpty else { return false }
+        switch tagCheck { case .free, .mine: return false; default: return true }
+    }
     private var canSave: Bool {
-        !isSaving && (image != nil || removesPicture || !name.trimmingCharacters(in: .whitespaces).isEmpty)
+        !isSaving && !tagBlocks
+            && (image != nil || removesPicture || !name.trimmingCharacters(in: .whitespaces).isEmpty || tagChanged)
+    }
+
+    private var tagLine: (text: String, tint: Color)? {
+        if cleanTag.isEmpty { return current?.tag == nil ? nil : ("Saving lets @\(current?.tag ?? "") go.", DeskColor.nightMuted.color) }
+        if !tagChanged { return ("Your tag. Friends can send to @\(cleanTag).", DeskColor.nightMuted.color) }
+        switch tagCheck {
+        case .idle, .checking: return ("Checking…", DeskColor.nightMuted.color)
+        case .free, .mine: return ("@\(cleanTag) is free. It's yours when you save.", DeskColor.rise.color)
+        case .taken: return ("@\(cleanTag) is taken. Try another.", DeskColor.fall.color)
+        case .invalid(let reason): return (reason, DeskColor.fall.color)
+        }
     }
 
     var body: some View {
@@ -72,11 +94,42 @@ struct ProfileEditorSheet: View {
                         .padding(.horizontal, 14)
                         .frame(height: 46)
                         .deskGlass(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    HStack(spacing: 0) {
+                        Text("@")
+                            .font(.system(size: 17, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                        TextField("tag", text: $tag)
+                            .font(.system(size: 17, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DeskColor.nightText.color)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.asciiCapable)
+                            .submitLabel(.done)
+                            .onChange(of: tag) { _, value in
+                                let kept = String(value.lowercased().filter { $0.isLetter && $0.isASCII || $0.isNumber || $0 == "_" }.prefix(20))
+                                if kept != value { tag = kept }
+                            }
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(height: 46)
+                    .deskGlass(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     Text(TraderSnapshot.short(address))
                         .font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit())
                         .foregroundStyle(DeskColor.nightMuted.color)
                         .padding(.leading, 4)
                 }
+            }
+
+            if let tagLine {
+                Text(tagLine.text)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(tagLine.tint)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("A free Desk tag. Friends can find you and send money to @you.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if image != nil || (current?.avatar != nil && !removesPicture) {
@@ -111,7 +164,24 @@ struct ProfileEditorSheet: View {
         .preferredColorScheme(.dark)
         .fittedSheet()
         .presentationDragIndicator(.visible)
-        .onAppear { name = current?.source == "desk" ? (current?.name ?? "") : "" }
+        .onAppear {
+            name = current?.source == "desk" && current?.name != current?.handle ? (current?.name ?? "") : ""
+            tag = current?.tag ?? ""
+        }
+        .task(id: cleanTag) {
+            guard tagChanged, !cleanTag.isEmpty else { tagCheck = .idle; return }
+            tagCheck = .checking
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            let result = await IdentityDirectory.shared.tagAvailability(cleanTag)
+            guard !Task.isCancelled else { return }
+            switch result {
+            case .free: tagCheck = .free
+            case .taken(let owner): tagCheck = owner.lowercased() == address.lowercased() ? .mine : .taken
+            case .invalid(let reason): tagCheck = .invalid(reason)
+            case .unknown: tagCheck = .free
+            }
+        }
         .onChange(of: picked) { _, item in
             guard let item else { return }
             Task {
@@ -147,7 +217,7 @@ struct ProfileEditorSheet: View {
         defer { isSaving = false }
         let picture: Data? = removesPicture ? Data() : image.flatMap(Self.jpeg)
         do {
-            try await model.saveProfile(name: name.trimmingCharacters(in: .whitespaces), image: picture)
+            try await model.saveProfile(name: name.trimmingCharacters(in: .whitespaces), image: picture, tag: tagChanged ? cleanTag : nil)
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             withAnimation(.snappy) { saved = true }
             try? await Task.sleep(for: .milliseconds(700))

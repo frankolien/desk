@@ -161,6 +161,13 @@ struct MarketSearchScreen: View {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.hasPrefix("@") || text.hasPrefix("0x")
             || text.contains(".") && !text.contains(" ")
+            || Self.looksLikeATag(text)
+    }
+
+    /// A Desk tag is a plain word: 3 to 20 letters, digits and underscores.
+    static func looksLikeATag(_ text: String) -> Bool {
+        text.count >= 3 && text.count <= 20 && text.first?.isLetter == true
+            && text.allSatisfy { ($0.isLetter && $0.isASCII) || $0.isNumber || $0 == "_" }
     }
     @AppStorage("desk.watchlist") private var savedIDs = ""
 
@@ -3869,6 +3876,7 @@ private struct WalletProfileScreen: View {
 
     private var statusLine: String? {
         var parts: [String] = []
+        if let handle = identity?.handle, identity?.name != handle { parts.append(handle) }
         if let label = identity?.sourceLabel { parts.append(label) }
         if let account = identity?.perplAccount { parts.append("Perpl #\(account)") }
         if parts.isEmpty, let first = resource?.labels?.first { parts.append(first.text) }

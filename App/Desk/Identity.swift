@@ -10,8 +10,12 @@ struct Identity: Codable, Hashable, Sendable {
     let x: String?
     let farcaster: String?
     let perplAccount: String?
+    /// The wallet's free Desk tag, without the @.
+    var tag: String? = nil
 
     var avatarURL: URL? { avatar.flatMap(URL.init(string:)) }
+    /// "@frank", when the wallet has claimed a Desk tag.
+    var handle: String? { tag.map { "@" + $0 } }
     var isEmpty: Bool { name == nil && avatar == nil && perplAccount == nil }
 
     var sourceLabel: String? {
@@ -173,6 +177,23 @@ final class IdentityDirectory {
             persist()
         }
         return .wallet(address: address, identity: body.identity)
+    }
+
+    enum TagAvailability { case free, taken(owner: String), invalid(String), unknown }
+
+    /// Is this tag free? Asked as the person types it into their profile.
+    func tagAvailability(_ tag: String) async -> TagAvailability {
+        struct Answer: Decodable { let tag: String?; let available: Bool?; let address: String?; let reason: String? }
+        var components = URLComponents(string: Self.endpoint)!
+        components.queryItems = [URLQueryItem(name: "view", value: "tag"), URLQueryItem(name: "q", value: tag)]
+        guard let url = components.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let answer = try? JSONDecoder().decode(Answer.self, from: data) else { return .unknown }
+        if let reason = answer.reason { return .invalid(reason) }
+        if answer.available == true { return .free }
+        if let owner = answer.address { return .taken(owner: owner) }
+        return .unknown
     }
 
     func matches(_ query: String, limit: Int = 3) -> [Identity] {

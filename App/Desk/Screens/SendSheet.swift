@@ -21,11 +21,24 @@ struct SendSheet: View {
     @State private var typed = ""
     @FocusState private var typing: Bool
     @State private var page: WebPage?
+    /// A typed tag or name, once the directory has turned it into a wallet.
+    @State private var found: (query: String, address: String, identity: Identity?)?
+    @State private var lookup: Lookup = .idle
+
+    enum Lookup: Equatable { case idle, looking, missing, unavailable }
 
     private var editable: Bool { recipient == nil }
-    private var address: String { recipient ?? typed.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var typedText: String { typed.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// Something other than an address that could be a Desk tag or a name service name.
+    private var typedIsName: Bool { editable && !typedText.isEmpty && EthereumAddress(text: typedText) == nil && Self.nameLike(typedText) }
+    private var address: String {
+        if let recipient { return recipient }
+        if let found, found.query == typedText { return found.address }
+        return typedText
+    }
     private var to: EthereumAddress? { EthereumAddress(text: address) }
     private var toMyself: Bool { to != nil && to == model.address }
+    private var foundName: String? { found.flatMap { $0.query == typedText ? ($0.identity?.handle ?? $0.identity?.name ?? typedText) : nil } }
     private var walletBalance: Money { model.walletAUSD.value ?? .zero }
     private var tradingBalance: Money { model.collateral.value ?? .zero }
     private var available: Money { source == .wallet ? walletBalance : tradingBalance }
@@ -38,6 +51,13 @@ struct SendSheet: View {
     /// Why the typed address won't do, in one line.
     private var addressProblem: String? {
         guard editable, !typed.isEmpty else { return nil }
+        if typedIsName && to == nil {
+            switch lookup {
+            case .missing: return "No Desk tag or name answers to \(typedText)."
+            case .unavailable: return "Names can't be looked up right now. Paste the address instead."
+            default: return nil
+            }
+        }
         guard let to else { return "That isn't a Monad address. Check every character." }
         if to.isZero { return "That address burns anything sent to it." }
         if toMyself && source == .wallet { return "That's this wallet. Pick Trading balance to move money into it." }
@@ -58,9 +78,31 @@ struct SendSheet: View {
             model.clearWithdrawal()
             if walletBalance.isZero && !tradingBalance.isZero { source = .trading }
         }
+        .task(id: typedText) {
+            guard typedIsName else { lookup = .idle; return }
+            if let found, found.query == typedText { return }
+            lookup = .looking
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            switch await IdentityDirectory.shared.lookup(typedText) {
+            case .wallet(let address, let identity):
+                found = (typedText, address, identity)
+                lookup = .idle
+            case .solana, .notFound: lookup = .missing
+            case .unavailable: lookup = .unavailable
+            }
+        }
         #if DEBUG
         .task { if editable, ProcessInfo.processInfo.arguments.contains("-withdraw-sent") { model.seedWithdrawalSentForReview() } }
         #endif
+    }
+
+    /// "@frank", "frank", "frank.desk", "salmo.nad", "vitalik.eth": worth asking the directory about.
+    static func nameLike(_ text: String) -> Bool {
+        if text.hasPrefix("@") { return text.count >= 4 }
+        if text.contains(".") { return !text.contains(" ") }
+        return text.count >= 3 && text.count <= 20 && text.first?.isLetter == true
+            && text.allSatisfy { ($0.isLetter && $0.isASCII) || $0.isNumber || $0 == "_" }
     }
 
     // MARK: Entry
@@ -169,8 +211,16 @@ struct SendSheet: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                         .onTapGesture { typing = true }
+                } else if let foundName, !typing {
+                    Text("\(foundName) · \(shortAddress)")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture { typing = true }
                 } else {
-                    TextField("", text: $typed, prompt: Text("Paste a Monad address").foregroundStyle(DeskColor.nightMuted.color))
+                    TextField("", text: $typed, prompt: Text("@tag or Monad address").foregroundStyle(DeskColor.nightMuted.color))
                         .font(.system(size: 16, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
                         .textInputAutocapitalization(.never)
@@ -180,7 +230,9 @@ struct SendSheet: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                if typed.isEmpty {
+                if lookup == .looking {
+                    ProgressView().controlSize(.small).padding(.trailing, 8)
+                } else if typed.isEmpty {
                     Button("Paste") {
                         typed = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                         typing = false
@@ -299,7 +351,7 @@ struct SendSheet: View {
         case .withdrawing: return "Moving from trading…"
         case .sending: return "Sending…"
         default:
-            if editable && to == nil { return "Add an address" }
+            if editable && to == nil { return typedIsName ? "Finding \(typedText)…" : "Add a tag or address" }
             guard let requested else { return "Enter an amount" }
             return toMyself ? "Move $\(requested.display()) to wallet" : "Send $\(requested.display())"
         }

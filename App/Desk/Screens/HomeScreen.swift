@@ -108,6 +108,10 @@ struct HomeScreen: View {
         model.address.flatMap { IdentityDirectory.shared.name(for: $0.checksummed) }
     }
 
+    private var ownHandle: String? {
+        model.address.flatMap { IdentityDirectory.shared.identity(for: $0.checksummed)?.handle }
+    }
+
     private var followingCount: Int {
         let traders = UserDefaults.standard.stringArray(forKey: TraderDirectory.storageKey) ?? []
         return Set(traders.map { $0.lowercased() }).union(TrackedWallets.shared.list.map(\.id)).count
@@ -382,7 +386,7 @@ struct HomeScreen: View {
                     Task { try? await Task.sleep(for: .seconds(1.4)); withAnimation { copiedAddress = false } }
                 } label: {
                     HStack(spacing: 5) {
-                        Text(copiedAddress ? "Address copied" : (ownName != nil ? model.addressShort : model.network.name))
+                        Text(copiedAddress ? "Address copied" : (ownHandle.map { ownName == $0 ? model.addressShort : "\($0) · \(model.addressShort)" } ?? (ownName != nil ? model.addressShort : model.network.name)))
                         Image(systemName: copiedAddress ? "checkmark" : "doc.on.doc")
                             .font(.system(size: 10, weight: .bold))
                     }
