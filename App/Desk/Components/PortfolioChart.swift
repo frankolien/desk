@@ -14,6 +14,8 @@ struct PortfolioChart: View {
     let points: [PortfolioChartPoint]
     let baseline: Double
     @Binding var selected: PortfolioChartPoint?
+    /// Steps between points instead of curving: for values that only change at events.
+    var stepped = false
 
     @State private var scrubDate: Date?
 
@@ -33,10 +35,10 @@ struct PortfolioChart: View {
         Chart {
             ForEach(points) { point in
                 AreaMark(x: .value("Time", point.date), yStart: .value("Base", yDomain.lowerBound), yEnd: .value("Value", point.value))
-                    .interpolationMethod(.monotone)
+                    .interpolationMethod(stepped ? .stepEnd : .monotone)
                     .foregroundStyle(LinearGradient(colors: [tint.opacity(0.28), tint.opacity(0)], startPoint: .top, endPoint: .bottom))
                 LineMark(x: .value("Time", point.date), y: .value("Value", point.value))
-                    .interpolationMethod(.monotone)
+                    .interpolationMethod(stepped ? .stepEnd : .monotone)
                     .foregroundStyle(tint)
                     .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
             }
