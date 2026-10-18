@@ -161,6 +161,13 @@ extension View {
             buttonStyle(.bordered)
         }
     }
+
+    /// Content fades out under floating bottom buttons instead of a hard edge.
+    @ViewBuilder
+    func deskSoftBottomEdge() -> some View {
+        if #available(iOS 26.0, *) { scrollEdgeEffectStyle(.soft, for: .bottom) }
+        else { self }
+    }
 }
 
 struct Chip<Content: View>: View {

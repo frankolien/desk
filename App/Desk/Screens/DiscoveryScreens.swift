@@ -942,12 +942,6 @@ private extension View {
         if #available(iOS 26.0, *) { glassEffect(.regular, in: shape) }
         else { background(.ultraThinMaterial, in: shape) }
     }
-
-    @ViewBuilder
-    func deskSoftBottomEdge() -> some View {
-        if #available(iOS 26.0, *) { scrollEdgeEffectStyle(.soft, for: .bottom) }
-        else { self }
-    }
 }
 
 private enum SpotDetailTab: String, CaseIterable, Identifiable {

@@ -134,9 +134,10 @@ struct CopyBoardScreen: View {
                 }
             }
             .padding(.horizontal, 20)
-            .padding(.bottom, 110)
+            .padding(.bottom, 24)
         }
         .background(DeskBackground())
+        .deskSoftBottomEdge()
         .safeAreaInset(edge: .bottom) { actions }
         .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)
@@ -367,30 +368,27 @@ struct CopyBoardScreen: View {
     // MARK: Actions
 
     private var actions: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Button { editing = true } label: {
                 Text("Adjust")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(DeskColor.nightText.color)
+                    .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
-                    .frame(height: 50)
+                    .padding(.vertical, 2)
             }
-            .buttonStyle(.plain)
-            .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            Button { confirmsStop = true } label: {
+            .controlSize(.large)
+            .deskSecondaryButton()
+            Button(role: .destructive) { confirmsStop = true } label: {
                 Text("Stop copying")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(DeskColor.fall.color)
+                    .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
-                    .frame(height: 50)
+                    .padding(.vertical, 2)
             }
-            .buttonStyle(.plain)
-            .background(DeskColor.fall.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .controlSize(.large)
+            .deskSecondaryButton()
+            .tint(DeskColor.fall.color)
         }
         .padding(.horizontal, 20)
-        .padding(.top, 10)
         .padding(.bottom, 8)
-        .background(.ultraThinMaterial)
     }
 
     private func stop() {
