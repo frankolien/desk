@@ -638,7 +638,7 @@ private struct PerpMarketRow: View {
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 3) {
                 let price = model.liveText(for: market)
-                TickText(text: price == "—" ? "—" : "$" + price, value: IndexFeed.shared.price(for: market.symbol),
+                TickText(text: price == "—" ? "—" : "$" + price, value: model.liveValue(for: market),
                          font: .system(size: 16, weight: .bold, design: .rounded).monospacedDigit())
                 let change = model.changePercent(for: market)
                 Text(change.map { String(format: "%+.2f%%", $0) } ?? "—")
@@ -1181,7 +1181,7 @@ struct PerpDetailScreen: View {
                     Text("24h")
                         .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
-                    if market.hasLiveIndex, market.markText != "—" {
+                    if market.hasLivePrice, market.markText != "—" {
                         Text("· Mark $" + market.markText)
                             .font(.system(size: 14, weight: .medium, design: .rounded).monospacedDigit())
                             .foregroundStyle(DeskColor.nightMuted.color)

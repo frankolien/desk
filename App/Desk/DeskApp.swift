@@ -47,12 +47,9 @@ struct DeskApp: App {
         }
         .onChange(of: phase) { _, new in
             switch new {
-            case .background:
-                grace.leave(model)
-                IndexFeed.shared.stop()
+            case .background: grace.leave(model)
             case .active:
                 grace.return(model)
-                IndexFeed.shared.start()
                 Task { await TradeAlerts.shared.resume() }
             default: break
             }
