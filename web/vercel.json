@@ -29,6 +29,10 @@
       "destination": "/app/index.html"
     },
     {
+      "source": "/@:tag",
+      "destination": "/app/index.html"
+    },
+    {
       "source": "/api/relay-status",
       "destination": "/api/relay-quote?view=status"
     },

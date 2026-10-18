@@ -468,6 +468,8 @@ const ROUTES = [
   { pattern: /^\/app\/portfolio\/?$/, view: "wallet", section: "portfolio", params: () => ({}) },
   { pattern: /^\/app\/wallet\/([A-Za-z0-9]{20,64})\/?$/, view: "wallet", section: "portfolio", params: (m) => ({ address: m[1] }) },
   { pattern: /^\/app\/token\/(\d{1,10})\/([A-Za-z0-9]{20,64})\/?$/, view: "token", section: "markets", params: (m) => ({ chainIndex: m[1], address: m[2] }) },
+  // trydesk.trade/@frank: the link on a share card's QR. Resolved to the wallet page.
+  { pattern: /^\/@([A-Za-z][A-Za-z0-9_]{2,19})\/?$/, view: "tag", section: "portfolio", params: (m) => ({ tag: m[1].toLowerCase() }) },
 ];
 
 let unmount = null;
@@ -494,6 +496,17 @@ async function render() {
   const view = $("#view");
   view.scrollTop = 0;
   window.scrollTo(0, 0);
+  if (route.view === "tag") {
+    view.innerHTML = `<div class="empty">Finding @${esc(params.tag)}…</div>`;
+    try {
+      const found = await api(`/api/traders?view=lookup&q=${encodeURIComponent("@" + params.tag)}`, { ttl: 60_000 });
+      if (token !== mountToken) return;
+      if (found?.address && found.chain !== "solana") return navigate(`/app/wallet/${found.address}`, { replace: true });
+    } catch {}
+    if (token !== mountToken) return;
+    view.innerHTML = `<div class="empty">Nobody on Desk answers to @${esc(params.tag)}.<br><span class="faint">Tags are claimed in the Desk app.</span></div>`;
+    return;
+  }
   try {
     const module = await import(`/app/views/${route.view}.js`);
     if (token !== mountToken) return;

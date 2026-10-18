@@ -84,7 +84,8 @@ struct PositionScreen: View {
             #endif
             .sheet(isPresented: $showsShare) {
                 if let figures {
-                    TradeShareSheet(symbol: market.symbol, figures: figures)
+                    TradeShareSheet(symbol: market.symbol, figures: figures,
+                                    tag: model.address.flatMap { IdentityDirectory.shared.identity(for: $0.checksummed)?.tag })
                 }
             }
             .fullScreenCover(isPresented: $showsStudio) {
@@ -773,6 +774,7 @@ extension PerplPosition: @retroactive Identifiable {
 private struct TradeShareSheet: View {
     let symbol: String
     let figures: PositionFigures
+    let tag: String?
 
     @Environment(\.dismiss) private var dismiss
     @State private var photoItem: PhotosPickerItem?
@@ -794,7 +796,7 @@ private struct TradeShareSheet: View {
 
                     VStack(spacing: 10) {
                         ShareCardPreview(
-                            symbol: symbol, figures: figures, photo: photo,
+                            symbol: symbol, figures: figures, photo: photo, tag: tag,
                             width: cardWidth, height: cardHeight)
                             .frame(maxWidth: .infinity)
 
@@ -918,7 +920,7 @@ private struct TradeShareSheet: View {
     }
 
     @MainActor private func render() -> UIImage? {
-        let card = TradeShareCard(symbol: symbol, figures: figures, photo: photo)
+        let card = TradeShareCard(symbol: symbol, figures: figures, photo: photo, tag: tag)
             .frame(width: 900, height: 1125)
         let renderer = ImageRenderer(content: card)
         renderer.scale = 1
@@ -931,11 +933,12 @@ private struct ShareCardPreview: View {
     let symbol: String
     let figures: PositionFigures
     let photo: UIImage?
+    let tag: String?
     let width: CGFloat
     let height: CGFloat
 
     var body: some View {
-        TradeShareCard(symbol: symbol, figures: figures, photo: photo)
+        TradeShareCard(symbol: symbol, figures: figures, photo: photo, tag: tag)
             .frame(width: 900, height: 1125)
             .scaleEffect(width / 900, anchor: .topLeading)
             .frame(width: width, height: height, alignment: .topLeading)
@@ -976,8 +979,12 @@ private struct TradeShareCard: View {
     let symbol: String
     let figures: PositionFigures
     let photo: UIImage?
+    /// The sharer's Desk tag: the code then leads to them, not just to the market.
+    let tag: String?
 
     private var tint: Color { figures.isProfit ? DeskColor.rise.color : DeskColor.fall.color }
+    private var codeLink: String { tag.map { "https://trydesk.trade/@\($0)" } ?? "https://trydesk.trade/app/trade/\(symbol)" }
+    private var codeLabel: String { tag.map { "Code to open @\($0) on Desk" } ?? "Code to open \(symbol) on Desk" }
     private var pnl: String {
         (figures.unrealisedPnL.isNegative ? "" : "+") + figures.unrealisedPnL.display() + " AUSD"
     }
@@ -1047,7 +1054,7 @@ private struct TradeShareCard: View {
                             .foregroundStyle(Color.white.opacity(0.56))
                     }
                     Spacer()
-                    AddressQR(address: "https://trydesk.trade/app/trade/\(symbol)", size: 80, label: "Code to open \(symbol) on Desk")
+                    AddressQR(address: codeLink, size: 80, label: codeLabel)
                 }
                 .padding(.top, 34)
             }
