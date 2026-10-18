@@ -5,7 +5,7 @@ import { memoryStore } from "../api/_store.mjs";
 import { createRunner } from "../copyd/runner.mjs";
 import { createLease } from "../copyd/lease.mjs";
 import { accountInFrame, subscription, TOPICS, EXCHANGE } from "../copyd/watcher.mjs";
-import { copyPayload, createNotifier } from "../copyd/notify.mjs";
+import { copyPayload, createNotifier, traderNames } from "../copyd/notify.mjs";
 
 const quiet = { warn() {} };
 
@@ -101,6 +101,34 @@ test("Skips are held to one per trader per hour; devices without a token get not
   assert.equal(sent.length, 2);
   assert.deepEqual(await notify({ id: "x" }, row({ kind: "opened" })), { skipped: "no device" });
   assert.deepEqual(await notify({ ...copier, notifyShadow: false }, row({ kind: "opened", isShadow: true })), { skipped: "shadow muted" });
+});
+
+test("A push names the trader by Desk tag, then by a known name, then by the short address", async () => {
+  const store = memoryStore();
+  const tagged = "0x52ac212e7187a799a7382c7a768cb35b72a3e20a";
+  const named = `0x${"1".repeat(40)}`;
+  const nobody = `0x${"2".repeat(40)}`;
+  await store.set(`profile:${tagged}`, JSON.stringify({ name: "Frank O", tag: "frank", updatedAt: 1 }));
+  await store.set(`id:${named}`, JSON.stringify({ address: named, name: "whale.nad", source: "nad", tag: null }));
+  let reads = 0;
+  const names = traderNames({ store, fetchImpl: async () => { reads += 1; return { ok: false }; } });
+  const sent = [];
+  const notify = createNotifier({ send: async (push, payload) => { sent.push(payload); return { status: 200 }; }, names });
+  const copier = { id: "mainnet:0xme", push: { token: "ab".repeat(32), environment: "production" } };
+  await notify(copier, row({ kind: "opened", trader: tagged }));
+  await notify(copier, row({ kind: "closed", pnl: 1, trader: named }));
+  await notify(copier, row({ kind: "opened", trader: nobody }));
+  await notify(copier, row({ kind: "opened", trader: nobody }));
+  assert.equal(sent[0].aps.alert.title, "Copied @frank: Long BTC 5×");
+  assert.equal(sent[1].aps.alert.title, "Closed with whale.nad: Long BTC 5×");
+  assert.equal(sent[2].aps.alert.title, "Copied 0x2222…2222: Long BTC 5×");
+  const asked = reads;
+  assert.ok(asked > 0, "an unknown trader is looked up once");
+  assert.equal(reads, asked, "and not again within the hold");
+  assert.equal(await names("not an address"), null);
+  const down = async () => { throw new Error("down"); };
+  const failing = traderNames({ store: { mget: down, get: down, set: down, smembers: down }, fetchImpl: async () => ({ ok: false }) });
+  assert.equal(await failing(nobody), null, "a store outage names nobody rather than failing the push");
 });
 
 test("One beat holds the lease for three beats, so events are never dropped between them", async () => {

@@ -1,7 +1,37 @@
 /// Every result the engine records, as a push to the copier's phone: the app is not open to show
 /// it. Shadow results say so in the title, so a paper copy is never mistaken for money. Skips are
 /// held to one per trader per hour; everything else always goes.
+import { resolveIdentities } from "../api/_identity.mjs";
+import { deskProfiles } from "../api/_profile.mjs";
+
 export const shortAddress = (address) => `${address.slice(0, 6)}…${address.slice(-4)}`;
+const EVM = /^0x[a-fA-F0-9]{40}$/;
+
+/// Who a trader is, for the push: their Desk tag as "@tag", else the name Desk already knows
+/// them by (the identity cache; name services are asked at most once a day), else nothing, and
+/// the payload falls back to the short address. Answers are held for ten minutes so one sweep's
+/// pushes don't each read Redis.
+export function traderNames({ store, fetchImpl = fetch, now = Date.now, ttlMs = 10 * 60_000 }) {
+  const known = new Map();
+  return async function name(address) {
+    if (!store || !EVM.test(address ?? "")) return null;
+    const key = address.toLowerCase();
+    const hit = known.get(key);
+    if (hit && now() - hit.at < ttlMs) return hit.value;
+    let value = null;
+    try {
+      const profile = (await deskProfiles(store, [key])).get(key);
+      if (profile?.tag) value = `@${profile.tag}`;
+      else {
+        const identity = (await resolveIdentities([key], { store, fetchImpl }))[key];
+        value = identity?.tag ? `@${identity.tag}` : identity?.name ?? null;
+      }
+    } catch { value = null; }
+    known.set(key, { value, at: now() });
+    if (known.size > 5_000) for (const [k, v] of known) if (now() - v.at >= ttlMs) known.delete(k);
+    return value;
+  };
+}
 
 const side = (row) => (row.isLong ? "Long" : "Short");
 const money = (value) => `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(2)} AUSD`;
@@ -48,7 +78,9 @@ export function createNotifier({ send, names = () => null, now = Date.now }) {
       skipNoted.set(key, hour);
       if (skipNoted.size > 50_000) for (const [k, h] of skipNoted) if (h !== hour) skipNoted.delete(k);
     }
-    const payload = copyPayload(row, { name: names(row.trader) });
+    let name = null;
+    try { name = row.trader ? await names(row.trader) : null; } catch { name = null; }
+    const payload = copyPayload(row, { name });
     if (!payload) return { skipped: "silent kind" };
     return send(copier.push, payload, { collapseId: `copy-${row.id}`.slice(0, 64) });
   };

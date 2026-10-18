@@ -11,7 +11,7 @@ import { chainReader, openMarkets } from "../api/traders.mjs";
 import { createEngine } from "./engine.mjs";
 import { createLease } from "./lease.mjs";
 import { createRunner } from "./runner.mjs";
-import { createNotifier, apiSender } from "./notify.mjs";
+import { createNotifier, apiSender, traderNames } from "./notify.mjs";
 import { readTrader } from "./books.mjs";
 import { watchPositions } from "./watcher.mjs";
 import { createExecutor } from "./executor.mjs";
@@ -30,7 +30,7 @@ if (!store) { console.error("copyd: KV_REST_API_URL and KV_REST_API_TOKEN are re
 const chain = chainReader();
 // Notifications go out through Desk's API, which holds the APNs key; copyd keeps none.
 const notify = process.env.DESK_API && process.env.CRON_SECRET
-  ? createNotifier({ send: apiSender({ base: process.env.DESK_API, secret: process.env.CRON_SECRET }) })
+  ? createNotifier({ send: apiSender({ base: process.env.DESK_API, secret: process.env.CRON_SECRET }), names: traderNames({ store }) })
   : async () => ({ skipped: "notifications not configured" });
 
 /// desk-copyd's KMS client, for both kinds of copying; null without its credentials.
