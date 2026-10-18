@@ -43,10 +43,13 @@ struct HomeScreen: View {
 
     @AppStorage("desk.hidesBalance") private var hidesBalance = false
     @AppStorage("desk.firstOpened") private var firstOpened: Double = 0
-    @State private var selectedPosition: PerplPosition?
     @State private var spot = SpotHoldingsModel()
     @State private var openToken: TokenOpenRequest.Target?
-    @State private var openHolding: SpotHolding?
+    /// Everything this screen presents as a sheet goes through one slot: separate `.sheet`
+    /// modifiers on one view leave the next one unable to open until something redraws.
+    @State private var overlay: Overlay?
+    @State private var claimsTag = false
+    @State private var checkedTag = false
     @State private var book: Book = .open
     @State private var filter: Filter = .all
     @AppStorage("desk.portfolio.range") private var range: Range = .month
@@ -54,7 +57,6 @@ struct HomeScreen: View {
     @State private var scrubbed: PortfolioChartPoint?
     @State private var equity: [EquityLog.Point] = []
     @State private var copiedAddress = false
-    @State private var editsProfile = false
     @State private var showsPortfolioReplay = false
     @State private var expandedTrade: Int64?
 
@@ -110,6 +112,23 @@ struct HomeScreen: View {
 
     private var ownHandle: String? {
         model.address.flatMap { IdentityDirectory.shared.identity(for: $0.checksummed)?.handle }
+    }
+
+    private enum Overlay: Identifiable {
+        case holding(SpotHolding), position(PerplPosition), editor
+        var id: String {
+            switch self {
+            case .holding(let holding): "holding-\(holding.id)"
+            case .position(let position): "position-\(position.hashValue)"
+            case .editor: "editor"
+            }
+        }
+    }
+
+    /// Nobody finds the pencil on the avatar: until a tag is claimed, the profile asks for one itself.
+    private var needsTag: Bool {
+        guard checkedTag, let address = model.address?.checksummed else { return false }
+        return IdentityDirectory.shared.identity(for: address)?.tag == nil
     }
 
     private var followingCount: Int {
@@ -177,6 +196,7 @@ struct HomeScreen: View {
                 VStack(alignment: .leading, spacing: 0) {
                     topBar
                     identity.padding(.top, 34)
+                    if needsTag { tagCard.padding(.top, 18) }
                     hairline.padding(.top, 22)
                     portfolio.padding(.top, 20)
                     cashRow.padding(.top, 22)
@@ -199,12 +219,13 @@ struct HomeScreen: View {
             let arguments = ProcessInfo.processInfo.arguments
             if arguments.contains("-open-share") || arguments.contains("-open-close") {
                 try? await Task.sleep(for: .seconds(2))
-                selectedPosition = model.openPositions.first
+                overlay = model.openPositions.first.map(Overlay.position)
             }
             if arguments.contains("-open-holding") {
                 while spot.holdings.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
-                openHolding = spot.holdings.first
+                overlay = spot.holdings.first.map(Overlay.holding)
             }
+            if arguments.contains("-claim-tag") { claimsTag = true }
         }
         #endif
         .toolbar(.hidden, for: .navigationBar)
@@ -212,20 +233,29 @@ struct HomeScreen: View {
             SpotTokenPage(target: target, model: model)
                 .toolbar(.hidden, for: .tabBar)
         }
-        .sheet(item: $openHolding, onDismiss: { Task { await spot.refresh() } }) { holding in
-            TokenPositionSheet(holding: holding, model: model) { target in
-                // The sheet has to be gone before the page can be pushed under it.
-                Task { try? await Task.sleep(for: .milliseconds(450)); openToken = target }
-            }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-        }
-        .sheet(item: $selectedPosition) { held in
-            PositionScreen(position: held, market: market, session: model.trading, model: model)
+        .sheet(item: $overlay, onDismiss: { if Showcase.spotTrading { Task { await spot.refresh() } } }) { overlay in
+            switch overlay {
+            case .holding(let holding):
+                TokenPositionSheet(holding: holding, model: model) { target in
+                    // The sheet has to be gone before the page can be pushed under it.
+                    Task { try? await Task.sleep(for: .milliseconds(450)); openToken = target }
+                }
                 .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            case .position(let held):
+                PositionScreen(position: held, market: market, session: model.trading, model: model)
+                    .presentationDetents([.large])
+            case .editor:
+                ProfileEditorSheet(model: model) { self.overlay = nil }
+            }
         }
-        .sheet(isPresented: $editsProfile) {
-            ProfileEditorSheet(model: model) { editsProfile = false }
+        .fullScreenCover(isPresented: $claimsTag) {
+            ClaimTagScreen(model: model) { claimsTag = false }
+        }
+        .task(id: model.address?.checksummed) {
+            guard let address = model.address?.checksummed else { return }
+            await IdentityDirectory.shared.refresh(address)
+            checkedTag = true
         }
         .fullScreenCover(isPresented: $showsPortfolioReplay) {
             PortfolioReplaySheet(
@@ -240,7 +270,7 @@ struct HomeScreen: View {
         }
         #if DEBUG
         .task {
-            if ProcessInfo.processInfo.arguments.contains("-open-profile-editor") { editsProfile = true }
+            if ProcessInfo.processInfo.arguments.contains("-open-profile-editor") { overlay = .editor }
             if ProcessInfo.processInfo.arguments.contains("-closed-book") { book = .closed }
             if ProcessInfo.processInfo.arguments.contains("-expand-closed") {
                 book = .closed
@@ -359,7 +389,7 @@ struct HomeScreen: View {
 
     private var identity: some View {
         HStack(alignment: .top, spacing: 14) {
-            Button { editsProfile = true } label: {
+            Button { overlay = .editor } label: {
                 TraderAvatar(address: model.address?.checksummed ?? "", size: 58)
                     .overlay(alignment: .bottomTrailing) {
                         Image(systemName: "pencil")
@@ -616,6 +646,38 @@ struct HomeScreen: View {
         .buttonStyle(DeskPressStyle())
     }
 
+    private var tagCard: some View {
+        Button { claimsTag = true } label: {
+            HStack(spacing: 12) {
+                Text("@")
+                    .font(.system(size: 20, weight: .heavy, design: .rounded))
+                    .foregroundStyle(DeskColor.night.color)
+                    .frame(width: 34, height: 34)
+                    .background(DeskColor.action.color, in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Claim your free @tag")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                    Text("Friends find you by it and send to @you. One Face ID.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(DeskColor.nightText.color)
+            }
+            .padding(14)
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(DeskColor.action.color.opacity(0.35), lineWidth: 0.75))
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(DeskPressStyle())
+        .accessibilityLabel("Claim your free tag")
+    }
+
     private var ledger: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -706,7 +768,7 @@ struct HomeScreen: View {
                     detail: Self.percent(position.figures.returnOnMarginMicros) + " on margin",
                     tint: position.figures.isProfit ? DeskColor.rise : DeskColor.fall) {
                         market.select(position.market)
-                        selectedPosition = position.held
+                        overlay = .position(position.held)
                         Task { await model.trading.selectMarket(position.market) }
                     }
             }
@@ -718,7 +780,7 @@ struct HomeScreen: View {
                     value: hidesBalance ? "•••••" : holding.value.map { DisplayCurrency.shared.format($0) } ?? Unavailable.text,
                     detail: holding.changeSincePaid.map { Self.percent(Int($0 * 1_000_000)) + " since buy" },
                     tint: (holding.changeSincePaid ?? 0) < 0 ? DeskColor.fall : DeskColor.rise) {
-                        openHolding = holding
+                        overlay = .holding(holding)
                     }
             }
         }
