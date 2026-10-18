@@ -162,6 +162,8 @@ struct StudioFrame {
     var studies: StudySet
     var alerts: [Double] = []
     var leverage: Int = 1
+    /// The time of a candle pinned by a double tap.
+    var pinned: Double?
 }
 
 struct StudySet {
@@ -328,7 +330,24 @@ struct StudioPainter {
             axisTag(PriceAxis.label(drawing.a.price), y: y, fill: DeskColor.action.color, text: .black, in: &context)
         }
         drawLastPrice(in: &context)
+        pin?.draw(in: &context)
         drawCrosshair(in: &context)
+    }
+
+    var pin: CandlePin? {
+        guard let time = frame.pinned, let index = frame.candles.firstIndex(where: { $0.time == time }),
+              frame.window.range.contains(index) else { return nil }
+        let candle = candles[index]
+        return CandlePin(candle: candle, x: geometry.x(index: index),
+                         anchorY: (geometry.scale.y(candle.open) + geometry.scale.y(candle.close)) / 2,
+                         plot: geometry.plot)
+    }
+
+    /// The crosshair's price tag on the axis, grown to a finger's width.
+    var crosshairTag: CGRect? {
+        guard let crosshair = frame.crosshair else { return nil }
+        let y = min(max(geometry.scale.y(crosshairPrice(at: crosshair)), geometry.plot.minY), geometry.plot.maxY)
+        return CGRect(x: geometry.plot.maxX - 4, y: y - 22, width: StudioGeometry.axisWidth + 4, height: 44)
     }
 
     private func drawGrid(in context: inout GraphicsContext) {
@@ -809,7 +828,7 @@ struct ChartStudio: View {
 
     /// What one finger is doing. Decided on the first movement, not the first touch, so
     /// a hand that rests before it drags still pans.
-    private enum Touch { case undecided, pan, crosshair, ruler }
+    private enum Touch { case undecided, pan, crosshair, ruler, tag }
 
     @AppStorage("desk.chart.style") private var styleName = ChartStyle.candles.rawValue
     @AppStorage("desk.chart.overlays") private var overlayNames = "ma7,ma25,ma99"
@@ -837,6 +856,9 @@ struct ChartStudio: View {
     @State private var levelMenu: ChartDrawing?
     @State private var alertMenu: Double?
     @State private var alerts: [Double] = []
+    @State private var pinnedTime: Double?
+    @State private var notice: String?
+    @State private var noticeFade: Task<Void, Never>?
 
     private static let defaultVisible = 70
 
@@ -862,7 +884,7 @@ struct ChartStudio: View {
             candles: candles, interval: Double(market.candleIntervalSeconds), window: window, style: style,
             overlays: overlays, panes: panes, logScale: logScale, guides: guides, drawings: drawings,
             pendingTrend: pendingTrend, ruler: ruler, crosshair: crosshair, magnet: magnet, studies: studies,
-            alerts: alerts, leverage: Int(market.market?.config.maxLeverage ?? 1))
+            alerts: alerts, leverage: Int(market.market?.config.maxLeverage ?? 1), pinned: pinnedTime)
     }
 
     private var priceDecimals: Int { Int(market.market?.config.priceDecimals ?? 2) }
@@ -899,6 +921,7 @@ struct ChartStudio: View {
         }
         .background(Color.black.ignoresSafeArea())
         .foregroundStyle(DeskColor.nightText.color)
+        .statusBarHidden(crosshair != nil && !crosshairMode)
         .onAppear {
             market.setCandleDepth(400)
             drawings = ChartDrawingStore.load(drawingKey)
@@ -1199,7 +1222,19 @@ struct ChartStudio: View {
                     StudioCanvas(frame: frame)
                         .contentShape(Rectangle())
                         .gesture(dragGesture(geometry: geometry, painter: painter).simultaneously(with: zoomGesture(geometry: geometry)))
-                        .simultaneousGesture(ExclusiveGesture(doubleTap, tapGesture(painter: painter)))
+                        .simultaneousGesture(ExclusiveGesture(doubleTap(painter: painter), tapGesture(painter: painter)))
+                }
+                if let notice {
+                    Text(notice)
+                        .font(.system(size: 12, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .padding(.horizontal, 12)
+                        .frame(height: 30)
+                        .deskGlass(in: Capsule())
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .padding(.top, 8)
+                        .allowsHitTesting(false)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
                 if !window.isAtLatest {
                     Button {
@@ -1271,12 +1306,19 @@ struct ChartStudio: View {
                 case .ruler:
                     guard let rulerFrom, let to = anchor(at: value.location, geometry: geometry, painter: painter) else { return }
                     ruler = (rulerFrom, to)
+                case .tag:
+                    // A finger that slides off the tag is dragging the crosshair after all.
+                    guard hypot(value.translation.width, value.translation.height) > 8 else { return }
+                    touch = .crosshair
+                    ruler = nil
+                    place(crosshairAt: value.location, geometry: geometry, painter: painter)
                 case nil:
                     break
                 }
             }
             .onEnded { _ in
                 hold?.cancel()
+                if touch == .tag, let crosshair { toggleAlert(at: painter.crosshairPrice(at: crosshair)) }
                 if touch == .crosshair, !crosshairMode { crosshair = nil }
                 touch = nil
                 dragStart = nil
@@ -1286,7 +1328,9 @@ struct ChartStudio: View {
 
     private func begin(at start: CGPoint, geometry: StudioGeometry, painter: StudioPainter) {
         if crosshairMode {
-            if let crosshair, hypot(crosshair.x - start.x, crosshair.y - start.y) < 36,
+            if let tag = painter.crosshairTag, tag.contains(start) {
+                touch = .tag
+            } else if let crosshair, hypot(crosshair.x - start.x, crosshair.y - start.y) < 36,
                let from = anchor(at: crosshair, geometry: geometry, painter: painter) {
                 touch = .ruler
                 rulerFrom = from
@@ -1337,11 +1381,61 @@ struct ChartStudio: View {
             .onEnded { _ in zoomStart = nil }
     }
 
-    private var doubleTap: some Gesture {
-        SpatialTapGesture(count: 2).onEnded { _ in
+    private func doubleTap(painter: StudioPainter) -> some Gesture {
+        SpatialTapGesture(count: 2).onEnded { value in
+            if !crosshairMode, pinOrRelease(at: value.location, painter: painter) { return }
             withAnimation(.snappy(duration: 0.25)) {
                 window = ChartWindow(total: window.total, visible: Self.defaultVisible)
             }
+        }
+    }
+
+    /// A double tap on a candle pins it; on the pinned candle, its card, or empty space it lets go.
+    /// False when there was nothing to pin or release, so the tap can still reset the zoom.
+    private func pinOrRelease(at point: CGPoint, painter: StudioPainter) -> Bool {
+        let geometry = painter.geometry
+        if let pin = painter.pin, pin.card.contains(point) || abs(pin.x - point.x) < geometry.slotWidth / 2 {
+            pinnedTime = nil
+            return true
+        }
+        let index = painter.frame.window.index(atSlot: geometry.slot(atX: point.x))
+        guard point.x < geometry.plot.maxX, point.y < geometry.size.height - StudioGeometry.timeAxisHeight,
+              candles.indices.contains(index), let time = candles[index].time else {
+            guard pinnedTime != nil else { return false }
+            pinnedTime = nil
+            return true
+        }
+        pinnedTime = time
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        return true
+    }
+
+    /// The crosshair's price tag is a switch: a tap sets an alert there, a tap on one already set clears it.
+    private func toggleAlert(at raw: Double) {
+        let tick = 1 / priceScale
+        let price = (raw * priceScale).rounded() / priceScale
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if let target = TradeAlerts.shared.targets(for: market.symbol).first(where: { abs($0.price - price) < tick * 1.5 }) {
+            TradeAlerts.shared.removeTarget(target)
+            refreshAlerts()
+            show("Alert removed")
+            return
+        }
+        guard let mark = candles.last?.close else { return }
+        Task {
+            guard await TradeAlerts.shared.addTarget(market: market.symbol, price: price, mark: mark) else { return }
+            refreshAlerts()
+            show("Alert at \(PriceAxis.label(price))")
+        }
+    }
+
+    private func show(_ text: String) {
+        noticeFade?.cancel()
+        withAnimation(.easeOut(duration: 0.18)) { notice = text }
+        noticeFade = Task {
+            try? await Task.sleep(for: .seconds(1.6))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.25)) { notice = nil }
         }
     }
 
@@ -1349,7 +1443,11 @@ struct ChartStudio: View {
         SpatialTapGesture().onEnded { value in
             switch tool {
             case .none:
-                if let hit = nearestDrawing(to: value.location, painter: painter),
+                if let pin = painter.pin, pin.card.contains(value.location) {
+                    pinnedTime = nil
+                } else if crosshairMode, let tag = painter.crosshairTag, tag.contains(value.location) {
+                    // The drag gesture already took it as a tap on the tag.
+                } else if let hit = nearestDrawing(to: value.location, painter: painter),
                    let drawing = drawings.first(where: { $0.id == hit }), drawing.kind == .level {
                     levelMenu = drawing
                 } else if let price = alerts.min(by: { abs(painter.geometry.scale.y($0) - value.location.y) < abs(painter.geometry.scale.y($1) - value.location.y) }),

@@ -24,53 +24,104 @@ struct CandlestickChart: View {
     let candles: [ChartCandle]
     var guides: [PriceGuide] = []
     var marks: [ChartMark] = []
+    /// Told when the crosshair lands and lifts, so the screen can clear the status bar while reading.
+    var onScrub: ((Bool) -> Void)?
     /// Where the finger is: the crosshair follows it exactly, the candle it reads is the nearest.
     @State private var scrub: CGPoint?
+    /// The candle a double tap pinned, by time; its card stays until a tap lifts it.
+    @State private var pinnedTime: Double?
 
-    private static let stamp: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "d MMM HH:mm"
-        return formatter
-    }()
+    /// The window drawn: the last 25 candles and the scales they sit on.
+    private struct Scene {
+        let samples: [ChartCandle]
+        let layout: CandleLayout
+        let axis: PriceAxis
+        let plotWidth: CGFloat
+        let priceHeight: CGFloat
+        let hasVolume: Bool
 
-    private static func nearest(_ x: CGFloat, layout: CandleLayout, count: Int) -> Int {
-        min(max(Int(x / layout.step) - layout.leading, 0), count - 1)
+        func nearest(_ x: CGFloat) -> Int {
+            min(max(Int(x / layout.step) - layout.leading, 0), samples.count - 1)
+        }
+
+        func pin(_ time: Double?) -> CandlePin? {
+            guard let time, let index = samples.firstIndex(where: { $0.time == time }) else { return nil }
+            let candle = samples[index]
+            return CandlePin(candle: candle, x: layout.x(index),
+                             anchorY: (axis.y(candle.open) + axis.y(candle.close)) / 2,
+                             plot: CGRect(x: 0, y: 0, width: plotWidth, height: priceHeight))
+        }
+    }
+
+    private func scene(_ size: CGSize) -> Scene? {
+        let samples = Array(candles.suffix(25))
+        guard samples.count > 1,
+              let low = samples.map(\.low).min(),
+              let high = samples.map(\.high).max() else { return nil }
+        let hasVolume = samples.compactMap(\.volume).contains { $0 > 0 }
+        let plotWidth = size.width - 62
+        let priceHeight = hasVolume ? size.height * 0.76 : size.height - 6
+        let axis = PriceAxis(
+            candleLow: low, candleHigh: high, guides: guides.map(\.value),
+            height: priceHeight, topInset: 7, bottomInset: 7)
+        return Scene(samples: samples, layout: CandleLayout(count: samples.count, width: plotWidth),
+                     axis: axis, plotWidth: plotWidth, priceHeight: priceHeight, hasVolume: hasVolume)
     }
 
     var body: some View {
         GeometryReader { proxy in
             canvas
                 .gesture(ScrubPress { location in
-                    guard let location else { scrub = nil; return }
-                    let samples = Array(candles.suffix(25))
-                    let layout = CandleLayout(count: samples.count, width: proxy.size.width - 62)
-                    let before = scrub.map { Self.nearest($0.x, layout: layout, count: samples.count) }
+                    guard let location, let scene = scene(proxy.size) else { scrub = nil; return }
+                    let before = scrub.map { scene.nearest($0.x) }
                     scrub = location
-                    if Self.nearest(location.x, layout: layout, count: samples.count) != before {
+                    if scene.nearest(location.x) != before {
                         UISelectionFeedbackGenerator().selectionChanged()
                     }
                 })
+                .gesture(ChartTap { location in
+                    guard let scene = scene(proxy.size) else { return }
+                    pin(at: location, in: scene)
+                })
         }
+        .onChange(of: scrub != nil) { _, active in onScrub?(active) }
+        #if DEBUG
+        .task(id: candles.count) {
+            guard pinnedTime == nil, ProcessInfo.processInfo.arguments.contains("-pin-candle") else { return }
+            pinnedTime = candles.suffix(25).dropLast(7).last?.time
+        }
+        #endif
+    }
+
+    /// A double tap on a candle pins it; on the pinned candle, its card, or empty space it lets go.
+    private func pin(at location: CGPoint, in scene: Scene) {
+        if let pin = scene.pin(pinnedTime), pin.card.contains(location) || abs(pin.x - location.x) < scene.layout.step / 2 {
+            pinnedTime = nil
+            return
+        }
+        let index = scene.nearest(location.x)
+        guard location.x <= scene.plotWidth, abs(scene.layout.x(index) - location.x) < scene.layout.step,
+              let time = scene.samples[index].time else {
+            pinnedTime = nil
+            return
+        }
+        pinnedTime = time
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     private var canvas: some View {
         Canvas { context, size in
-            let samples = Array(candles.suffix(25))
-            guard samples.count > 1,
-                  let low = samples.map(\.low).min(),
-                  let high = samples.map(\.high).max() else { return }
-
-            let volumes = samples.compactMap(\.volume)
-            let hasVolume = volumes.contains { $0 > 0 }
-            let plotWidth = size.width - 62
-            let priceHeight = hasVolume ? size.height * 0.76 : size.height - 6
+            guard let scene = scene(size) else { return }
+            let samples = scene.samples
+            let hasVolume = scene.hasVolume
+            let plotWidth = scene.plotWidth
+            let priceHeight = scene.priceHeight
             let volumeTop = size.height * 0.80
-            let layout = CandleLayout(count: samples.count, width: plotWidth)
+            let layout = scene.layout
+            let axis = scene.axis
+            let volumes = samples.compactMap(\.volume)
 
             let guideValues = guides.map(\.value)
-            let axis = PriceAxis(
-                candleLow: low, candleHigh: high, guides: guideValues,
-                height: priceHeight, topInset: 7, bottomInset: 7)
             let placements = Array(zip(guides, guideValues.map(axis.place)))
 
             for tick in axis.ticks(clearOf: guideValues, within: 11) {
@@ -180,8 +231,10 @@ struct CandlestickChart: View {
                     at: CGPoint(x: plotWidth + 31, y: guideY), anchor: .center)
             }
 
+            scene.pin(pinnedTime)?.draw(in: &context)
+
             if let scrub {
-                let candle = samples[Self.nearest(scrub.x, layout: layout, count: samples.count)]
+                let candle = samples[scene.nearest(scrub.x)]
                 let x = min(max(scrub.x, 0), plotWidth)
                 let y = min(max(scrub.y, 0), priceHeight)
                 let value = axis.value(atY: y)
@@ -215,7 +268,7 @@ struct CandlestickChart: View {
 
                 if let time = candle.time {
                     let when = context.resolve(
-                        Text(Self.stamp.string(from: Date(timeIntervalSince1970: time)))
+                        Text(CandlePin.stamp.string(from: Date(timeIntervalSince1970: time)))
                             .font(.system(size: 10, weight: .bold, design: .rounded))
                             .foregroundStyle(.white))
                     let whenSize = when.measure(in: CGSize(width: 140, height: 20))
@@ -312,4 +365,89 @@ struct ScrubPress: UIGestureRecognizerRepresentable {
         default: onChange(nil)
         }
     }
+}
+
+/// A double tap, through UIKit's own recognizer: it cancels no touches and gives up on the
+/// first movement, so a flick still scrolls the page and a hold still scrubs.
+struct ChartTap: UIGestureRecognizerRepresentable {
+    let onDoubleTap: (CGPoint) -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> UITapGestureRecognizer {
+        let recognizer = UITapGestureRecognizer()
+        recognizer.numberOfTapsRequired = 2
+        recognizer.cancelsTouchesInView = false
+        recognizer.delaysTouchesEnded = false
+        return recognizer
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UITapGestureRecognizer, context: Context) {
+        guard recognizer.state == .ended else { return }
+        onDoubleTap(context.converter.localLocation)
+    }
+}
+
+/// One candle's reading, held on the chart: a marker through the candle and a card beside it.
+/// The card is measured with UIKit so a tap can be tested against it outside a draw pass.
+struct CandlePin {
+    static let stamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "d MMM HH:mm"
+        return formatter
+    }()
+
+    private static let font: UIFont = {
+        let base = UIFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
+        return UIFont(descriptor: base.fontDescriptor.withDesign(.rounded) ?? base.fontDescriptor, size: 10)
+    }()
+
+    let x: CGFloat
+    let plot: CGRect
+    let card: CGRect
+    private let body: String
+    private let delta: String
+    private let rising: Bool
+
+    init(candle: ChartCandle, x: CGFloat, anchorY: CGFloat, plot: CGRect) {
+        var lines: [String] = []
+        if let time = candle.time { lines.append(Self.stamp.string(from: Date(timeIntervalSince1970: time))) }
+        lines.append("O \(PriceAxis.label(candle.open))   H \(PriceAxis.label(candle.high))")
+        lines.append("L \(PriceAxis.label(candle.low))   C \(PriceAxis.label(candle.close))")
+        body = lines.joined(separator: "\n")
+        let percent = candle.open > 0 ? (candle.close - candle.open) / candle.open * 100 : 0
+        rising = percent >= 0
+        delta = String(format: "%@%.2f%%", rising ? "+" : Direction.minus, abs(percent))
+
+        let bodySize = Self.measure(body)
+        let deltaSize = Self.measure(delta)
+        let size = CGSize(width: max(bodySize.width, deltaSize.width) + 16,
+                          height: bodySize.height + deltaSize.height + 16)
+        var origin = CGPoint(x: x + 12, y: anchorY - size.height / 2)
+        if origin.x + size.width > plot.maxX - 2 { origin.x = x - 12 - size.width }
+        origin.x = max(origin.x, 2)
+        origin.y = min(max(origin.y, plot.minY + 2), plot.maxY - size.height - 2)
+        card = CGRect(origin: origin, size: size)
+        self.x = x
+        self.plot = plot
+    }
+
+    func draw(in context: inout GraphicsContext) {
+        var marker = Path()
+        marker.move(to: CGPoint(x: x, y: plot.minY))
+        marker.addLine(to: CGPoint(x: x, y: plot.maxY))
+        context.stroke(marker, with: .color(DeskColor.identity.color.opacity(0.8)), lineWidth: 1)
+        context.fill(Path(roundedRect: card, cornerRadius: 8), with: .color(Color(white: 0.12).opacity(0.96)))
+        context.stroke(Path(roundedRect: card, cornerRadius: 8), with: .color(DeskColor.identity.color.opacity(0.5)), lineWidth: 0.8)
+        let font = Font(Self.font)
+        context.draw(Text(body).font(font).foregroundStyle(.white),
+                     at: CGPoint(x: card.minX + 8, y: card.minY + 8), anchor: .topLeading)
+        context.draw(Text(delta).font(font).foregroundStyle(rising ? DeskColor.rise.color : DeskColor.fall.color),
+                     at: CGPoint(x: card.minX + 8, y: card.maxY - 8), anchor: .bottomLeading)
+    }
+
+    private static func measure(_ text: String) -> CGSize {
+        (text as NSString).boundingRect(
+            with: CGSize(width: 240, height: 120), options: [.usesLineFragmentOrigin],
+            attributes: [.font: font], context: nil).size
+    }
+
 }

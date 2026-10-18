@@ -806,6 +806,7 @@ struct PerpDetailScreen: View {
     @State private var selectedPosition: PerplPosition?
     @State private var tickTint: DeskRGB?
     @State private var tickFade: Task<Void, Never>?
+    @State private var scrubbing = false
     @AppStorage("desk.watchlist") private var savedIDs = ""
 
     var body: some View {
@@ -853,6 +854,7 @@ struct PerpDetailScreen: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { tradeBar }
         .toolbar(.hidden, for: .navigationBar)
+        .statusBarHidden(scrubbing)
         .task(id: market.symbol) { await holders.run(symbol: market.symbol) }
         .task(id: market.symbol) { await chat.run(symbol: market.symbol) }
         .onAppear { market.watchBook(true) }
@@ -1213,7 +1215,9 @@ struct PerpDetailScreen: View {
     @ViewBuilder private var chart: some View {
         if !market.candles.isEmpty, let config = market.market?.config {
             let scale = pow(10.0, Double(config.priceDecimals))
-            CandlestickChart(candles: market.candles.map { $0.chartCandle(scale: scale) })
+            CandlestickChart(candles: market.candles.map { $0.chartCandle(scale: scale) }) { active in
+                withAnimation(.easeOut(duration: 0.2)) { scrubbing = active }
+            }
                 .frame(height: 250)
                 .overlay(alignment: .bottom) { Divider().overlay(Color.white.opacity(0.12)) }
                 .overlay(alignment: .topTrailing) { ChartExpandButton { showsStudio = true } }
