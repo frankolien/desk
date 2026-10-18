@@ -325,16 +325,21 @@ struct FollowingFeed: View {
                     ForEach(model.items) { item in
                         switch item {
                         case .spot(let trade):
-                            FollowingTradeRow(trade: trade, walletName: name(trade.wallet)) { onOpen(trade) }
+                            FollowingTradeRow(trade: trade, walletName: label(trade.wallet)) { onOpen(trade) }
                         case .perp(let move):
-                            FollowingPerpRow(move: move, walletName: name(move.wallet)) { onOpenPerp(move) }
+                            FollowingPerpRow(move: move, walletName: label(move.wallet)) { onOpenPerp(move) }
                         case .transfer(let move):
-                            FollowingTransferRow(move: move, walletName: name(move.wallet))
+                            FollowingTransferRow(move: move, walletName: label(move.wallet))
                         }
                     }
                 }
             }
         }
+    }
+
+    /// A claimed Desk tag names the wallet before any other name it is known by.
+    private func label(_ wallet: String) -> String {
+        IdentityDirectory.shared.identity(for: wallet)?.handle ?? name(wallet)
     }
 
     private func guideStep(_ number: String, _ text: String) -> some View {
