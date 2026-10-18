@@ -41,7 +41,7 @@ test("a .nad name wins, and the avatar it lacks comes from nad.fun", async () =>
   });
   const identities = await resolveIdentities([SALMO], { fetchImpl });
   assert.deepEqual(identities[SALMO.toLowerCase()], {
-    address: SALMO.toLowerCase(), name: "salmo.nad", source: "nad",
+    address: SALMO.toLowerCase(), name: "salmo.nad", source: "nad", tag: null,
     avatar: "https://storage.nadapp.net/u/salmo.png", bio: "monad maxi", x: null, farcaster: null, perplAccount: null,
   });
 });
@@ -208,4 +208,16 @@ test("name-service outages are not reported as unregistered names", async () => 
   const result = await handler({ method: "GET", query: { view: "lookup", q: "vitalik.eth" } }, response);
   assert.equal(result.status, 503);
   assert.match(result.body.error, /unavailable/i);
+});
+
+test("a Desk tag resolves before any other name service, in any of its spellings", async () => {
+  const store = memoryStore();
+  await store.set("tag:frank", "0x82ec56aaf7aa35c6ac62b598e6c964a4b186f775");
+  const fetchImpl = async () => { throw new Error("no network needed"); };
+  for (const spelling of ["frank", "@Frank", "frank.desk"]) {
+    const found = await lookupName(spelling, { fetchImpl, store, neynarKey: null });
+    assert.deepEqual(found, { address: "0x82ec56aaf7aa35c6ac62b598e6c964a4b186f775", source: "desk", name: "@frank" });
+  }
+  assert.equal(await lookupName("nobody.desk", { fetchImpl, store, neynarKey: null }), null);
+  assert.equal(await lookupName("nobody", { fetchImpl, store, neynarKey: null }), null);
 });

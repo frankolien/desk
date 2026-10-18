@@ -1,6 +1,7 @@
 import { createPublicClient, http } from "viem";
-import { deskProfiles } from "./_profile.mjs";
 import { mainnet } from "viem/chains";
+
+import { cleanTag, deskProfiles, tagOwner } from "./_profile.mjs";
 
 export const MAX_ADDRESSES = 50;
 export class NameLookupUnavailable extends Error {}
@@ -128,8 +129,9 @@ export function describeIdentity(address, { desk = null, nad = null, fun = null,
   const first = (field) => sources.find((entry) => entry[field])?.[field] ?? null;
   return {
     address,
-    name: named?.name ?? null,
-    source: named?.source ?? null,
+    name: named?.name ?? (desk?.tag ? `@${desk.tag}` : null),
+    source: named?.source ?? (desk?.tag ? "desk" : null),
+    tag: desk?.tag ?? null,
     avatar: named?.avatar ?? first("avatar"),
     bio: named?.bio ?? first("bio"),
     x: named?.x ?? first("x"),
@@ -185,10 +187,17 @@ export async function resolveIdentities(addresses, { fetchImpl = fetch, chain = 
 }
 
 /// Keeps the chain with the result: a Solana public key must never be treated as a Perpl/EVM address.
-export async function lookupName(query, { fetchImpl = fetch, ensAddress = null, neynarKey = process.env.NEYNAR_API_KEY } = {}) {
+export async function lookupName(query, { fetchImpl = fetch, ensAddress = null, neynarKey = process.env.NEYNAR_API_KEY, store = null } = {}) {
   const text = String(query ?? "").trim();
   if (/^0x[a-fA-F0-9]{40}$/.test(text)) return { address: text.toLowerCase(), source: "address" };
   const lower = text.toLowerCase();
+  // A Desk tag answers before any other name service: "@frank", "frank" or "frank.desk".
+  if (store) {
+    const { tag } = cleanTag(lower);
+    const owner = tag ? await tagOwner(store, tag) : null;
+    if (owner) return { address: owner, source: "desk", name: `@${tag}` };
+    if (lower.endsWith(".desk")) return null;
+  }
   if (/\.(sol|sns|solana)$/.test(lower)) {
     const name = lower.endsWith(".solana") ? `${lower.slice(0, -7)}.sol` : lower;
     if (!/^(?:[a-z0-9-]+\.){1,2}(?:sol|sns)$/.test(name)) return null;

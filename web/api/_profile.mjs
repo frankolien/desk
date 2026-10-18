@@ -9,6 +9,43 @@ const API_HOST = process.env.PUBLIC_API_HOST || "https://web-lovat-nine-49.verce
 
 const evmAddress = (value) => /^0x[a-fA-F0-9]{40}$/.test(String(value ?? ""));
 const profileKey = (address) => `profile:${address.toLowerCase()}`;
+const tagKey = (tag) => `tag:${tag}`;
+
+/// Names Desk keeps for itself, so no one can pose as the app or its staff.
+const RESERVED_TAGS = new Set([
+  "desk", "trydesk", "admin", "administrator", "support", "help", "team", "official", "staff", "mod", "moderator",
+  "security", "root", "system", "null", "undefined", "perpl", "monad", "ausd", "agora", "wallet", "treasury", "fees",
+]);
+
+/// A Desk tag: 3 to 20 lowercase letters, digits and underscores, starting with a letter.
+/// "@frank", "Frank" and "frank.desk" all mean frank. Returns the tag, or a sentence saying why not.
+export function cleanTag(value) {
+  let tag = String(value ?? "").trim().toLowerCase();
+  if (tag.startsWith("@")) tag = tag.slice(1);
+  if (tag.endsWith(".desk")) tag = tag.slice(0, -5);
+  if (!tag) return { tag: "" };
+  if (tag.length < 3) return { error: "A tag needs at least 3 characters." };
+  if (tag.length > 20) return { error: "A tag can have at most 20 characters." };
+  if (!/^[a-z][a-z0-9_]*$/.test(tag)) return { error: "Letters, numbers and underscores only, starting with a letter." };
+  if (RESERVED_TAGS.has(tag)) return { error: "That tag is reserved." };
+  return { tag };
+}
+
+/// Who holds a tag, if anyone.
+export async function tagOwner(store, tag) {
+  if (!store || !tag) return null;
+  const owner = await store.get(tagKey(tag)).catch(() => null);
+  return owner && evmAddress(owner) ? String(owner).toLowerCase() : null;
+}
+
+/// The answer to "is @frank free?", for the editor as the person types.
+export async function tagAvailability(store, query) {
+  const cleaned = cleanTag(query);
+  if (cleaned.error) return { status: 200, body: { tag: null, available: false, reason: cleaned.error } };
+  if (!cleaned.tag) return { status: 400, body: { error: "A tag is required." } };
+  const owner = await tagOwner(store, cleaned.tag);
+  return { status: 200, body: { tag: cleaned.tag, available: owner == null, address: owner } };
+}
 
 export function profileMessage(address, timestamp) {
   return `Desk profile\n${String(address).toLowerCase()}\n${timestamp}`;
@@ -34,6 +71,8 @@ export async function deleteProfile(store, body, { now = Date.now(), verify = ve
     valid = await verify({ address, message: deleteMessage(address, timestamp), signature });
   } catch { valid = false; }
   if (!valid) return { status: 401, body: { error: "That signature does not belong to this wallet." } };
+  const previous = await readProfile(store, address);
+  if (previous?.tag && (await tagOwner(store, previous.tag)) === address.toLowerCase()) await store.del(tagKey(previous.tag)).catch(() => {});
   await store.del(profileKey(address));
   await store.del(`id:${address.toLowerCase()}`).catch(() => {});
   return { status: 200, body: { deleted: true } };
@@ -60,6 +99,7 @@ export function publicProfile(address, stored) {
   if (!stored) return null;
   return {
     name: stored.name ?? null,
+    tag: stored.tag ?? null,
     avatar: stored.image ? avatarURL(address, stored.updatedAt) : null,
     updatedAt: stored.updatedAt,
   };
@@ -85,7 +125,7 @@ export async function deskProfiles(store, addresses) {
     try {
       const stored = JSON.parse(rows[index]);
       const profile = publicProfile(address, stored);
-      if (profile && (profile.name || profile.avatar)) found.set(address.toLowerCase(), profile);
+      if (profile && (profile.name || profile.avatar || profile.tag)) found.set(address.toLowerCase(), profile);
     } catch {}
   });
   return found;
@@ -111,7 +151,11 @@ export async function saveProfile(store, body, { now = Date.now(), verify = veri
     type = imageType(image);
     if (!type) return { status: 400, body: { error: "The picture must be a JPEG or PNG." } };
   }
-  if (!name && !image) return { status: 400, body: { error: "Give the profile a name or a picture." } };
+  // A missing tag keeps the one already there; an empty string lets it go.
+  const wantsTag = body?.tag !== undefined && body?.tag !== null;
+  const cleanedTag = wantsTag ? cleanTag(body.tag) : { tag: undefined };
+  if (cleanedTag.error) return { status: 400, body: { error: cleanedTag.error } };
+  if (!name && !image && !cleanedTag.tag) return { status: 400, body: { error: "Give the profile a name, a tag or a picture." } };
 
   let valid = false;
   try {
@@ -125,8 +169,17 @@ export async function saveProfile(store, body, { now = Date.now(), verify = veri
   if (attempts > 1) return { status: 429, body: { error: "Give it a moment before saving again." } };
 
   const previous = await readProfile(store, address);
+  const me = address.toLowerCase();
+  const tag = cleanedTag.tag === undefined ? (previous?.tag ?? null) : (cleanedTag.tag || null);
+  if (tag && tag !== previous?.tag) {
+    // First come, first served: the key is set only if nobody holds it.
+    const claimed = await store.set(tagKey(tag), me, { nx: true });
+    if (!claimed && (await tagOwner(store, tag)) !== me) return { status: 409, body: { error: `@${tag} is taken. Try another.` } };
+  }
+  if (previous?.tag && previous.tag !== tag && (await tagOwner(store, previous.tag)) === me) await store.del(tagKey(previous.tag)).catch(() => {});
   const stored = {
     name: name || null,
+    tag,
     // An empty string clears the picture; a missing field keeps the one already there.
     image: image === "" ? null : (image ?? previous?.image ?? null),
     type: image === "" ? null : (type ?? previous?.type ?? null),

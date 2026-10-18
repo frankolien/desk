@@ -5,7 +5,7 @@ import { MAX_ADDRESSES, NameLookupUnavailable, ensAddressReader, ensReader, look
 import { EXCHANGE_VIEWS } from "./_perpl-abi.mjs";
 import { DEFAULT_WINDOW, WINDOWS, cachedSignals } from "./_signals.mjs";
 import { redisStore } from "./_store.mjs";
-import { deleteProfile, publicProfile, readProfile, saveProfile } from "./_profile.mjs";
+import { deleteProfile, publicProfile, readProfile, saveProfile, tagAvailability } from "./_profile.mjs";
 import { isProfileHidden, report } from "./_moderation.mjs";
 import { cleanLabel, nameStatus, namesOf, registerRequest, setPrimaryCalldata, setRecordsCalldata } from "./_nad.mjs";
 
@@ -322,12 +322,18 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
     }
     if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
 
+    if (view === "tag") {
+      if (!store) return res.status(503).json({ error: "Profiles are not configured." });
+      const outcome = await tagAvailability(store, String(req.query.q ?? "").slice(0, 40));
+      res.setHeader("Cache-Control", "private, no-store");
+      return res.status(outcome.status).json(outcome.body);
+    }
     if (view === "lookup") {
       const query = String(req.query.q ?? "").trim().slice(0, 80);
       if (!query) return res.status(400).json({ error: "A name or address is required." });
       let found;
       try {
-        found = await lookupName(query, { fetchImpl, ensAddress });
+        found = await lookupName(query, { fetchImpl, ensAddress, store });
       } catch (error) {
         if (!(error instanceof NameLookupUnavailable)) throw error;
         return res.status(503).json({ error: error.message });
@@ -342,7 +348,7 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
       }
       const identities = await resolveIdentities([found.address], { fetchImpl, chain, store, ens });
       const identity = identities[found.address] ?? null;
-      if (identity && found.source !== "address" && found.source !== "farcaster") {
+      if (identity && found.source !== "address" && found.source !== "farcaster" && found.source !== "desk") {
         identity.name = query.replace(/^@/, "");
         identity.source = found.source;
       }
