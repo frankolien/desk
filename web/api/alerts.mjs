@@ -8,6 +8,7 @@ import { MAX_TARGETS, parseTargets, priceDeliveries } from "./_prices.mjs";
 import { clientIp } from "./_ratelimit.mjs";
 import { CURSOR_TTL_S, HYPERSYNC_URLS, RX_KEY, faucetSender, parseMe, receiptScan, skipList } from "./_receipts.mjs";
 import { redisStore } from "./_store.mjs";
+import { carryTold, holdingDeliveries, parseHoldingAlerts } from "./_holding-alerts.mjs";
 import {
   DEFAULT_MIN_USD, DIGEST_WINDOW_S, MAX_WALLETS, MOVES_KEPT, MOVES_TTL_S, WALLET_PUSH_CAP, movesKey, newestMarker, seenKey,
   walletCountKey, walletDigestKey, walletEvents, walletPayload,
@@ -47,7 +48,7 @@ const validAddress = (value) => typeof value === "string" && /^0x[a-fA-F0-9]{40}
 
 export function parseSubscription(body) {
   if (!body || typeof body !== "object") return { error: "A JSON body is required." };
-  const { install, token, environment, traders, names, copying, wallets, prices, priceMarkets, targets, web } = body;
+  const { install, token, environment, traders, names, copying, wallets, prices, priceMarkets, targets, web, holdings } = body;
   if (typeof install !== "string" || !/^[0-9a-f]{64}$/.test(install)) return { error: "A valid install secret is required." };
   const browser = web == null ? null : parseWebSubscription(web);
   if (browser?.error) return { error: browser.error };
@@ -66,6 +67,8 @@ export function parseSubscription(body) {
   if (!tracked) return { error: `Up to ${MAX_WALLETS} tracked wallets are allowed, each with an address, an optional name and a minimum in dollars.` };
   const wanted = parseTargets(targets);
   if (!wanted) return { error: `Up to ${MAX_TARGETS} price targets are allowed, each with a market, a price and a direction.` };
+  const held = parseHoldingAlerts(holdings);
+  if (!held) return { error: "Up to 30 holding alerts are allowed, each with a chain, a token, the price paid and a step of 5, 10 or 20 percent." };
   const followed = [...new Set(traders.map((address) => address.toLowerCase()))];
   const copied = [...new Set((copying ?? []).map((address) => address.toLowerCase()))];
   const labels = {};
@@ -88,10 +91,11 @@ export function parseSubscription(body) {
       prices: browser ? prices === true : prices !== false,
       priceMarkets: watched,
       targets: wanted,
+      holdings: held,
       me: own.me,
       moves: Number.isSafeInteger(body.moves) && body.moves > 0 ? body.moves : 0,
     },
-    wantsPrices: prices === true || wanted.length > 0,
+    wantsPrices: prices === true || wanted.length > 0 || held.length > 0,
   };
 }
 
@@ -425,7 +429,7 @@ const sentCount = (results, deliveries, part) =>
   results.filter((result, index) => deliveries[index].part === part && result.status === 200).length;
 
 export async function scan({
-  store, chain, apns, webpush = null, markets, quotes = [], sources = {}, skip = skipList(), receiptTimeoutMs, now = Date.now(),
+  store, chain, apns, webpush = null, markets, quotes = [], sources = {}, skip = skipList(), receiptTimeoutMs, now = Date.now(), tokenPrices = undefined,
 }) {
   const ids = await store.smembers(SUBSCRIPTIONS);
   if (ids.length === 0) {
@@ -536,6 +540,12 @@ export async function scan({
     .catch((error) => { report("prices")(error); return { deliveries: [], events: 0, changed: [] }; });
   deliveries.push(...priced.deliveries.map((delivery) => ({ ...delivery, part: "prices" })));
 
+  const pricedRecords = new Map(priced.changed);
+  const held = await holdingDeliveries({ subscribers: everyone.map(({ id, record }) => ({ id, record: pricedRecords.get(id) ?? record })), prices: tokenPrices })
+    .catch((error) => { report("holdings")(error); return { deliveries: [], events: 0, changed: [] }; });
+  deliveries.push(...held.deliveries);
+  const rewritten = new Map([...priced.changed, ...held.changed]);
+
   const results = await inBatches(deliveries, 10, ({ record, payload, collapseId, background }) =>
     sendTo({ apns, webpush }, record, payload, { collapseId, background }));
 
@@ -551,11 +561,12 @@ export async function scan({
     await store.srem(SUBSCRIPTIONS, id);
   }
   // A fired target is forgotten first, so the environment write below keeps the shorter list.
-  for (const [id, record] of priced.changed) {
+  for (const [id, record] of rewritten) {
     if (!dead.has(id) && !moved.has(id)) await store.set(subscriptionKey(id), JSON.stringify(record), { ex: SUBSCRIPTION_TTL });
   }
   for (const [id, record] of moved) {
-    if (!dead.has(id)) await store.set(subscriptionKey(id), JSON.stringify(record), { ex: SUBSCRIPTION_TTL });
+    const latest = rewritten.get(id);
+    if (!dead.has(id)) await store.set(subscriptionKey(id), JSON.stringify(latest ? { ...latest, environment: record.environment } : record), { ex: SUBSCRIPTION_TTL });
   }
   return {
     subscriptions: ids.length - expired.length,
@@ -564,6 +575,7 @@ export async function scan({
     failed: results.filter((result) => result.status !== 200).length,
     wallets: { watched: watchers.size, events: tracked.events, sent: sentCount(results, deliveries, "wallets") },
     prices: { events: priced.events, sent: sentCount(results, deliveries, "prices") },
+    holdings: { events: held.events, sent: sentCount(results, deliveries, "holdings") },
     receipts: { events: rx.events, sent: sentCount(results, deliveries, "receipts") },
     ...(errors.length ? { errors } : {}),
   };
@@ -655,7 +667,7 @@ export function createHandler(resolve) {
         for (let round = 0; round < rounds; round += 1) {
           if (round > 0) await deps.sleep(ROUND_INTERVAL_MS);
           const quotes = deps.quotes ? await deps.quotes().catch(() => []) : [];
-          const report = await scan({ store, chain: deps.chain, apns, webpush, markets, quotes, sources: deps.receipts, skip: deps.skip });
+          const report = await scan({ store, chain: deps.chain, apns, webpush, markets, quotes, sources: deps.receipts, skip: deps.skip, tokenPrices: deps.tokenPrices });
           reports.push(report);
           if (report.subscriptions === 0) break;
         }
@@ -708,7 +720,7 @@ export function createHandler(resolve) {
     if (record.web && !webpush?.configured) return res.status(503).json({ error: "Browser alerts aren't configured on this server." });
 
     if (record.traders.length === 0 && record.copying.length === 0 && record.wallets.length === 0 && record.targets.length === 0
-        && !wantsPrices && !record.me) {
+        && record.holdings.length === 0 && !wantsPrices && !record.me) {
       await store.del(subscriptionKey(id));
       await store.srem(SUBSCRIPTIONS, id);
       return res.status(200).json({ traders: 0 });
@@ -747,7 +759,8 @@ export function createHandler(resolve) {
       if (!settled) return res.status(429).json({ error: "Trade alerts are still being set up. Try again in a moment." });
     }
 
-    await store.set(subscriptionKey(id), JSON.stringify({ ...record, environment }), { ex: SUBSCRIPTION_TTL });
+    const holdings = carryTold(record.holdings, safeJSON(known)?.holdings);
+    await store.set(subscriptionKey(id), JSON.stringify({ ...record, holdings, environment }), { ex: SUBSCRIPTION_TTL });
     await store.sadd(SUBSCRIPTIONS, id);
     for (const wallet of record.wallets) {
       await store.sadd(TRACKED_KEY, wallet.address);
