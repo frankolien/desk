@@ -637,11 +637,9 @@ private struct PerpMarketRow: View {
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 3) {
-                let price = model.markText(for: market)
-                Text(price == "—" ? "—" : "$" + price)
-                    .font(.system(size: 16, weight: .bold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(DeskColor.nightText.color)
-                    .contentTransition(.numericText())
+                let price = model.liveText(for: market)
+                TickText(text: price == "—" ? "—" : "$" + price, value: IndexFeed.shared.price(for: market.symbol),
+                         font: .system(size: 16, weight: .bold, design: .rounded).monospacedDigit())
                 let change = model.changePercent(for: market)
                 Text(change.map { String(format: "%+.2f%%", $0) } ?? "—")
                     .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
@@ -806,6 +804,8 @@ struct PerpDetailScreen: View {
     @State private var scrollPosition = ScrollPosition(edge: .top)
     @State private var showsPortfolio = false
     @State private var selectedPosition: PerplPosition?
+    @State private var tickTint: DeskRGB?
+    @State private var tickFade: Task<Void, Never>?
     @AppStorage("desk.watchlist") private var savedIDs = ""
 
     var body: some View {
@@ -1045,10 +1045,8 @@ struct PerpDetailScreen: View {
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 1) {
-                Text(market.markText == "—" ? "—" : "$" + market.markText)
-                    .font(.system(size: 17, weight: .bold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(DeskColor.nightText.color)
-                    .contentTransition(.numericText())
+                TickText(text: market.liveText == "—" ? "—" : "$" + market.liveText, value: market.liveValue,
+                         font: .system(size: 17, weight: .bold, design: .rounded).monospacedDigit())
                 if let percent = market.changePercentText {
                     HStack(spacing: 3) {
                         Image(systemName: (change?.up ?? true) ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
@@ -1157,8 +1155,19 @@ struct PerpDetailScreen: View {
     private var priceRow: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 6) {
-                AmountText(market.markText == "—" ? "—" : "$" + market.markText, size: 40)
+                AmountText(market.liveText == "—" ? "—" : "$" + market.liveText, size: 40, colour: tickTint ?? DeskColor.nightText)
                     .contentTransition(.numericText())
+                    .animation(.snappy(duration: 0.25), value: market.liveText)
+                    .onChange(of: market.liveValue) { old, new in
+                        guard let old, let new, old != new else { return }
+                        tickFade?.cancel()
+                        withAnimation(.easeOut(duration: 0.12)) { tickTint = new > old ? DeskColor.rise : DeskColor.fall }
+                        tickFade = Task {
+                            try? await Task.sleep(for: .milliseconds(450))
+                            guard !Task.isCancelled else { return }
+                            withAnimation(.easeInOut(duration: 0.5)) { tickTint = nil }
+                        }
+                    }
                 HStack(spacing: 6) {
                     if let change {
                         Image(systemName: change.up ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
@@ -1172,6 +1181,12 @@ struct PerpDetailScreen: View {
                     Text("24h")
                         .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
+                    if market.hasLiveIndex, market.markText != "—" {
+                        Text("· Mark $" + market.markText)
+                            .font(.system(size: 14, weight: .medium, design: .rounded).monospacedDigit())
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                            .contentTransition(.numericText())
+                    }
                 }
                 .foregroundStyle(market.trend.color)
             }
@@ -1412,5 +1427,32 @@ struct CoinRow: View {
             return "$" + String(format: "%.\(digits)f", scaled).replacingOccurrences(of: #"\.?0+$"#, with: "", options: .regularExpression) + suffix
         }
         return "$" + String(format: "%.0f", value)
+    }
+}
+
+/// A price that lights up the way it moved for a moment after each tick, the way a terminal does.
+private struct TickText: View {
+    let text: String
+    let value: Double?
+    let font: Font
+    @State private var tint: Color?
+    @State private var fade: Task<Void, Never>?
+
+    var body: some View {
+        Text(text)
+            .font(font)
+            .foregroundStyle(tint ?? DeskColor.nightText.color)
+            .contentTransition(.numericText())
+            .animation(.snappy(duration: 0.25), value: text)
+            .onChange(of: value) { old, new in
+                guard let old, let new, old != new else { return }
+                fade?.cancel()
+                withAnimation(.easeOut(duration: 0.12)) { tint = new > old ? DeskColor.rise.color : DeskColor.fall.color }
+                fade = Task {
+                    try? await Task.sleep(for: .milliseconds(450))
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.easeInOut(duration: 0.5)) { tint = nil }
+                }
+            }
     }
 }

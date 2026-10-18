@@ -148,6 +148,7 @@ final class MarketModel {
         marketID = selected.id
         market = selected
         symbol = selected.symbol
+        IndexFeed.shared.watch(selected.symbol)
         candles = []
         reachedOldestCandle = false
         history = []
@@ -249,6 +250,20 @@ final class MarketModel {
         market?.id == id ? market : allMarkets.first(where: { $0.id == id })
     }
 
+    /// What the market screens show: Hyperliquid's live mid for the same coin, which moves
+    /// whenever the world does, while Perpl's mark can sit still for half a minute. Every
+    /// position figure, order and liquidation still reads the mark.
+    func liveText(for item: Market) -> String {
+        guard let live = IndexFeed.shared.price(for: item.symbol) else { return markText(for: item) }
+        let scale = pow(10.0, Double(item.config.priceDecimals))
+        guard let price = item.price(Int64((live * scale).rounded())) else { return markText(for: item) }
+        return price.display(fractionDigits: item.config.priceDecimals)
+    }
+
+    var liveText: String { market.map { liveText(for: $0) } ?? markText }
+    var liveValue: Double? { market.flatMap { IndexFeed.shared.price(for: $0.symbol) } }
+    var hasLiveIndex: Bool { liveValue != nil }
+
     func changePercent(for item: Market) -> Double? {
         let quote = quotes[item.id] ?? Quote(
             markRaw: item.state.markRaw, previousRaw: item.state.previousRaw)
@@ -305,6 +320,8 @@ final class MarketModel {
     }
 
     private func startLiveStream() {
+        IndexFeed.shared.start()
+        IndexFeed.shared.watch(symbol)
         liveReader = Task { [weak self] in
             while !Task.isCancelled {
                 do {
@@ -523,5 +540,138 @@ final class MarketModel {
             lastCandleFetch = Date()
         } catch {
         }
+    }
+}
+
+/// Hyperliquid's public price stream: the one keyless feed that reaches every market Perpl
+/// lists and ticks whenever the world moves. It is for showing only; nothing that moves money
+/// reads it. `allMids` carries every coin at once; `bbo` follows the open market tick by tick.
+@MainActor
+@Observable
+final class IndexFeed {
+    static let shared = IndexFeed()
+
+    struct Tick: Sendable {
+        let price: Double
+        let at: ContinuousClock.Instant
+        /// 1 when this tick was higher than the one before, -1 lower, 0 unknown.
+        let direction: Int
+    }
+
+    private(set) var ticks: [String: Tick] = [:]
+    @ObservationIgnored private var reader: Task<Void, Never>?
+    @ObservationIgnored private var socket: URLSessionWebSocket?
+    @ObservationIgnored private var coin: String?
+    @ObservationIgnored private var subscribedCoin: String?
+    private static let url = URL(string: "wss://api.hyperliquid.xyz/ws")!
+
+    /// Nothing older than this is shown: the mark takes over until the stream is back.
+    func price(for symbol: String, maxAge: Duration = .seconds(20)) -> Double? {
+        guard let tick = ticks[symbol], ContinuousClock.now - tick.at < maxAge else { return nil }
+        return tick.price
+    }
+
+    func watch(_ symbol: String) {
+        coin = symbol
+        Task { await syncCoin() }
+    }
+
+    func start() {
+        guard reader == nil else { return }
+        reader = Task { [weak self] in
+            var delay: Duration = .seconds(1)
+            while !Task.isCancelled {
+                do {
+                    guard let self else { return }
+                    let socket = try URLSessionWebSocket(url: Self.url)
+                    self.socket = socket
+                    subscribedCoin = nil
+                    try await socket.send(#"{"method":"subscribe","subscription":{"type":"allMids"}}"#)
+                    await syncCoin()
+                    // Hyperliquid drops a connection that has not spoken for a minute.
+                    let pinger = Task {
+                        while !Task.isCancelled {
+                            try? await Task.sleep(for: .seconds(45))
+                            try? await socket.send(#"{"method":"ping"}"#)
+                        }
+                    }
+                    defer { pinger.cancel() }
+                    delay = .seconds(1)
+                    while !Task.isCancelled {
+                        let text = try await socket.receive()
+                        let frame = await Task.detached(priority: .utility) { Self.decode(Data(text.utf8)) }.value
+                        ingest(frame)
+                    }
+                } catch {
+                    self?.socket?.close()
+                    self?.socket = nil
+                    guard !Task.isCancelled else { return }
+                    try? await Task.sleep(for: delay)
+                    delay = min(delay * 2, .seconds(30))
+                }
+            }
+        }
+    }
+
+    func stop() {
+        reader?.cancel()
+        reader = nil
+        socket?.close()
+        socket = nil
+        subscribedCoin = nil
+    }
+
+    private func syncCoin() async {
+        guard let socket, let coin, coin != subscribedCoin else { return }
+        if let old = subscribedCoin {
+            try? await socket.send(#"{"method":"unsubscribe","subscription":{"type":"bbo","coin":"\#(old)"}}"#)
+        }
+        try? await socket.send(#"{"method":"subscribe","subscription":{"type":"bbo","coin":"\#(coin)"}}"#)
+        subscribedCoin = coin
+    }
+
+    private enum Frame: Sendable {
+        case mids([String: Double])
+        case bbo(coin: String, mid: Double)
+        case other
+    }
+
+    nonisolated private static func decode(_ data: Data) -> Frame {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let channel = root["channel"] as? String, let payload = root["data"] as? [String: Any] else { return .other }
+        switch channel {
+        case "allMids":
+            guard let mids = payload["mids"] as? [String: String] else { return .other }
+            var out: [String: Double] = [:]
+            out.reserveCapacity(mids.count)
+            for (coin, text) in mids where coin.first != "@" {  // "@123" are spot pairs
+                if let value = Double(text), value > 0 { out[coin] = value }
+            }
+            return .mids(out)
+        case "bbo":
+            guard let coin = payload["coin"] as? String, let sides = payload["bbo"] as? [[String: Any]], sides.count == 2,
+                  let bid = (sides[0]["px"] as? String).flatMap(Double.init), let ask = (sides[1]["px"] as? String).flatMap(Double.init),
+                  bid > 0, ask > 0 else { return .other }
+            return .bbo(coin: coin, mid: (bid + ask) / 2)
+        default:
+            return .other
+        }
+    }
+
+    private func ingest(_ frame: Frame) {
+        let now = ContinuousClock.now
+        switch frame {
+        case .mids(let mids): for (coin, price) in mids { write(coin, price, at: now) }
+        case .bbo(let coin, let mid): write(coin, mid, at: now)
+        case .other: break
+        }
+    }
+
+    /// An unchanged price is not rewritten (every reader would redraw), only restamped now and then.
+    private func write(_ coin: String, _ price: Double, at now: ContinuousClock.Instant) {
+        let old = ticks[coin]
+        if let old, old.price == price, now - old.at < .seconds(5) { return }
+        let direction = old.map { price > $0.price ? 1 : price < $0.price ? -1 : $0.direction } ?? 0
+        ticks[coin] = Tick(price: price, at: now, direction: direction)
     }
 }
