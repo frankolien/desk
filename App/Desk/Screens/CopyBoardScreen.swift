@@ -54,17 +54,18 @@ struct CopyBoardScreen: View {
         for entry in copier.shownLog where entry.trader.lowercased() == key {
             let side = entry.isLong ? "long" : "short"
             let practice = entry.shadowed ? " · practice" : ""
+            let away = entry.byServer == true ? " · while your phone was off" : ""
             switch entry.kind {
             case .opened:
                 let size = [entry.margin.map { "$\(Self.money($0))" }, entry.leverage.map { "\($0)×" }].compactMap { $0 }.joined(separator: " at ")
                 out.append(Move(id: entry.id.uuidString, date: entry.date, symbol: entry.symbol, title: "Opened \(side) \(entry.symbol)",
-                                detail: "Copied\(size.isEmpty ? "" : " · \(size)")\(practice)", outcome: .copied, pnl: nil))
+                                detail: "Copied\(size.isEmpty ? "" : " · \(size)")\(practice)\(away)", outcome: .copied, pnl: nil))
             case .closed:
                 out.append(Move(id: entry.id.uuidString, date: entry.date, symbol: entry.symbol, title: "Closed \(side) \(entry.symbol)",
-                                detail: "Closed with them\(practice)", outcome: .copied, pnl: entry.pnl))
+                                detail: "Closed with them\(practice)\(away)", outcome: .copied, pnl: entry.pnl))
             case .protected:
                 out.append(Move(id: entry.id.uuidString, date: entry.date, symbol: entry.symbol, title: "Stop loss · \(entry.symbol)",
-                                detail: entry.detail.isEmpty ? "Your stop closed it before they did" : entry.detail, outcome: .protected, pnl: entry.pnl))
+                                detail: (entry.detail.isEmpty ? "Your stop closed it before they did" : entry.detail) + away, outcome: .protected, pnl: entry.pnl))
             case .skipped:
                 out.append(Move(id: entry.id.uuidString, date: entry.date, symbol: entry.symbol, title: "Opened \(side) \(entry.symbol)",
                                 detail: entry.detail, outcome: .skipped, pnl: nil))
