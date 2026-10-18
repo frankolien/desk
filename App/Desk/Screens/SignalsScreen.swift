@@ -30,13 +30,11 @@ struct SignalsScreen: View {
     @State private var tradeAlert: TradeAlert?
     @State private var showsCopying = false
     @State private var afterAlert: (() -> Void)?
-    @State private var smartMoney = SignalsModel()
     @State private var smartFeed = SmartMoneyFeedModel()
     @State private var followingFeed = FollowingFeedModel()
     @Namespace private var pickerSpace
     @State private var trackedEditing: TrackedWallet?
     @State private var showsTrackNew = false
-    @State private var showsSmartMoney = false
     @State private var openToken: TokenOpenRequest.Target?
     @State private var selectedFollowingTrade: FollowingTrade?
     #if DEBUG
@@ -89,28 +87,6 @@ struct SignalsScreen: View {
                             .padding(.bottom, 130)
                             .task { await smartFeed.run() }
                         case .top:
-                            if Showcase.smartMoney {
-                            Button { showsSmartMoney = true } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: "waveform.path.ecg").font(.system(size: 19, weight: .semibold))
-                                        .frame(width: 38, height: 38)
-                                        .background(DeskColor.action.color.opacity(0.16), in: Circle())
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text("Smart money").font(.system(size: 15, weight: .bold, design: .rounded))
-                                        Text("See what proven wallets are buying")
-                                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                                            .foregroundStyle(DeskColor.nightMuted.color)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold))
-                                }
-                                .foregroundStyle(DeskColor.nightText.color)
-                                .padding(15)
-                                .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 18))
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.top, 20)
-                            }
                             TradersFeed(content: .top, directory: directory, copier: copier, onOpenCopying: { showsCopying = true },
                                         onSelect: { selectedTrader = $0 },
                                         onOpenTracked: { selectedTrackedWallet = $0 },
@@ -158,7 +134,7 @@ struct SignalsScreen: View {
                 if arguments.contains("-track-demo"), TrackedWallets.shared.list.isEmpty {
                     TrackedWallets.shared.track("0x52ac212e7187a799a7382c7a768cb35b72a3e20a", name: "moncat degen")
                 }
-                if arguments.contains("-smart-money") { section = .top; showsSmartMoney = true }
+                if arguments.contains("-smart-money") { section = .smart }
                 if arguments.contains("watchlist") { section = .watchlist }
                 if arguments.contains("-smart-feed") { section = .smart }
             }
@@ -220,25 +196,6 @@ struct SignalsScreen: View {
             .navigationDestination(isPresented: $showsCopying) {
                 CopyActivityScreen(model: model, copier: copier, directory: directory)
                     .toolbar(.hidden, for: .tabBar)
-            }
-            .navigationDestination(isPresented: $showsSmartMoney) {
-                ZStack {
-                    DeskBackground()
-                    ScrollView(showsIndicators: false) {
-                        SmartMoneyFeed(model: smartMoney) { signal in
-                            openToken = .init(chainIndex: signal.chainIndex, contract: signal.token, symbol: signal.symbol)
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.top, 20)
-                        .padding(.bottom, 90)
-                    }
-                    .refreshable { await smartMoney.load() }
-                }
-                .navigationTitle("Smart money")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar(.visible, for: .navigationBar)
-                .toolbar(.hidden, for: .tabBar)
-                .task { await smartMoney.run() }
             }
         }
         .task { await directory.run() }
