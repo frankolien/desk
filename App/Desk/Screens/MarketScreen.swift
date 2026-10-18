@@ -20,7 +20,6 @@ struct MarketScreen: View {
 
     @State fileprivate var showsMarket = false
     @State private var shelf: Shelf = .perps
-    @State private var perpGroup: PerpGroup = .crypto
     @State private var tokenShelf: TokenShelves.Kind = .crypto
     @State private var tokenShelves = TokenShelves()
     @State private var tokensExpanded = false
@@ -322,8 +321,7 @@ struct MarketScreen: View {
             }
             switch shelf {
             case .perps:
-                subChips(PerpGroup.allCases, selected: perpGroup) { perpGroup = $0 }
-                perpGroupRows
+                perpRows(market.allMarkets)
             case .tokens:
                 subChips(TokenShelves.Kind.allCases, selected: tokenShelf) { tokenShelf = $0; tokensExpanded = false }
                 tokenRows
@@ -333,7 +331,7 @@ struct MarketScreen: View {
         .task(id: tokenShelf) { await tokenShelves.load(tokenShelf) }
     }
 
-    /// The second row under Perps and Tokens: quieter than the shelves above it.
+    /// The second row under Tokens: quieter than the shelves above it.
     private func subChips<Item: RawRepresentable & Hashable>(_ items: [Item], selected: Item, select: @escaping (Item) -> Void) -> some View where Item.RawValue == String {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -358,18 +356,6 @@ struct MarketScreen: View {
             }
         }
         .scrollClipDisabled()
-    }
-
-    @ViewBuilder
-    private var perpGroupRows: some View {
-        let markets = market.allMarkets.filter { PerpGroup.of($0.symbol) == perpGroup }
-        if market.allMarkets.isEmpty || !markets.isEmpty {
-            perpRows(markets)
-        } else {
-            emptyShelf(perpGroup == .stocks
-                ? "Perpl doesn't list stock perps yet. They'll show up here the day it does."
-                : "Perpl doesn't list commodity perps yet. Gold, oil and the rest land here when it does.")
-        }
     }
 
     @ViewBuilder
@@ -1326,27 +1312,6 @@ extension MarketScreen {
         market.select(found)
         await session.selectMarket(found)
         showsMarket = true
-    }
-}
-
-/// Perpl's markets, grouped for Explore. Perpl lists crypto only today; stocks and commodities
-/// sort themselves in here by symbol as soon as it lists them.
-enum PerpGroup: String, CaseIterable, Hashable {
-    case crypto = "Crypto", stocks = "Stocks", commodities = "Commodities"
-
-    private static let stockSymbols: Set<String> = [
-        "TSLA", "NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "GOOG", "META", "NFLX", "AMD", "COIN", "MSTR", "HOOD",
-        "PLTR", "SPX", "SPY", "QQQ", "NDX", "NASDAQ", "SP500", "DJI", "CRCL",
-    ]
-    private static let commoditySymbols: Set<String> = [
-        "XAU", "GOLD", "XAG", "SILVER", "OIL", "WTI", "BRENT", "CL", "NATGAS", "NG", "COPPER", "HG", "XPT", "PLATINUM", "PAXG", "XAUT",
-    ]
-
-    static func of(_ symbol: String) -> PerpGroup {
-        let base = symbol.uppercased().split(whereSeparator: { "-/_:".contains($0) }).first.map(String.init) ?? symbol.uppercased()
-        if stockSymbols.contains(base) { return .stocks }
-        if commoditySymbols.contains(base) { return .commodities }
-        return .crypto
     }
 }
 
