@@ -491,11 +491,15 @@ struct MarketSearchScreen: View {
                 .textInputAutocapitalization(.never)
                 .submitLabel(.search)
             if !query.isEmpty {
+                // A glyph-sized target next to a glass edge is easy to miss; the whole corner clears.
                 Button { query = "" } label: {
                     Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
                         .foregroundStyle(DeskColor.nightMuted.color)
+                        .frame(width: 40, height: 44)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(DeskPressStyle())
+                .buttonStyle(.plain)
                 .accessibilityLabel("Clear search")
             } else {
                 Button {
