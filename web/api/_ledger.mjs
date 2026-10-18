@@ -7,9 +7,14 @@ export const CUSTODY = new Set([
   "0xd236c18d274e54faccc3dd9dda4b27965a73ee6c",
   "0x4cd00e387622c35bddb9b4c962c136462338bc31",
 ]);
+/// Perpl's contracts: money sent there is a deposit, money back is a withdrawal.
+export const PERPL = new Set(["0x34b6552d57a35a1d042ccae1951bd1c370112a6f", "0x1964c32f0be608e7d29302aff5e61268e72080cc"]);
 export const NATIVE = "native";
-export const LEDGER_VERSION = 1;
-export const QUOTE_SYMBOLS = new Set(["MON", "WMON", "USDC", "USDT", "AUSD", "USDE", "SUSDE", "SOL", "WSOL"]);
+export const LEDGER_VERSION = 2;
+export const STABLE_SYMBOLS = new Set(["USDC", "USDT", "AUSD", "USDE", "SUSDE"]);
+export const QUOTE_SYMBOLS = new Set([...STABLE_SYMBOLS, "MON", "WMON", "SOL", "WSOL"]);
+const isStable = (symbol) => STABLE_SYMBOLS.has(String(symbol ?? "").toUpperCase());
+const isQuote = (symbol) => QUOTE_SYMBOLS.has(String(symbol ?? "").toUpperCase());
 // EVM is case-insensitive; Solana base58 is not. Never merge distinct Solana wallets.
 export const ledgerKey = (address) => `wl:${address.startsWith("0x") ? address.toLowerCase() : address}`;
 export const TRACKED_KEY = "wl:tracked";
@@ -17,6 +22,7 @@ export const URGENT_KEY = "wl:urgent";
 export const WATCHED_KEY = "wl:watched";
 export const HEARTBEAT_KEY = "wl:heartbeat";
 const KEEP_TRADES = 300;
+const KEEP_MOVES = 80;
 
 const lower = (value) => String(value ?? "").toLowerCase();
 const padTopic = (address) => `0x${lower(address).slice(2).padStart(64, "0")}`;
@@ -46,9 +52,10 @@ export function groupMovements(wallet, { logs = [], transactions = [], blocks = 
   for (const log of logs) {
     const transfer = decodeTransfer(log);
     if (!transfer || (transfer.from !== me && transfer.to !== me) || transfer.raw === 0n) continue;
-    const entry = byHash.get(transfer.hash) ?? { hash: transfer.hash, block: transfer.block, in: new Map(), out: new Map() };
+    const entry = byHash.get(transfer.hash) ?? { hash: transfer.hash, block: transfer.block, in: new Map(), out: new Map(), peers: new Set() };
     const side = transfer.to === me ? entry.in : entry.out;
     side.set(transfer.token, (side.get(transfer.token) ?? 0n) + transfer.raw);
+    entry.peers.add(transfer.to === me ? transfer.from : transfer.to);
     if (transfer.from === me && transfer.to === me) entry.in.delete(transfer.token);
     byHash.set(transfer.hash, entry);
   }
@@ -68,6 +75,8 @@ export function groupMovements(wallet, { logs = [], transactions = [], blocks = 
       block: entry.block,
       time: (timestamps.get(entry.block) ?? 0) * 1000,
       kind,
+      to: tx ? lower(tx.to) : null,
+      counterparty: entry.peers.size === 1 ? [...entry.peers][0] : null,
       paidNative: value,
       in: [...entry.in].map(([token, raw]) => ({ token, raw })),
       out: [...entry.out].map(([token, raw]) => ({ token, raw })),
@@ -78,7 +87,7 @@ export function groupMovements(wallet, { logs = [], transactions = [], blocks = 
 export function emptyLedger(address) {
   return {
     version: LEDGER_VERSION, address: lower(address), cursor: 0, indexedAt: 0,
-    positions: {}, trades: [], realized: 0, wins: 0, losses: 0,
+    positions: {}, trades: [], moves: [], realized: 0, wins: 0, losses: 0,
   };
 }
 
@@ -89,21 +98,59 @@ const units = (raw, decimals) => {
   return Number(raw / scale) + Number(raw % scale) / Number(scale);
 };
 
+/// A movement into the ledger. Trades are priced by a candle at that hour, or, when no candle
+/// covers the token, from what was paid or received on the other side of the swap. Money
+/// moving without a trade (deposits, withdrawals, sends, receipts) goes to `moves`, and never
+/// into cost basis.
 export async function applyMovement(ledger, movement, { price, meta }) {
+  ledger.moves ??= [];
+  const trading = movement.kind !== "received" && movement.kind !== "sent";
   const legs = [];
-  for (const { token, raw } of movement.in) legs.push({ token, raw, side: "in" });
-  for (const { token, raw } of movement.out) legs.push({ token, raw, side: "out" });
-  if (movement.paidNative > 0n && movement.kind === "buy") legs.push({ token: NATIVE, raw: movement.paidNative, side: "out", payment: true });
+  const add = async (token, raw, side, payment = false) => {
+    const info = await meta(token);
+    if (!info) return;
+    const amount = units(raw, info.decimals);
+    if (amount > 0) legs.push({ token, side, payment, amount, symbol: info.symbol, decimals: info.decimals, unit: undefined });
+  };
+  for (const { token, raw } of movement.in) await add(token, raw, "in");
+  for (const { token, raw } of movement.out) await add(token, raw, "out");
+  if (movement.paidNative > 0n && movement.kind === "buy") await add(NATIVE, movement.paidNative, "out", true);
+
+  if (!trading) {
+    await recordMove(ledger, movement, legs, price);
+    return ledger;
+  }
+
+  const assets = { in: legs.filter((leg) => leg.side === "in" && !isQuote(leg.symbol)), out: legs.filter((leg) => leg.side === "out" && !isQuote(leg.symbol)) };
+  const quoteOnly = assets.in.length === 0 && assets.out.length === 0;
+  const quote = { in: 0, out: 0 };
+  const stable = { in: 0, out: 0 };
+  for (const leg of legs) {
+    if (!isQuote(leg.symbol)) continue;
+    leg.unit = isStable(leg.symbol) ? 1 : await price(leg.token, movement.time);
+    if (leg.unit != null) quote[leg.side] += leg.amount * leg.unit;
+    if (isStable(leg.symbol)) stable[leg.side] += leg.amount;
+  }
+  for (const leg of legs) {
+    const other = leg.side === "in" ? "out" : "in";
+    if (leg.unit === undefined) {
+      leg.unit = await price(leg.token, movement.time);
+      // No candle for this token at that hour: what was paid or received for it says what it was worth.
+      if (leg.unit == null && assets[leg.side].length === 1 && assets[other].length === 0 && quote[other] > 0) leg.unit = quote[other] / leg.amount;
+    } else if (leg.unit == null && quoteOnly && stable[other] > 0 && legs.filter((l) => l.side === leg.side).length === 1) {
+      // MON bought with AUSD when no MON candle came back: the AUSD paid says what it cost.
+      leg.unit = stable[other] / leg.amount;
+      quote[leg.side] += leg.amount * leg.unit;
+    }
+  }
 
   for (const leg of legs) {
-    const info = await meta(leg.token);
-    if (!info) continue;
-    const amount = units(leg.raw, info.decimals);
-    if (!(amount > 0)) continue;
-    const unit = movement.kind === "received" || movement.kind === "sent" ? null : await price(leg.token, movement.time);
-    const position = ledger.positions[leg.token] ?? { symbol: info.symbol, decimals: info.decimals, holding: 0, basis: 0, unpriced: 0, bought: 0, sold: 0, realized: 0 };
-    position.symbol = info.symbol;
-
+    const { unit, amount } = leg;
+    const position = ledger.positions[leg.token] ?? { symbol: leg.symbol, decimals: leg.decimals, holding: 0, basis: 0, unpriced: 0, bought: 0, sold: 0, realized: 0 };
+    position.symbol = leg.symbol;
+    // Stables are money; MON and SOL are money too, unless money was all that changed hands.
+    const asset = !leg.payment && (!isQuote(leg.symbol) || (quoteOnly && !isStable(leg.symbol)));
+    let gain = null;
     if (leg.side === "in") {
       if (unit == null) {
         position.unpriced += amount;
@@ -116,7 +163,6 @@ export async function applyMovement(ledger, movement, { price, meta }) {
       const fromUnpriced = Math.min(position.unpriced, amount);
       position.unpriced -= fromUnpriced;
       const priced = Math.min(position.holding, amount - fromUnpriced);
-      let gain = null;
       if (priced > 0) {
         const averageCost = position.holding > 0 ? position.basis / position.holding : 0;
         position.basis -= averageCost * priced;
@@ -129,18 +175,47 @@ export async function applyMovement(ledger, movement, { price, meta }) {
           if (gain >= 0) ledger.wins += 1; else ledger.losses += 1;
         }
       }
-      const payment = leg.payment || QUOTE_SYMBOLS.has(String(info.symbol).toUpperCase());
-      if (unit != null && movement.kind !== "sent" && !payment) {
-        ledger.trades.push({ time: movement.time, hash: movement.hash, token: leg.token, symbol: info.symbol, side: "sell", amount, price: unit, value: amount * unit, gain });
-      }
     }
-    if (leg.side === "in" && unit != null && movement.kind !== "received" && !QUOTE_SYMBOLS.has(String(info.symbol).toUpperCase())) {
-      ledger.trades.push({ time: movement.time, hash: movement.hash, token: leg.token, symbol: info.symbol, side: "buy", amount, price: unit, value: amount * unit, gain: null });
+    if (asset && unit != null) {
+      ledger.trades.push({ time: movement.time, hash: movement.hash, token: leg.token, symbol: leg.symbol, side: leg.side === "in" ? "buy" : "sell",
+        amount, price: unit, value: amount * unit, gain });
     }
     ledger.positions[leg.token] = position;
   }
   ledger.trades = ledger.trades.slice(-KEEP_TRADES);
   return ledger;
+}
+
+/// Money that moved without a trade. Deposits to and withdrawals from Perpl always count.
+/// Other transfers count when they can be valued: stables at par, money tokens and tokens
+/// the wallet already trades by candle. Airdrop spam from strangers is unpriced and skipped.
+async function recordMove(ledger, movement, legs, price) {
+  const perpl = PERPL.has(movement.to) || PERPL.has(movement.counterparty);
+  for (const leg of legs) {
+    const position = ledger.positions[leg.token];
+    const known = isQuote(leg.symbol) || (position && position.holding > 0);
+    if (leg.side === "in") {
+      ledger.positions[leg.token] = position ?? { symbol: leg.symbol, decimals: leg.decimals, holding: 0, basis: 0, unpriced: 0, bought: 0, sold: 0, realized: 0 };
+      ledger.positions[leg.token].unpriced += leg.amount;
+    } else if (position) {
+      const fromUnpriced = Math.min(position.unpriced, leg.amount);
+      position.unpriced -= fromUnpriced;
+      const priced = Math.min(position.holding, leg.amount - fromUnpriced);
+      if (priced > 0) {
+        position.basis -= (position.basis / position.holding) * priced;
+        position.holding -= priced;
+      }
+    }
+    let unit = null;
+    if (isStable(leg.symbol)) unit = 1;
+    else if (known) unit = await price(leg.token, movement.time);
+    const value = unit == null ? null : leg.amount * unit;
+    if (!perpl && (value == null || value < 1)) continue;
+    const kind = perpl ? (leg.side === "out" ? "deposit" : "withdraw") : (leg.side === "out" ? "sent" : "received");
+    ledger.moves.push({ time: movement.time, hash: movement.hash, kind, token: leg.token, symbol: leg.symbol, amount: leg.amount, value,
+      counterparty: movement.counterparty ?? movement.to ?? null });
+  }
+  ledger.moves = ledger.moves.slice(-KEEP_MOVES);
 }
 
 export function summarize(ledger, currentPrice, { now = Date.now() } = {}) {

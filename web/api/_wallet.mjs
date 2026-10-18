@@ -211,18 +211,21 @@ export function priceReader({ store = null, chainIndex = MONAD, fetchCandles = o
       return value;
     }
     let price = null;
+    let answered = false;
     for (const bar of ["1m", "1H", "1D"]) {
       try {
         const rows = await fetchCandles("/api/v6/dex/market/historical-candles", {
           chainIndex, tokenContractAddress: contract, bar, limit: "1", after: String(time + span(bar)),
         });
+        if (Array.isArray(rows)) answered = true;
         const row = Array.isArray(rows) ? rows[0] : null;
         const close = row ? number(row[4]) : null;
         if (close != null && close > 0) { price = close; break; }
       } catch {}
     }
     memory.set(key, price);
-    if (store) store.set(key, price == null ? "" : String(price), { ex: 30 * 24 * 3600 }).catch(() => {});
+    // "No candle" is an answer worth a month; a rate limit or outage is not, and is asked again.
+    if (store && (price != null || answered)) store.set(key, price == null ? "" : String(price), { ex: 30 * 24 * 3600 }).catch(() => {});
     return price;
   };
 }

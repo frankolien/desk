@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { describeWallet } from "../api/_wallet.mjs";
+import { describeWallet, priceReader } from "../api/_wallet.mjs";
+import { memoryStore } from "../api/_store.mjs";
 
 const FROGE = "0xAbCd000000000000000000000000000000000001";
 
@@ -73,4 +74,24 @@ test("a wallet with no desk is left as the index described it, and a zero chain 
   assert.deepEqual(bare.holdings.map((row) => [row.symbol, row.value, row.desk]), [["AUSD", 1.5, true]]);
   assert.equal(bare.portfolio, 1.5);
   assert.deepEqual(bare.chains, [{ chainIndex: "143", chain: "Monad", value: 1.5 }]);
+});
+
+test("a price lookup that failed is asked again; one that answered with no candle is remembered", async () => {
+  const token = "0xaaaa000000000000000000000000000000000001";
+  const failing = memoryStore();
+  let calls = 0;
+  const broken = priceReader({ store: failing, fetchCandles: async () => { calls += 1; throw new Error("429"); } });
+  assert.equal(await broken(token, 3_600_000), null);
+  assert.equal(calls, 3);
+  assert.equal(await failing.get(`px:143:${token}:1`), null);
+
+  const empty = memoryStore();
+  const quiet = priceReader({ store: empty, fetchCandles: async () => [] });
+  assert.equal(await quiet(token, 3_600_000), null);
+  assert.equal(await empty.get(`px:143:${token}:1`), "");
+
+  const priced = memoryStore();
+  const live = priceReader({ store: priced, fetchCandles: async () => [["t", "1", "2", "0.5", "1.25"]] });
+  assert.equal(await live(token, 3_600_000), 1.25);
+  assert.equal(await priced.get(`px:143:${token}:1`), "1.25");
 });

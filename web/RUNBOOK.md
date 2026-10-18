@@ -136,6 +136,13 @@ They read `HYPERSYNC_INDEX_TOKEN` (or `HYPERSYNC_TOKEN`) on Vercel. The cursor l
 one height request and sends nothing. A query that fails or takes over 8 s keeps the cursor,
 skips deposits for that scan, and shows in `railway logs` as `worker: scan skipped receipts …`.
 
+Wallet ledgers carry `LEDGER_VERSION` (`api/_ledger.mjs`). Raising it makes the worker rebuild
+every tracked wallet from scratch on its next turn, 45 days back, within the same budget: the
+Following feed keeps serving the old ledger until the first rebuilt slice is written, so for
+a day or so some wallets show fewer trades than before, then more. Version 2 (18 Oct 2026)
+prices swaps from the quote leg when no candle covers the token, records MON bought or sold
+for stables, and keeps a `moves` list of deposits, withdrawals, sends and receipts.
+
 ## Spot Auto-Copy (docs/spot-copy.md)
 
 - **Setup, once:** `FEE_TO=0x… bash web/copyd/spot-setup.sh`. It makes the KMS key `alias/desk-spot-copy`,

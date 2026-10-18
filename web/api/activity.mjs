@@ -2,7 +2,7 @@ import { redisStore } from "./_store.mjs";
 import { walletResource } from "./_wallet-resource.mjs";
 import { postMessage, readRoom } from "./_chat.mjs";
 import { act, authorized, overview, report } from "./_moderation.mjs";
-import { HEARTBEAT_KEY, QUOTE_SYMBOLS, ledgerKey, TRACKED_KEY, URGENT_KEY } from "./_ledger.mjs";
+import { HEARTBEAT_KEY, STABLE_SYMBOLS, ledgerKey, TRACKED_KEY, URGENT_KEY } from "./_ledger.mjs";
 import { MOVES_KEPT, movesKey } from "./_watch.mjs";
 
 const ETHERSCAN = "https://api.etherscan.io/v2/api";
@@ -23,6 +23,7 @@ const validAddress = (value) => /^0x[a-fA-F0-9]{40}$/.test(value);
 const validSolana = (value) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
 
 const PERP_KINDS = new Set(["opened", "added", "reduced", "flipped", "closed"]);
+const MOVE_KINDS = new Set(["deposit", "withdraw", "sent", "received"]);
 
 export function perpMoves(wallet, raw, now) {
   let rows;
@@ -49,6 +50,7 @@ export async function followingFeed(store, addresses, now = Date.now()) {
   const pending = [];
   const stale = [];
   const events = [];
+  const transfers = [];
   for (let index = 0; index < addresses.length; index += 1) {
     const address = addresses[index];
     let ledger;
@@ -71,17 +73,24 @@ export async function followingFeed(store, addresses, now = Date.now()) {
       if (!Number.isFinite(trade.time) || trade.time > now + 60_000 || trade.time < now - 14 * 86_400_000) continue;
       if (!["buy", "sell"].includes(trade.side) || !Number.isFinite(trade.value) || trade.value <= 0) continue;
       // Ledgers written before money stopped counting as a position still carry these.
-      if (QUOTE_SYMBOLS.has(String(trade.symbol ?? "").toUpperCase())) continue;
+      if (STABLE_SYMBOLS.has(String(trade.symbol ?? "").toUpperCase())) continue;
       events.push({ wallet: address, chainIndex, time: trade.time, hash: trade.hash,
         token: trade.token, symbol: trade.symbol, side: trade.side,
         amount: trade.amount, value: trade.value, gain: trade.gain ?? null });
     }
+    for (const move of Array.isArray(ledger.moves) ? ledger.moves : []) {
+      if (!Number.isFinite(move.time) || move.time > now + 60_000 || move.time < now - 14 * 86_400_000) continue;
+      if (!MOVE_KINDS.has(move.kind) || !move.symbol) continue;
+      transfers.push({ wallet: address, chainIndex, time: move.time, hash: move.hash, kind: move.kind,
+        token: move.token, symbol: move.symbol, amount: move.amount ?? null, value: move.value ?? null, counterparty: move.counterparty ?? null });
+    }
   }
   events.sort((a, b) => b.time - a.time);
+  transfers.sort((a, b) => b.time - a.time);
   let workerAt = null;
   try { workerAt = JSON.parse(service[0])?.at ?? null; } catch { /* no heartbeat */ }
   const scanAt = service[1] ? Date.parse(service[1]) : null;
-  return { events: events.slice(0, 80), perps, pending, stale, observedAt: now,
+  return { events: events.slice(0, 80), transfers: transfers.slice(0, 40), perps, pending, stale, observedAt: now,
     sync: {
       workerDelayed: !Number.isFinite(workerAt) || now - workerAt > 10 * 60_000,
       pushDelayed: !Number.isFinite(scanAt) || now - scanAt > 15 * 60_000,

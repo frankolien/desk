@@ -129,3 +129,22 @@ test("following feed returns each followed wallet's Perpl moves, newest first, t
   assert.ok(feed.perps.every((row, index) => index === 0 || feed.perps[index - 1].time >= row.time));
   assert.deepEqual((await followingFeed(memoryStore(), [SOLANA], now)).perps, []);
 });
+
+test("following feed carries deposits, withdrawals and transfers, and keeps MON trades", async () => {
+  const store = memoryStore();
+  const now = Date.now();
+  await store.set(ledgerKey(ME), JSON.stringify({ indexedAt: now, trades: [
+    { time: now - 5_000, hash: "0x1", token: "0xwmon", symbol: "WMON", side: "buy", amount: 4000, value: 100 },
+    { time: now - 4_000, hash: "0x2", token: "0xausd", symbol: "AUSD", side: "buy", amount: 100, value: 100 },
+  ], moves: [
+    { time: now - 3_000, hash: "0x3", kind: "deposit", token: "0xausd", symbol: "AUSD", amount: 500, value: 500, counterparty: PERPL },
+    { time: now - 2_000, hash: "0x4", kind: "received", token: "0xausd", symbol: "AUSD", amount: 20, value: 20, counterparty: OTHER },
+    { time: now - 20 * 86_400_000, hash: "0x5", kind: "withdraw", token: "0xausd", symbol: "AUSD", amount: 1, value: 1, counterparty: PERPL },
+    { time: now - 1_000, hash: "0x6", kind: "mystery", token: "0xausd", symbol: "AUSD", amount: 1, value: 1 },
+  ] }));
+  const feed = await followingFeed(store, [ME], now);
+  assert.deepEqual(feed.events.map((event) => event.symbol), ["WMON"]);
+  assert.deepEqual(feed.transfers.map((move) => [move.kind, move.value, move.wallet]), [["received", 20, ME], ["deposit", 500, ME]]);
+  assert.equal(feed.transfers[1].counterparty, PERPL);
+  assert.equal(feed.transfers[0].chainIndex, "143");
+});

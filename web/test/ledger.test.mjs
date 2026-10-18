@@ -164,3 +164,74 @@ test("with a quiet window, a run that found nothing skips the write until the st
   await indexWallet(ME, { store, hypersync, price, meta, backfillBlocks: 1_000_000, now: () => 131_000 });
   assert.equal(writes, 3);
 });
+
+test("a swap against a stable is priced from the stable leg when no candle covers the token", async () => {
+  const PEPE = "0xcccc000000000000000000000000000000000003";
+  const withPepe = async (token) => token === PEPE ? { symbol: "PEPE", decimals: 18 } : meta(token);
+  const ledger = emptyLedger(ME);
+  const swap = { hash: "0xa", block: 10, time: 1000_000, kind: "swap", paidNative: 0n, in: [{ token: PEPE, raw: 10n ** 23n }], out: [{ token: USDC, raw: 250_000_000n }] };
+  await applyMovement(ledger, swap, { price, meta: withPepe });
+  assert.equal(ledger.positions[PEPE].holding, 100_000);
+  assert.equal(ledger.positions[PEPE].unpriced, 0);
+  assert.equal(ledger.positions[PEPE].basis, 250);
+  assert.equal(ledger.trades.length, 1);
+  assert.equal(ledger.trades[0].side, "buy");
+  assert.equal(ledger.trades[0].value, 250);
+  assert.ok(Math.abs(ledger.trades[0].price - 0.0025) < 1e-12);
+
+  // Selling half back for 200 USDC realises against the 250 paid, again without a candle.
+  const sell = { hash: "0xb", block: 11, time: 2000_000, kind: "swap", paidNative: 0n, in: [{ token: USDC, raw: 200_000_000n }], out: [{ token: PEPE, raw: 5n * 10n ** 22n }] };
+  await applyMovement(ledger, sell, { price, meta: withPepe });
+  assert.ok(Math.abs(ledger.realized - 75) < 1e-9);
+  assert.equal(ledger.trades[1].side, "sell");
+  assert.equal(ledger.trades[1].value, 200);
+  // The stable legs themselves are never trades.
+  assert.equal(ledger.trades.length, 2);
+});
+
+test("money for money: buying MON with AUSD is a MON buy, stable for stable is nothing", async () => {
+  const WMON = "0xdddd000000000000000000000000000000000004";
+  const AUSD = "0xeeee000000000000000000000000000000000005";
+  const metaMore = async (token) => ({ [WMON]: { symbol: "WMON", decimals: 18 }, [AUSD]: { symbol: "AUSD", decimals: 6 } })[token] ?? meta(token);
+  const ledger = emptyLedger(ME);
+  const buyMon = { hash: "0xa", block: 10, time: 1000_000, kind: "swap", paidNative: 0n, in: [{ token: WMON, raw: 4000n * 10n ** 18n }], out: [{ token: AUSD, raw: 100_000_000n }] };
+  await applyMovement(ledger, buyMon, { price: async () => null, meta: metaMore });
+  assert.equal(ledger.trades.length, 1);
+  assert.equal(ledger.trades[0].symbol, "WMON");
+  assert.equal(ledger.trades[0].side, "buy");
+  assert.equal(ledger.trades[0].value, 100);
+  assert.ok(Math.abs(ledger.trades[0].price - 0.025) < 1e-12);
+
+  const stableSwap = { hash: "0xb", block: 11, time: 2000_000, kind: "swap", paidNative: 0n, in: [{ token: AUSD, raw: 100_000_000n }], out: [{ token: USDC, raw: 100_000_000n }] };
+  await applyMovement(ledger, stableSwap, { price, meta: metaMore });
+  assert.equal(ledger.trades.length, 1);
+});
+
+test("deposits, withdrawals, sends and receipts are moves; airdrop spam is not", async () => {
+  const perpl = "0x34b6552d57a35a1d042ccae1951bd1c370112a6f";
+  const SPAM = "0xffff000000000000000000000000000000000006";
+  const metaMore = async (token) => token === SPAM ? { symbol: "FREE", decimals: 18 } : meta(token);
+  const ledger = emptyLedger(ME);
+  await applyMovement(ledger, { hash: "0xa", block: 10, time: 1000_000, kind: "sent", to: perpl, counterparty: perpl, paidNative: 0n, in: [], out: [{ token: USDC, raw: 500_000_000n }] }, { price, meta: metaMore });
+  await applyMovement(ledger, { hash: "0xb", block: 11, time: 2000_000, kind: "received", to: null, counterparty: perpl, paidNative: 0n, in: [{ token: USDC, raw: 620_000_000n }], out: [] }, { price, meta: metaMore });
+  await applyMovement(ledger, { hash: "0xc", block: 12, time: 3000_000, kind: "received", to: null, counterparty: FRIEND, paidNative: 0n, in: [{ token: SPAM, raw: 10n ** 24n }], out: [] }, { price, meta: metaMore });
+  await applyMovement(ledger, { hash: "0xd", block: 13, time: 3000_000, kind: "sent", to: USDC, counterparty: FRIEND, paidNative: 0n, in: [], out: [{ token: USDC, raw: 20_000_000n }] }, { price, meta: metaMore });
+  assert.deepEqual(ledger.moves.map((move) => [move.kind, move.value]), [["deposit", 500], ["withdraw", 620], ["sent", 20]]);
+  assert.equal(ledger.moves[0].counterparty, perpl);
+  assert.equal(ledger.moves[2].counterparty, FRIEND);
+  // The spam still sits in the ledger as an unpriced holding, as before.
+  assert.equal(ledger.positions[SPAM].unpriced, 1_000_000);
+  assert.equal(ledger.trades.length, 0);
+});
+
+test("movements remember the counterparty and the contract called", () => {
+  const page = {
+    logs: [transfer("0xa", 10, USDC, ME, POOL, 100_000_000n, 0), transfer("0xa", 10, FROGE, POOL, ME, 10n ** 23n, 1), transfer("0xd", 13, FROGE, ME, FRIEND, 10n ** 21n, 0)],
+    transactions: [tx("0xa"), tx("0xd", { to: FROGE, input: "0xa9059cbb0000" })],
+    blocks: [block(10, 1000), block(13, 3000)],
+  };
+  const byHash = Object.fromEntries(groupMovements(ME, page).map((m) => [m.hash, m]));
+  assert.equal(byHash["0xa"].to, ROUTER);
+  assert.equal(byHash["0xa"].counterparty, POOL);
+  assert.equal(byHash["0xd"].counterparty, FRIEND);
+});
