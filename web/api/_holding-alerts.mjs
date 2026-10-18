@@ -10,20 +10,22 @@ const evmAddress = (value) => /^0x[a-fA-F0-9]{40}$/.test(String(value ?? ""));
 const solanaAddress = (value) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(String(value ?? ""));
 export const holdingKey = (alert) => `${alert.chainIndex}:${alert.contract}`;
 
+/// A row that cannot be read is dropped, never the whole list: one odd token on a phone must
+/// not silence every other alert that phone has. Only a list that is not a list is refused.
 export function parseHoldingAlerts(list) {
   if (list == null) return [];
-  if (!Array.isArray(list) || list.length > MAX_HOLDING_ALERTS) return null;
+  if (!Array.isArray(list)) return null;
   const out = [];
   const seen = new Set();
-  for (const row of list) {
-    if (!row || typeof row !== "object") return null;
+  for (const row of list.slice(0, MAX_HOLDING_ALERTS)) {
+    if (!row || typeof row !== "object") continue;
     const chainIndex = String(row.chainIndex ?? "");
-    if (!/^\d{1,6}$/.test(chainIndex)) return null;
+    if (!/^\d{1,6}$/.test(chainIndex)) continue;
     const contract = evmAddress(row.contract) ? String(row.contract).toLowerCase() : solanaAddress(row.contract) ? String(row.contract) : null;
-    if (!contract) return null;
+    if (!contract) continue;
     const anchor = Number(row.anchor);
     const step = Number(row.step);
-    if (!(anchor > 0) || !Number.isFinite(anchor) || !HOLDING_STEPS.includes(step)) return null;
+    if (!(anchor > 0) || !Number.isFinite(anchor) || !HOLDING_STEPS.includes(step)) continue;
     const symbol = String(row.symbol ?? "").replace(/[^\w$.-]/g, "").slice(0, 12) || "token";
     const up = row.up !== false, down = row.down !== false;
     if (!up && !down) continue;

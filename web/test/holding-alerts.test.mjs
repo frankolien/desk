@@ -14,10 +14,12 @@ test("holding alerts are validated: a chain, a token, the price paid and a 5, 10
   const parsed = parseHoldingAlerts([{ chainIndex: "143", contract: MON.toUpperCase().replace("0X", "0x"), symbol: "MON", anchor: 0.02, step: 0.05 }]);
   assert.deepEqual(parsed, [alert()]);
   assert.equal(parseHoldingAlerts(null).length, 0);
-  assert.equal(parseHoldingAlerts([{ chainIndex: "143", contract: MON, anchor: 0.02, step: 0.07 }]), null);
-  assert.equal(parseHoldingAlerts([{ chainIndex: "143", contract: "0x12", anchor: 0.02, step: 0.05 }]), null);
-  assert.equal(parseHoldingAlerts([{ chainIndex: "143", contract: MON, anchor: 0, step: 0.05 }]), null);
-  assert.equal(parseHoldingAlerts(Array(31).fill({ chainIndex: "143", contract: MON, anchor: 1, step: 0.05 })), null);
+  assert.equal(parseHoldingAlerts("nope"), null, "not a list: refused");
+  // A row that cannot be read is dropped on its own; the rows beside it still count.
+  assert.deepEqual(parseHoldingAlerts([{ chainIndex: "143", contract: MON, anchor: 0.02, step: 0.07 }, alert()]), [alert()]);
+  assert.deepEqual(parseHoldingAlerts([{ chainIndex: "143", contract: "0x12", anchor: 0.02, step: 0.05 }]), []);
+  assert.deepEqual(parseHoldingAlerts([{ chainIndex: "143", contract: MON, anchor: 0, step: 0.05 }]), []);
+  assert.equal(parseHoldingAlerts(Array(31).fill({ chainIndex: "143", contract: MON, anchor: 1, step: 0.05 })).length, 1, "the list is cut at 30, then deduplicated");
   // Neither direction wanted is no alert; the same token twice is one alert.
   assert.equal(parseHoldingAlerts([{ chainIndex: "143", contract: MON, anchor: 1, step: 0.05, up: false, down: false }]).length, 0);
   assert.equal(parseHoldingAlerts([alert(), alert({ step: 0.1 })]).length, 1);
