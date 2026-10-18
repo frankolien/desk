@@ -117,12 +117,26 @@ struct TraderTradesList: View {
             }
             .padding(.horizontal, 20)
             .padding(.top, 16)
-        } else {
+        } else if loaded {
             ContentUnavailableView(
-                loaded ? "No Closed Trades Yet" : "Loading Trades…",
+                "No Closed Trades Yet",
                 systemImage: "clock.arrow.circlepath",
-                description: Text(loaded ? "Closed trades appear here as Desk indexes Perpl's history." : ""))
+                description: Text("Closed trades appear here as Desk indexes Perpl's history."))
                 .padding(.top, 20)
+        } else {
+            VStack(spacing: 22) {
+                ForEach(0..<5, id: \.self) { index in
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            SkeletonRow(widthFraction: [0.4, 0.5, 0.35, 0.45, 0.38][index])
+                            SkeletonRow(widthFraction: [0.75, 0.6, 0.7, 0.55, 0.68][index])
+                        }
+                        SkeletonBlock(width: 64, height: 14, cornerRadius: 7)
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 24)
         }
     }
 
@@ -201,12 +215,26 @@ struct TraderStatsView: View {
             }
             .padding(.horizontal, 20)
             .padding(.top, 16)
-        } else {
+        } else if loaded {
             ContentUnavailableView(
-                loaded ? "Not Enough History" : "Loading Stats…",
+                "Not Enough History",
                 systemImage: "chart.bar.xaxis",
-                description: Text(loaded ? "Stats appear once this trader has closed trades Desk has indexed." : ""))
+                description: Text("Stats appear once this trader has closed trades Desk has indexed."))
                 .padding(.top, 20)
+        } else {
+            VStack(spacing: 18) {
+                HStack(spacing: 14) {
+                    SkeletonCircle(size: 56)
+                    VStack(alignment: .leading, spacing: 8) {
+                        SkeletonRow(widthFraction: 0.9)
+                        SkeletonRow(widthFraction: 0.6)
+                    }
+                }
+                SkeletonBlock(height: 212, cornerRadius: 18)
+                SkeletonBlock(height: 256, cornerRadius: 18)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
         }
     }
 

@@ -46,20 +46,107 @@ public struct SkeletonRow: View {
         self.widthFraction = widthFraction
     }
 
-    @State private var shimmer = false
-
     public var body: some View {
         GeometryReader { geometry in
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(DeskColor.nightLine.color.opacity(shimmer ? 0.75 : 0.4))
-                .frame(width: geometry.size.width * widthFraction)
+            SkeletonBlock(width: geometry.size.width * widthFraction, height: 14, cornerRadius: 8)
         }
         .frame(height: 14)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
-                shimmer = true
+    }
+}
+
+/// A placeholder the shape of a card, a chart or a figure that has not arrived yet.
+public struct SkeletonBlock: View {
+    private let width: CGFloat?
+    private let height: CGFloat
+    private let cornerRadius: CGFloat
+
+    public init(width: CGFloat? = nil, height: CGFloat, cornerRadius: CGFloat = 12) {
+        self.width = width
+        self.height = height
+        self.cornerRadius = cornerRadius
+    }
+
+    public var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(skeletonBase)
+            .frame(width: width, height: height)
+            .modifier(SkeletonShimmer(shape: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)))
+            .accessibilityHidden(true)
+    }
+}
+
+public struct SkeletonCircle: View {
+    private let size: CGFloat
+
+    public init(size: CGFloat = 38) {
+        self.size = size
+    }
+
+    public var body: some View {
+        Circle()
+            .fill(skeletonBase)
+            .frame(width: size, height: size)
+            .modifier(SkeletonShimmer(shape: Circle()))
+            .accessibilityHidden(true)
+    }
+}
+
+/// N rows shaped like an avatar beside two lines of text, for a list that is still loading.
+public struct SkeletonList: View {
+    private let rows: Int
+    private let avatarSize: CGFloat
+    private let spacing: CGFloat
+
+    public init(rows: Int = 4, avatarSize: CGFloat = 38, spacing: CGFloat = 18) {
+        self.rows = rows
+        self.avatarSize = avatarSize
+        self.spacing = spacing
+    }
+
+    public var body: some View {
+        VStack(spacing: spacing) {
+            ForEach(0..<max(rows, 0), id: \.self) { index in
+                HStack(spacing: 12) {
+                    SkeletonCircle(size: avatarSize)
+                    VStack(alignment: .leading, spacing: 8) {
+                        SkeletonRow(widthFraction: [0.55, 0.7, 0.45, 0.62][index % 4])
+                        SkeletonRow(widthFraction: [0.35, 0.28, 0.4, 0.3][index % 4])
+                    }
+                }
             }
         }
         .accessibilityHidden(true)
+    }
+}
+
+/// A diagonal highlight sweeping across the placeholder; a slow pulse when motion is reduced.
+private let skeletonBase = DeskColor.nightLine.color.opacity(0.55)
+
+private struct SkeletonShimmer<S: Shape>: ViewModifier {
+    let shape: S
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+                .opacity(pulse ? 1 : 0.55)
+                .onAppear {
+                    withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true }
+                }
+        } else {
+            content
+                .overlay {
+                    TimelineView(.animation) { context in
+                        let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
+                        let x = -0.7 + phase * 2.4
+                        LinearGradient(
+                            colors: [.clear, Color.white.opacity(0.11), .clear],
+                            startPoint: UnitPoint(x: x, y: 0),
+                            endPoint: UnitPoint(x: x + 0.7, y: 1))
+                    }
+                }
+                .clipShape(shape)
+        }
     }
 }

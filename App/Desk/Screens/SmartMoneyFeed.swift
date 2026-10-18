@@ -77,10 +77,15 @@ struct SmartMoneyFeedView: View {
             .padding(.bottom, 8)
 
             if feed.trades.isEmpty && feed.monad.isEmpty {
-                Text(feed.failed ? "Smart money couldn't load. Pull down to try again." : feed.loaded ? "No smart-money trades right now." : "Loading smart money…")
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
-                    .frame(maxWidth: .infinity, minHeight: 120)
+                if feed.failed || feed.loaded {
+                    Text(feed.failed ? "Smart money couldn't load. Pull down to try again." : "No smart-money trades right now.")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                } else {
+                    SkeletonList(rows: 4, avatarSize: 46, spacing: 22)
+                        .padding(.top, 14)
+                }
             }
             if !feed.monad.isEmpty {
                 sectionTitle("On Monad", detail: "Wallets that made money on Monad over the last 30 days")

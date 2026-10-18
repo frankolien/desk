@@ -96,8 +96,9 @@ struct ActivityScreen: View {
     private var content: some View {
         switch state {
         case .loading where entries.isEmpty:
-            Spacer()
-            ProgressView().controlSize(.large)
+            SkeletonList(rows: 7, avatarSize: 40, spacing: 22)
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
             Spacer()
         case .unavailable(let sentence) where entries.isEmpty:
             message(sentence, symbol: "exclamationmark.triangle")

@@ -228,9 +228,7 @@ struct MarketSearchScreen: View {
 
                     let people = peopleRows
                     if looksLikeAName && isLookingUpName {
-                        ProgressView("Looking up name…")
-                            .font(DeskType.caption)
-                            .foregroundStyle(DeskColor.nightMuted.color)
+                        SkeletonList(rows: 2, avatarSize: 40, spacing: 18)
                             .padding(.top, 18)
                     } else if looksLikeAName && nameWasNotFound && people.isEmpty {
                         Text(query.lowercased().hasSuffix(".solana")
@@ -332,14 +330,8 @@ struct MarketSearchScreen: View {
                         }
                         .padding(.top, 12)
                     } else if Showcase.spotTrading, discovery.isLoading {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text(query.isEmpty ? "Finding what’s moving…" : "Searching across networks…")
-                        }
-                        .font(DeskType.caption)
-                        .foregroundStyle(DeskColor.nightMuted.color)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 28)
+                        SkeletonList(rows: 4, avatarSize: 40, spacing: 20)
+                            .padding(.vertical, 20)
                     } else if Showcase.spotTrading, let error = discovery.errorText {
                         ContentUnavailableView("Discovery unavailable", systemImage: "wifi.exclamationmark", description: Text(error))
                             .frame(minHeight: 150)
@@ -357,10 +349,8 @@ struct MarketSearchScreen: View {
                     .padding(.top, 30)
 
                     if market.allMarkets.isEmpty {
-                        VStack(alignment: .leading, spacing: 14) {
-                            ForEach(0..<4, id: \.self) { SkeletonRow(widthFraction: 0.8 - Double($0) * 0.1) }
-                        }
-                        .padding(.top, 28)
+                        SkeletonList(rows: 4, avatarSize: 40, spacing: 20)
+                            .padding(.top, 24)
                     } else if results.isEmpty {
                         Text("No market matches “\(query)”.")
                             .font(DeskType.caption)
@@ -1244,13 +1234,23 @@ private struct SpotTokenDetailScreen: View {
             HStack { Text("TX"); Spacer(); Text("Amount"); Spacer(); Text("Wallet") }
                 .font(.system(size: 11, weight: .bold, design: .rounded)).foregroundStyle(.secondary)
                 .padding(.horizontal, 20).padding(.bottom, 8)
-            if feed.transactions.isEmpty {
-                HStack(spacing: 10) {
-                    if feed.isLoading { ProgressView() }
-                    Text(feed.errorText ?? "Waiting for the next on-chain trade…")
+            if feed.transactions.isEmpty, feed.isLoading, feed.errorText == nil {
+                VStack(spacing: 18) {
+                    ForEach(0..<4, id: \.self) { _ in
+                        HStack {
+                            SkeletonBlock(width: 64, height: 14, cornerRadius: 7)
+                            Spacer()
+                            SkeletonBlock(width: 84, height: 14, cornerRadius: 7)
+                            Spacer()
+                            SkeletonBlock(width: 72, height: 14, cornerRadius: 7)
+                        }
+                    }
                 }
-                .font(.system(size: 13, weight: .medium, design: .rounded))
-                .foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.vertical, 34)
+                .padding(.horizontal, 20).padding(.vertical, 20)
+            } else if feed.transactions.isEmpty {
+                Text(feed.errorText ?? "Waiting for the next on-chain trade…")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.vertical, 34)
             }
             ForEach(feed.transactions) { tx in
                 HStack(spacing: 10) {
@@ -3612,10 +3612,28 @@ private struct WalletProfileScreen: View {
                 .padding(.top, 8)
 
             if !profileReady {
-                ProgressView("Preparing wallet profile…")
-                    .tint(DeskColor.action.color)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 14) {
+                        SkeletonCircle(size: 68)
+                        Spacer(minLength: 14)
+                        VStack(alignment: .leading, spacing: 8) {
+                            SkeletonBlock(width: 84, height: 18, cornerRadius: 8)
+                            SkeletonBlock(width: 56, height: 12, cornerRadius: 6)
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            SkeletonBlock(width: 84, height: 18, cornerRadius: 8)
+                            SkeletonBlock(width: 56, height: 12, cornerRadius: 6)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.top, 22)
+                    SkeletonBlock(width: 180, height: 22, cornerRadius: 8).padding(.top, 18)
+                    SkeletonBlock(height: 40, cornerRadius: 12).padding(.top, 22)
+                    SkeletonList(rows: 3, avatarSize: 46, spacing: 24).padding(.top, 28)
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if resourceFailed && resource == nil {
                 ContentUnavailableView {
                     Label("Wallet unavailable", systemImage: "wifi.exclamationmark")
@@ -3928,15 +3946,8 @@ private struct WalletProfileScreen: View {
     private var content: some View {
         let rows = rows(for: tab)
         if resource == nil, !resourceFailed, isEVM || isSolana, rows.isEmpty {
-            VStack(spacing: 0) {
-                ForEach(0..<3, id: \.self) { _ in
-                    HStack(spacing: 14) {
-                        Circle().fill(Color.white.opacity(0.08)).frame(width: 46, height: 46)
-                        VStack(alignment: .leading, spacing: 8) { SkeletonRow(widthFraction: 0.5); SkeletonRow(widthFraction: 0.3) }
-                    }
-                    .frame(height: 78)
-                }
-            }
+            SkeletonList(rows: 3, avatarSize: 46, spacing: 30)
+                .padding(.vertical, 16)
         } else {
             if rows.isEmpty {
                 Text(ledger?.status == "indexing" ? "Analyzing this wallet’s on-chain history…"
@@ -4155,7 +4166,15 @@ struct TokenPositionSheet: View {
             if let token {
                 TokenPositionContent(token: token, holding: holding, model: model) { onOpenPage(target) }
             } else {
-                ProgressView().tint(.white)
+                ScrollView {
+                    VStack(spacing: 18) {
+                        SkeletonBlock(height: 74, cornerRadius: 18)
+                        SkeletonBlock(height: 300, cornerRadius: 18)
+                        SkeletonBlock(height: 230, cornerRadius: 18)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
+                }
             }
         }
         .preferredColorScheme(.dark)

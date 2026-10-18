@@ -666,12 +666,17 @@ private struct FollowedCard: View {
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
                         .lineLimit(1)
-                    Text(trader.pnl == nil ? (noAccount ? "Not on Perpl yet" : "Loading") : TraderFormat.compact(trader.pnl.flatMap(Double.init), signed: true))
-                        .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .foregroundStyle(trader.pnl == nil ? DeskColor.nightMuted.color
-                                         : (trader.isProfit ? DeskColor.rise : DeskColor.fall).color)
+                    if trader.pnl == nil, !noAccount {
+                        SkeletonBlock(width: 64, height: 14, cornerRadius: 7)
+                            .frame(height: 18)
+                    } else {
+                        Text(trader.pnl == nil ? "Not on Perpl yet" : TraderFormat.compact(trader.pnl.flatMap(Double.init), signed: true))
+                            .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .foregroundStyle(trader.pnl == nil ? DeskColor.nightMuted.color
+                                             : (trader.isProfit ? DeskColor.rise : DeskColor.fall).color)
+                    }
                 }
             }
             .padding(14)
@@ -1127,9 +1132,15 @@ struct TraderProfileScreen: View {
                     dismiss()
                     TokenOpenRequest.shared.open(.init(chainIndex: holding.chainIndex, contract: holding.contract, symbol: holding.symbol))
                 }
+            } else if trader.positions.isEmpty, snapshot == nil {
+                VStack(spacing: 10) {
+                    SkeletonBlock(height: 132, cornerRadius: 18)
+                    SkeletonBlock(height: 132, cornerRadius: 18)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
             } else if trader.positions.isEmpty {
-                emptyState(snapshot == nil ? "Loading positions…" : "Nothing open right now.",
-                           detail: snapshot == nil ? nil : "Positions appear here the moment this trader opens one.")
+                emptyState("Nothing open right now.", detail: "Positions appear here the moment this trader opens one.")
             } else {
                 LazyVStack(spacing: 10) {
                     ForEach(trader.positions) { position in
@@ -1363,9 +1374,13 @@ struct TraderTokensList: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 10)
+            } else if holdings == nil, !failed {
+                SkeletonList(rows: 4, avatarSize: 38, spacing: 20)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
             } else {
                 VStack(spacing: 6) {
-                    Text(failed ? "Their tokens couldn't load." : holdings == nil ? "Loading tokens…" : "No tokens worth over $1.")
+                    Text(failed ? "Their tokens couldn't load." : "No tokens worth over $1.")
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
                     if failed {

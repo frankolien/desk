@@ -101,10 +101,8 @@ struct MarketHoldersList: View {
             .padding(.vertical, 12)
 
             if !model.loaded {
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(0..<4, id: \.self) { SkeletonRow(widthFraction: 0.9 - Double($0) * 0.12) }
-                }
-                .padding(.top, 10)
+                SkeletonList(rows: 4, avatarSize: 36, spacing: 20)
+                    .padding(.top, 14)
             } else {
                 LazyVStack(spacing: 0) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, holder in
@@ -320,7 +318,7 @@ struct HolderPositionSheet: View {
             CandlestickChart(candles: market.candles.map { $0.chartCandle(scale: scale) }, guides: guides)
                 .frame(height: 230)
         } else {
-            VStack(spacing: 16) { SkeletonRow(widthFraction: 0.88); SkeletonRow(widthFraction: 0.64) }.frame(height: 230)
+            SkeletonBlock(height: 230, cornerRadius: 14)
         }
     }
 

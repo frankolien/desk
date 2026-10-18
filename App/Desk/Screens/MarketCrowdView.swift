@@ -35,13 +35,26 @@ struct MarketCrowdFeed: View {
     }
 
     private var waiting: some View {
-        HStack(spacing: 10) {
-            ProgressView().tint(DeskColor.nightMuted.color)
-            Text("Reading the book")
-                .font(DeskType.label)
-                .foregroundStyle(DeskColor.nightMuted.color)
+        VStack(spacing: 10) {
+            ForEach(0..<3, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        SkeletonBlock(width: 88, height: 16, cornerRadius: 8)
+                        Spacer()
+                        SkeletonBlock(width: 56, height: 14, cornerRadius: 7)
+                    }
+                    SkeletonBlock(height: 10, cornerRadius: 5)
+                    HStack {
+                        SkeletonBlock(width: 110, height: 12, cornerRadius: 6)
+                        Spacer()
+                        SkeletonBlock(width: 110, height: 12, cornerRadius: 6)
+                    }
+                }
+                .padding(18)
+                .background(DeskColor.nightChip.color.opacity(0.6),
+                            in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
