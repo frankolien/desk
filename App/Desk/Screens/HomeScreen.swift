@@ -57,6 +57,7 @@ struct HomeScreen: View {
     @State private var scrubbed: PortfolioChartPoint?
     @State private var equity: [EquityLog.Point] = []
     @State private var copiedAddress = false
+    @State private var copiedTag = false
     @State private var showsPortfolioReplay = false
     @State private var expandedTrade: Int64?
 
@@ -405,27 +406,42 @@ struct HomeScreen: View {
             .accessibilityLabel("Edit profile")
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(ownName ?? model.addressShort)
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundStyle(DeskColor.nightText.color)
-                    .lineLimit(1)
-                Button {
-                    model.copyAddress()
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(.snappy(duration: 0.2)) { copiedAddress = true }
-                    Task { try? await Task.sleep(for: .seconds(1.4)); withAnimation { copiedAddress = false } }
-                } label: {
-                    HStack(spacing: 5) {
-                        Text(copiedAddress ? "Address copied" : (ownHandle.map { ownName == $0 ? model.addressShort : "\($0) · \(model.addressShort)" } ?? (ownName != nil ? model.addressShort : model.network.name)))
-                        Image(systemName: copiedAddress ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 10, weight: .bold))
-                    }
-                    .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
-                    .foregroundStyle(copiedAddress ? DeskColor.rise.color : DeskColor.nightMuted.color)
-                    .contentShape(Rectangle())
+                // The tag is the title when it is the only name; otherwise it sits by the address.
+                if let handle = ownHandle, ownName == handle {
+                    tagButton(handle)
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundStyle(copiedTag ? DeskColor.rise.color : DeskColor.nightText.color)
+                } else {
+                    Text(ownName ?? model.addressShort)
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .lineLimit(1)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Copy address")
+                HStack(spacing: 5) {
+                    if let handle = ownHandle, ownName != handle {
+                        tagButton(handle)
+                            .foregroundStyle(copiedTag ? DeskColor.rise.color : DeskColor.nightMuted.color)
+                        Text("·").foregroundStyle(DeskColor.nightMuted.color)
+                    }
+                    Button {
+                        model.copyAddress()
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        withAnimation(.snappy(duration: 0.2)) { copiedAddress = true }
+                        Task { try? await Task.sleep(for: .seconds(1.4)); withAnimation { copiedAddress = false } }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text(copiedAddress ? "Address copied" : (ownName != nil ? model.addressShort : model.network.name))
+                            Image(systemName: copiedAddress ? "checkmark" : "doc.on.doc")
+                                .font(.system(size: 10, weight: .bold))
+                        }
+                        .foregroundStyle(copiedAddress ? DeskColor.rise.color : DeskColor.nightMuted.color)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Copy address")
+                }
+                .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
+                .lineLimit(1)
                 HStack(spacing: 12) {
                     Button(action: onFollowing) {
                         (Text("\(followingCount) ").bold() + Text("Following"))
@@ -441,6 +457,21 @@ struct HomeScreen: View {
             }
             Spacer(minLength: 0)
         }
+    }
+
+    private func tagButton(_ handle: String) -> some View {
+        Button {
+            UIPasteboard.general.string = handle
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.snappy(duration: 0.2)) { copiedTag = true }
+            Task { try? await Task.sleep(for: .seconds(1.4)); withAnimation { copiedTag = false } }
+        } label: {
+            Text(copiedTag ? "Tag copied" : handle)
+                .lineLimit(1)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Copy tag \(handle)")
     }
 
     private var portfolio: some View {
