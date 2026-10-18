@@ -222,7 +222,7 @@ struct AccountScreen: View {
                 .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showsWithdraw) {
-            WithdrawSheet(model: model) { showsWithdraw = false }
+            SendSheet(model: model, title: "Withdraw") { showsWithdraw = false }
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Color(.systemBackground))

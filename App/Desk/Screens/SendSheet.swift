@@ -4,28 +4,45 @@ import DeskUI
 import SwiftUI
 import UIKit
 
-/// Sending AUSD to someone from their profile: who it's for, one big amount, where it comes
-/// from, the keypad, and one button. Face ID is the confirmation, so there's no hold step.
-/// Money in trading comes out of Perpl first, in the same Face ID.
+/// Sending AUSD: who it's for, one big amount, where it comes from, the keypad, and one
+/// button. Face ID is the confirmation, so there's no hold step. Money in trading comes out
+/// of Perpl first, in the same Face ID. Opened from someone's profile the recipient is fixed;
+/// opened as Withdraw the person types or pastes one, or picks their own wallet to move
+/// trading money back into it.
 struct SendSheet: View {
     let model: AppModel
-    let recipient: String
-    var name: String?
+    var recipient: String? = nil
+    var name: String? = nil
+    var title: String? = nil
     let onClose: () -> Void
 
     @State private var source: AppModel.WithdrawalSource = .wallet
     @State private var amount = ""
+    @State private var typed = ""
+    @FocusState private var typing: Bool
     @State private var page: WebPage?
 
-    private var to: EthereumAddress? { EthereumAddress(text: recipient) }
+    private var editable: Bool { recipient == nil }
+    private var address: String { recipient ?? typed.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var to: EthereumAddress? { EthereumAddress(text: address) }
+    private var toMyself: Bool { to != nil && to == model.address }
     private var walletBalance: Money { model.walletAUSD.value ?? .zero }
     private var tradingBalance: Money { model.collateral.value ?? .zero }
     private var available: Money { source == .wallet ? walletBalance : tradingBalance }
     private var requested: Money? { Money(text: amount).flatMap { $0.raw > 0 ? $0 : nil } }
     private var tooMuch: Bool { requested.map { $0 > available } ?? false }
     private var lacksGas: Bool { (model.walletMON.value?.raw ?? .max) < 10_000_000_000_000_000 * (source == .trading ? 2 : 1) }
-    private var shortAddress: String { "\(recipient.prefix(6))…\(recipient.suffix(4))" }
-    private var title: String { name ?? shortAddress }
+    private var shortAddress: String { "\(address.prefix(6))…\(address.suffix(4))" }
+    private var recipientTitle: String { toMyself ? "My wallet" : (name ?? shortAddress) }
+
+    /// Why the typed address won't do, in one line.
+    private var addressProblem: String? {
+        guard editable, !typed.isEmpty else { return nil }
+        guard let to else { return "That isn't a Monad address. Check every character." }
+        if to.isZero { return "That address burns anything sent to it." }
+        if toMyself && source == .wallet { return "That's this wallet. Pick Trading balance to move money into it." }
+        return nil
+    }
 
     var body: some View {
         ZStack {
@@ -41,6 +58,9 @@ struct SendSheet: View {
             model.clearWithdrawal()
             if walletBalance.isZero && !tradingBalance.isZero { source = .trading }
         }
+        #if DEBUG
+        .task { if editable, ProcessInfo.processInfo.arguments.contains("-withdraw-sent") { model.seedWithdrawalSentForReview() } }
+        #endif
     }
 
     // MARK: Entry
@@ -48,6 +68,7 @@ struct SendSheet: View {
     private var entry: some View {
         VStack(spacing: 0) {
             header.padding(.top, 22)
+            if editable { toField.padding(.horizontal, 20).padding(.top, 18) }
 
             Spacer(minLength: 12)
 
@@ -65,25 +86,27 @@ struct SendSheet: View {
 
             Spacer(minLength: 12)
 
-            HStack(spacing: 10) {
-                ForEach([10, 25, 50, 100], id: \.self) { percent in
-                    Button { fill(percent) } label: {
-                        Text(percent == 100 ? "Max" : "\(percent)%")
-                            .font(.system(size: 15, weight: .semibold, design: .rounded))
-                            .foregroundStyle(DeskColor.nightText.color)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 40)
-                            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            if !typing {
+                HStack(spacing: 10) {
+                    ForEach([10, 25, 50, 100], id: \.self) { percent in
+                        Button { fill(percent) } label: {
+                            Text(percent == 100 ? "Max" : "\(percent)%")
+                                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                .foregroundStyle(DeskColor.nightText.color)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 40)
+                                .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
-            }
-            .padding(.horizontal, 20)
-
-            AmountKeypad(text: $amount, keyHeight: 58)
                 .padding(.horizontal, 20)
-                .padding(.top, 10)
+
+                AmountKeypad(text: $amount, keyHeight: 58)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 10)
+            }
 
             footer
                 .padding(.horizontal, 20)
@@ -91,19 +114,26 @@ struct SendSheet: View {
                 .padding(.bottom, 12)
         }
         .disabled(model.withdrawal.isBusy)
+        .animation(.snappy(duration: 0.2), value: typing)
     }
 
     private var header: some View {
         HStack(spacing: 12) {
-            TraderAvatar(address: recipient, size: 46)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
+            if editable {
+                Text(title ?? "Send")
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
                     .foregroundStyle(DeskColor.nightText.color)
-                    .lineLimit(1)
-                Text(name == nil ? model.network.name : shortAddress)
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundStyle(DeskColor.nightMuted.color)
+            } else {
+                TraderAvatar(address: address, size: 46)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(recipientTitle)
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .lineLimit(1)
+                    Text(name == nil ? model.network.name : shortAddress)
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
             }
             Spacer()
             Button(action: close) {
@@ -118,6 +148,83 @@ struct SendSheet: View {
             .accessibilityLabel("Close")
         }
         .padding(.horizontal, 20)
+    }
+
+    /// Who the money goes to: typed or pasted, or this wallet itself for trading money.
+    private var toField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                if to != nil && addressProblem == nil {
+                    TraderAvatar(address: address, size: 28)
+                } else {
+                    Text("To")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+                if toMyself && !typing {
+                    Text("My wallet · \(shortAddress)")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture { typing = true }
+                } else {
+                    TextField("", text: $typed, prompt: Text("Paste a Monad address").foregroundStyle(DeskColor.nightMuted.color))
+                        .font(.system(size: 16, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                        .focused($typing)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                if typed.isEmpty {
+                    Button("Paste") {
+                        typed = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        typing = false
+                    }
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(DeskColor.nightText.color)
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .frame(height: 32)
+                    .background(Color.white.opacity(0.12), in: Capsule())
+                } else {
+                    Button { typed = ""; typing = true } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear address")
+                }
+            }
+            .padding(.leading, 14)
+            .padding(.trailing, 8)
+            .frame(height: 52)
+            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            if let addressProblem {
+                Text(addressProblem)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.fall.color)
+            } else if !toMyself, source == .trading, let mine = model.address {
+                Button {
+                    typed = mine.checksummed
+                    typing = false
+                    UISelectionFeedbackGenerator().selectionChanged()
+                } label: {
+                    Label("Move it to my wallet instead", systemImage: "wallet.bifold")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DeskColor.action.color)
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     /// Which balance it comes from; trading money comes out of Perpl first.
@@ -183,7 +290,7 @@ struct SendSheet: View {
     }
 
     private var canSend: Bool {
-        requested != nil && !tooMuch && !lacksGas && to != nil && !model.withdrawal.isBusy
+        requested != nil && !tooMuch && !lacksGas && to != nil && addressProblem == nil && !model.withdrawal.isBusy
     }
 
     private var buttonTitle: String {
@@ -191,7 +298,10 @@ struct SendSheet: View {
         case .confirming: return "Confirm with Face ID"
         case .withdrawing: return "Moving from trading…"
         case .sending: return "Sending…"
-        default: return requested.map { "Send $\($0.display())" } ?? "Enter an amount"
+        default:
+            if editable && to == nil { return "Add an address" }
+            guard let requested else { return "Enter an amount" }
+            return toMyself ? "Move $\(requested.display()) to wallet" : "Send $\(requested.display())"
         }
     }
 
@@ -205,6 +315,7 @@ struct SendSheet: View {
 
     private func send() {
         guard let requested, let to else { return }
+        typing = false
         Task { await model.withdraw(requested, from: source, to: to) }
     }
 
@@ -214,7 +325,7 @@ struct SendSheet: View {
         VStack(spacing: 0) {
             Spacer()
             ZStack(alignment: .bottomTrailing) {
-                TraderAvatar(address: recipient, size: 88)
+                TraderAvatar(address: receipt.recipient?.checksummed ?? model.address?.checksummed ?? address, size: 88)
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 30))
                     .symbolRenderingMode(.palette)
@@ -226,7 +337,7 @@ struct SendSheet: View {
                 .font(.system(size: 52, weight: .semibold, design: .rounded).monospacedDigit())
                 .foregroundStyle(DeskColor.nightText.color)
                 .padding(.top, 24)
-            Text("Sent to \(title)")
+            Text(receipt.recipient == nil ? "Moved to your wallet" : "Sent to \(recipientTitle)")
                 .font(.system(size: 17, weight: .medium, design: .rounded))
                 .foregroundStyle(DeskColor.nightMuted.color)
                 .padding(.top, 4)
