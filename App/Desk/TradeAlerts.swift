@@ -102,6 +102,12 @@ final class TradeAlerts {
         return (try? JSONDecoder().decode([PriceTarget].self, from: data)) ?? []
     }()
     private(set) var priceAlerts = UserDefaults.standard.bool(forKey: "desk.alerts.prices")
+    private static let holdingsKey = "desk.alerts.holdings"
+    /// Tokens the person holds and asked to hear about: each new 5, 10 or 20% step from the price paid.
+    private(set) var holdingAlerts: [HoldingAlert] = {
+        guard let data = UserDefaults.standard.data(forKey: "desk.alerts.holdings") else { return [] }
+        return (try? JSONDecoder().decode([HoldingAlert].self, from: data)) ?? []
+    }()
     private static let depositsKey = "desk.alerts.deposits"
     private(set) var depositAlerts = UserDefaults.standard.object(forKey: "desk.alerts.deposits") as? Bool ?? true
     private static let dirtyKey = "desk.alerts.needsSync"
@@ -236,7 +242,7 @@ final class TradeAlerts {
         }
         await refreshPermission()
         if permission == .allowed { alertFollowed() }
-        let wantsAlerts = !alerted.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty || !targets.isEmpty
+        let wantsAlerts = !alerted.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty || !targets.isEmpty || !holdingAlerts.isEmpty
             || (me != nil && depositAlerts)
         if needsSync, deviceToken != nil { scheduleSync() }
         guard (permission == .allowed && wantsAlerts) || !copying.isEmpty else { return }
@@ -300,6 +306,40 @@ final class TradeAlerts {
         return true
     }
 
+    // MARK: Holding alerts
+
+    func holdingAlert(chainIndex: String, contract: String) -> HoldingAlert? {
+        holdingAlerts.first { $0.chainIndex == chainIndex && $0.contract.lowercased() == contract.lowercased() }
+    }
+
+    /// Turns alerts on for a token just bought or held, asking for permission the first time.
+    @discardableResult
+    func setHoldingAlert(_ alert: HoldingAlert) async -> Bool {
+        let center = UNUserNotificationCenter.current()
+        if await center.notificationSettings().authorizationStatus == .notDetermined {
+            _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+        }
+        await refreshPermission()
+        guard permission == .allowed else { return false }
+        holdingAlerts.removeAll { $0.chainIndex == alert.chainIndex && $0.contract.lowercased() == alert.contract.lowercased() }
+        holdingAlerts.append(alert)
+        if holdingAlerts.count > 30 { holdingAlerts.removeFirst(holdingAlerts.count - 30) }
+        persistHoldingAlerts()
+        UIApplication.shared.registerForRemoteNotifications()
+        scheduleSync()
+        return true
+    }
+
+    func removeHoldingAlert(chainIndex: String, contract: String) {
+        holdingAlerts.removeAll { $0.chainIndex == chainIndex && $0.contract.lowercased() == contract.lowercased() }
+        persistHoldingAlerts()
+        scheduleSync()
+    }
+
+    private func persistHoldingAlerts() {
+        UserDefaults.standard.set(try? JSONEncoder().encode(holdingAlerts), forKey: Self.holdingsKey)
+    }
+
     func removeTarget(_ target: PriceTarget) {
         targets.removeAll { $0 == target }
         persistTargets()
@@ -353,7 +393,7 @@ final class TradeAlerts {
     }
 
     func signOut() async {
-        let hadSubscription = !alerted.isEmpty || !copying.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty || !targets.isEmpty
+        let hadSubscription = !alerted.isEmpty || !copying.isEmpty || priceAlerts || !TrackedWallets.shared.list.isEmpty || !targets.isEmpty || !holdingAlerts.isEmpty
             || deviceToken != nil || lastSyncedAt != nil || me != nil
         alerted = []
         muted = []
@@ -493,6 +533,7 @@ final class TradeAlerts {
             "prices": priceAlerts,
             "priceMarkets": Self.watchlistSymbols,
             "targets": sentTargets.map { ["market": $0.market, "price": $0.price, "direction": $0.direction.rawValue] as [String: Any] },
+            "holdings": holdingAlerts.map { ["chainIndex": $0.chainIndex, "contract": $0.contract, "symbol": $0.symbol, "anchor": $0.anchor, "step": $0.step, "up": $0.up, "down": $0.down] as [String: Any] },
             "confirm": confirm,
             "moves": 2,
         ]
@@ -645,6 +686,7 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UN
             "wallet": ["type": "wallet", "wallet": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045", "token": "0x527d86b0820a72f7dfb937fe1da0c649019b7777", "symbol": "GOCHI", "chainIndex": "143"],
             "wallet-buy": ["type": "wallet", "event": "buy", "wallet": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045", "token": "0x527d86b0820a72f7dfb937fe1da0c649019b7777", "symbol": "GOCHI", "chainIndex": "143"],
             "price": ["type": "price", "kind": "target", "market": "BTC", "level": 82000.0, "direction": "up", "mark": 82010.5],
+            "holding": ["type": "holding", "chainIndex": "143", "token": "0x3bd359c1119da7da1d913d1c4d2b7c461115433a", "symbol": "MON", "direction": "down", "percent": -7.0, "price": 0.0186],
         ]
         guard let desk = payloads[arguments[index + 1]], let data = try? JSONSerialization.data(withJSONObject: desk) else { return }
         Task { @MainActor in
@@ -657,6 +699,7 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UN
             // reaches are opened anyway, so they get exercised too.
             switch desk["type"] as? String {
             case "wallet": TokenOpenRequest.shared.open(.init(chainIndex: "143", contract: desk["token"] as? String ?? "", symbol: desk["symbol"] as? String, opensBuy: pressed == TradeAlerts.buySameAction))
+            case "holding": TokenOpenRequest.shared.open(.init(chainIndex: desk["chainIndex"] as? String ?? "143", contract: desk["token"] as? String ?? "", symbol: desk["symbol"] as? String, opensBuy: false))
             case "trade" where desk["event"] as? String == "summary": TradeAlerts.shared.openedTrader = desk["trader"] as? String
             case "trade": TradeAlerts.shared.opened = TradeAlert(userInfo: ["desk": desk])
             default: break
@@ -669,6 +712,10 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UN
     /// the profile, the trader or the trade itself.
     static func handleTap(userInfo: [AnyHashable: Any], action: String) async {
         await Self.noteFiredTarget(userInfo)
+        if let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "holding", let token = desk["token"] as? String {
+            TokenOpenRequest.shared.open(.init(chainIndex: desk["chainIndex"] as? String ?? "143", contract: token, symbol: desk["symbol"] as? String, opensBuy: false))
+            return
+        }
         if let desk = userInfo["desk"] as? [String: Any], desk["type"] as? String == "price",
            let market = desk["market"] as? String {
             await MainActor.run { MarketOpenRequest.shared.open(market) }
@@ -715,4 +762,19 @@ final class DeskAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UN
             TradeAlerts.shared.opened = alert
         }
     }
+}
+
+/// A token someone holds and wants to hear about: every `step` (5, 10 or 20%) from `anchor`,
+/// the price when they bought or turned this on, upward and/or downward.
+struct HoldingAlert: Codable, Hashable, Sendable {
+    let chainIndex: String
+    let contract: String
+    let symbol: String
+    let anchor: Double
+    var step: Double
+    var up: Bool
+    var down: Bool
+
+    var stepPercent: Int { Int((step * 100).rounded()) }
+    var directions: String { up && down ? "up or down" : up ? "up" : "down" }
 }

@@ -1939,6 +1939,10 @@ private struct SpotBuyTicket: View {
                     ],
                     hash: purchase.txHash, link: purchase.trackingURL)
                     .padding(.top, 4)
+                HoldingAlertPrompt(token: token, price: purchase.quoted.flatMap { quote in
+                    quote.receive.usd.flatMap(Double.init).flatMap { usd in quote.receive.amount.flatMap(Double.init).map { $0 > 0 ? usd / $0 : nil } ?? nil }
+                } ?? token.price)
+                    .padding(.top, 10)
             case .refunded:
                 Text("Relay could not fill this and refunded your MON.")
                     .font(.system(size: 13, weight: .semibold, design: .rounded)).foregroundStyle(.yellow)
@@ -4243,6 +4247,10 @@ private struct TokenPositionContent: View {
                     GlassRow("Average entry", value: entryPrice.map { "$" + SpotFormat.amount(String($0)) } ?? "—")
                 }
 
+                GlassSection("Alerts", footer: "Desk tells you each time the price moves another step from what you paid.") {
+                    HoldingAlertRow(chainIndex: token.chainIndex, contract: token.contract, symbol: token.symbol, anchor: entryPrice ?? current.price ?? token.price)
+                }
+
                 GlassSection("Transactions") {
                     GlassRow("Bought", subtitle: current.purchase.boughtAt.formatted(date: .abbreviated, time: .shortened)) {
                         VStack(alignment: .trailing, spacing: 2) {
@@ -4327,5 +4335,149 @@ struct TokenProfile: Decodable, Sendable {
         components.queryItems = [.init(name: "view", value: "profile"), .init(name: "chainIndex", value: chainIndex), .init(name: "address", value: contract)]
         guard let url = components.url, let (data, _) = try? await ResponseCache.shared.data(from: url, maxStale: 3600) else { return nil }
         return try? JSONDecoder().decode(TokenProfile.self, from: data)
+    }
+}
+
+// MARK: - Holding alerts
+
+/// Right after a buy: one card asking whether to hear when this token moves, with the step and
+/// the directions. Turning it on asks for notification permission the first time.
+struct HoldingAlertPrompt: View {
+    let token: TrendingSpotToken
+    let price: Double?
+
+    @State private var step = 0.1
+    @State private var up = true
+    @State private var down = true
+    @State private var state: Stage = .asking
+    enum Stage { case asking, saving, on, refused }
+
+    private var existing: HoldingAlert? { TradeAlerts.shared.holdingAlert(chainIndex: token.chainIndex, contract: token.contract) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: state == .on ? "bell.badge.fill" : "bell")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(state == .on ? DeskColor.rise.color : DeskColor.action.color)
+                Text(state == .on ? "You'll hear when \(token.symbol) moves \(Int(step * 100))% \(up && down ? "either way" : up ? "up" : "down")." : "Hear when \(token.symbol) moves?")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if state != .on {
+                HStack(spacing: 8) {
+                    ForEach([0.05, 0.1, 0.2], id: \.self) { value in
+                        Button { step = value; UISelectionFeedbackGenerator().selectionChanged() } label: {
+                            Text("\(Int(value * 100))%")
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .foregroundStyle(step == value ? DeskColor.night.color : DeskColor.nightText.color)
+                                .frame(maxWidth: .infinity).frame(height: 32)
+                                .background(step == value ? DeskColor.action.color : Color.white.opacity(0.08), in: Capsule())
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Divider().frame(height: 20)
+                    arrow("arrow.up", on: $up, tint: DeskColor.rise)
+                    arrow("arrow.down", on: $down, tint: DeskColor.fall)
+                }
+                HStack(spacing: 10) {
+                    Button { Task { await turnOn() } } label: {
+                        Text(state == .saving ? "Turning on…" : "Turn on")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DeskColor.night.color)
+                            .frame(maxWidth: .infinity).frame(height: 40)
+                            .background(DeskColor.action.color, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(state == .saving || price == nil || (!up && !down))
+                    Button("Not now") { withAnimation(.snappy(duration: 0.2)) { state = .refused } }
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .buttonStyle(.plain)
+                }
+                if price == nil {
+                    Text("No price for this token yet, so there's nothing to measure from.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded)).foregroundStyle(DeskColor.nightMuted.color)
+                }
+            }
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 0.6))
+        .opacity(state == .refused ? 0 : 1)
+        .frame(height: state == .refused ? 0 : nil)
+        .clipped()
+        .onAppear { if let existing { step = existing.step; up = existing.up; down = existing.down; state = .on } }
+    }
+
+    private func arrow(_ name: String, on: Binding<Bool>, tint: DeskRGB) -> some View {
+        Button { on.wrappedValue.toggle(); UISelectionFeedbackGenerator().selectionChanged() } label: {
+            Image(systemName: name)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(on.wrappedValue ? tint.color : DeskColor.nightMuted.color)
+                .frame(width: 36, height: 32)
+                .background(on.wrappedValue ? tint.color.opacity(0.16) : Color.white.opacity(0.05), in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func turnOn() async {
+        guard let price else { return }
+        state = .saving
+        let alert = HoldingAlert(chainIndex: token.chainIndex, contract: token.contract, symbol: token.symbol, anchor: price, step: step, up: up, down: down)
+        let ok = await TradeAlerts.shared.setHoldingAlert(alert)
+        withAnimation(.snappy(duration: 0.25)) { state = ok ? .on : .asking }
+        if ok { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+    }
+}
+
+/// On a holding's sheet: the alert for this token, with a menu to change the step, the
+/// directions, or turn it off.
+struct HoldingAlertRow: View {
+    let chainIndex: String
+    let contract: String
+    let symbol: String
+    let anchor: Double?
+
+    @State private var alerts = TradeAlerts.shared
+    private var current: HoldingAlert? { alerts.holdingAlert(chainIndex: chainIndex, contract: contract) }
+
+    var body: some View {
+        Menu {
+            Section("Every") {
+                ForEach([0.05, 0.1, 0.2], id: \.self) { step in
+                    Button { set(step: step) } label: {
+                        if current?.step == step { Label("\(Int(step * 100))%", systemImage: "checkmark") } else { Text("\(Int(step * 100))%") }
+                    }
+                }
+            }
+            if let current {
+                Section("Direction") {
+                    Button { set(up: !current.up) } label: { if current.up { Label("Up", systemImage: "checkmark") } else { Text("Up") } }
+                    Button { set(down: !current.down) } label: { if current.down { Label("Down", systemImage: "checkmark") } else { Text("Down") } }
+                }
+                Button("Turn off", role: .destructive) { alerts.removeHoldingAlert(chainIndex: chainIndex, contract: contract) }
+            }
+        } label: {
+            HStack {
+                Label(current == nil ? "Price moves" : "Every \(current!.stepPercent)% \(current!.directions)", systemImage: current == nil ? "bell" : "bell.badge.fill")
+                    .foregroundStyle(current == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(DeskColor.rise.color))
+                Spacer()
+                Text(current == nil ? "Off" : "On").foregroundStyle(.secondary)
+                Image(systemName: "chevron.up.chevron.down").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .disabled(anchor == nil)
+    }
+
+    private func set(step: Double? = nil, up: Bool? = nil, down: Bool? = nil) {
+        guard let anchor = current?.anchor ?? anchor else { return }
+        let next = HoldingAlert(chainIndex: chainIndex, contract: contract, symbol: symbol, anchor: anchor,
+                                step: step ?? current?.step ?? 0.1, up: up ?? current?.up ?? true, down: down ?? current?.down ?? true)
+        if !next.up && !next.down { alerts.removeHoldingAlert(chainIndex: chainIndex, contract: contract); return }
+        Task { await alerts.setHoldingAlert(next) }
     }
 }
