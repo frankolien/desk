@@ -19,6 +19,25 @@ struct FollowingTrade: Codable, Identifiable, Sendable {
     var isBuy: Bool { side == "buy" }
 }
 
+/// Money a followed wallet moved without trading: into or out of Perpl, or to and from
+/// someone else.
+struct FollowingTransfer: Codable, Identifiable, Sendable {
+    enum Kind: String, Codable, Sendable { case deposit, withdraw, sent, received }
+
+    let wallet: String
+    let chainIndex: String
+    let time: Double
+    let hash: String
+    let kind: Kind
+    let token: String?
+    let symbol: String
+    let amount: Double?
+    let value: Double?
+    let counterparty: String?
+
+    var id: String { "\(wallet):\(hash):\(symbol):\(kind.rawValue)" }
+}
+
 struct FollowingPerp: Codable, Identifiable, Sendable {
     enum Kind: String, Codable, Sendable { case opened, added, reduced, flipped, closed }
 
@@ -64,11 +83,13 @@ struct FollowingPerp: Codable, Identifiable, Sendable {
 enum FollowingItem: Identifiable {
     case spot(FollowingTrade)
     case perp(FollowingPerp)
+    case transfer(FollowingTransfer)
 
     var id: String {
         switch self {
         case .spot(let trade): "spot:" + trade.id
         case .perp(let move): "perp:" + move.id
+        case .transfer(let move): "move:" + move.id
         }
     }
 
@@ -76,6 +97,7 @@ enum FollowingItem: Identifiable {
         switch self {
         case .spot(let trade): trade.time
         case .perp(let move): move.time
+        case .transfer(let move): move.time
         }
     }
 }
@@ -98,6 +120,7 @@ final class FollowingFeedModel {
         let stale: [String]?
         let sync: Sync?
         let perps: [Lossy<FollowingPerp>]?
+        let transfers: [Lossy<FollowingTransfer>]?
     }
     private struct CachedFeed: Codable {
         let events: [FollowingTrade]
@@ -105,10 +128,12 @@ final class FollowingFeedModel {
         let stale: [String]
         let savedAt: Date
         var perps: [FollowingPerp]?
+        var transfers: [FollowingTransfer]?
     }
 
     private(set) var events: [FollowingTrade] = []
     private(set) var perps: [FollowingPerp] = []
+    private(set) var transfers: [FollowingTransfer] = []
     private(set) var pending: [String] = []
     private(set) var stale: [String] = []
     private(set) var loaded = false
@@ -127,12 +152,12 @@ final class FollowingFeedModel {
     }
 
     var items: [FollowingItem] {
-        (events.map(FollowingItem.spot) + perps.map(FollowingItem.perp)).sorted { $0.time > $1.time }
+        (events.map(FollowingItem.spot) + perps.map(FollowingItem.perp) + transfers.map(FollowingItem.transfer)).sorted { $0.time > $1.time }
     }
 
     func run(addresses: [String]) async {
         guard !addresses.isEmpty else {
-            events = []; perps = []; pending = []; stale = []; loaded = true; problem = nil; sync = nil
+            events = []; perps = []; transfers = []; pending = []; stale = []; loaded = true; problem = nil; sync = nil
             return
         }
         prepare(addresses: addresses)
@@ -144,7 +169,7 @@ final class FollowingFeedModel {
 
     func load(addresses: [String]) async {
         guard !addresses.isEmpty else {
-            events = []; perps = []; pending = []; stale = []; loaded = true; problem = nil; sync = nil
+            events = []; perps = []; transfers = []; pending = []; stale = []; loaded = true; problem = nil; sync = nil
             return
         }
         prepare(addresses: addresses)
@@ -163,6 +188,7 @@ final class FollowingFeedModel {
             let feed = try JSONDecoder().decode(Response.self, from: data)
             events = feed.events
             perps = feed.perps?.compactMap(\.value) ?? []
+            transfers = feed.transfers?.compactMap(\.value) ?? []
             pending = feed.pending
             stale = feed.stale ?? []
             sync = feed.sync
@@ -172,7 +198,7 @@ final class FollowingFeedModel {
             persist(addresses: addresses)
         } catch {
             guard !Task.isCancelled else { return }
-            let empty = events.isEmpty && perps.isEmpty
+            let empty = events.isEmpty && perps.isEmpty && transfers.isEmpty
             problem = empty
                 ? "Following activity couldn’t be loaded. Pull down to retry."
                 : "Live refresh failed. Showing your last saved activity."
@@ -187,6 +213,7 @@ final class FollowingFeedModel {
         activeKey = key
         events = []
         perps = []
+        transfers = []
         pending = []
         stale = []
         sync = nil
@@ -198,6 +225,7 @@ final class FollowingFeedModel {
         else { return }
         events = cached.events
         perps = cached.perps ?? []
+        transfers = cached.transfers ?? []
         pending = cached.pending
         stale = cached.stale
         lastUpdated = cached.savedAt
@@ -206,7 +234,7 @@ final class FollowingFeedModel {
     }
 
     private func persist(addresses: [String]) {
-        let cache = CachedFeed(events: events, pending: pending, stale: stale, savedAt: .now, perps: perps)
+        let cache = CachedFeed(events: events, pending: pending, stale: stale, savedAt: .now, perps: perps, transfers: transfers)
         if let data = try? JSONEncoder().encode(cache) {
             UserDefaults.standard.set(data, forKey: cacheKey(addresses))
         }
@@ -286,7 +314,7 @@ struct FollowingFeed: View {
                     Text("No confirmed movements yet")
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundStyle(DeskColor.nightText.color)
-                    Text("Desk shows their trades on Monad and, with alerts on, their perps moves on Perpl.")
+                    Text("Everything they do on-chain shows up here: token buys and sells, perps on Perpl, and money moving in and out.")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundStyle(DeskColor.nightMuted.color)
                         .fixedSize(horizontal: false, vertical: true)
@@ -300,6 +328,8 @@ struct FollowingFeed: View {
                             FollowingTradeRow(trade: trade, walletName: name(trade.wallet)) { onOpen(trade) }
                         case .perp(let move):
                             FollowingPerpRow(move: move, walletName: name(move.wallet)) { onOpenPerp(move) }
+                        case .transfer(let move):
+                            FollowingTransferRow(move: move, walletName: name(move.wallet))
                         }
                     }
                 }
@@ -611,5 +641,86 @@ private struct FollowingPerpRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(DeskPressStyle())
+    }
+}
+
+/// Money moved, not traded: what, how much, and where it went.
+private struct FollowingTransferRow: View {
+    let move: FollowingTransfer
+    let walletName: String
+
+    private var verb: String {
+        switch move.kind {
+        case .deposit: "Deposited"
+        case .withdraw: "Withdrew"
+        case .sent: "Sent"
+        case .received: "Received"
+        }
+    }
+
+    private var tint: Color {
+        switch move.kind {
+        case .deposit, .received: DeskColor.rise.color
+        case .withdraw, .sent: DeskColor.nightMuted.color
+        }
+    }
+
+    private var subject: String {
+        if let value = move.value { return "\(value.formatted(.currency(code: "USD").precision(.fractionLength(2)))) \(move.symbol)" }
+        if let amount = move.amount { return "\(TraderFormat.compact(amount)) \(move.symbol)" }
+        return move.symbol
+    }
+
+    private var detail: String {
+        let short = move.counterparty.map { "\($0.prefix(6))…\($0.suffix(4))" }
+        switch move.kind {
+        case .deposit: return "Into their Perpl trading account"
+        case .withdraw: return "Out of their Perpl trading account"
+        case .sent: return short.map { "To \($0)" } ?? "To another wallet"
+        case .received: return short.map { "From \($0)" } ?? "From another wallet"
+        }
+    }
+
+    private var timeLabel: String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: Date(timeIntervalSince1970: move.time / 1_000), relativeTo: .now)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(spacing: 10) {
+                TraderAvatar(address: move.wallet, size: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(walletName).font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DeskColor.nightText.color).lineLimit(1)
+                    Text(move.chainIndex == "501" ? "Following · Solana" : "Following · Monad")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                }
+                Spacer(minLength: 4)
+                Text(timeLabel)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(DeskColor.nightMuted.color)
+            }
+            HStack(spacing: 12) {
+                MarketTokenLogo(symbol: move.symbol, size: 40)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Text(verb).foregroundStyle(tint)
+                        Text(subject).foregroundStyle(DeskColor.nightText.color)
+                    }
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    Text(detail)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.vertical, 15)
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.1)).frame(height: 1) }
     }
 }
