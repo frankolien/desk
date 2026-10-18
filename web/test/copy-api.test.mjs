@@ -317,12 +317,14 @@ test("The engine follows what the API writes: new copiers, rules, a close from t
   const state = await ctx.signed("state");
   assert.equal(state.body.open[0].id, copy.id);
   assert.equal(state.body.log[0].kind, "opened");
+  assert.equal(state.body.log[0].byServer, true, "a copy the server placed says so");
 
   assert.equal((await ctx.signed("close", { copyId: "nope" })).code, 404);
   assert.equal((await ctx.signed("close", { copyId: copy.id })).code, 200);
   await engine.refresh();
   assert.deepEqual(await engine.openCopies(ctx.id), []);
   assert.equal(notes.at(-1).detail, "Closed from the app.");
+  assert.equal(notes.at(-1).byServer, false, "a close the app asked for is not the server's own doing");
   assert.deepEqual(await ctx.store.smembers(`copy:close:${ctx.id}`), []);
 
   await ctx.store.set(`copy:pause:${ctx.id}`, "Today's copy losses reached your limit.");

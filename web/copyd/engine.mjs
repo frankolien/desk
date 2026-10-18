@@ -216,12 +216,13 @@ export function createEngine({
           const price = marks.get(copy.symbol) ?? copy.lastMark ?? copy.shadow.entry;
           record(copier, {
             trader: copy.trader, symbol: copy.symbol, isLong: copy.isLong, kind: "closed", detail: "Closed from the app.",
-            isShadow: true, leverage: copy.leverage, margin: copy.margin, pnl: shadowPnL(copy.shadow, price, fee),
+            isShadow: true, leverage: copy.leverage, margin: copy.margin, pnl: shadowPnL(copy.shadow, price, fee), byServer: false,
           }, out);
         } else {
           keep.push(copy);
           if (executor && copy.state !== "closing") {
             copy.state = "closing";
+            copy.closeAsked = true;
             intents.push({ action: "close", copier, copy, market: bySymbol.get(copy.symbol), verb: "manual", reason: "Closed from the app." });
           }
         }
@@ -239,7 +240,8 @@ export function createEngine({
   function touch(key) { dirtyKeys.add(key); }
 
   function record(copier, entry, out) {
-    const row = { id: randomUUID(), date: now(), ...entry };
+    // Every row here is the server's own doing unless the entry says the app asked for it.
+    const row = { id: randomUUID(), date: now(), byServer: true, ...entry };
     const rows = pendingRows.get(copier.id) ?? [];
     rows.push(row);
     pendingRows.set(copier.id, rows);
@@ -588,10 +590,16 @@ export function createEngine({
         delete copy.closeWhenFilled;
         copy.state = "closing";
       }
-    } else if (result.kind === "closeFailed") copy.state = "open";
+    } else if (result.kind === "closeFailed") { copy.state = "open"; delete copy.closeAsked; }
     else openBy.set(id, open.filter((c) => c !== copy));
     touch(K.open(id));
-    if (result.row) record(copier, { trader: copy.trader, symbol: copy.symbol, isLong: copy.isLong, leverage: copy.leverage, margin: copy.margin, ...result.row }, out);
+    const askedByApp = result.kind === "closed" && copy.closeAsked === true;
+    if (result.row) {
+      record(copier, {
+        trader: copy.trader, symbol: copy.symbol, isLong: copy.isLong, leverage: copy.leverage, margin: copy.margin,
+        ...(askedByApp ? { byServer: false } : {}), ...result.row,
+      }, out);
+    }
     await settleEffects(out);
     if (closeNow && executor) {
       const market = (await marketsBySymbol(copier.network)).get(copy.symbol);

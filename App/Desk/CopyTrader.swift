@@ -65,6 +65,8 @@ struct CopyLogEntry: Codable, Hashable, Identifiable {
     var pnl: Double?
     var isShadow: Bool?
     var slippageBps: Int?
+    /// Set by Desk's server on rows it placed on its own; never on the phone's own rows or a close the app asked for.
+    var byServer: Bool?
 
     var shadowed: Bool { isShadow == true }
 }

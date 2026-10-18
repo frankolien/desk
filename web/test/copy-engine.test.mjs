@@ -381,3 +381,47 @@ test("A close that lands while the copy's order is in flight waits for the fill,
   assert.equal((await engine.openCopies(id))[0].state, "closing");
   fill?.();
 });
+
+test("Rows say whether the server placed them on its own: not when the app asked for the close", async () => {
+  const calls = [];
+  const executor = {
+    quote: async (copier, market) => ({ mark: priceFrom(60_000, market.config.priceDecimals), free: 5_000_000_000n }),
+    submit: async () => {},
+    close: async (intent) => { calls.push(intent.reason); },
+  };
+  const store = memoryStore();
+  const books = { [TRADER]: { accountId: "9", portfolio: 20_000, positions: {} } };
+  const engine = createEngine({ store, markets: async () => openMarkets, executor, readTrader: async (a) => books[a], logger: { warn() {} } });
+  await engine.putCopier({ network: "testnet", address: ME, guards: DEFAULT_GUARDS, traders: { [TRADER]: { rules: { ...DEFAULT_RULES, mode: "live" }, since: 0 } } });
+  const id = copierId("testnet", ME);
+  await engine.processTrader(TRADER);
+  books[TRADER].positions = { BTC: btc() };
+  await engine.processTrader(TRADER);
+  const [copy] = await engine.openCopies(id);
+  await engine.settle(id, copy.id, { kind: "filled", entry: 60_000, sizeRaw: "7", row: { kind: "opened", detail: "Filled." } });
+  assert.equal((await engine.log(id))[0].byServer, true, "the server opened it on its own");
+
+  await store.sadd(`copy:close:${id}`, copy.id);
+  await store.sadd("copy:dirty", id);
+  await engine.refresh();
+  assert.deepEqual(calls, ["Closed from the app."]);
+  await engine.settle(id, copy.id, { kind: "closed", row: { kind: "closed", detail: "Closed from the app.", pnl: 1 } });
+  const [closed] = await engine.log(id);
+  assert.equal(closed.kind, "closed");
+  assert.equal(closed.byServer, false, "the app asked, so the phone was on");
+  assert.deepEqual(await engine.openCopies(id), []);
+
+  // A close the engine makes because the trader closed is the server's own.
+  books[TRADER].positions = {};
+  await engine.processTrader(TRADER); await engine.processTrader(TRADER); // the trader's own close, after the copy was gone
+  books[TRADER].positions = { BTC: btc() };
+  await engine.processTrader(TRADER);
+  const [again] = await engine.openCopies(id);
+  assert.ok(again, "their next open is copied again");
+  await engine.settle(id, again.id, { kind: "filled", entry: 60_000, sizeRaw: "7", row: { kind: "opened", detail: "Filled." } });
+  books[TRADER].positions = {};
+  await engine.processTrader(TRADER); await engine.processTrader(TRADER);
+  assert.equal(calls.at(-1), "Closed with the trader.");
+  await engine.settle(id, again.id, { kind: "closed", row: { kind: "closed", detail: "Closed with the trader.", pnl: 0 } });
+  assert.equal((await engine.log(id))[0].byServer, true);
+});

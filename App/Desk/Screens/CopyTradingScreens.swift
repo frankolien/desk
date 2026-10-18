@@ -977,6 +977,12 @@ private struct CopyLogRow: View {
         }
     }
 
+    private var when: String {
+        let ago = entry.date.formatted(.relative(presentation: .named))
+        guard entry.byServer == true, [.opened, .closed, .protected].contains(entry.kind) else { return ago }
+        return "\(ago) · while your phone was off"
+    }
+
     var body: some View {
         if compact { compactBody } else { fullBody }
     }
@@ -988,7 +994,7 @@ private struct CopyLogRow: View {
                 .foregroundStyle(icon.tint)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).lineLimit(1)
-                Text("\(name) · \(entry.date.formatted(.relative(presentation: .named)))")
+                Text("\(name) · \(when)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -1026,7 +1032,7 @@ private struct CopyLogRow: View {
 
     private var footnote: String {
         [name,
-         entry.date.formatted(.relative(presentation: .named)),
+         when,
          entry.fillSeconds.map { String(format: "%.1f s after their move", $0) },
          entry.slippageBps.map { String(format: "%+d bps vs mark", $0) }]
             .compactMap { $0 }.joined(separator: " · ")
