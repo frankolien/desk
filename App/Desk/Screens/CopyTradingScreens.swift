@@ -374,12 +374,18 @@ struct CopyStatusCard: View {
     }
 
     private var headline: String {
-        if copier.server.isOn ? copier.server.isPaused : copier.isPaused { return "Auto-Copy Paused" }
-        let count = copier.traders.count
+        let spotCount = SpotCopier.shared.leaders.count
+        if copier.server.isOn ? copier.server.isPaused : copier.isPaused, copier.traders.isEmpty || spotCount == 0 { return "Auto-Copy Paused" }
+        let count = copier.traders.count + spotCount
         return "Copying \(count) \(count == 1 ? "Trader" : "Traders")" + (copier.basket != nil ? " · Basket" : "")
     }
 
     private var detail: String {
+        let spot = SpotCopier.shared
+        if copier.traders.isEmpty, !spot.leaders.isEmpty {
+            if spot.isPaused { return "Token copies paused" }
+            return "\(spot.leaders.count == 1 ? "Their token trades" : "Their token trades"), copied on Desk's server"
+        }
         if copier.server.isOn {
             if let problem = copier.server.problem { return problem }
             return "\(copier.shownOpen.count) open · on Desk's server"
@@ -400,6 +406,9 @@ struct CopyActivityScreen: View {
 
     @State private var editing: CopiedTrader?
     @State private var boarding: CopiedTrader?
+    @State private var boardingSpot: SpotLeaderRef?
+    @State private var showsSpot = false
+    @State private var spot = SpotCopier.shared
     @State private var showsBasket = false
     @State private var showsSettings = false
     @State private var showsShadow = true
@@ -465,6 +474,53 @@ struct CopyActivityScreen: View {
                 .buttonStyle(.plain)
             }
 
+            if !spot.leaders.isEmpty || spot.isOn {
+                GlassSection("Copying tokens", footer: spot.leaders.isEmpty ? "Open a wallet you follow and tap Auto-Copy Trades to copy its token buys." : nil) {
+                    ForEach(spot.leaders.keys.sorted(), id: \.self) { address in
+                        let entry = spot.leaders[address]
+                        Button { boardingSpot = SpotLeaderRef(address: address) } label: {
+                            HStack(spacing: 10) {
+                                TraderAvatar(address: address, size: 28)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(entry?.name ?? directory.name(for: address)).fontWeight(.medium).lineLimit(1)
+                                    Text(spotRulesLine(entry?.rules)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Spacer(minLength: 8)
+                                Text(spot.isPaused ? "Paused" : spot.stage == "live" ? "Live" : "Starting")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(spot.isPaused ? AnyShapeStyle(.secondary) : AnyShapeStyle(DeskColor.rise.color))
+                                chevron
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Stop Copying", systemImage: "stop.circle", role: .destructive) {
+                                Task { try? await spot.setRules(nil, for: address, name: entry?.name) }
+                            }
+                        }
+                    }
+                    Button { showsSpot = true } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(DeskColor.rise.color)
+                                .frame(width: 30, height: 30)
+                                .background(DeskColor.rise.color.opacity(0.16), in: Circle())
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Token copy limits")
+                                Text(spot.limits.map { "Up to \($0.perTrade) AUSD a buy · \($0.perDay) a day" } ?? "Limits, pause and what the copies hold")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            chevron
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
             if !openCopies.isEmpty {
                 GlassSection("Open") {
                     ForEach(openCopies) { copy in
@@ -518,6 +574,14 @@ struct CopyActivityScreen: View {
         }
         .navigationDestination(item: $boarding) { trader in
             CopyBoardScreen(address: trader.address, model: model, copier: copier, directory: directory)
+        }
+        .navigationDestination(item: $boardingSpot) { leader in
+            CopyBoardScreen(address: leader.address, model: model, copier: copier, directory: directory)
+        }
+        .navigationDestination(isPresented: $showsSpot) { SpotCopyActivityScreen(model: model) }
+        .task(id: model.address?.checksummed) {
+            spot.bind(address: model.address?.checksummed)
+            await spot.refresh()
         }
         #if DEBUG
         .task { if ProcessInfo.processInfo.arguments.contains("-copy-board") { boarding = copier.traders.first } }
@@ -967,4 +1031,16 @@ private struct CopyLogRow: View {
          entry.slippageBps.map { String(format: "%+d bps vs mark", $0) }]
             .compactMap { $0 }.joined(separator: " · ")
     }
+}
+
+/// A wallet whose token trades are copied, as a navigation item.
+struct SpotLeaderRef: Identifiable, Hashable {
+    let address: String
+    var id: String { address }
+}
+
+private func spotRulesLine(_ rules: SpotCopyProtocol.Rules?) -> String {
+    guard let rules else { return "Token trades" }
+    let size = rules.sizing == .fixed ? "\(Int(rules.amount)) AUSD a buy" : "Their size, up to \(Int(rules.maxPerBuy)) AUSD"
+    return size + (rules.copySells ? " · sells with them" : "")
 }

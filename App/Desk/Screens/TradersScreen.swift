@@ -525,7 +525,7 @@ struct TradersFeed: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if content == .following {
-            if !copier.traders.isEmpty || !copier.log.isEmpty {
+            if !copier.traders.isEmpty || !copier.log.isEmpty || !SpotCopier.shared.leaders.isEmpty {
                 CopyStatusCard(copier: copier, onOpen: onOpenCopying)
                     .padding(.bottom, 24)
             }

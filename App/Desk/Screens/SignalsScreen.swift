@@ -243,6 +243,14 @@ struct SignalsScreen: View {
         }
         .task { await directory.run() }
         .task { await TradeAlerts.shared.refreshPermission() }
+        .task(id: model.address?.checksummed) {
+            // Spot (token) copies are server-side; without this the Following tab only knew perps copies.
+            SpotCopier.shared.bind(address: model.address?.checksummed)
+            while !Task.isCancelled {
+                await SpotCopier.shared.refresh()
+                try? await Task.sleep(for: .seconds(45))
+            }
+        }
         .task(id: TrackedWallets.shared.list.map(\.id).joined(separator: ",")) {
             let addresses = TrackedWallets.shared.list.map(\.address)
             await followingFeed.run(addresses: addresses)
