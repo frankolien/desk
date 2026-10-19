@@ -29,6 +29,10 @@ public struct AnyChainSend: Sendable {
     public static let solana: UInt64 = 792_703_809
     /// A send may be signed this long after the API prepared it.
     public static let deadlineWindow: TimeInterval = 300
+    /// Where an EVM address can be paid in AUSD, as the chain picker lists them.
+    public static let chains: [(id: UInt64, name: String)] = [
+        (143, "Monad"), (1, "Ethereum"), (8453, "Base"), (42161, "Arbitrum"), (43114, "Avalanche"), (137, "Polygon"),
+    ]
     static let approveSelector = "095ea7b3"
     static let transferSelector = "a9059cbb"
 

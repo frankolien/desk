@@ -1236,6 +1236,21 @@ final class AppModel {
 
     func clearWithdrawal() { withdrawal = .idle }
 
+    /// The two signatures an any-chain send needs, from one Face ID: the Send that pins the
+    /// calls, and AUSD's permit for the DeskSend contract. Both digests come through the
+    /// signing guard inside `AnyChainSend`, so only its declared shapes can be signed.
+    func signAnyChainSend(_ send: AnyChainSend) async throws -> (signature: String, permit: String) {
+        let sendDigest = try send.sendDigest()
+        let permitDigest = try send.permitDigest()
+        let signed: (Data, Data) = try await passkey.withKeys { wallet, _ in
+            let first = try WalletSigner.sign(digest: sendDigest, with: wallet)
+            let second = try WalletSigner.sign(digest: permitDigest, with: wallet)
+            return (first.serialized, second.serialized)
+        }
+        let hex = { (data: Data) in "0x" + data.map { String(format: "%02x", $0) }.joined() }
+        return (hex(signed.0), hex(signed.1))
+    }
+
     func deleteAccount() async -> String? {
         guard let address else { return nil }
         let passkey = passkey

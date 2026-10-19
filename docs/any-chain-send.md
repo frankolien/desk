@@ -1,6 +1,6 @@
 # Send anywhere: AUSD out of Desk to any address on any chain, gasless
 
-Status: research, 19 Oct 2026. Nothing built. The ask: a Desk user types an address (or a
+Status: built 19 Oct 2026 (contract, API, copyd worker, app), not yet deployed. Deploy order at the end. The ask: a Desk user types an address (or a
 @tag), picks an amount, and the money arrives on whatever chain that address lives on, in a
 stablecoin, without the user holding gas anywhere or knowing which chain they are on. FOMO is
 the reference: USDC on Solana in, Monad out, no gas, no chain picker.
@@ -136,7 +136,17 @@ Fund already takes Relay from any chain and Crossmint for cards. Two cheap addit
 - Circle's CCTP V2 Fast Transfer for USDC from Solana if we ever want Circle's rail instead
   of a solver; Monad is a destination, ~8 s, native USDC, then a swap to AUSD.
 
-## Build order, when we build
+## Deploying what is built
+
+1. `bash web/copyd/send-setup.sh` deploys DeskSend from the spot copy key at the pinned address
+   `0x41FA5ca5b73fb6ea8E3CA219f8f2BC8CE35fa04E` (CREATE2, salt zero). The build must match the
+   fork-tested bytecode; the script refuses if the address would differ.
+2. `cd web && vercel deploy --prod --yes` for the `send`, `send-submit` and `send-status` views.
+3. `bash web/copyd/deploy.sh` for the worker that submits queued sends.
+Then one real send from a phone with a few dollars of AUSD, to a Monad address first, then to
+Solana.
+
+## Build order, as built
 
 1. Forwarder contract in `contracts/`: `send(permit, intent, calls)`; fork tests on Monad
    against the live AUSD and Relay router; deploy with the spot-copy key.
