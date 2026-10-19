@@ -1,14 +1,16 @@
 import { CHAINS } from "./_chains.mjs";
 import { hypersyncClient } from "./_history.mjs";
 import { resolveIdentities } from "./_identity.mjs";
-import { TRACKED_KEY, indexWallet, ledgerKey, summarize } from "./_ledger.mjs";
+import { TRACKED_KEY, URGENT_KEY, indexWallet, ledgerKey, summarize } from "./_ledger.mjs";
 import { SOLANA } from "./_solana.mjs";
 import { currentPrices, describeDesk, describeWallet, logosFor, metaReader, priceReader, walletBalances, withDesk, MONAD_AUSD } from "./_wallet.mjs";
 import { chainReader, noAccount } from "./traders.mjs";
 
 const MONAD = "143";
 const BACKFILL_BLOCKS = 45 * 216_000;
-const INDEX_BUDGET_MS = 25_000;
+/// A page should open in seconds: the request indexes this long and hands the rest to the
+/// worker, which takes an unfinished wallet in its next round.
+const INDEX_BUDGET_MS = 6_000;
 const MAX_TRACKED = 2_000;
 let sharedVenue = null;
 
@@ -150,11 +152,13 @@ async function monadLedger(address, { store, hypersync, now }) {
     // HyperSync's free tier rate-limits; the worker will index this wallet, so history is pending, not empty.
     if (!stored) {
       store.sadd(TRACKED_KEY, address).catch(() => {});
+      store.sadd(URGENT_KEY, address).catch(() => {});
       return { status: /429/.test(error.message) ? "indexing" : "unavailable", detail: error.message, behind: null };
     }
     result = { ledger: JSON.parse(stored), complete: false, behind: null };
   }
   store.sadd(TRACKED_KEY, address).catch(() => {});
+  if (!result.complete) store.sadd(URGENT_KEY, address).catch(() => {});
   const tokens = Object.keys(result.ledger.positions);
   const prices = await currentPrices(MONAD, tokens);
   return {

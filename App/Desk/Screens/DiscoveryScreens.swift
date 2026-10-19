@@ -3950,7 +3950,7 @@ private struct WalletProfileScreen: View {
                 .padding(.vertical, 16)
         } else {
             if rows.isEmpty {
-                Text(ledger?.status == "indexing" ? "Analyzing this wallet’s on-chain history…"
+                Text(ledger?.status == "indexing" ? "Reading this wallet’s last 45 days on Monad. A busy wallet takes a minute or two; trades appear as they’re priced."
                      : ledger == nil && resource != nil && tab != .positions ? "Trade history is unavailable right now."
                      : tab == .positions ? "No holdings found for this wallet."
                      : tab == .closed ? "No closed trades on record." : "No trades on record.")
