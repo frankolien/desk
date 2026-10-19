@@ -183,12 +183,13 @@ contract DeskSendTest is Test {
         DeskSend.Call[] memory calls = _transferCalls(address(0xB0B), 20e6);
         assertEq(sender.hashCalls(calls), 0xce53fbff5690ae64ae12014724e1ed578026f4ad97ebb439fa10f1ceed3a097a);
         assertEq(keccak256("143:bob"), 0xb8824dac87bb649c718a275c3ff6592f35e3066e7c97d6148469fddd6d30ca85);
+        assertEq(keccak256("143:0x0000000000000000000000000000000000000b0b"), 0x9e1dc77c835d4b8e909ceee6398c6a8fc0c65e92c56950f7e41b0d0eb3acfb03);
         DeskSend.Send memory intent = DeskSend.Send(
             0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7, 20e6, 0, 1792350000,
             0xce53fbff5690ae64ae12014724e1ed578026f4ad97ebb439fa10f1ceed3a097a,
-            0xb8824dac87bb649c718a275c3ff6592f35e3066e7c97d6148469fddd6d30ca85);
+            0x9e1dc77c835d4b8e909ceee6398c6a8fc0c65e92c56950f7e41b0d0eb3acfb03);
         assertEq(address(sender), 0x41FA5ca5b73fb6ea8E3CA219f8f2BC8CE35fa04E, "the deterministic address the server and app pin");
-        assertEq(sender.hashSend(intent), 0x67193dafdbfbef63057c6ace6cd113a728b2ac4328183b73e23429c650ab0472);
+        assertEq(sender.hashSend(intent), 0x0c3ae401ecbf57c6396095a86790c6865e302ae588d66d367c0b332dd10f0faf);
     }
 
     function test_ExpiredIsRefused() public {
