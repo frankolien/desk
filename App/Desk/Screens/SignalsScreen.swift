@@ -37,6 +37,8 @@ struct SignalsScreen: View {
     @State private var showsTrackNew = false
     @State private var openToken: TokenOpenRequest.Target?
     @State private var selectedFollowingTrade: FollowingTrade?
+    @State private var smartWallet: SmartWallet?
+    private struct SmartWallet: Identifiable { let address: String; var id: String { address } }
     #if DEBUG
     @State private var debugPrimer: TraderSnapshot?
     @State private var debugAutoCopy: TraderSnapshot?
@@ -80,9 +82,11 @@ struct SignalsScreen: View {
                                           onOpenPerp: { openPerpMarket($0.market) })
                                 .padding(.bottom, 130)
                         case .smart:
-                            SmartMoneyFeedView(feed: smartFeed) { trade in
+                            SmartMoneyFeedView(feed: smartFeed, onOpen: { trade in
                                 openToken = .init(chainIndex: trade.chainIndex, contract: trade.token, symbol: trade.symbol)
-                            }
+                            }, onOpenWallet: { wallet in
+                                smartWallet = SmartWallet(address: wallet)
+                            })
                             .padding(.top, 16)
                             .padding(.bottom, 130)
                             .task { await smartFeed.run() }
@@ -144,6 +148,9 @@ struct SignalsScreen: View {
             }
             .sheet(isPresented: $showsTrackNew) {
                 TrackWalletSheet(existing: nil, directory: directory).fittedSheet().presentationDragIndicator(.visible)
+            }
+            .fullScreenCover(item: $smartWallet) { wallet in
+                WalletProfileCover(address: wallet.address, model: model) { smartWallet = nil }
             }
             .sheet(item: $selectedFollowingTrade) { trade in
                 FollowingTradeDetailSheet(

@@ -60,6 +60,8 @@ struct SmartMoneyTrade: Decodable, Identifiable, Sendable {
 struct SmartMoneyFeedView: View {
     let feed: SmartMoneyFeedModel
     let onOpen: (SmartMoneyTrade) -> Void
+    /// The wallet behind a trade: a tap on its name opens its page, where it can be followed or copied.
+    var onOpenWallet: ((String) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -89,17 +91,11 @@ struct SmartMoneyFeedView: View {
             }
             if !feed.monad.isEmpty {
                 sectionTitle("On Monad", detail: "Wallets that made money on Monad over the last 30 days")
-                ForEach(feed.monad) { trade in
-                    Button { onOpen(trade) } label: { row(trade) }
-                        .buttonStyle(.plain)
-                }
+                ForEach(feed.monad) { trade in row(trade) }
             }
             if !feed.trades.isEmpty {
                 if !feed.monad.isEmpty { sectionTitle("Elsewhere", detail: "Base, BNB Chain and Ethereum, scored by OKX").padding(.top, 14) }
-                ForEach(feed.trades) { trade in
-                    Button { onOpen(trade) } label: { row(trade) }
-                        .buttonStyle(.plain)
-                }
+                ForEach(feed.trades) { trade in row(trade) }
             }
             Text("Monad wallets are scored on their own 30-day record. Other chains by OKX.")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -112,11 +108,26 @@ struct SmartMoneyFeedView: View {
     private func row(_ trade: SmartMoneyTrade) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                if let wallet = trade.wallet { TraderAvatar(address: wallet, size: 30) }
-                Text(walletLine(trade))
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(DeskColor.nightText.color)
-                    .lineLimit(1)
+                Button {
+                    if let wallet = trade.wallet { onOpenWallet?(wallet) }
+                } label: {
+                    HStack(spacing: 10) {
+                        if let wallet = trade.wallet { TraderAvatar(address: wallet, size: 30) }
+                        Text(walletLine(trade))
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DeskColor.nightText.color)
+                            .lineLimit(1)
+                        if trade.wallet != nil, onOpenWallet != nil {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(DeskColor.nightMuted.color)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(trade.wallet == nil || onOpenWallet == nil)
+                .accessibilityLabel(trade.wallet.map { "Open wallet \($0)" } ?? "Smart money")
                 Spacer()
                 if let time = trade.time {
                     Text(Date(timeIntervalSince1970: time / 1000), format: .relative(presentation: .named))
@@ -124,6 +135,16 @@ struct SmartMoneyFeedView: View {
                         .foregroundStyle(DeskColor.nightMuted.color)
                 }
             }
+            Button { onOpen(trade) } label: { body(trade) }
+                .buttonStyle(.plain)
+            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
+        }
+        .padding(.vertical, 12)
+    }
+
+    /// The trade itself: the token, what was bought or sold, and the lead wallet's record.
+    private func body(_ trade: SmartMoneyTrade) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 MarketTokenLogo(symbol: trade.symbol, size: 46, remoteURL: TokenArtwork.url(trade.logoURL))
                 VStack(alignment: .leading, spacing: 3) {
@@ -150,9 +171,7 @@ struct SmartMoneyFeedView: View {
                     .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
                     .foregroundStyle(DeskColor.nightMuted.color)
             }
-            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
         }
-        .padding(.vertical, 12)
         .contentShape(Rectangle())
     }
 

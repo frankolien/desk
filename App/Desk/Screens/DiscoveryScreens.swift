@@ -4500,3 +4500,17 @@ struct HoldingAlertRow: View {
         Task { await alerts.setHoldingAlert(next) }
     }
 }
+
+/// A wallet's page, for screens outside this file (Smart Money opens the wallet behind a trade).
+struct WalletProfileCover: View {
+    let address: String
+    let model: AppModel
+    let onBack: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            WalletProfileScreen(wallet: SpotWallet(address: address, emoji: "◉", portfolio: "—"), token: nil, model: model, onBack: onBack)
+                .toolbar(.hidden, for: .navigationBar)
+        }
+    }
+}
