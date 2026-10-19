@@ -497,7 +497,8 @@ struct SendSheet: View {
     /// Send and the permit with one Face ID, hand them in, and follow the send to the far chain.
     private func sendAnywhere(_ requested: Money) async {
         guard let wallet = model.address, let prepared, preparedIsCurrent else { return }
-        let recipient = solanaRecipient ?? address
+        // An EVM address is hashed lowercased, as the server hashes it; a Solana one as typed.
+        let recipient = solanaRecipient ?? address.lowercased()
         delivery = .signing
         do {
             let checked = try AnyChainSend(
