@@ -549,6 +549,8 @@ struct SendSheet: View {
         case "not-enough-ausd": return "There wasn't enough AUSD in the wallet when Desk went to send it."
         case "expired", "already-used": return "The send timed out before Desk could place it. Nothing moved; try again."
         case "refunded": return "Relay couldn't deliver it, so the AUSD came back to your wallet."
+        case "permit-rejected": return "AUSD didn't accept the signature. Update Desk and try again; nothing moved."
+        case "route-failed": return "Relay couldn't take the route. Nothing moved; try again in a moment."
         default: return "The send couldn't be placed. Your AUSD hasn't moved."
         }
     }
