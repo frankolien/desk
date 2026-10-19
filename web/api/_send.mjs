@@ -19,16 +19,23 @@ export const PREP_TTL_S = 240;
 export const JOB_TTL_S = 7 * 86_400;
 export const MAX_IMPACT_PERCENT = 1;
 
-/// Where AUSD can go. Chains Agora issues AUSD on natively take AUSD; Solana takes USDC, since
-/// the AUSD pool there is thin. Anything else is refused rather than guessed.
+/// Where AUSD can go. On each chain the tokens it may arrive as, in order of preference:
+/// Relay is asked for each and the one that delivers the most wins, so a thin AUSD pool (Base,
+/// Arbitrum tonight) never costs the person anything. Solana takes USDC. Anything else is
+/// refused rather than guessed.
+const USDC = {
+  1: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", 8453: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", 42161: "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+  43114: "0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e", 137: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+};
+const evmChoices = (chainId) => [{ symbol: "AUSD", currency: AUSD }, { symbol: "USDC", currency: USDC[chainId] }];
 export const DESTINATIONS = {
-  [MONAD]: { name: "Monad", symbol: "AUSD", currency: AUSD, vm: "evm" },
-  1: { name: "Ethereum", symbol: "AUSD", currency: AUSD, vm: "evm" },
-  8453: { name: "Base", symbol: "AUSD", currency: AUSD, vm: "evm" },
-  42161: { name: "Arbitrum", symbol: "AUSD", currency: AUSD, vm: "evm" },
-  43114: { name: "Avalanche", symbol: "AUSD", currency: AUSD, vm: "evm" },
-  137: { name: "Polygon", symbol: "AUSD", currency: AUSD, vm: "evm" },
-  [SOLANA]: { name: "Solana", symbol: "USDC", currency: USDC_SOLANA, vm: "svm" },
+  [MONAD]: { name: "Monad", vm: "evm", choices: [{ symbol: "AUSD", currency: AUSD }] },
+  1: { name: "Ethereum", vm: "evm", choices: evmChoices(1) },
+  8453: { name: "Base", vm: "evm", choices: evmChoices(8453) },
+  42161: { name: "Arbitrum", vm: "evm", choices: evmChoices(42161) },
+  43114: { name: "Avalanche", vm: "evm", choices: evmChoices(43114) },
+  137: { name: "Polygon", vm: "evm", choices: evmChoices(137) },
+  [SOLANA]: { name: "Solana", vm: "svm", choices: [{ symbol: "USDC", currency: USDC_SOLANA }] },
 };
 
 export const K = {
@@ -50,12 +57,13 @@ export const display = (raw) => { const n = BigInt(raw); return `${n / 1_000_000
 /// Who the money is for: an EVM address with a chain (Monad unless said), or a Solana address.
 export function destinationOf({ to, chainId }) {
   const recipient = String(to ?? "").trim();
-  if (isSolanaAddress(recipient) && !evm(recipient)) return { chainId: SOLANA, recipient, ...DESTINATIONS[SOLANA] };
+  const first = (known) => ({ symbol: known.choices[0].symbol, currency: known.choices[0].currency });
+  if (isSolanaAddress(recipient) && !evm(recipient)) return { chainId: SOLANA, recipient, ...DESTINATIONS[SOLANA], ...first(DESTINATIONS[SOLANA]) };
   if (!evm(recipient)) return null;
   const chain = Number(chainId ?? MONAD);
   const known = DESTINATIONS[chain];
   if (!known || known.vm !== "evm") return null;
-  return { chainId: chain, recipient: recipient.toLowerCase(), ...known };
+  return { chainId: chain, recipient: recipient.toLowerCase(), ...known, ...first(known) };
 }
 
 /// keccak256 over (to ‖ keccak256(data)) per call, as DeskSend.hashCalls does.
@@ -185,8 +193,16 @@ export async function prepare({ store, fetchImpl, nonces, user, to, chainId, amo
   if (destination.chainId === MONAD) {
     calls = [transferCall(destination.recipient, raw)];
   } else {
-    try { route = await relayRoute({ fetchImpl, contract, destination, amount: raw, refundTo: user, apiKey }); }
-    catch (error) { return { status: 422, body: { error: error.message, reason: error.reason ?? "unavailable" } }; }
+    // Every token the chain takes is quoted; the one that lands the most is the one sent.
+    const tried = await Promise.all(destination.choices.map(async (choice) => {
+      try { return { choice, route: await relayRoute({ fetchImpl, contract, destination: { ...destination, ...choice }, amount: raw, refundTo: user, apiKey }) }; }
+      catch (error) { return { choice, error }; }
+    }));
+    const best = tried.filter((t) => t.route).sort((a, b) => Number(BigInt(b.route.out.raw) - BigInt(a.route.out.raw)))[0];
+    if (!best) { const error = tried[0].error; return { status: 422, body: { error: error.message, reason: error.reason ?? "unavailable" } }; }
+    route = best.route;
+    destination.symbol = best.choice.symbol;
+    destination.currency = best.choice.currency;
     if (route.impact < -MAX_IMPACT_PERCENT) return { status: 422, body: { error: `This route would lose ${Math.abs(route.impact).toFixed(1)}% on the way. Try a different amount or chain.`, reason: "impact" } };
     calls = route.calls;
   }
@@ -199,7 +215,7 @@ export async function prepare({ store, fetchImpl, nonces, user, to, chainId, amo
   const typed = { send: sendTypedData({ contract: low(contract), ...intent }), permit: permitTypedData({ owner: low(user), spender: low(contract), value: raw, nonce, deadline }) };
   const summary = {
     chainId: destination.chainId, chain: destination.name, recipient: destination.recipient, symbol: destination.symbol,
-    amount: display(raw), arrives: route ? route.out.formatted : display(raw), feeUsd: route ? Number(route.feeUsd.toFixed(4)) : 0, seconds: route ? route.seconds : 1,
+    amount: display(raw), arrives: route ? Number(route.out.formatted).toFixed(2) : display(raw), feeUsd: route ? Number(route.feeUsd.toFixed(4)) : 0, seconds: route ? route.seconds : 1,
   };
   const record = { id, user: low(user), contract: low(contract), calls, intent, destination: summary, requestId: route?.requestId ?? null, preparedAt: now() };
   await store.set(K.prep(id), JSON.stringify(record), { ex: PREP_TTL_S });

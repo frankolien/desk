@@ -79,7 +79,7 @@ test("prepare: a Monad send is one transfer, a Solana send is Relay's approve an
   assert.equal(solana.status, 200, JSON.stringify(solana.body));
   assert.equal(solana.body.chain, "Solana");
   assert.equal(solana.body.symbol, "USDC");
-  assert.equal(solana.body.arrives, "19.964581");
+  assert.equal(solana.body.arrives, "19.96");
   assert.equal(solana.body.feeUsd, 0.026);
   assert.equal(solana.body.calls.length, 2);
   assert.equal(solana.body.calls[1].to, RELAY_DEPOSITORY);
