@@ -19,9 +19,9 @@ struct AutoCopyLiveActivity: Widget {
                         VStack(alignment: .leading, spacing: 0) {
                             Text("Auto-Copy")
                                 .font(.system(size: 14, weight: .bold, design: .rounded))
-                            Text(state.isPaused ? "Paused" : (context.isStale ? "Open Desk" : (state.isStreaming ? "Live" : "Checking")))
+                            Text(state.isPaused ? "Paused" : (context.isStale ? (state.isServer == true ? "On the server" : "Open Desk") : (state.isStreaming ? "Live" : "Checking")))
                                 .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(state.isPaused || context.isStale ? DeskColor.action.color : DeskColor.rise.color)
+                                .foregroundStyle(state.isPaused || (context.isStale && state.isServer != true) ? DeskColor.action.color : DeskColor.rise.color)
                         }
                     }
                     .padding(.leading, 4)
@@ -93,7 +93,7 @@ struct AutoCopyLockScreen: View {
     let isStale: Bool
 
     private var subtitle: String {
-        if isStale && !state.isPaused { return "Open Desk to keep copying" }
+        if isStale && !state.isPaused { return state.isServer == true ? "Copying on Desk's server" : "Open Desk to keep copying" }
         return autoCopyStatus(paused: state.isPaused, traders: state.traders, openCopies: state.openCopies, shadow: state.isShadow)
     }
 
@@ -107,7 +107,7 @@ struct AutoCopyLockScreen: View {
                         .foregroundStyle(DeskColor.nightText.color)
                     Text(subtitle)
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(state.isPaused || isStale ? DeskColor.action.color : DeskColor.nightMuted.color)
+                        .foregroundStyle(state.isPaused || (isStale && state.isServer != true) ? DeskColor.action.color : DeskColor.nightMuted.color)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 8)

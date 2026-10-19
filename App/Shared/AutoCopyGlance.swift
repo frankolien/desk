@@ -87,5 +87,8 @@ struct AutoCopyActivityAttributes: ActivityAttributes {
         var isStreaming: Bool
         var isShadow: Bool
         var lastMove: AutoCopyGlance.Move?
+        /// Copying on Desk's server: a stale activity then means the phone fell behind, not the copying.
+        /// Optional so a state pushed before this field existed still decodes.
+        var isServer: Bool? = nil
     }
 }

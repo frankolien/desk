@@ -67,8 +67,9 @@ final class AutoCopyPublisher {
         }
         let state = AutoCopyActivityAttributes.ContentState(
             today: glance.today, openCopies: glance.openCopies, traders: glance.traders,
-            isPaused: copier.isPaused, isStreaming: copier.isStreaming, isShadow: glance.isShadow,
-            lastMove: glance.moves.first)
+            isPaused: copier.server.isOn ? copier.server.isPaused : copier.isPaused,
+            isStreaming: copier.isStreaming, isShadow: glance.isShadow,
+            lastMove: glance.moves.first, isServer: copier.server.isOn)
         let content = ActivityContent(state: state, staleDate: .now.addingTimeInterval(Self.staleAfter))
 
         if activities.isEmpty {
