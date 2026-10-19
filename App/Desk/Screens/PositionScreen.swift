@@ -19,6 +19,8 @@ struct PositionScreen: View {
     @State private var tab: PositionTab = .positions
     @State private var focusedID: Int64?
     @State private var focusedLong: Bool?
+    @State private var tickTint: DeskRGB?
+    @State private var tickFade: Task<Void, Never>?
 
     private var activeID: Int64 { focusedID ?? position.positionID }
 
@@ -50,6 +52,7 @@ struct PositionScreen: View {
                 if isClosed { closedView } else if let figures { content(figures) } else { unavailable }
             }
             .toolbar(.hidden, for: .navigationBar)
+            .onAppear { market.watchBook(true) }
             .onChange(of: isClosed) { _, closed in
                 guard closed else { return }
                 showsClose = false
@@ -309,14 +312,38 @@ struct PositionScreen: View {
         figures.side == .long ? DeskColor.rise : DeskColor.fall
     }
 
+    /// The venue's live price, as the market page prints it: the book mid ticking every second,
+    /// with the mark (what the position is actually figured from) beside the 24h change.
     private var priceBlock: some View {
         VStack(alignment: .leading, spacing: 7) {
-            AmountText(market.markText == "—" ? "—" : "$" + market.markText, size: 38)
+            AmountText(market.liveText == "—" ? "—" : "$" + market.liveText, size: 38, colour: tickTint ?? DeskColor.nightText)
                 .contentTransition(.numericText())
+                .animation(.snappy(duration: 0.25), value: market.liveText)
+                .onChange(of: market.liveValue) { old, new in
+                    guard let old, let new, old != new else { return }
+                    tickFade?.cancel()
+                    withAnimation(.easeOut(duration: 0.12)) { tickTint = new > old ? DeskColor.rise : DeskColor.fall }
+                    tickFade = Task {
+                        try? await Task.sleep(for: .milliseconds(450))
+                        guard !Task.isCancelled else { return }
+                        withAnimation(.easeInOut(duration: 0.5)) { tickTint = nil }
+                    }
+                }
             HStack(spacing: 8) {
-                Text(market.changePercentText ?? "—")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(market.trend.color)
+                HStack(spacing: 6) {
+                    Text(dayChange?.text ?? "—")
+                        .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle((dayChange?.up ?? true) ? DeskColor.rise.color : DeskColor.fall.color)
+                    Text("24h")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(DeskColor.nightMuted.color)
+                    if market.hasLivePrice, market.markText != "—" {
+                        Text("· Mark $" + market.markText)
+                            .font(.system(size: 13, weight: .medium, design: .rounded).monospacedDigit())
+                            .foregroundStyle(DeskColor.nightMuted.color)
+                            .contentTransition(.numericText())
+                    }
+                }
                 Text(stale ? "LAST KNOWN" : "LIVE")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundStyle(DeskColor.nightMuted.color)
@@ -326,6 +353,11 @@ struct PositionScreen: View {
             }
         }
         .opacity(stale ? 0.7 : 1)
+    }
+
+    private var dayChange: (text: String, up: Bool)? {
+        guard let listed = market.market, let percent = market.changePercent(for: listed) else { return nil }
+        return ((percent < 0 ? "−" : "+") + String(format: "%.2f", abs(percent)) + "%", percent >= 0)
     }
 
     /// The same thresholds as the position rows, so a line and a row never disagree.
