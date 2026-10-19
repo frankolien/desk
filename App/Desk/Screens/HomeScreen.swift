@@ -218,9 +218,14 @@ struct HomeScreen: View {
         #if DEBUG
         .task {
             let arguments = ProcessInfo.processInfo.arguments
-            if arguments.contains("-open-share") || arguments.contains("-open-close") {
+            if arguments.contains("-open-share") || arguments.contains("-open-close") || arguments.contains("-open-position") {
                 try? await Task.sleep(for: .seconds(2))
-                overlay = model.openPositions.first.map(Overlay.position)
+                while model.openPositions.isEmpty || market.market(id: model.openPositions[0].marketID) == nil {
+                    try? await Task.sleep(for: .milliseconds(300))
+                }
+                let held = model.openPositions[0]
+                if let listed = market.market(id: held.marketID) { market.select(listed) }
+                overlay = .position(held)
             }
             if arguments.contains("-open-holding") {
                 while spot.holdings.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
