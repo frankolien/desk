@@ -30,8 +30,13 @@ struct CandlestickChart: View {
     @State private var scrub: CGPoint?
     /// The candle a double tap pinned, by time; its card stays until a tap lifts it.
     @State private var pinnedTime: Double?
+    /// How many candles the window shows: a pinch widens or narrows it between 8 and whatever is loaded.
+    @State private var visible = CandlestickChart.defaultVisible
+    @State private var pinchStart: Int?
+    static let defaultVisible = 25
+    private static let fewest = 8
 
-    /// The window drawn: the last 25 candles and the scales they sit on.
+    /// The window drawn: the last `visible` candles and the scales they sit on.
     private struct Scene {
         let samples: [ChartCandle]
         let layout: CandleLayout
@@ -54,7 +59,7 @@ struct CandlestickChart: View {
     }
 
     private func scene(_ size: CGSize) -> Scene? {
-        let samples = Array(candles.suffix(25))
+        let samples = Array(candles.suffix(visible))
         guard samples.count > 1,
               let low = samples.map(\.low).min(),
               let high = samples.map(\.high).max() else { return nil }
@@ -64,7 +69,7 @@ struct CandlestickChart: View {
         let axis = PriceAxis(
             candleLow: low, candleHigh: high, guides: guides.map(\.value),
             height: priceHeight, topInset: 7, bottomInset: 7)
-        return Scene(samples: samples, layout: CandleLayout(count: samples.count, width: plotWidth),
+        return Scene(samples: samples, layout: CandleLayout(count: samples.count, width: plotWidth, minimumSlots: min(24, visible)),
                      axis: axis, plotWidth: plotWidth, priceHeight: priceHeight, hasVolume: hasVolume)
     }
 
@@ -83,14 +88,32 @@ struct CandlestickChart: View {
                     guard let scene = scene(proxy.size) else { return }
                     pin(at: location, in: scene)
                 })
+                .gesture(ChartPinch { scale in
+                    guard let scale else { pinchStart = nil; return }
+                    let start = pinchStart ?? visible
+                    pinchStart = start
+                    zoom(to: Int((Double(start) / scale).rounded()))
+                })
         }
         .onChange(of: scrub != nil) { _, active in onScrub?(active) }
         #if DEBUG
         .task(id: candles.count) {
-            guard pinnedTime == nil, ProcessInfo.processInfo.arguments.contains("-pin-candle") else { return }
-            pinnedTime = candles.suffix(25).dropLast(7).last?.time
+            let arguments = ProcessInfo.processInfo.arguments
+            if let index = arguments.firstIndex(of: "-zoom-chart"), arguments.indices.contains(index + 1),
+               let count = Int(arguments[index + 1]) { zoom(to: count) }
+            guard pinnedTime == nil, arguments.contains("-pin-candle") else { return }
+            pinnedTime = candles.suffix(visible).dropLast(7).last?.time
         }
         #endif
+    }
+
+    /// Fewer than eight candles reads as a bar chart; more than are loaded would draw nothing.
+    private func zoom(to count: Int) {
+        let widest = max(Self.fewest, candles.count)
+        let next = min(max(count, Self.fewest), widest)
+        guard next != visible else { return }
+        if next == Self.fewest || next == widest { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+        visible = next
     }
 
     /// A double tap on a candle pins it; on the pinned candle, its card, or empty space it lets go.
@@ -383,6 +406,23 @@ struct ChartTap: UIGestureRecognizerRepresentable {
     func handleUIGestureRecognizerAction(_ recognizer: UITapGestureRecognizer, context: Context) {
         guard recognizer.state == .ended else { return }
         onDoubleTap(context.converter.localLocation)
+    }
+}
+
+/// A two-finger pinch, through UIKit's own recognizer so one finger still scrolls the page and
+/// holds to scrub. Reports the running scale, nil when the fingers lift.
+struct ChartPinch: UIGestureRecognizerRepresentable {
+    let onChange: (Double?) -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> UIPinchGestureRecognizer {
+        UIPinchGestureRecognizer()
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UIPinchGestureRecognizer, context: Context) {
+        switch recognizer.state {
+        case .began, .changed: onChange(Double(recognizer.scale))
+        default: onChange(nil)
+        }
     }
 }
 
