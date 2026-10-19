@@ -35,7 +35,7 @@ struct AnyChainSendTests {
         try typed("""
         {"types":{"EIP712Domain":[{"name":"name","type":"string"},{"name":"version","type":"string"},{"name":"chainId","type":"uint256"},{"name":"verifyingContract","type":"address"}],
         "Permit":[{"name":"owner","type":"address"},{"name":"spender","type":"address"},{"name":"value","type":"uint256"},{"name":"nonce","type":"uint256"},{"name":"deadline","type":"uint256"}]},
-        "primaryType":"Permit","domain":{"name":"AUSD","version":"1","chainId":"143","verifyingContract":"\(ausd)"},
+        "primaryType":"Permit","domain":{"name":"Agora Dollar","version":"1","chainId":"143","verifyingContract":"\(ausd)"},
         "message":{"owner":"0xe05fcc23807536bee418f142d19fa0d21bb0cff7","spender":"\(spender ?? contract)","value":"\(value)","nonce":"\(nonce)","deadline":"\(deadline)"}}
         """)
     }
@@ -54,6 +54,8 @@ struct AnyChainSendTests {
             send: try sendTyped(callsHash: callsHash, destination: destination), permit: try permitTyped(), now: now)
         #expect(hex(try send.sendDigest()) == "0x0c3ae401ecbf57c6396095a86790c6865e302ae588d66d367c0b332dd10f0faf")
         #expect(try send.permitDigest().count == 32)
+        // AUSD's DOMAIN_SEPARATOR() on Monad, read on 19 Oct 2026: the permit is signed for the real token.
+        #expect(hex(try EIP712.domainSeparator(send.permit)) == "0x995063441ebf2219c94dce05014a545da4390d2362f99b3d7ad456046678cafe")
     }
 
     @Test("a Solana send is Relay's approve and deposit, nothing else")

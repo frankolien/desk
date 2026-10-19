@@ -154,7 +154,7 @@ public struct AnyChainSend: Sendable {
     public func permitDigest() throws -> Data {
         try EIP712.digest(permit, expecting: .init(
             encodedType: Self.permitEncodedType, domainEncodedType: Self.domainEncodedType,
-            domainName: "AUSD", domainVersion: "1", allowedChainIDs: [Self.monad],
+            domainName: "Agora Dollar", domainVersion: "1", allowedChainIDs: [Self.monad],
             signerField: "owner", signer: "0x" + Self.hex(wallet.bytes)))
     }
 

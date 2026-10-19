@@ -95,7 +95,8 @@ export function sendTypedData({ contract, from, amount, nonce, deadline, callsHa
 export function permitTypedData({ owner, spender, value, nonce, deadline }) {
   return {
     types: { EIP712Domain: DOMAIN_TYPE, ...PERMIT_TYPES }, primaryType: "Permit",
-    domain: { name: "AUSD", version: "1", chainId: String(MONAD), verifyingContract: AUSD },
+    // AUSD's own EIP-712 domain, as its eip712Domain() reports it: the token is "Agora Dollar" to permits.
+    domain: { name: "Agora Dollar", version: "1", chainId: String(MONAD), verifyingContract: AUSD },
     message: { owner, spender, value: String(value), nonce: String(nonce), deadline: String(deadline) },
   };
 }
@@ -339,12 +340,24 @@ export function createSendWorker({ store, chain, contract = process.env.SEND_CON
   };
 }
 
+/// Revert selectors the worker meets, by name: DeskSend's own, AUSD's permit and balance errors.
+const SELECTORS = {
+  "0x203d82d8": "expired", "0x62791302": "expired",               // Expired(), ERC2612ExpiredSignature(uint256)
+  "0x8bc06427": "already-used",                                     // WrongNonce(uint256)
+  "0x4b800e46": "permit-rejected", "0x8baa579f": "permit-rejected", // ERC2612InvalidSigner(address,address), InvalidSignature()
+  "0xe450d38c": "not-enough-ausd", "0xfb8f41b2": "not-enough-ausd", // ERC20InsufficientBalance, ERC20InsufficientAllowance
+  "0x3f9a3b48": "route-failed",                                     // CallFailed(uint256)
+  "0xbd560ada": "refused", "0x5cd5d233": "refused", "0xfa5cd00f": "refused", // WrongCalls(), BadSignature(), NotAllowed(address)
+};
 export function reasonOf(error) {
+  const data = String(error?.cause?.data ?? error?.data ?? error?.cause?.cause?.data ?? "").toLowerCase();
+  const selector = /^0x[0-9a-f]{8}/.exec(data)?.[0];
+  if (selector && SELECTORS[selector]) return SELECTORS[selector];
   const text = String(error?.shortMessage ?? error?.message ?? error ?? "");
   if (/Expired/.test(text)) return "expired";
   if (/WrongNonce/.test(text)) return "already-used";
   if (/insufficient|exceeds balance|transfer amount|e450d38c/i.test(text)) return "not-enough-ausd";
   if (/CallFailed/.test(text)) return "route-failed";
-  if (/BadSignature|WrongCalls|NotAllowed/.test(text)) return "refused";
-  return text.slice(0, 120) || "failed";
+  if (/BadSignature|WrongCalls|NotAllowed|InvalidSigner/.test(text)) return "refused";
+  return (selector ? `reverted ${selector}` : text.slice(0, 120)) || "failed";
 }

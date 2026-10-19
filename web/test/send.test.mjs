@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { privateKeyToAccount } from "viem/accounts";
-import { decodeFunctionData } from "viem";
+import { decodeFunctionData, hashDomain } from "viem";
 
 import {
   AUSD, K, MONAD, RELAY_DEPOSITORY, SEND_ABI, SEND_CONTRACT, SOLANA, USDC_SOLANA,
-  amountRaw, checkCalls, createSendWorker, destinationOf, hashCalls, permitTypedData, prepare, sendCalldata, sendTypedData, status, submit, transferCall,
+  amountRaw, checkCalls, createSendWorker, destinationOf, hashCalls, permitTypedData, prepare, reasonOf, sendCalldata, sendTypedData, status, submit, transferCall,
 } from "../api/_send.mjs";
 import { memoryStore } from "../api/_store.mjs";
 
@@ -168,6 +168,9 @@ test("the worker simulates, sends and records; a revert in simulation fails the 
   await failing.tick();
   assert.equal(JSON.parse(await store.get(K.job(second.body.id))).status, "failed");
   assert.equal(JSON.parse(await store.get(K.job(second.body.id))).reason, "already-used");
+  const permitRejected = { cause: { data: "0x4b800e46" + "00".repeat(64) }, shortMessage: "Execution reverted for an unknown reason." };
+  assert.equal(reasonOf(permitRejected), "permit-rejected");
+  assert.equal(reasonOf({ shortMessage: "Execution reverted for an unknown reason.", cause: { data: "0xdeadbeef" } }), "reverted 0xdeadbeef");
   assert.equal(sent.length, 1, "nothing was sent");
 
   // An empty wallet is told so before anything is simulated.
@@ -178,6 +181,13 @@ test("the worker simulates, sends and records; a revert in simulation fails the 
   await empty.tick();
   assert.equal(JSON.parse(await store.get(K.job(third.body.id))).reason, "not-enough-ausd");
   assert.equal(simulated, 0);
+});
+
+test("the permit's domain is AUSD's own: its separator matches the one on Monad", () => {
+  const permit = permitTypedData({ owner: wallet.address, spender: SEND_CONTRACT, value: 1n, nonce: 0n, deadline: 2n });
+  assert.equal(permit.domain.name, "Agora Dollar");
+  // DOMAIN_SEPARATOR() of 0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a, read from Monad on 19 Oct 2026.
+  assert.equal(hashDomain({ domain: { ...permit.domain, chainId: 143n }, types: { EIP712Domain: permit.types.EIP712Domain } }), "0x995063441ebf2219c94dce05014a545da4390d2362f99b3d7ad456046678cafe");
 });
 
 test("typed data: the Send and the Permit carry what the contract hashes", () => {
