@@ -18,14 +18,20 @@ export function monadClients({ rpc = process.env.MONAD_MAINNET_RPC || "https://r
 /// `chain` for the executor: simulate and send as Desk's key, and wait for the receipt.
 export function spotChain({ reader, writer }) {
   const account = writer.account;
+  // One key, many senders (copies, any-chain sends): transactions leave one at a time so two
+  // never take the same nonce.
+  let queue = Promise.resolve();
+  const oneAtATime = (work) => { const run = queue.then(work, work); queue = run.catch(() => {}); return run; };
   return {
     async simulate({ to, data }) {
       await reader.call({ account: account.address, to, data });
     },
-    async send({ to, data, authorizationList }) {
-      const gas = await reader.estimateGas({ account: account.address, to, data, authorizationList });
-      // Monad charges the gas limit, not the gas used: a tight margin is money.
-      return writer.sendTransaction({ to, data, authorizationList, gas: (gas * 115n) / 100n });
+    send({ to, data, authorizationList }) {
+      return oneAtATime(async () => {
+        const gas = await reader.estimateGas({ account: account.address, to, data, authorizationList });
+        // Monad charges the gas limit, not the gas used: a tight margin is money.
+        return writer.sendTransaction({ to, data, authorizationList, gas: (gas * 115n) / 100n });
+      });
     },
     wait: (hash) => reader.waitForTransactionReceipt({ hash, timeout: 60_000 }),
   };

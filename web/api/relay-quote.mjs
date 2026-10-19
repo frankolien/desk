@@ -1,5 +1,7 @@
 import { encodeAbiParameters, encodeFunctionData } from "viem";
 import { chainName, isBuyable, rpcEndpoint } from "./_chains.mjs";
+import { AUSD as SEND_AUSD, prepare as prepareSend, status as sendStatus, submit as submitSend } from "./_send.mjs";
+import { redisStore } from "./_store.mjs";
 import { baseUnits, readableUnits, resolveDecimals } from "./swap-quote.mjs";
 
 const RELAY = "https://api.relay.link";
@@ -331,9 +333,37 @@ async function status(fetchImpl, req, res) {
 // case the rewrite ever drops the destination's own query.
 const wantsStatus = (req) => req.query?.view === "status" || String(req.url ?? "").split("?")[0].endsWith("/relay-status");
 
-export function createHandler(fetchImpl = fetch) {
+const NONCES = "0x7ecebe00";
+const readBody = (req) => (typeof req.body === "string" ? (() => { try { return JSON.parse(req.body); } catch { return null; } })() : req.body);
+
+/// The any-chain send (docs/any-chain-send.md): `send` prepares what to sign, `send-submit`
+/// queues the signed pair for copyd, `send-status` follows it to the far chain.
+async function sendViews(fetchImpl, store, req, res) {
+  const view = req.query.view;
+  if (!store) return res.status(503).json({ error: "Sending is not configured.", reason: "unavailable" });
+  if (view === "send-submit") {
+    if (req.method !== "POST") return res.status(405).json({ error: "POST required" });
+    const out = await submitSend({ store, body: readBody(req) });
+    return res.status(out.status).json(out.body);
+  }
+  if (req.method !== "GET") return res.status(405).json({ error: "GET required" });
+  if (view === "send-status") {
+    const out = await sendStatus({ store, fetchImpl, id: String(req.query.id ?? "") });
+    return res.status(out.status).json(out.body);
+  }
+  const nonces = async (user) => {
+    const hex = await rpc(fetchImpl, String(MONAD), "eth_call", [{ to: SEND_AUSD, data: NONCES + word(user) }, "latest"]);
+    if (!/^0x[0-9a-f]{64}$/i.test(String(hex))) throw new Error("nonce");
+    return BigInt(hex).toString();
+  };
+  const out = await prepareSend({ store, fetchImpl, nonces, user: String(req.query.user ?? ""), to: String(req.query.to ?? ""), chainId: req.query.chainId, amount: String(req.query.amount ?? "") });
+  return res.status(out.status).json(out.body);
+}
+
+export function createHandler(fetchImpl = fetch, store = redisStore()) {
   return async function handler(req, res) {
     res.setHeader("Cache-Control", "private, no-store");
+    if (["send", "send-submit", "send-status"].includes(req.query?.view)) return sendViews(fetchImpl, store, req, res);
     if (req.query?.view === "execute") {
       if (req.method !== "POST") return res.status(405).json({ error: "POST required" });
       return execute(fetchImpl, req, res);

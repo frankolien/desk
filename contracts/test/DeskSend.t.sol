@@ -178,6 +178,19 @@ contract DeskSendTest is Test {
         sender.send(intent, abi.encodePacked(r2, s2, v2), v, r, s, calls);
     }
 
+    /// The same inputs hashed in web/api/_send.mjs and in the app: one digest, or nothing signs.
+    function test_PinsTheDigestsTheServerAndAppCompute() public view {
+        DeskSend.Call[] memory calls = _transferCalls(address(0xB0B), 20e6);
+        assertEq(sender.hashCalls(calls), 0xce53fbff5690ae64ae12014724e1ed578026f4ad97ebb439fa10f1ceed3a097a);
+        assertEq(keccak256("143:bob"), 0xb8824dac87bb649c718a275c3ff6592f35e3066e7c97d6148469fddd6d30ca85);
+        DeskSend.Send memory intent = DeskSend.Send(
+            0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7, 20e6, 0, 1792350000,
+            0xce53fbff5690ae64ae12014724e1ed578026f4ad97ebb439fa10f1ceed3a097a,
+            0xb8824dac87bb649c718a275c3ff6592f35e3066e7c97d6148469fddd6d30ca85);
+        assertEq(address(sender), 0x41FA5ca5b73fb6ea8E3CA219f8f2BC8CE35fa04E, "the deterministic address the server and app pin");
+        assertEq(sender.hashSend(intent), 0x67193dafdbfbef63057c6ace6cd113a728b2ac4328183b73e23429c650ab0472);
+    }
+
     function test_ExpiredIsRefused() public {
         uint256 deadline = block.timestamp - 1;
         DeskSend.Call[] memory calls = _transferCalls(bob, 1e6);

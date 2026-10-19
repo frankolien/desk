@@ -20,6 +20,7 @@ import { hookAddress, kmsAccount } from "./spot-chain.mjs";
 import { apiQuote, monadClients, spotChain, spotReads } from "./spot-node.mjs";
 import { createSpotExecutor } from "./spot-executor.mjs";
 import { S as SPOT_KEYS, createSpotEngine } from "./spot-engine.mjs";
+import { createSendWorker } from "../api/_send.mjs";
 
 const SWEEP_MS = Number(process.env.COPYD_SWEEP_MS || 30_000);
 const PENDING_SWEEP_MS = 10 * 60_000;
@@ -97,11 +98,23 @@ async function startSpot() {
   const account = await kmsAccount({ client, keyId: process.env.SPOT_KEY_ID });
   const { reader, writer } = monadClients({ account });
   const reads = spotReads({ reader, hook, desk: account.address });
-  const spotExecutor = createSpotExecutor({ store, chain: spotChain({ reader, writer }), quote: apiQuote(), hook, desk: account.address });
+  const chain = spotChain({ reader, writer });
+  const spotExecutor = createSpotExecutor({ store, chain, quote: apiQuote(), hook, desk: account.address });
   const send = createNotifierSend();
   const spot = createSpotEngine({ store, reads, executor: spotExecutor, desk: { address: account.address, hook }, send });
   // The API reads Desk's key and the hook from here, so neither is configured twice.
   await store.set(SPOT_KEYS.desk, JSON.stringify({ address: account.address, hook, feeBps: Number(process.env.COPY_FEE_BPS || 0) }));
+  // Any-chain sends (docs/any-chain-send.md) go out from the same key, through DeskSend.
+  const sends = createSendWorker({ store, chain });
+  (async () => {
+    while (!stopping) {
+      if (lease.holds()) {
+        try { const n = await sends.tick(); if (n) console.log(`copyd: sent ${n} any-chain send${n === 1 ? "" : "s"}`); }
+        catch (error) { console.error(`copyd: send tick: ${error.message}`); }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+  })();
   let lastBalanceCheck = 0;
   (async () => {
     while (!stopping) {
