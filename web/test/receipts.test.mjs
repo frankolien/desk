@@ -75,7 +75,7 @@ test("MON counts when someone else sends at least a cent's worth in a transactio
   assert.equal(monAmount(2n * ETHER), "2");
 });
 
-test("AUSD counts from a stranger, never from the venue, a faucet, the bridge or the person's own transaction", () => {
+test("AUSD counts from a stranger and from the bridge, never from the venue, a faucet or the person's own transaction", () => {
   const found = extract({
     logs: [
       log(1, 25_000_000n),
@@ -93,7 +93,16 @@ test("AUSD counts from a stranger, never from the venue, a faucet, the bridge or
       tx(5, { from: DESK_FAUCET, to: AGORA_FAUCET }), tx(6, { from: DESK_FAUCET }), tx(7), tx(8),
     ],
   });
-  assert.deepEqual(found.map((receipt) => [receipt.token, receipt.amount, receipt.from, receipt.index]), [["AUSD", "25.00", STRANGER, 0]]);
+  assert.deepEqual(found.map((receipt) => [receipt.token, receipt.amount, receipt.from, receipt.index]), [["AUSD", "25.00", STRANGER, 0], ["AUSD", "10.00", "0x4cd00e387622c35bddb9b4c962c136462338bc31", 0]]);
+  assert.equal(found[1].viaRelay, true);
+  assert.match(receiptPayload(found[1]).aps.alert.body, /Bridged in through Relay/);
+  assert.match(receiptPayload(found[0]).aps.alert.body, /^From 0x/);
+});
+
+test("USDC on Monad counts too, and the query asks for both tokens", () => {
+  const found = extract({ logs: [log(1, 7_000_000n, { token: "0x754704bc059f8c67012fed69bc8a327a5aafb603" })], transactions: [tx(1)] });
+  assert.deepEqual(found.map((receipt) => [receipt.token, receipt.amount]), [["USDC", "7.00"]]);
+  assert.deepEqual(receiptQuery([ME], "mainnet", 5).logs[0].address, [AUSD.mainnet, "0x754704bc059f8c67012fed69bc8a327a5aafb603"]);
 });
 
 test("poisoning dust is ignored, and several AUSD logs in one transaction are one receipt", () => {

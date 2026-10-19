@@ -1,6 +1,6 @@
 import { privateKeyToAccount } from "viem/accounts";
 
-import { CUSTODY, TRANSFER_TOPIC, decodeTransfer } from "./_ledger.mjs";
+import { PERPL, TRANSFER_TOPIC, decodeTransfer } from "./_ledger.mjs";
 import { shortAddress } from "./_watch.mjs";
 
 export const RX_KEY = "alerts:rx";
@@ -10,6 +10,13 @@ export const AUSD = {
   mainnet: "0x00000000efe302beaa2b3e6e1b18d08d69a9012a",
   testnet: "0xa9012a055bd4e0edff8ce09f960291c09d5322dc",
 };
+/// Native USDC on Monad: what some wallets and bridges deliver instead of AUSD. It lands in
+/// the same wallet and Desk swaps it, so it is money arriving all the same.
+export const USDC = { mainnet: "0x754704bc059f8c67012fed69bc8a327a5aafb603" };
+/// Relay's depository and the Agora faucet: money from them was asked for by the person
+/// (a bridge in, a swap, test funds), so it arrives with a different sentence, not none.
+export const RELAY = new Set(["0x4cd00e387622c35bddb9b4c962c136462338bc31"]);
+export const AGORA_FAUCET = "0xd236c18d274e54faccc3dd9dda4b27965a73ee6c";
 const MIN_MON = 10n ** 16n;
 const MIN_AUSD = 10_000n;
 const CHUNK = 1_000;
@@ -27,7 +34,9 @@ export function faucetSender(key = process.env.FAUCET_PRIVATE_KEY) {
   try { return privateKeyToAccount(key).address.toLowerCase(); } catch { return null; }
 }
 
-export const skipList = (extra = []) => new Set([...CUSTODY, ...extra.filter(Boolean).map(lower)]);
+/// Perpl's contracts and Desk's own faucet: a withdrawal from the venue or test funds are not
+/// someone sending money. Relay is not skipped: a bridge in is exactly what people wait for.
+export const skipList = (extra = []) => new Set([...PERPL, AGORA_FAUCET, ...extra.filter(Boolean).map(lower)]);
 
 export function parseMe(me) {
   if (me == null) return { me: null };
@@ -42,9 +51,10 @@ export function parseMe(me) {
 export function receiptQuery(owners, network, from) {
   const chunks = [];
   for (let index = 0; index < owners.length; index += CHUNK) chunks.push(owners.slice(index, index + CHUNK));
+  const tokens = [AUSD[network], USDC[network]].filter(Boolean);
   return {
     from_block: from,
-    logs: chunks.map((chunk) => ({ address: [AUSD[network]], topics: [[TRANSFER_TOPIC], [], chunk.map(padTopic)] })),
+    logs: chunks.map((chunk) => ({ address: tokens, topics: [[TRANSFER_TOPIC], [], chunk.map(padTopic)] })),
     transactions: chunks.map((chunk) => ({ to: chunk })),
     field_selection: {
       log: ["block_number", "transaction_hash", "log_index", "address", "topic1", "topic2", "topic3", "data"],
@@ -93,15 +103,16 @@ export function extractReceipts({ network, page, owners, skip }) {
   }
   const sums = new Map();
   for (const log of page.logs ?? []) {
-    if (lower(log.address) !== AUSD[network]) continue;
+    const token = lower(log.address) === AUSD[network] ? "AUSD" : lower(log.address) === USDC[network] ? "USDC" : null;
+    if (!token) continue;
     const transfer = decodeTransfer(log);
     if (!transfer || !mine.has(transfer.to)) continue;
     const sender = lower(byHash.get(transfer.hash)?.from);
     if (!sender || sender === transfer.to || transfer.from === transfer.to || skip.has(sender) || skip.has(transfer.from)) continue;
-    const key = `${transfer.hash}:${transfer.to}`;
+    const key = `${transfer.hash}:${transfer.to}:${token}`;
     const entry = sums.get(key);
     if (entry) entry.raw += transfer.raw;
-    else sums.set(key, { network, token: "AUSD", owner: transfer.to, raw: transfer.raw, from: transfer.from, hash: transfer.hash, index: transfer.index, block: transfer.block || 0 });
+    else sums.set(key, { network, token, owner: transfer.to, raw: transfer.raw, from: transfer.from, hash: transfer.hash, index: transfer.index, block: transfer.block || 0, viaRelay: RELAY.has(sender) || RELAY.has(transfer.from) });
   }
   for (const entry of sums.values()) if (entry.raw >= MIN_AUSD) out.push({ ...entry, amount: ausdAmount(entry.raw) });
   return out.sort((a, b) => a.block - b.block || (a.index ?? -1) - (b.index ?? -1));
@@ -110,15 +121,16 @@ export function extractReceipts({ network, page, owners, skip }) {
 const receiptAps = (title, body) => ({ alert: { title, body }, sound: "default", "thread-id": "receipt", category: "desk.receipt" });
 
 export function receiptPayload(receipt) {
-  const { network, token, amount, from, hash } = receipt;
+  const { network, token, amount, from, hash, viaRelay } = receipt;
+  const body = viaRelay ? `Bridged in through Relay, on Monad ${network}.` : `From ${shortAddress(from)} on Monad ${network}.`;
   return {
-    aps: receiptAps(`You received ${grouped(amount)} ${token}`, `From ${shortAddress(from)} on Monad ${network}.`),
+    aps: receiptAps(`You received ${grouped(amount)} ${token}`, body),
     desk: { type: "receipt", network, token, amount, from, hash },
   };
 }
 
 export function summaryPayload(network, receipts) {
-  const tokens = ["MON", "AUSD"].filter((token) => receipts.some((receipt) => receipt.token === token));
+  const tokens = ["MON", "AUSD", "USDC"].filter((token) => receipts.some((receipt) => receipt.token === token));
   return {
     aps: receiptAps(`You received ${receipts.length} deposits`, `${tokens.join(" and ")} on Monad ${network}.`),
     desk: { type: "receipt", network, summary: true },
