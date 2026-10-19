@@ -169,6 +169,15 @@ test("the worker simulates, sends and records; a revert in simulation fails the 
   assert.equal(JSON.parse(await store.get(K.job(second.body.id))).status, "failed");
   assert.equal(JSON.parse(await store.get(K.job(second.body.id))).reason, "already-used");
   assert.equal(sent.length, 1, "nothing was sent");
+
+  // An empty wallet is told so before anything is simulated.
+  const third = await prepare({ store, fetchImpl: relayFetch(), nonces, user: wallet.address, to: FRIEND, amount: "5", now: fixedNow });
+  await submit({ store, body: { id: third.body.id, ...(await signPair(third.body)) }, now: fixedNow });
+  let simulated = 0;
+  const empty = createSendWorker({ store, chain: { ...chain, ausdBalance: async () => 0n, simulate: async () => { simulated += 1; } }, logger: { log() {}, warn() {}, error() {} }, now: fixedNow });
+  await empty.tick();
+  assert.equal(JSON.parse(await store.get(K.job(third.body.id))).reason, "not-enough-ausd");
+  assert.equal(simulated, 0);
 });
 
 test("typed data: the Send and the Permit carry what the contract hashes", () => {

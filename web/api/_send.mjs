@@ -305,6 +305,10 @@ export function createSendWorker({ store, chain, contract = process.env.SEND_CON
     if (job.status !== "queued") return;
     const save = (patch) => store.set(K.job(id), JSON.stringify({ ...job, ...patch }), { ex: JOB_TTL_S });
     if (Number(job.intent.deadline) * 1000 < now() + 5_000) { await save({ status: "failed", reason: "expired" }); return; }
+    if (chain.ausdBalance) {
+      const held = await chain.ausdBalance(job.intent.from).catch(() => null);
+      if (held != null && BigInt(held) < BigInt(job.intent.amount)) { await save({ status: "failed", reason: "not-enough-ausd" }); return; }
+    }
     const data = sendCalldata(job);
     try {
       await chain.simulate({ to: contract, data });
@@ -339,7 +343,7 @@ export function reasonOf(error) {
   const text = String(error?.shortMessage ?? error?.message ?? error ?? "");
   if (/Expired/.test(text)) return "expired";
   if (/WrongNonce/.test(text)) return "already-used";
-  if (/insufficient|exceeds balance|transfer amount/i.test(text)) return "not-enough-ausd";
+  if (/insufficient|exceeds balance|transfer amount|e450d38c/i.test(text)) return "not-enough-ausd";
   if (/CallFailed/.test(text)) return "route-failed";
   if (/BadSignature|WrongCalls|NotAllowed/.test(text)) return "refused";
   return text.slice(0, 120) || "failed";

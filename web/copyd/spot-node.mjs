@@ -34,8 +34,11 @@ export function spotChain({ reader, writer }) {
       });
     },
     wait: (hash) => reader.waitForTransactionReceipt({ hash, timeout: 60_000 }),
+    /// A wallet's AUSD, in base units, for the send worker to refuse an empty wallet plainly.
+    ausdBalance: (owner) => reader.readContract({ address: SPOT.ausd, abi: ERC20_BALANCE, functionName: "balanceOf", args: [owner] }),
   };
 }
+const ERC20_BALANCE = [{ name: "balanceOf", type: "function", stateMutability: "view", inputs: [{ name: "owner", type: "address" }], outputs: [{ type: "uint256" }] }];
 
 /// What the API and the engine read from a wallet: its code, nonces and the hook's books.
 export function spotReads({ reader, hook, desk }) {
