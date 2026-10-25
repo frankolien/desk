@@ -65,6 +65,38 @@ struct APIKeyStore: Sendable {
         SecItemDelete(baseQuery(for: address) as CFDictionary)
     }
 
+    /// The first derived index worth offering Perpl: every lower one was enrolled or refused from
+    /// this phone. Kept apart from the token so deleting the account leaves it, or the next
+    /// sign-in walks the same registered keys again and ends on the same refusal.
+    func nextTradingIndex(for address: EthereumAddress) -> UInt32 {
+        var query = indexQuery(for: address)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data, let text = String(data: data, encoding: .utf8),
+              let index = UInt32(text) else { return TradingKeyIndex.initial }
+        return max(index, TradingKeyIndex.initial)
+    }
+
+    func noteTradingIndicesTried(below next: UInt32, for address: EthereumAddress) {
+        guard next > nextTradingIndex(for: address) else { return }
+        let data = Data(String(next).utf8)
+        let query = indexQuery(for: address)
+        let attributes = [kSecValueData as String: data]
+        guard SecItemUpdate(query as CFDictionary, attributes as CFDictionary) == errSecItemNotFound else { return }
+        var item = query
+        item[kSecValueData as String] = data
+        item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        SecItemAdd(item as CFDictionary, nil)
+    }
+
+    private func indexQuery(for address: EthereumAddress) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: service + ".next-index",
+         kSecAttrAccount as String: address.checksummed.lowercased()]
+    }
+
     private func baseQuery(for address: EthereumAddress) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: service,

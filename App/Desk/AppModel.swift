@@ -389,6 +389,7 @@ final class AppModel {
             let session = session
             let vaultNetwork = network.rawValue
             let expected = address
+            let indices = indicesToOffer
             let enrolled = try await passkey.withKeys { [weak self] wallet, tradingKeys in
                 // Another passkey picked at the prompt is another wallet. Opening its desk
                 // here would file its key under this account.
@@ -398,7 +399,7 @@ final class AppModel {
                 let opened = try await sequence.open(
                     wallet: wallet,
                     tradingKeys: { try tradingKeys.key(at: $0) },
-                    indices: TradingKeyIndex.initial..<(TradingKeyIndex.initial + TradingKeyIndex.attempts),
+                    indices: indices,
                     deposit: deposit,
                     label: "Desk on iPhone",
                     report: { progress in
@@ -411,15 +412,29 @@ final class AppModel {
                 await session.open(enrolledKey)
                 return APIKeyStore.Stored(apiKey: opened.apiKey, tradingIndex: opened.index)
             }
-            if let address { try apiKeys.save(enrolled.apiKey, tradingIndex: enrolled.tradingIndex, for: address) }
+            if let address {
+                try apiKeys.save(enrolled.apiKey, tradingIndex: enrolled.tradingIndex, for: address)
+                apiKeys.noteTradingIndicesTried(below: enrolled.tradingIndex + 1, for: address)
+            }
             sessionTradingIndex = enrolled.tradingIndex
             isKeyUnlocked = true
 
             await enterTrading(enrolled, context: context)
         } catch {
+            // Perpl refused the last of this round as already registered, so the next tap starts past them.
+            if case PerplREST.Failure.rejected(status: 409, _) = error, let address {
+                apiKeys.noteTradingIndicesTried(below: indicesToOffer.upperBound, for: address)
+            }
             openingProblem = Self.openingSentence(for: error)
             openingStep = nil
         }
+    }
+
+    /// Each sign-in, browser and reinstall enrols another derived key and Perpl never reissues
+    /// one, so the walk starts where the last one on this phone stopped.
+    private var indicesToOffer: Range<UInt32> {
+        let start = address.map { apiKeys.nextTradingIndex(for: $0) } ?? TradingKeyIndex.initial
+        return start..<(start + TradingKeyIndex.attempts)
     }
 
     private func enterTrading(_ stored: APIKeyStore.Stored, context: PerplContext) async {
@@ -1056,6 +1071,12 @@ final class AppModel {
         case PerplREST.Failure.unauthorized(let status, let detail):
             return "Perpl refused trading-key registration (HTTP \(status))"
                 + (detail.map { ": \($0)" } ?? ".")
+        case PerplREST.Failure.rejected(status: 409, _), Enrolment.Failure.noCandidateKeys:
+            return "Every trading key Desk tried is already registered with Perpl from earlier "
+                + "sign-ins. Tap again and Desk tries the next ones."
+        case PerplREST.Failure.rejected(status: 423, _):
+            return "This account has reached Perpl's limit of 16 active API keys, so no more phones "
+                + "or browsers can be added. Perpl only revokes keys in its own web app."
         case PerplREST.Failure.rejected(let status, let detail):
             return "Perpl rejected trading-key registration (HTTP \(status))"
                 + (detail.map { ": \($0)" } ?? ".")
