@@ -30,10 +30,12 @@ export async function walletResource(address, { chainIndex = MONAD, contract = "
   const wanted = solana ? address : address.toLowerCase();
   const chains = Object.keys(CHAINS).filter((index) => CHAINS[index].rpc !== null && index !== "501");
 
-  const [identities, balances, desk] = await Promise.all([
+  // The ledger reads HyperSync and the balances read OKX: neither waits on the other.
+  const [identities, balances, desk, ledger] = await Promise.all([
     resolveIdentities([wanted], { fetchImpl, chain, store, ens }).catch(() => ({})),
     solana ? walletBalances(wanted, ["501"]).catch(() => null) : balancesAcross(wanted, chains, chainIndex),
     solana ? null : readDesk(wanted, venue ?? (sharedVenue ??= chainReader())).catch(() => null),
+    solana ? solanaLedger(wanted, { store, now }) : monadLedger(wanted, { store, hypersync, now }),
   ]);
   const identity = identities[wanted] ?? null;
   const wallet = withDesk(balances ? describeWallet(balances, contract) : { portfolio: null, chains: [], held: null, holdings: [] }, desk);
@@ -42,7 +44,6 @@ export async function walletResource(address, { chainIndex = MONAD, contract = "
     wallet.held = match ? { balance: match.balance, value: match.value } : null;
   }
 
-  const ledger = solana ? await solanaLedger(wanted, { store, now }) : await monadLedger(wanted, { store, hypersync, now });
   const labels = walletLabels({ identity, ledger, holdings: wallet.holdings, now: now() });
   const logos = await logosFor([
     ...wallet.holdings.map((row) => ({ chainIndex: row.chainIndex, contract: row.contract, symbol: row.symbol })),
