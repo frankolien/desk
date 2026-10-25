@@ -82,7 +82,7 @@ final class AppModel {
     private let session = SigningSession()
     private let passkey: any PasskeyService
     private var apiKeys: APIKeyStore { APIKeyStore.forNetwork(network) }
-    private(set) var network: DeskNetwork = NetworkChoice.saved ?? .testnet
+    private(set) var network: DeskNetwork = NetworkChoice.saved ?? .mainnet
     /// False on a fresh install until the wallet is known, so a mainnet desk reopens on mainnet.
     private var networkIsSettled = NetworkChoice.saved != nil
     private var historyRefilled: Set<String> = []
@@ -1529,9 +1529,12 @@ enum NetworkChoice {
         SecItemAdd(added as CFDictionary, nil)
     }
 
-    /// With no choice saved, a wallet that enrolled on mainnet is a mainnet desk.
+    /// With no choice saved, Desk is a mainnet app: only a wallet whose desk on this phone is
+    /// testnet alone goes back there.
     static func likely(for address: EthereumAddress) -> DeskNetwork {
-        APIKeyStore.forNetwork(.mainnet).load(for: address) != nil ? .mainnet : .testnet
+        let onMainnet = APIKeyStore.forNetwork(.mainnet).load(for: address) != nil
+        let onTestnet = APIKeyStore.forNetwork(.testnet).load(for: address) != nil
+        return onTestnet && !onMainnet ? .testnet : .mainnet
     }
 }
 
