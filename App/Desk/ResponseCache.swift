@@ -47,6 +47,39 @@ actor ResponseCache {
         }
     }
 
+    /// The phone's copy first, when it has one young enough, then the network's. When the server
+    /// answered from its own held copy while it rebuilds (`"refreshing":true`), the app asks
+    /// again a few times over the next seconds, so the screen ends on the rebuilt answer. A network failure after
+    /// a copy was shown ends the stream quietly; with nothing shown it is thrown.
+    nonisolated func updates(_ url: URL, maxStale: TimeInterval = 86_400) -> AsyncThrowingStream<Data, Error> {
+        AsyncThrowingStream { continuation in
+            let work = Task {
+                var shown = false
+                if let held = await cached(url, maxAge: maxStale) {
+                    continuation.yield(held)
+                    shown = true
+                }
+                do {
+                    var (data, _) = try await data(from: url, maxStale: shown ? 0 : maxStale)
+                    continuation.yield(data)
+                    // Smart Money's rebuild takes about twelve seconds; a wallet's a few.
+                    for pause in [3, 4, 5, 6] where Self.isRefreshing(data) {
+                        try await Task.sleep(for: .seconds(pause))
+                        (data, _) = try await self.data(from: url, maxStale: 0)
+                        continuation.yield(data)
+                    }
+                    continuation.finish()
+                } catch {
+                    if shown || error is CancellationError { continuation.finish() } else { continuation.finish(throwing: error) }
+                }
+            }
+            continuation.onTermination = { _ in work.cancel() }
+        }
+    }
+
+    private static let refreshingMarker = Data(#""refreshing":true"#.utf8)
+    nonisolated static func isRefreshing(_ data: Data) -> Bool { data.range(of: refreshingMarker) != nil }
+
     /// A timeout, a dropped connection, a 429 or a 5xx gets two more tries with a pause;
     /// no network at all does not, because the stale copy is the better answer right now.
     private static func fetch(_ url: URL) async throws -> Data {

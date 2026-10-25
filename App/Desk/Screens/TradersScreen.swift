@@ -1425,13 +1425,14 @@ struct TraderTokensList: View {
         ]
         guard let url = components.url else { return }
         do {
-            let (data, _) = try await ResponseCache.shared.data(from: url, maxStale: 300)
-            let resource = try JSONDecoder().decode(Resource.self, from: data)
-            logos = resource.logos ?? [:]
-            holdings = resource.holdings
-                .filter { $0.chainIndex != "501" && ($0.value ?? 0) >= 1 }
-                .sorted { ($0.value ?? 0) > ($1.value ?? 0) }
-            failed = false
+            for try await data in ResponseCache.shared.updates(url, maxStale: 3_600) {
+                guard let resource = try? JSONDecoder().decode(Resource.self, from: data) else { continue }
+                logos = resource.logos ?? [:]
+                holdings = resource.holdings
+                    .filter { $0.chainIndex != "501" && ($0.value ?? 0) >= 1 }
+                    .sorted { ($0.value ?? 0) > ($1.value ?? 0) }
+                failed = false
+            }
         } catch {
             failed = holdings == nil
         }

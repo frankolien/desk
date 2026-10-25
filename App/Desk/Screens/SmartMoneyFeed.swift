@@ -43,11 +43,13 @@ struct SmartMoneyTrade: Decodable, Identifiable, Sendable {
     func load() async {
         let url = URL(string: "https://web-lovat-nine-49.vercel.app/api/token-details?view=smart-money")!
         do {
-            let (data, _) = try await ResponseCache.shared.data(from: url)
-            let body = try JSONDecoder().decode(Response.self, from: data)
-            monad = body.monad ?? []
-            trades = body.trades
-            failed = false
+            for try await data in ResponseCache.shared.updates(url) {
+                guard let body = try? JSONDecoder().decode(Response.self, from: data) else { continue }
+                monad = body.monad ?? []
+                trades = body.trades
+                failed = false
+                loaded = true
+            }
         } catch {
             failed = trades.isEmpty && monad.isEmpty
         }

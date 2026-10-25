@@ -1357,14 +1357,12 @@ extension MarketScreen {
         var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/token-discovery")!
         components.queryItems = [kind.query]
         let url = components.url!
-        if lists[kind] == nil, let cached = await ResponseCache.shared.cached(url),
-           let tokens = try? JSONDecoder().decode(Response.self, from: cached).tokens {
-            lists[kind] = tokens.filter { $0.chainIndex != "501" }
-        }
         do {
-            let (data, _) = try await ResponseCache.shared.data(from: url)
-            lists[kind] = try JSONDecoder().decode(Response.self, from: data).tokens.filter { $0.chainIndex != "501" }
-            failed.remove(kind)
+            for try await data in ResponseCache.shared.updates(url) {
+                guard let tokens = try? JSONDecoder().decode(Response.self, from: data).tokens else { continue }
+                lists[kind] = tokens.filter { $0.chainIndex != "501" }
+                failed.remove(kind)
+            }
         } catch {
             if lists[kind]?.isEmpty ?? true { failed.insert(kind) }
         }

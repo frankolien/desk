@@ -613,25 +613,18 @@ final class TokenDiscoveryModel: ObservableObject {
         var components = URLComponents(string: "https://web-lovat-nine-49.vercel.app/api/token-discovery")!
         if !query.isEmpty { components.queryItems = [URLQueryItem(name: "q", value: query)] }
         let url = components.url!
-        if (intoSearch ? searchResults : trending).isEmpty,
-           let cached = await ResponseCache.shared.cached(url) {
-            let tokens = try? await Task.detached(priority: .utility) {
-                try JSONDecoder().decode(Response.self, from: cached).tokens.filter { $0.chainIndex != "501" }
-            }.value
-            if let tokens {
-                if intoSearch { searchResults = tokens } else { trending = tokens }
-            }
-        }
         isLoading = (intoSearch ? searchResults : trending).isEmpty
         if isLoading { errorText = nil }
         do {
-            let (data, _) = try await ResponseCache.shared.data(from: url)
-            let tokens = try await Task.detached(priority: .utility) {
-                try JSONDecoder().decode(Response.self, from: data).tokens.filter { $0.chainIndex != "501" }
-            }.value
-            guard !intoSearch || latestQuery == query else { return }
-            if intoSearch { searchResults = tokens } else { trending = tokens }
-            errorText = nil
+            for try await data in ResponseCache.shared.updates(url) {
+                guard let tokens = try? await Task.detached(priority: .utility, operation: {
+                    try JSONDecoder().decode(Response.self, from: data).tokens.filter { $0.chainIndex != "501" }
+                }).value else { continue }
+                guard !intoSearch || latestQuery == query else { return }
+                if intoSearch { searchResults = tokens } else { trending = tokens }
+                errorText = nil
+                isLoading = false
+            }
         } catch {
             if (intoSearch ? searchResults : trending).isEmpty {
                 errorText = "Live token data could not be loaded. Pull back and try again."
@@ -1588,15 +1581,17 @@ private final class SpotLiveFeed: ObservableObject {
             URLQueryItem(name: "address", value: contract)
         ]
         do {
-            let (data, _) = try await ResponseCache.shared.data(from: components.url!)
-            let payload = try await Task.detached(priority: .utility) {
-                try Self.decodeDetails(data)
-            }.value
-            details = payload.details
-            holders = payload.holders
-            detailsError = nil
+            // The phone's copy paints the page while the fresh one is on its way.
+            for try await data in ResponseCache.shared.updates(components.url!, maxStale: 900) {
+                guard let payload = try? await Task.detached(priority: .utility, operation: {
+                    try Self.decodeDetails(data)
+                }).value else { continue }
+                details = payload.details
+                holders = payload.holders
+                detailsError = nil
+            }
         } catch {
-            detailsError = "Token details are temporarily unavailable."
+            if details == nil { detailsError = "Token details are temporarily unavailable." }
         }
     }
 
@@ -3795,10 +3790,13 @@ private struct WalletProfileScreen: View {
         }
         .task { await TradeAlerts.shared.refreshPermission() }
         .task(id: profileReady) {
-            guard profileReady, resource?.ledger.status == "indexing" else { return }
-            try? await Task.sleep(for: .seconds(8))
-            guard !Task.isCancelled else { return }
-            await loadResource()
+            // A wallet seen for the first time is indexed while the page is open: ask again until it's done.
+            guard profileReady else { return }
+            for _ in 0..<15 where resource?.ledger.status == "indexing" {
+                try? await Task.sleep(for: .seconds(8))
+                guard !Task.isCancelled else { return }
+                await loadResource()
+            }
         }
         .navigationDestination(item: $opened) { token in
             SpotTokenDetailScreen(token: token, model: model)
@@ -4096,30 +4094,47 @@ private struct WalletProfileScreen: View {
             URLQueryItem(name: "contract", value: token?.contract ?? ""),
         ]
         guard let url = components.url else { resourceFailed = true; profileReady = true; return }
+        // The phone's last copy of this wallet shows at once and the network's replaces it.
+        // Logos already on the phone come with it; the rest fill in as they arrive.
         do {
-            let (data, _) = try await ResponseCache.shared.data(from: url, maxStale: 300)
-            let snapshot = try JSONDecoder().decode(WalletResource.self, from: data)
-            let artwork = await prepareArtwork(for: snapshot)
-            guard !Task.isCancelled else { return }
-            preparedArtwork = artwork
-            resource = snapshot
-            resourceFailed = false
+            for try await data in ResponseCache.shared.updates(url, maxStale: 3_600) {
+                guard let snapshot = try? JSONDecoder().decode(WalletResource.self, from: data) else { continue }
+                let urls = artworkURLs(for: snapshot)
+                let held = await Self.artwork(urls, fetching: false)
+                guard !Task.isCancelled else { return }
+                preparedArtwork.merge(held) { _, new in new }
+                resource = snapshot
+                resourceFailed = false
+                profileReady = true
+                let missing = urls.filter { preparedArtwork[$0] == nil }
+                if !missing.isEmpty {
+                    let fetched = await Self.artwork(missing, fetching: true)
+                    guard !Task.isCancelled else { return }
+                    preparedArtwork.merge(fetched) { _, new in new }
+                }
+            }
         } catch {
             guard !Task.isCancelled else { return }
-            resourceFailed = true
+            resourceFailed = resource == nil
         }
         profileReady = true
     }
 
-    private func prepareArtwork(for snapshot: WalletResource) async -> [URL: UIImage] {
+    private func artworkURLs(for snapshot: WalletResource) -> [URL] {
         var urls = Set((snapshot.logos ?? [:]).values.compactMap(TokenArtwork.url))
         if let url = token?.artworkURL { urls.insert(url) }
         if let url = identity?.avatarURL { urls.insert(url) }
-        return await withTaskGroup(of: (URL, UIImage?).self, returning: [URL: UIImage].self) { group in
-            for url in urls.prefix(32) {
+        return Array(urls.prefix(32))
+    }
+
+    /// The images the phone holds for `urls`; with `fetching`, the network's for the rest.
+    private static func artwork(_ urls: [URL], fetching: Bool) async -> [URL: UIImage] {
+        await withTaskGroup(of: (URL, UIImage?).self, returning: [URL: UIImage].self) { group in
+            for url in urls {
                 group.addTask {
                     if let cached = await ResponseCache.shared.cached(url, maxAge: 7 * 86_400),
                        let image = UIImage(data: cached) { return (url, image) }
+                    guard fetching else { return (url, nil) }
                     var request = URLRequest(url: url)
                     request.timeoutInterval = 3
                     guard let (data, response) = try? await URLSession.shared.data(for: request),

@@ -42,9 +42,12 @@ final class SignalsModel {
         components.queryItems = [URLQueryItem(name: "view", value: "signals"), URLQueryItem(name: "window", value: window)]
         guard let url = components.url else { return }
         do {
-            let (data, _) = try await ResponseCache.shared.data(from: url, maxStale: 600)
-            signals = try JSONDecoder().decode(Response.self, from: data).signals
-            problem = nil
+            for try await data in ResponseCache.shared.updates(url, maxStale: 600) {
+                guard let body = try? JSONDecoder().decode(Response.self, from: data) else { continue }
+                signals = body.signals
+                problem = nil
+                loaded = true
+            }
         } catch {
             problem = "Signals could not be read right now."
         }
