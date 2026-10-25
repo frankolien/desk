@@ -313,7 +313,7 @@ struct AccountScreen: View {
                         }
                     }
                 } message: {
-                    Text("Removes your Desk profile, alerts and this iPhone's keys. Your wallet and Perpl account live on-chain and stay; your passkey still opens them. Withdraw your AUSD first if you won't sign in again.")
+                    Text("Turns off copying on Desk's server, then removes your Desk profile, alerts and this iPhone's keys. Your wallet and Perpl account live on-chain and stay; your passkey still opens them. Withdraw your AUSD first if you won't sign in again.")
                 }
             if let deleteProblem {
                 Text(deleteProblem)

@@ -1254,16 +1254,39 @@ final class AppModel {
     func deleteAccount() async -> String? {
         guard let address else { return nil }
         let passkey = passkey
+        // Copying on the server outlives the profile and this phone's keys, so it stops first:
+        // an account the person deleted must not keep trading for them.
+        var copyingStopped = false
+        do {
+            let server = ServerCopy(network: network)
+            server.bind(address: address.checksummed)
+            if server.isOn {
+                try await server.disable()
+                copyingStopped = true
+            } else if (try? DeviceKey.signer(network: network, address: address.checksummed, create: false)) != nil {
+                // A reinstall loses the switch but not the device key: the server may still be copying.
+                if (try? await server.disable()) != nil { copyingStopped = true }
+            }
+            SpotCopier.shared.bind(address: address.checksummed)
+            if SpotCopier.shared.isOn {
+                try await SpotCopier.shared.disable(model: self)
+                copyingStopped = true
+            }
+        } catch PasskeyFailure.cancelledByUser {
+            return copyingStopped ? "Copying on the server was turned off, but nothing else was deleted." : "Nothing was deleted."
+        } catch {
+            return "Copying on Desk's server couldn't be turned off, so nothing was deleted. Try again."
+        }
         do {
             try await DeskProfile.delete(address: address) { digest in
                 try await passkey.withKeys { wallet, _ in try WalletSigner.sign(digest: digest, with: wallet) }
             }
         } catch PasskeyFailure.cancelledByUser {
-            return "Nothing was deleted."
+            return copyingStopped ? "Copying was turned off, but the profile wasn't deleted." : "Nothing was deleted."
         } catch DeskProfile.Failure.refused(let reason) {
             return reason
         } catch {
-            return "Desk's server couldn't be reached, so nothing was deleted. Try again."
+            return "Desk's server couldn't be reached, so the profile wasn't deleted. Try again."
         }
         for network in DeskNetwork.allCases { APIKeyStore.forNetwork(network).delete(for: address) }
         for network in DeskNetwork.allCases { TradingKeyVault.forget(address: address, network: network.rawValue) }
