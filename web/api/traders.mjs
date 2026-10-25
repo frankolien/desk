@@ -1,3 +1,4 @@
+import { lastGood } from "./_swr.mjs";
 import { createPublicClient, erc20Abi, http } from "viem";
 
 import { describe, shardKey, shardOf, statistics, tradesKey } from "./_history.mjs";
@@ -455,18 +456,21 @@ export function createHandler({ chain = chainReader(), fetchImpl = fetch, store 
       }
 
       if (view === "top") {
-        const scanned = await Promise.all([...book.values()].map(async (market) =>
-          (await chain.allPositions(market)).rows.map(({ row, mark }) => ({
-            accountId: row.accountId, raw: row, described: describePosition(row, mark, market),
-          }))));
-        const ranked = rankTraders(scanned.flat());
-        const accounts = await Promise.all(ranked.map((entry) => chain.accountById(entry.accountId)));
-        res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=300");
-        return res.status(200).json({
-          observedAt: Date.now(),
-          traders: ranked.map((entry, index) =>
-            summary(entry.accountId, accounts[index].accountAddr, entry.pnl, entry.positions)),
+        const { value, stale } = await lastGood(store, "swr:traders-top", { freshMs: 60_000, keepS: 86_400 }, async () => {
+          const scanned = await Promise.all([...book.values()].map(async (market) =>
+            (await chain.allPositions(market)).rows.map(({ row, mark }) => ({
+              accountId: row.accountId, raw: row, described: describePosition(row, mark, market),
+            }))));
+          const ranked = rankTraders(scanned.flat());
+          const accounts = await Promise.all(ranked.map((entry) => chain.accountById(entry.accountId)));
+          return {
+            observedAt: Date.now(),
+            traders: ranked.map((entry, index) =>
+              summary(entry.accountId, accounts[index].accountAddr, entry.pnl, entry.positions)),
+          };
         });
+        res.setHeader("Cache-Control", stale ? "no-store" : "public, s-maxage=60, stale-while-revalidate=300");
+        return res.status(200).json(stale ? { ...value, refreshing: true } : value);
       }
 
       if (view === "trader" || view === "following") {

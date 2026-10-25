@@ -1,6 +1,7 @@
 import { okxGet, okxPost } from "./_okx.mjs";
 import { chainName } from "./_chains.mjs";
 import { redisStore } from "./_store.mjs";
+import { lastGood } from "./_swr.mjs";
 import { handleHoldings } from "./_holdings.mjs";
 import { handleRisk } from "./_risk.mjs";
 import { handleEarly } from "./_early.mjs";
@@ -254,13 +255,17 @@ async function handleSmartMoney(req, res) {
   try {
     const key = process.env.MOBULA_API_KEY;
     const store = redisStore();
-    const [monad, trades] = await Promise.all([
-      key ? monadSmartMoney({ key, store }).catch(() => []) : [],
-      smartMoneyFeed().catch(() => []),
-    ]);
-    // Ten minutes at the edge: each fresh answer spends up to ~45 Mobula credits.
-    res.setHeader("Cache-Control", "public, s-maxage=600, stale-while-revalidate=1200");
-    return res.status(200).json({ observedAt: Date.now(), monad, trades });
+    // Ten minutes per rebuild, as before: each fresh answer spends up to ~45 Mobula credits.
+    // Held in Redis, so a cold edge answers from the last build instead of a 12-second rebuild.
+    const { value, stale } = await lastGood(store, "swr:smart-money", { freshMs: 600_000, keepS: 86_400 }, async () => {
+      const [monad, trades] = await Promise.all([
+        key ? monadSmartMoney({ key, store }).catch(() => []) : [],
+        smartMoneyFeed().catch(() => []),
+      ]);
+      return { observedAt: Date.now(), monad, trades };
+    });
+    res.setHeader("Cache-Control", stale ? "no-store" : "public, s-maxage=600, stale-while-revalidate=1200");
+    return res.status(200).json(stale ? { ...value, refreshing: true } : value);
   } catch (error) {
     return res.status(502).json({ error: error.message });
   }

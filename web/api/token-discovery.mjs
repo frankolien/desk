@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 import { chainName, isBuyable, isQuotable, nativeToken, CHAINS } from "./_chains.mjs";
+import { redisStore } from "./_store.mjs";
+import { lastGood } from "./_swr.mjs";
 
 function authHeaders(timestamp, requestPath) {
   const signature = crypto.createHmac("sha256", process.env.OKX_SECRET_KEY)
@@ -182,24 +184,33 @@ export default async function handler(req, res) {
   const sort = String(req.query.sort ?? "");
   try {
     if (!query && sort === "crypto") {
-      // CoinGecko's free tier is rate limited; the edge serves one answer a minute to everyone.
-      res.setHeader("Cache-Control", "s-maxage=60, stale-while-revalidate=600");
-      return res.status(200).json({ mode: "crypto", observedAt: Date.now(), tokens: await cryptoTokens() });
+      // CoinGecko's free tier is rate limited; one answer a minute serves everyone.
+      const { value, stale } = await lastGood(redisStore(), "swr:discovery:crypto", { freshMs: 60_000, keepS: 86_400 },
+        async () => ({ mode: "crypto", observedAt: Date.now(), tokens: await cryptoTokens() }));
+      res.setHeader("Cache-Control", stale ? "no-store" : "s-maxage=60, stale-while-revalidate=600");
+      return res.status(200).json(stale ? { ...value, refreshing: true } : value);
     }
     const listChain = sort === "holders" ? (chain || MONAD) : chain;
-    const rows = query
-      ? await searchTokens(query)
-      : await okxGet("/api/v6/dex/market/token/hot-token", {
-          ...(listChain ? { chainIndex: listChain } : {}),
-          rankingType: "4", rankingTimeFrame: "4", riskFilter: "true",
-          stableTokenFilter: "true", limit: listChain ? "40" : "20",
-        });
-    let tokens = homeFirst(rows.map(normalize).filter((token) => token.symbol && token.contract));
-    if (sort === "holders") tokens = byHolders(tokens);
-    res.setHeader("Cache-Control", query
-      ? "s-maxage=10, stale-while-revalidate=30"
-      : "s-maxage=30, stale-while-revalidate=90");
-    return res.status(200).json({ mode: query ? "search" : "trending", observedAt: Date.now(), tokens });
+    const build = async () => {
+      const rows = query
+        ? await searchTokens(query)
+        : await okxGet("/api/v6/dex/market/token/hot-token", {
+            ...(listChain ? { chainIndex: listChain } : {}),
+            rankingType: "4", rankingTimeFrame: "4", riskFilter: "true",
+            stableTokenFilter: "true", limit: listChain ? "40" : "20",
+          });
+      let tokens = homeFirst(rows.map(normalize).filter((token) => token.symbol && token.contract));
+      if (sort === "holders") tokens = byHolders(tokens);
+      return { mode: query ? "search" : "trending", observedAt: Date.now(), tokens };
+    };
+    if (query) {
+      res.setHeader("Cache-Control", "s-maxage=10, stale-while-revalidate=30");
+      return res.status(200).json(await build());
+    }
+    const { value, stale } = await lastGood(redisStore(), `swr:discovery:${listChain || "all"}:${sort || "trending"}`,
+      { freshMs: 30_000, keepS: 86_400 }, build);
+    res.setHeader("Cache-Control", stale ? "no-store" : "s-maxage=30, stale-while-revalidate=90");
+    return res.status(200).json(stale ? { ...value, refreshing: true } : value);
   } catch (error) {
     return res.status(502).json({ error: error.message || "Token discovery unavailable" });
   }

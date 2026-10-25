@@ -1,3 +1,4 @@
+import { lastGood } from "./_swr.mjs";
 import { redisStore } from "./_store.mjs";
 import { walletResource } from "./_wallet-resource.mjs";
 import { postMessage, readRoom } from "./_chat.mjs";
@@ -196,11 +197,15 @@ export function createHandler(fetchImpl = fetch, key = () => process.env.ETHERSC
     if (req.query.view === "wallet") {
       if (!validAddress(address) && !validSolana(address)) return res.status(400).json({ error: "A wallet address is required." });
       try {
-        const body = await wallet(address, {
-          chainIndex: String(req.query.chainIndex || "143"), contract: String(req.query.contract || ""), store, fetchImpl,
-        });
-        res.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=300");
-        return res.status(200).json(body);
+        const chainIndex = String(req.query.chainIndex || "143");
+        const contract = String(req.query.contract || "");
+        const keyed = address.startsWith("0x") ? address.toLowerCase() : address;
+        const { value: body, stale, ageMs } = await lastGood(store, `wr:${keyed}:${chainIndex}:${contract.toLowerCase()}`,
+          { freshMs: (held) => (held?.ledger?.status === "indexing" ? 5_000 : 30_000), keepS: 86_400 },
+          () => wallet(address, { chainIndex, contract, store, fetchImpl }));
+        // A held answer goes out at once; the edge must not keep it, so the app's second ask gets the rebuilt one.
+        res.setHeader("Cache-Control", stale ? "no-store" : "public, s-maxage=30, stale-while-revalidate=300");
+        return res.status(200).json(stale ? { ...body, refreshing: true, ageMs } : body);
       } catch (error) {
         return res.status(502).json({ error: "The wallet could not be read right now.", detail: error.message });
       }

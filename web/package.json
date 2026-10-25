@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-kms": "^3.1152.0",
+    "@vercel/functions": "3.9.11",
     "viem": "^2.56.6"
   }
 }
