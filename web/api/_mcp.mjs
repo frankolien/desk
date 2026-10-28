@@ -355,7 +355,7 @@ export function serverFor({ get, store = null, now = Date.now } = {}) {
     outputSchema: SmartMoney.extend({ kind: z.literal("smart_money"), url: s }), annotations: READ_ONLY, _meta: card("Reading smart money…", "Smart money ready"),
   }, async ({ scope, limit }) => {
     const { data, images } = await loadSmartMoney(get, { scope: scope ?? "all", limit: limit ?? 8, now });
-    return { structuredContent: { kind: "smart_money", ...data, url: `${SITE}/app` }, content: [{ type: "text", text: say.smart(data) }], _meta: { images } };
+    return { structuredContent: { kind: "smart_money", ...data, url: links.markets() }, content: [{ type: "text", text: say.smart(data) }], _meta: { images } };
   });
 
   return server;

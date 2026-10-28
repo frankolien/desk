@@ -73,6 +73,7 @@ export const links = {
   token: (chainIndex, contract) => `${SITE}/app/token/${chainIndex}/${contract}`,
   market: (name) => `${SITE}/app/trade/${encodeURIComponent(name)}`,
   traders: () => `${SITE}/app/traders`,
+  markets: () => `${SITE}/app/markets`,
 };
 
 /// Desk's public API, read with a deadline. Each failure becomes a sentence for the person.
