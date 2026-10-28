@@ -103,7 +103,7 @@ const NATIVE_LOGOS = {
   "56": "https://assets.coingecko.com/coins/images/825/large/bnb-icon2_2x.png",
   "137": "https://assets.coingecko.com/coins/images/32440/large/polygon.png",
   "43114": "https://assets.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite_Trans.png",
-  "143": "https://coin-images.coingecko.com/coins/images/38909/large/monad.png",
+  "143": "https://coin-images.coingecko.com/coins/images/38927/large/mon.png",
 };
 
 async function exists(url) {
