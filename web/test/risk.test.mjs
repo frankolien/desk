@@ -71,7 +71,7 @@ test("the score is half a point per unit of weight, capped at ten", () => {
 
 test("the grid metrics and badges come with the assessment", () => {
   const risk = assessToken({ liquidity: 60_000, holders: [holder("0xdev", 18), holder("0xa", 5)], creator: "0xDEV", riskFlag: "clear", communityRecognized: true, graduated: true, now: NOW });
-  assert.deepEqual(risk.metrics, { topTen: 23, creator: 18, liquidity: 60_000 });
+  assert.deepEqual(risk.metrics, { topTen: 23, creator: 18, liquidity: 60_000, pools: null });
   assert.deepEqual(risk.badges, [
     { code: "okx_clear", text: "OKX clear", ok: true },
     { code: "recognized", text: "Recognized", ok: true },
@@ -79,7 +79,7 @@ test("the grid metrics and badges come with the assessment", () => {
   ]);
   assert.equal(risk.level, "caution");
   const unknown = assessToken({ now: NOW });
-  assert.deepEqual(unknown.metrics, { topTen: null, creator: null, liquidity: null });
+  assert.deepEqual(unknown.metrics, { topTen: null, creator: null, liquidity: null, pools: null });
   assert.deepEqual(unknown.badges, []);
   assert.equal(assessToken({ holders: [holder("0xa", 5)], creator: "0xdev", now: NOW }).metrics.creator, 0);
   assert.equal(assessToken({ riskFlag: "high", communityRecognized: false, graduated: false, now: NOW }).badges.map((b) => b.ok).join(), "false,false,false");

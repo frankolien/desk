@@ -1,6 +1,7 @@
 import { okxGet, okxPost } from "./_okx.mjs";
 import { chainName } from "./_chains.mjs";
 import { redisStore } from "./_store.mjs";
+import { deeper, poolsFor } from "./_pools.mjs";
 import { lastGood } from "./_swr.mjs";
 import { handleHoldings } from "./_holdings.mjs";
 import { handleRisk } from "./_risk.mjs";
@@ -320,15 +321,20 @@ export default async function handler(req, res) {
 
   const identity = { chainIndex, tokenContractAddress: address };
   try {
-    const [priceRows, holderRows] = await Promise.all([
+    const [priceRows, holderRows, found] = await Promise.all([
       okxPost("/api/v6/dex/market/price-info", [identity]),
       okxGet("/api/v6/dex/market/token/holder", { ...identity, limit: "20" }),
+      poolsFor(chainIndex, [address], { store: redisStore() }).catch(() => new Map()),
     ]);
+    const priceInfo = Array.isArray(priceRows) ? priceRows[0] ?? null : priceRows;
+    // OKX's liquidity misses pools on DEXes it doesn't index; the deeper figure is the one to show.
+    const depth = deeper(number(priceInfo?.liquidity), found.get(address));
+    if (priceInfo && depth != null && depth !== number(priceInfo.liquidity)) priceInfo.liquidity = String(depth);
     res.setHeader("Cache-Control", "s-maxage=15, stale-while-revalidate=45");
     return res.status(200).json({
       symbol,
       observedAt: Date.now(),
-      priceInfo: Array.isArray(priceRows) ? priceRows[0] ?? null : priceRows,
+      priceInfo,
       holders: Array.isArray(holderRows) ? holderRows : holderRows?.holderList ?? [],
     });
   } catch (error) {

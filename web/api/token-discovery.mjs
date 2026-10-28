@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { chainName, isBuyable, isQuotable, nativeToken, CHAINS } from "./_chains.mjs";
 import { redisStore } from "./_store.mjs";
 import { lastGood } from "./_swr.mjs";
+import { withPoolDepth } from "./_pools.mjs";
 
 function authHeaders(timestamp, requestPath) {
   const signature = crypto.createHmac("sha256", process.env.OKX_SECRET_KEY)
@@ -200,6 +201,7 @@ export default async function handler(req, res) {
             stableTokenFilter: "true", limit: listChain ? "40" : "20",
           });
       let tokens = homeFirst(rows.map(normalize).filter((token) => token.symbol && token.contract));
+      tokens = await withPoolDepth(tokens, { store: redisStore() });
       if (sort === "holders") tokens = byHolders(tokens);
       return { mode: query ? "search" : "trending", observedAt: Date.now(), tokens };
     };

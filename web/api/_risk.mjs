@@ -1,4 +1,6 @@
 import { okxGet, okxPost } from "./_okx.mjs";
+import { deeper, poolsFor } from "./_pools.mjs";
+import { redisStore } from "./_store.mjs";
 
 const NADFUN_TOKEN_URL = "https://api.nad.fun/token/";
 
@@ -36,25 +38,29 @@ export function looksLikePool(holder, { liquidity, price }) {
 }
 
 export function assessToken({
-  liquidity = null, marketCap = null, holders = [], trades = [], price = null,
+  liquidity = null, marketCap = null, holders = [], trades = [], price = null, pools = null, poolAddresses = [],
   createdAt = null, creator = null, graduated = null, riskFlag = null, communityRecognized = null, now = Date.now(),
 } = {}) {
   const reasons = [];
   const facts = [];
   const badges = [];
-  const metrics = { topTen: null, creator: null, liquidity: liquidity ?? null };
+  const metrics = { topTen: null, creator: null, liquidity: liquidity ?? null, pools: pools ?? null };
+  const where = pools > 1 ? `across ${pools} pools` : "in pool";
   const push = (code, weight, text) => reasons.push({ code, weight, text, severity: weight >= 6 ? "high" : weight >= 3 ? "caution" : "info" });
 
   let checked = false;
 
   if (liquidity != null) {
     checked = true;
-    if (liquidity < 10_000) push("thin_liquidity", 6, `Liquidity is thin: ${compact(liquidity)} in pool`);
-    else if (liquidity < 50_000) push("light_liquidity", 3, `Liquidity is light: ${compact(liquidity)} in pool`);
+    if (liquidity < 10_000) push("thin_liquidity", 6, `Liquidity is thin: ${compact(liquidity)} ${where}`);
+    else if (liquidity < 50_000) push("light_liquidity", 3, `Liquidity is light: ${compact(liquidity)} ${where}`);
   }
 
+  // A pool holds tokens to trade against, not to sell: it is never one of the top wallets.
+  const isPool = new Set(poolAddresses.map((address) => String(address).toLowerCase()));
   const ranked = holders
     .map((row) => ({ address: String(row.address ?? "").toLowerCase(), amount: number(row.amount) ?? 0, percent: number(row.percent) ?? 0 }))
+    .filter((row) => !isPool.has(row.address))
     .sort((a, b) => b.percent - a.percent);
   if (ranked.length) {
     checked = true;
@@ -122,7 +128,7 @@ export async function nadfunToken(address, fetchImpl) {
   }
 }
 
-export async function handleRisk(req, res, { fetchImpl = fetch, okx = { get: okxGet, post: okxPost } } = {}) {
+export async function handleRisk(req, res, { fetchImpl = fetch, okx = { get: okxGet, post: okxPost }, store = redisStore(), pools = poolsFor } = {}) {
   const chainIndex = String(req.query.chainIndex ?? "");
   const address = String(req.query.address ?? "");
   if (!/^\d{1,10}$/.test(chainIndex) || !(/^0x[a-fA-F0-9]{40}$/.test(address) || (chainIndex === "501" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)))) {
@@ -133,17 +139,21 @@ export async function handleRisk(req, res, { fetchImpl = fetch, okx = { get: okx
   const flag = flagText === "" ? null : okxRiskLevel(flagText) ?? "clear";
   const recognized = req.query.communityRecognized == null ? null : String(req.query.communityRecognized) === "true";
   try {
-    const [priceRows, holderRows, tradeRows, launch] = await Promise.all([
+    const [priceRows, holderRows, tradeRows, launch, found] = await Promise.all([
       okx.post("/api/v6/dex/market/price-info", [identity]).catch(() => null),
       okx.get("/api/v6/dex/market/token/holder", { ...identity, limit: "20" }).catch(() => null),
       okx.get("/api/v6/dex/market/trades", { ...identity, limit: "100" }).catch(() => null),
       chainIndex === "143" ? nadfunToken(address, fetchImpl) : null,
+      pools(chainIndex, [address], { fetchImpl, store }).catch(() => new Map()),
     ]);
     const info = Array.isArray(priceRows) ? priceRows[0] : priceRows;
     const holders = (Array.isArray(holderRows) ? holderRows : holderRows?.holderList ?? [])
       .map((row) => ({ address: row.holderWalletAddress, amount: row.holdAmount, percent: row.holdPercent }));
+    const pooled = found.get(address) ?? null;
+    const liquidity = deeper(number(info?.liquidity), pooled);
     const assessment = assessToken({
-      liquidity: number(info?.liquidity), marketCap: number(info?.marketCap), price: number(info?.price),
+      liquidity, marketCap: number(info?.marketCap), price: number(info?.price),
+      pools: liquidity != null && pooled && liquidity === pooled.usd ? pooled.pools : null, poolAddresses: pooled?.addresses ?? [],
       holders, trades: Array.isArray(tradeRows) ? tradeRows : [],
       createdAt: launch?.createdAt ?? null, creator: launch?.creator ?? null, graduated: launch?.graduated ?? null,
       riskFlag: flag, communityRecognized: recognized,
