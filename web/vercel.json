@@ -72,6 +72,10 @@
     {
       "source": "/support",
       "destination": "/support/index.html"
+    },
+    {
+      "source": "/terms",
+      "destination": "/terms/index.html"
     }
   ],
   "headers": [

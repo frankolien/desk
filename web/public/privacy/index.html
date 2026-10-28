@@ -65,6 +65,7 @@
           <li><a href="#short">The short version</a></li>
           <li><a href="#phone">On your iPhone</a></li>
           <li><a href="#server">On our server</a></li>
+          <li><a href="#assistants">In ChatGPT and Claude</a></li>
           <li><a href="#third">Who else receives something</a></li>
           <li><a href="#not">What we do not do</a></li>
           <li><a href="#rights">Your choices</a></li>
@@ -73,7 +74,7 @@
       </nav>
 
       <div class="page-prose">
-        <p><em>Effective 2 October 2026.</em></p>
+        <p><em>Effective 28 October 2026.</em></p>
 
         <h2 id="short">The short version</h2>
         <p>The app has no passwords and no analytics. Your keys are made and kept on your iPhone. Our server learns only what it needs to send the push notifications you ask for, the public wallet addresses you look at, and the public name and picture of your Desk profile, if you set one. Signing out deletes your alert subscription from the server. Delete account in Settings also deletes your profile. The one exception to &ldquo;no tracking&rdquo; is the X ad pixel on this site&rsquo;s home page, described below.</p>
@@ -99,6 +100,15 @@
         <p>If you joined the waitlist on this site, we hold that email address until the invite has gone out, and delete it on request.</p>
         <p>Our hosts, Vercel and Railway, keep ordinary request logs, including IP addresses, for a short time. We use the IP address only for rate limits and never to identify anyone.</p>
 
+        <h2 id="assistants">In ChatGPT, Claude and other assistants</h2>
+        <p>Desk&rsquo;s plugin lets an assistant read public market data from Desk: token prices and risk, wallet portfolios and trading records, smart-money trades, and Perpl&rsquo;s traders and markets. It only reads. It can&rsquo;t trade, move money, sign anything or open your Desk wallet, and it needs no sign-in, so Desk never learns who you are in ChatGPT or Claude.</p>
+        <ul>
+          <li><strong>What the assistant sends.</strong> Only what a question needs: a wallet address or a public name such as <code>vitalik.eth</code>, a token&rsquo;s name or contract address, a market such as BTC, or how many results to show. Never your conversation.</li>
+          <li><strong>What ChatGPT adds.</strong> An anonymous ID that OpenAI makes for each user. Desk uses it for one thing: counting wallet lookups per minute, so one person can&rsquo;t exhaust the service for everyone. That count is kept for two minutes. ChatGPT may also send a coarse locale, location and app version with a request; Desk doesn&rsquo;t use or keep them.</li>
+          <li><strong>What Desk keeps.</strong> Answers about public addresses and tokens are cached for up to a day, so the next question is answered faster. A wallet someone looks up joins the list of public wallets Desk keeps indexed, so its Monad trading record stays current. Neither is linked to you or to your assistant account.</li>
+          <li><strong>Who answers.</strong> The services listed below answer those lookups and receive the public addresses and tokens involved. OpenAI and Anthropic hold your conversation under their own privacy policies.</li>
+        </ul>
+
         <h2 id="third">Who else receives something</h2>
         <p>Desk reads from and writes to services it does not run. Each receives only what the request needs:</p>
         <ul>
@@ -111,6 +121,7 @@
           <li><strong>Apple</strong> receives push notifications addressed to your device token.</li>
           <li><strong>X (Twitter)</strong> receives a visit to this site&rsquo;s home page through its ad pixel: the page address, your IP address and browser details, and it may set cookies. When you tap Get the app there, X also receives that click, so we can count how many people go on to TestFlight. Only the home page loads it. The app and this site&rsquo;s other pages do not.</li>
           <li><strong>Anthropic</strong> receives a public trader's aggregate figures to write a one-paragraph summary of their style. Never your data, and never an address.</li>
+          <li><strong>OpenAI and Anthropic</strong>, when you use Desk&rsquo;s plugin in ChatGPT or Claude, receive Desk&rsquo;s answers to the questions you ask there.</li>
         </ul>
         <p>The full list, with what each service is used for, is kept in the <a href="https://github.com/frankolien/desk/blob/main/docs/third-parties.md" target="_blank" rel="noreferrer">open repository</a>.</p>
 
@@ -148,6 +159,7 @@
           <a href="/status">Status</a>
           <a href="/security">Security</a>
           <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
           <a href="/support">Support</a>
           <a href="https://github.com/frankolien/desk" target="_blank" rel="noreferrer">GitHub</a>
           <a href="https://perpl.trade" target="_blank" rel="noreferrer">Perpl</a>
