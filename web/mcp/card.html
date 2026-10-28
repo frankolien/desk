@@ -156,6 +156,11 @@
     applyContext({ theme: window.openai?.theme });
     if (window.openai?.toolOutput) acceptOpenAI();
     window.addEventListener("openai:set_globals", () => { applyContext({ theme: window.openai?.theme }); if (!state.content && window.openai?.toolOutput) acceptOpenAI(); }, { passive: true });
+    // A host keeps the frame hidden until "initialized" arrives, so it is sent even when the
+    // host is slow to answer ui/initialize or never does.
+    let initialized = false;
+    const ready = () => { if (!initialized) { initialized = true; notify("ui/notifications/initialized", {}); } };
+    const fallback = setTimeout(ready, 2500);
     try {
       const init = await request("ui/initialize", {
         appInfo: { name: "Desk", version: "1.0.0" },
@@ -163,8 +168,9 @@
         protocolVersion: "2026-01-26",
       });
       applyContext(init?.hostContext ?? {});
-      notify("ui/notifications/initialized", {});
     } catch {}
+    clearTimeout(fallback);
+    ready();
   }
 
   function acceptOpenAI() {
@@ -311,7 +317,7 @@
             h("div", { class: "main" }, h("div", { class: "line1" }, row.symbol || "Token"), h("div", { class: "line2" }, chainName(row.chain))),
             h("div", { class: "end num" }, usd(row.valueUsd))];
           return row.contract
-            ? h("button", { class: "item", type: "button", "aria-label": `Ask about ${row.symbol} on ${chainName(row.chain)}`, onclick: () => ask(`Show the Desk token card for ${row.symbol} on ${row.chain} (${row.contract}).`) }, body)
+            ? h("button", { class: "item", type: "button", "aria-label": `Ask about ${row.symbol} on ${chainName(row.chain)}`, onclick: () => ask(`Show me ${row.symbol} on ${chainName(row.chain)} (${row.contract}).`) }, body)
             : h("div", { class: "item" }, body);
         }))));
     }
@@ -447,7 +453,7 @@
       h("div", {}, h("p", { class: "title" }, "Top traders on Perpl"), h("div", { class: "sub" }, "Ranked by open profit on Monad's perpetuals exchange")),
       h("div", { class: "list" }, (c.traders ?? []).map((t) => h("button", {
         class: "item", type: "button", "aria-label": `Ask about trader ${t.name || t.address}`,
-        onclick: () => ask(`Show the Desk wallet card for ${t.address}.`),
+        onclick: () => ask(`Show me the wallet ${t.address}.`),
       },
         h("span", { class: "num sub rank" }, String(t.rank)),
         picture(avatars[t.address], t.name || t.address, { small: true }),
@@ -465,13 +471,49 @@
       h("div", {}, h("p", { class: "title" }, "Smart money trades"), h("div", { class: "sub" }, "Wallets with a winning 30-day record")),
       rows.length ? h("div", { class: "list" }, rows.map((t) => h("button", {
         class: "item", type: "button", "aria-label": `Ask about ${t.symbol} on ${chainName(t.chain)}`,
-        onclick: () => ask(`Show the Desk token card for ${t.symbol} on ${t.chain} (${t.token}).`),
+        onclick: () => ask(`Show me ${t.symbol} on ${chainName(t.chain)} (${t.token}).`),
       },
         picture(tokens[`${t.chain}:${t.token}`], t.symbol, { small: true }),
         h("div", { class: "main" },
           h("div", { class: "line1" }, h("span", { class: t.side === "sell" ? "down" : "up" }, t.side === "sell" ? "Sold" : "Bought"), ` ${usd(t.valueUsd)} ${t.symbol}`),
           h("div", { class: "line2" }, [chainName(t.chain), `${short(t.wallet)}${t.otherWallets ? ` +${t.otherWallets} more` : ""}`, t.marketCapUsd != null ? `MC ${usd(t.marketCapUsd)}` : null].filter(Boolean).join(" · "))),
         h("div", { class: "end" }, h("div", { class: "line2" }, ago(t.time)), pct(t.change24hPercent, 0))))) : h("div", { class: "empty" }, "No smart-money trades in this window."),
+      footer(c.asOf), actions(c.url),
+    ];
+  }
+
+  function tokensCard(c, meta) {
+    const art = meta.images?.tokens ?? {};
+    const rows = c.tokens ?? [];
+    return [
+      h("div", {}, h("p", { class: "title" }, c.chain === "all" ? "Trending tokens" : `Trending on ${chainName(c.chain)}`),
+        h("div", { class: "sub" }, "The most actively traded tokens right now")),
+      rows.length ? h("div", { class: "list" }, rows.slice(0, 10).map((t) => h("button", {
+        class: "item", type: "button", "aria-label": `Ask about ${t.symbol} on ${chainName(t.chain)}`,
+        onclick: () => ask(`Show me ${t.symbol} on ${chainName(t.chain)} (${t.contract}).`),
+      },
+        picture(art[`${t.chain}:${t.contract}`], t.symbol, { small: true }),
+        h("div", { class: "main" }, h("div", { class: "line1" }, t.symbol || t.name),
+          h("div", { class: "line2" }, [t.name && t.name !== t.symbol ? t.name : null, t.marketCapUsd != null ? `MC ${usd(t.marketCapUsd)}` : null, t.liquidityUsd != null ? `Liq ${usd(t.liquidityUsd)}` : null].filter(Boolean).join(" · "))),
+        h("div", { class: "end" }, h("div", { class: "num" }, price(t.priceUsd)), pct(t.change24hPercent))))) : h("div", { class: "empty" }, "Nothing is trending here right now."),
+      footer(c.asOf), actions(c.url),
+    ];
+  }
+
+  function marketsCard(c) {
+    const rows = c.markets ?? [];
+    return [
+      h("div", {}, h("p", { class: "title" }, rows.length === 1 ? `${rows[0].market} on Perpl` : "Perpl markets"),
+        h("div", { class: "sub" }, `Perpetuals on Monad, settled in ${c.collateral || "AUSD"}`)),
+      h("div", { class: "list" }, rows.map((m) => h("button", {
+        class: "item", type: "button", "aria-label": `Ask about the ${m.market} market`,
+        onclick: () => ask(`Who is trading ${m.market} on Perpl, and how is it moving?`),
+      },
+        h("div", { class: "main" }, h("div", { class: "line1" }, m.market),
+          h("div", { class: "line2 num" }, [m.maxLeverage ? `Up to ${m.maxLeverage}×` : null,
+            m.fundingRatePercent != null ? `Funding ${m.fundingRatePercent}% per ${m.fundingIntervalMinutes ?? "?"} min` : null,
+            m.openInterestUsd != null ? `OI ${usd(m.openInterestUsd)}` : null].filter(Boolean).join(" · "))),
+        h("div", { class: "end" }, h("div", { class: "num" }, price(m.markPrice)), pct(m.change24hPercent))))),
       footer(c.asOf), actions(c.url),
     ];
   }
@@ -485,6 +527,8 @@
       : c.kind === "token" ? tokenCard(c, meta)
       : c.kind === "traders" ? tradersCard(c, meta)
       : c.kind === "smart_money" ? smartMoneyCard(c, meta)
+      : c.kind === "tokens" ? tokensCard(c, meta)
+      : c.kind === "markets" ? marketsCard(c)
       : [h("div", { class: "error" }, "This card type isn't supported.")];
     root.replaceChildren(...parts);
     root.setAttribute("aria-busy", "false");
