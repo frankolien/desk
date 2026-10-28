@@ -197,7 +197,7 @@ console.log(body.meta.asOf, body.data.traders[0].address);</code></pre>
           <div class="page-prose">
             <p class="docs-crumb">AI assistants</p>
             <h2 id="h-mcp">Desk in ChatGPT &amp; Claude</h2>
-            <p class="docs-summary">The same data as an MCP server: thirteen read-only tools and a card, at one URL.</p>
+            <p class="docs-summary">The same data as an MCP server: nine read-only tools, six of which show a card, at one URL.</p>
 <pre><code>https://trydesk.trade/mcp</code></pre>
             <p>It speaks the Model Context Protocol over streamable HTTP and needs no key or sign-in. Every tool only reads. None can trade, transfer or sign.</p>
             <h3 id="mcp-connect">Connect</h3>
@@ -214,20 +214,19 @@ console.log(body.meta.asOf, body.data.traders[0].address);</code></pre>
               <thead><tr><th>Tool</th><th>What it answers</th></tr></thead>
               <tbody>
                 <tr><td><code>search_tokens</code></td><td>Tokens by name, symbol or contract, across Monad and other chains.</td></tr>
-                <tr><td><code>get_trending_tokens</code></td><td>What&rsquo;s trading most on a chain, Monad by default.</td></tr>
-                <tr><td><code>get_token</code></td><td>Price, changes, market cap, liquidity, holders and Desk&rsquo;s risk check.</td></tr>
+                <tr><td><code>get_trending_tokens</code></td><td>What&rsquo;s trading most on a chain, Monad by default. Card.</td></tr>
+                <tr><td><code>get_token</code></td><td>Price, changes, market cap, liquidity, holders and Desk&rsquo;s risk check. Card with a chart.</td></tr>
                 <tr><td><code>get_token_candles</code></td><td>Price candles: 1H, 4H or 1D.</td></tr>
-                <tr><td><code>get_wallet</code></td><td>Holdings across chains, Monad trading record, Perpl positions and names. Takes an address or a name such as <code>vitalik.eth</code>.</td></tr>
-                <tr><td><code>get_smart_money</code></td><td>Recent trades by wallets with a winning 30-day record.</td></tr>
-                <tr><td><code>get_top_perp_traders</code></td><td>Perpl&rsquo;s traders with the most open profit, and their positions.</td></tr>
+                <tr><td><code>get_wallet</code></td><td>Holdings across chains, Monad trading record, Perpl positions and names. Takes an address or a name such as <code>vitalik.eth</code>. Card.</td></tr>
+                <tr><td><code>get_smart_money</code></td><td>Recent trades by wallets with a winning 30-day record. Card.</td></tr>
+                <tr><td><code>get_top_perp_traders</code></td><td>Perpl&rsquo;s traders with the most open profit, and their positions. Card.</td></tr>
                 <tr><td><code>get_perp_trader_stats</code></td><td>A Perpl trader&rsquo;s closed-trade record.</td></tr>
-                <tr><td><code>get_perp_markets</code></td><td>Perpl&rsquo;s markets: mark, change, volume, open interest, funding, leverage.</td></tr>
-                <tr><td><code>show_wallet_card</code>, <code>show_token_card</code>, <code>show_top_perp_traders_card</code>, <code>show_smart_money_card</code></td><td>The same data as a card.</td></tr>
+                <tr><td><code>get_perp_markets</code></td><td>Perpl&rsquo;s markets: mark, change, volume, open interest, funding, leverage. Card.</td></tr>
               </tbody>
             </table>
             </div>
             <h3 id="mcp-cards">Cards</h3>
-            <p>The <code>show_</code> tools return a card through MCP Apps, so it renders in ChatGPT, Claude and other hosts that support it. The token chart switches between 1H, 4H and 1D, tapping a row asks the assistant about it, and <em>Open in Desk</em> opens the web app. Hosts without cards get the same answer as text.</p>
+            <p>Six tools return a card through MCP Apps, so it renders in ChatGPT, Claude and other hosts that support it. The token chart switches between 1H, 4H and 1D, tapping a row asks the assistant about it, and <em>Open in Desk</em> opens the web app. Hosts without cards get the same answer as text.</p>
             <h3 id="mcp-limits">Limits</h3>
             <p>The endpoint takes 600 requests a minute per address. Wallet reads take 20 a minute per ChatGPT user, or per address when the host sends no user ID. A limited call answers with how many seconds to wait. What the plugin receives and keeps is on the <a href="/privacy#assistants">privacy page</a>.</p>
           </div>

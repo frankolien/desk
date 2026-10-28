@@ -1,7 +1,7 @@
 # Desk over MCP
 
 Desk answers ChatGPT, Claude and any other MCP client at `https://trydesk.trade/mcp`:
-thirteen read-only tools over Desk's public data, and one card the `show_` tools render.
+nine read-only tools over Desk's public data, six of which show a card.
 The submission package for OpenAI's plugin directory is in `plugin/`.
 
 ## Shape
@@ -15,17 +15,23 @@ The submission package for OpenAI's plugin directory is in `plugin/`.
 - **Data.** `api/_mcp-data.mjs` reads Desk's own public API over HTTPS, so assistant
   traffic shares the edge cache and the last-good Redis answers instead of hitting
   OKX on every call. `MCP_API_BASE` points it elsewhere.
-- **Tools.** Data tools (`search_tokens`, `get_trending_tokens`, `get_token`,
-  `get_token_candles`, `get_wallet`, `get_smart_money`, `get_top_perp_traders`,
-  `get_perp_trader_stats`, `get_perp_markets`) return answers with no UI. Render
-  tools (`show_wallet_card`, `show_token_card`, `show_top_perp_traders_card`,
-  `show_smart_money_card`) return the same data plus the card. Every tool is
-  `readOnlyHint: true`, `destructiveHint: false`, `openWorldHint: true`.
-- **Card.** `web/mcp/card.html`, one page for all four kinds, MCP Apps bridge first
-  and `window.openai` as a fallback. Every value is set as text.
+- **Tools.** `get_token`, `get_wallet`, `get_trending_tokens`, `get_smart_money`,
+  `get_top_perp_traders` and `get_perp_markets` answer and show a card.
+  `search_tokens`, `get_token_candles` and `get_perp_trader_stats` only answer. Every
+  tool is `readOnlyHint: true`, `destructiveHint: false`, `openWorldHint: true`, and
+  logs one line per call (tool, outcome, time; never the arguments).
+- **Card.** `web/mcp/card.html`, one page for six kinds (token, wallet, tokens,
+  smart_money, traders, markets), MCP Apps bridge first and `window.openai` as a
+  fallback. Every value is set as text.
 
 ## Decisions worth keeping
 
+- **The card rides on the main tools.** The first version kept data tools and
+  `show_` tools apart, as OpenAI suggests, so the model could compare items without
+  drawing cards. Claude answered "show me CHOG, is it risky?" with `get_token` and
+  plain text. People expect to see the token, so the tools they ask for show it.
+- **Held answers over two minutes old are asked for once more** (`deskApi`), since
+  the endpoint is rebuilding them; trending once came back forty minutes old.
 - **Spam is left out of wallet totals.** One batched price check per wallet drops
   holdings with no pool and no volume, or worth more than twenty times their pool,
   and lists them under `leftOut`. Without it, airdropped spam made Vitalik's wallet

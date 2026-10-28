@@ -9,7 +9,14 @@
   },
   "homepage": "https://trydesk.trade",
   "repository": "https://github.com/frankolien/desk",
-  "keywords": ["monad", "crypto", "tokens", "wallets", "perpetuals", "market data"],
+  "keywords": [
+    "monad",
+    "crypto",
+    "tokens",
+    "wallets",
+    "perpetuals",
+    "market data"
+  ],
   "extensions": {
     "com.openai": {
       "interface": {
@@ -47,31 +54,31 @@
               "description": "Trending tokens on Monad",
               "prompt": "What's trending on Monad right now?",
               "tools_triggered": "get_trending_tokens",
-              "expected_behavior": "Lists up to fifteen Monad tokens with price, 24h change, market cap and liquidity, and says when the figures are from."
+              "expected_behavior": "Shows a card of up to fifteen Monad tokens with price, 24h change, market cap and liquidity, and says when the figures are from. Tapping a token asks about it."
             },
             {
               "description": "A token by name, as a card with its risk",
               "prompt": "Show me CHOG on Monad. Is it risky?",
-              "tools_triggered": "search_tokens, show_token_card",
+              "tools_triggered": "search_tokens, get_token",
               "expected_behavior": "Finds CHOG's contract on Monad and shows the token card: price, 24h change, an hourly chart that switches to 4H and 1D, market cap, liquidity, holders and Desk's risk level with its reasons. The reply repeats the risk level without recommending a trade."
             },
             {
               "description": "A wallet by its ENS name",
               "prompt": "Show me vitalik.eth's wallet",
-              "tools_triggered": "show_wallet_card",
+              "tools_triggered": "get_wallet",
               "expected_behavior": "Resolves vitalik.eth to its address and shows the wallet card with portfolio value, value per chain and largest holdings. Airdropped tokens with no market are left out of the total and the reply says how many."
             },
             {
               "description": "The Perpl leaderboard",
               "prompt": "Who are the top traders on Perpl?",
               "tools_triggered": "get_top_perp_traders",
-              "expected_behavior": "Lists traders ranked by open profit on Perpl, each with their open positions: market, side, size, leverage and profit or loss."
+              "expected_behavior": "Shows a leaderboard card of traders ranked by open profit on Perpl, each with their open positions: market, side, size, leverage and profit or loss. Tapping a trader asks about that wallet."
             },
             {
               "description": "Smart-money trades",
               "prompt": "What are smart-money wallets buying today?",
               "tools_triggered": "get_smart_money",
-              "expected_behavior": "Lists recent buys and sells by wallets with a winning 30-day record: token, chain, size, how many other tracked wallets traded it, and the wallet's win rate where known."
+              "expected_behavior": "Shows a card of recent buys and sells by wallets with a winning 30-day record: token, chain, size, how many other tracked wallets traded it, and the token's 24h move."
             }
           ],
           "negative": [
@@ -93,7 +100,7 @@
         "commerce_description": "Desk Markets only reads public market data. It sells nothing and processes no payments."
       },
       "publication": {
-        "release_notes": "First release: token search, trending tokens, prices, charts and risk checks; wallet portfolios with Monad trading records and Perpl positions; smart-money trades; Perpl's traders, records and markets; and cards for wallets, tokens, smart money and the Perpl leaderboard."
+        "release_notes": "First release: token search, trending tokens, prices, charts and risk checks; wallet portfolios with Monad trading records and Perpl positions; smart-money trades; Perpl's traders, records and markets. Tokens, wallets, trending tokens, smart money, the Perpl leaderboard and Perpl markets each come with a card."
       }
     }
   }
