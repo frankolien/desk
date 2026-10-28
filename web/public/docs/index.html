@@ -85,6 +85,12 @@
             </ul>
           </div>
           <div data-group>
+            <p class="docs-nav-group">AI assistants</p>
+            <ul>
+              <li><a href="#mcp" data-keywords="mcp model context protocol chatgpt claude claude code cursor plugin connector tools cards /mcp">Desk in ChatGPT &amp; Claude</a></li>
+            </ul>
+          </div>
+          <div data-group>
             <p class="docs-nav-group">Markets</p>
             <ul>
               <li><a href="#markets" data-keywords="mark change volume open interest tvl funding leverage fees margin perpl ausd /api/v1/markets"><span class="docs-badge">GET</span>Markets</a></li>
@@ -184,6 +190,46 @@ console.log(body.meta.asOf, body.data.traders[0].address);</code></pre>
               </li>
             </ol>
             <p>Every endpoint below has a <strong>Try it</strong> button that runs the request from this page and shows the status, headers and body.</p>
+          </div>
+        </section>
+
+        <section class="docs-section" id="mcp" aria-labelledby="h-mcp">
+          <div class="page-prose">
+            <p class="docs-crumb">AI assistants</p>
+            <h2 id="h-mcp">Desk in ChatGPT &amp; Claude</h2>
+            <p class="docs-summary">The same data as an MCP server: thirteen read-only tools and a card, at one URL.</p>
+<pre><code>https://trydesk.trade/mcp</code></pre>
+            <p>It speaks the Model Context Protocol over streamable HTTP and needs no key or sign-in. Every tool only reads. None can trade, transfer or sign.</p>
+            <h3 id="mcp-connect">Connect</h3>
+            <ul>
+              <li><strong>ChatGPT.</strong> Open <a href="https://chatgpt.com/plugins">Plugins</a>, select the plus button, then <em>Add custom MCP server</em>. Paste the URL and choose no authentication.</li>
+              <li><strong>Claude.</strong> In Settings, under Connectors, add a custom connector with the URL.</li>
+              <li><strong>Claude Code.</strong> Run the command below.</li>
+              <li><strong>Any other client</strong> that supports streamable HTTP connects the same way.</li>
+            </ul>
+<pre><code>claude mcp add --transport http desk https://trydesk.trade/mcp</code></pre>
+            <h3 id="mcp-tools">Tools</h3>
+            <div class="page-table-wrap">
+            <table class="page-table">
+              <thead><tr><th>Tool</th><th>What it answers</th></tr></thead>
+              <tbody>
+                <tr><td><code>search_tokens</code></td><td>Tokens by name, symbol or contract, across Monad and other chains.</td></tr>
+                <tr><td><code>get_trending_tokens</code></td><td>What&rsquo;s trading most on a chain, Monad by default.</td></tr>
+                <tr><td><code>get_token</code></td><td>Price, changes, market cap, liquidity, holders and Desk&rsquo;s risk check.</td></tr>
+                <tr><td><code>get_token_candles</code></td><td>Price candles: 1H, 4H or 1D.</td></tr>
+                <tr><td><code>get_wallet</code></td><td>Holdings across chains, Monad trading record, Perpl positions and names. Takes an address or a name such as <code>vitalik.eth</code>.</td></tr>
+                <tr><td><code>get_smart_money</code></td><td>Recent trades by wallets with a winning 30-day record.</td></tr>
+                <tr><td><code>get_top_perp_traders</code></td><td>Perpl&rsquo;s traders with the most open profit, and their positions.</td></tr>
+                <tr><td><code>get_perp_trader_stats</code></td><td>A Perpl trader&rsquo;s closed-trade record.</td></tr>
+                <tr><td><code>get_perp_markets</code></td><td>Perpl&rsquo;s markets: mark, change, volume, open interest, funding, leverage.</td></tr>
+                <tr><td><code>show_wallet_card</code>, <code>show_token_card</code>, <code>show_top_perp_traders_card</code>, <code>show_smart_money_card</code></td><td>The same data as a card.</td></tr>
+              </tbody>
+            </table>
+            </div>
+            <h3 id="mcp-cards">Cards</h3>
+            <p>The <code>show_</code> tools return a card through MCP Apps, so it renders in ChatGPT, Claude and other hosts that support it. The token chart switches between 1H, 4H and 1D, tapping a row asks the assistant about it, and <em>Open in Desk</em> opens the web app. Hosts without cards get the same answer as text.</p>
+            <h3 id="mcp-limits">Limits</h3>
+            <p>The endpoint takes 600 requests a minute per address. Wallet reads take 20 a minute per ChatGPT user, or per address when the host sends no user ID. A limited call answers with how many seconds to wait. What the plugin receives and keeps is on the <a href="/privacy#assistants">privacy page</a>.</p>
           </div>
         </section>
 
