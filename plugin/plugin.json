@@ -1,0 +1,100 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "desk",
+  "version": "1.0.0",
+  "description": "Read-only crypto market data from Desk, Monad first: token prices and risk, wallet portfolios and trading records, smart-money trades, and the traders and markets on Perpl, Monad's perpetuals exchange.",
+  "author": {
+    "name": "Desk",
+    "url": "https://trydesk.trade"
+  },
+  "homepage": "https://trydesk.trade",
+  "repository": "https://github.com/frankolien/desk",
+  "keywords": ["monad", "crypto", "tokens", "wallets", "perpetuals", "market data"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Desk Markets",
+        "shortDescription": "Monad tokens, wallets, perps",
+        "longDescription": "Desk Markets brings Desk's market data into the conversation. Ask about a token, a wallet or a perpetuals trader and get live figures, with a card when you want to see them.\n\nWhat you can ask:\n- Token prices, short-term moves, market cap, liquidity, holders and a risk check (pool depth, holder concentration, age, sell pressure), with a price chart you can switch between hourly, four-hour and daily bars.\n- What's trending on Monad or on another chain.\n- Any wallet's holdings across chains, its trading record on Monad (realized and unrealized profit, win rate, recent trades), its open positions on Perpl, and the public names it goes by. Give an address or a name such as vitalik.eth or a .nad name.\n- Recent trades by wallets with a winning 30-day record.\n- The traders with the most open profit on Perpl, Monad's perpetuals exchange, each trader's closed-trade record, and Perpl's markets with funding and leverage.\n\nWho it's for: anyone following Monad's tokens and traders who wants answers without switching apps.\n\nLimits: Desk Markets only reads public blockchain and market data. It can't trade, transfer, sign or open your wallet, and it needs no sign-in. Tokens with no real market, such as airdropped spam, are left out of wallet totals and listed separately. Figures can be delayed or incomplete, and nothing here is financial advice.",
+        "developerName": "Desk",
+        "category": "Finance",
+        "capabilities": [
+          "Token prices, charts and risk checks",
+          "Wallet portfolios and Monad trading records",
+          "Smart-money trades",
+          "Perpl traders, records and markets"
+        ],
+        "websiteURL": "https://trydesk.trade",
+        "supportURL": "https://trydesk.trade/support",
+        "privacyPolicyURL": "https://trydesk.trade/privacy",
+        "termsOfServiceURL": "https://trydesk.trade/terms",
+        "defaultPrompt": [
+          "What's trending on Monad right now?",
+          "Who are the top traders on Perpl?",
+          "Show me vitalik.eth's wallet"
+        ],
+        "brandColor": "#B8861F",
+        "brandColorDark": "#E8B339",
+        "composerIcon": "./assets/icon.png",
+        "composerIconDark": "./assets/icon.png",
+        "logo": "./assets/logo.png",
+        "logoDark": "./assets/logo.png"
+      },
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Trending tokens on Monad",
+              "prompt": "What's trending on Monad right now?",
+              "tools_triggered": "get_trending_tokens",
+              "expected_behavior": "Lists up to fifteen Monad tokens with price, 24h change, market cap and liquidity, and says when the figures are from."
+            },
+            {
+              "description": "A token by name, as a card with its risk",
+              "prompt": "Show me CHOG on Monad. Is it risky?",
+              "tools_triggered": "search_tokens, show_token_card",
+              "expected_behavior": "Finds CHOG's contract on Monad and shows the token card: price, 24h change, an hourly chart that switches to 4H and 1D, market cap, liquidity, holders and Desk's risk level with its reasons. The reply repeats the risk level without recommending a trade."
+            },
+            {
+              "description": "A wallet by its ENS name",
+              "prompt": "Show me vitalik.eth's wallet",
+              "tools_triggered": "show_wallet_card",
+              "expected_behavior": "Resolves vitalik.eth to its address and shows the wallet card with portfolio value, value per chain and largest holdings. Airdropped tokens with no market are left out of the total and the reply says how many."
+            },
+            {
+              "description": "The Perpl leaderboard",
+              "prompt": "Who are the top traders on Perpl?",
+              "tools_triggered": "get_top_perp_traders",
+              "expected_behavior": "Lists traders ranked by open profit on Perpl, each with their open positions: market, side, size, leverage and profit or loss."
+            },
+            {
+              "description": "Smart-money trades",
+              "prompt": "What are smart-money wallets buying today?",
+              "tools_triggered": "get_smart_money",
+              "expected_behavior": "Lists recent buys and sells by wallets with a winning 30-day record: token, chain, size, how many other tracked wallets traded it, and the wallet's win rate where known."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Placing a trade",
+              "prompt": "Buy $100 of CHOG for me."
+            },
+            {
+              "description": "Moving funds",
+              "prompt": "Send 50 AUSD from my wallet to 0x2b969a5d35c000ca3efd791a54b9c766e3187ec7."
+            },
+            {
+              "description": "Asking for investment advice",
+              "prompt": "Should I put my savings into MON?"
+            }
+          ]
+        },
+        "commerce": false,
+        "commerce_description": "Desk Markets only reads public market data. It sells nothing and processes no payments."
+      },
+      "publication": {
+        "release_notes": "First release: token search, trending tokens, prices, charts and risk checks; wallet portfolios with Monad trading records and Perpl positions; smart-money trades; Perpl's traders, records and markets; and cards for wallets, tokens, smart money and the Perpl leaderboard."
+      }
+    }
+  }
+}

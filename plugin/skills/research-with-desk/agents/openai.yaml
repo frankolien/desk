@@ -1,0 +1,11 @@
+interface:
+  display_name: "Research with Desk"
+  short_description: "Tokens, wallets and Perpl traders"
+  default_prompt: "Research CHOG on Monad with Desk."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "desk"
+      description: "Desk's read-only market tools"
+      transport: "streamable_http"
+      url: "https://trydesk.trade/mcp"
