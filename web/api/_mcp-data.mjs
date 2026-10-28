@@ -76,9 +76,22 @@ export const links = {
   markets: () => `${SITE}/app/markets`,
 };
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /// Desk's public API, read with a deadline. Each failure becomes a sentence for the person.
-export function deskApi({ base = process.env.MCP_API_BASE || SITE, fetchImpl = fetch, timeoutMs = 12_000 } = {}) {
-  return async function get(path, query = {}, { timeout = timeoutMs, missing = null } = {}) {
+/// An endpoint that answered from a held copy more than two minutes old (`refreshing`) is
+/// rebuilding it, so it is asked once more after a pause: an assistant shouldn't quote a
+/// trending list from forty minutes ago when the new one is seconds away.
+export function deskApi({ base = process.env.MCP_API_BASE || SITE, fetchImpl = fetch, timeoutMs = 12_000, pause = wait, now = Date.now } = {}) {
+  async function get(path, query = {}, { timeout = timeoutMs, missing = null, settle = true } = {}) {
+    const body = await read(path, query, { timeout, missing });
+    if (!settle || !body?.refreshing) return body;
+    const age = Number.isFinite(body.ageMs) ? body.ageMs : now() - Number(body.observedAt ?? now());
+    if (!(age > 120_000)) return body;
+    await pause(2_500);
+    return get(path, query, { timeout, missing, settle: false }).catch(() => body);
+  }
+  async function read(path, query, { timeout, missing }) {
     const search = new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== null && v !== "")).toString();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
@@ -98,10 +111,13 @@ export function deskApi({ base = process.env.MCP_API_BASE || SITE, fetchImpl = f
     if (response.status === 404 && missing) throw new DeskDataError(missing);
     if (!response.ok) throw new DeskDataError(body?.error ? `Desk could not read that: ${body.error}` : "Desk's market data is unavailable right now. Try again in a moment.");
     return body;
-  };
+  }
+  return get;
 }
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/// A read the answer is poorer without but can live without: one retry after a short pause.
+const optional = (get, path, query, { pause = wait } = {}) =>
+  get(path, query).catch(() => pause(600).then(() => get(path, query))).catch(() => null);
 
 // MARK: Wallets
 
@@ -116,15 +132,9 @@ export async function resolveWallet(get, input) {
   return { address: EVM_ADDRESS.test(found.address) ? found.address.toLowerCase() : found.address, via: found.via ?? null };
 }
 
-export async function loadWallet(get, input, { now = Date.now, pause = wait } = {}) {
+export async function loadWallet(get, input, { now = Date.now } = {}) {
   const { address } = await resolveWallet(get, input);
-  const query = { view: "wallet", address, chainIndex: "143", contract: "" };
-  let resource = await get("/api/activity", query, { timeout: 25_000 });
-  // A held copy older than two minutes is rebuilding; one more ask usually gets the new one.
-  if (resource?.refreshing && (resource.ageMs ?? 0) > 120_000) {
-    await pause(2_500);
-    resource = await get("/api/activity", query, { timeout: 25_000 }).catch(() => resource);
-  }
+  const resource = await get("/api/activity", { view: "wallet", address, chainIndex: "143", contract: "" }, { timeout: 25_000 });
   const [perps, leftOut] = await Promise.all([
     resource?.desk?.account && EVM_ADDRESS.test(address)
       ? get("/api/traders", { view: "trader", address }).then((view) => view?.traders?.[0] ?? null).catch(() => null)
@@ -265,7 +275,8 @@ export async function trendingTokens(get, { chain = "monad", now = Date.now } = 
   const index = chain === "all" ? null : chainIndexOf(chain);
   if (chain !== "all" && !index) throw new DeskDataError(`Desk doesn't list tokens on "${chain}".`);
   const body = await get("/api/token-discovery", index ? { chain: index } : {});
-  const rows = (body?.tokens ?? []).filter((row) => row.contract).slice(0, 15);
+  // OKX's hot list can lead with a token whose pool holds nothing; it can't be traded.
+  const rows = (body?.tokens ?? []).filter((row) => row.contract && !((num(row.liquidity) ?? Infinity) < 1_000)).slice(0, 15);
   return {
     data: { chain: index ? chainSlugOf(index) : "all", tokens: rows.map(shapeListed), asOf: iso(num(body?.observedAt) ?? now()) },
     images: { tokens: listImages(rows) },
@@ -285,12 +296,12 @@ function tokenKey(chain, contract) {
   return { index, contract: index === "501" ? address : address.toLowerCase() };
 }
 
-export async function loadToken(get, { chain, contract, candles = null, now = Date.now }) {
+export async function loadToken(get, { chain, contract, candles = null, now = Date.now, pause = wait }) {
   const key = tokenKey(chain, contract);
   const [listing, details, risk, chart] = await Promise.all([
-    get("/api/token-discovery", { q: key.contract }).catch(() => null),
+    optional(get, "/api/token-discovery", { q: key.contract }, { pause }),
     get("/api/token-details", { chainIndex: key.index, address: key.contract }),
-    get("/api/token-details", { view: "risk", chainIndex: key.index, address: key.contract }).catch(() => null),
+    optional(get, "/api/token-details", { view: "risk", chainIndex: key.index, address: key.contract }, { pause }),
     candles ? loadCandles(get, { chain, contract: key.contract, interval: candles }).catch(() => null) : null,
   ]);
   return { ...shapeToken({ index: key.index, contract: key.contract, listing, details, risk, now }), candles: chart?.data?.candles ?? [] };

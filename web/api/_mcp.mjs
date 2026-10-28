@@ -1,6 +1,6 @@
-/// Desk as an MCP server: read-only market tools for ChatGPT, Claude and any MCP client, and
-/// one card (MCP Apps) that the show_ tools render. Served statelessly from /mcp inside the
-/// v1 function; every request builds a fresh server from `serverFor`.
+/// Desk as an MCP server: read-only market tools for ChatGPT, Claude and any MCP client. The
+/// tools for one token, one wallet and each list return a card (MCP Apps) with the answer.
+/// Served statelessly from /mcp inside the v1 function; every request builds a fresh server.
 
 import { readFileSync } from "node:fs";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
@@ -11,14 +11,14 @@ import {
 } from "./_mcp-data.mjs";
 import { clientIp, rateLimit } from "./_ratelimit.mjs";
 
-export const CARD_URI = "ui://desk/card-v1.html";
+export const CARD_URI = "ui://desk/card-v2.html";
 const CARD_HTML = readFileSync(new URL("../mcp/card.html", import.meta.url), "utf8");
 const VERSION = "1.0.0";
 
 export const INSTRUCTIONS = [
   "Desk reads public crypto market data, Monad first: token prices and risk, wallet portfolios and trading records, smart-money trades, and the traders and markets on Perpl, Monad's perpetuals exchange.",
   "Every tool is read-only. Desk cannot trade, transfer, sign or change anything.",
-  "Use the get_ tools to answer. Call a show_ tool when the person asks to see something, or when a card helps more than prose.",
+  "The tools for a token, a wallet, trending tokens, smart money, the Perpl leaderboard and Perpl markets also show the person a card with those figures, and a price chart for a token, so keep the reply short and don't repeat every number.",
   "Wallets can be a 0x or Solana address or a name such as vitalik.eth or name.nad.",
   "Figures are market data, not financial advice.",
 ].join(" ");
@@ -191,17 +191,34 @@ function caller(ctx) {
 export function serverFor({ get, store = null, now = Date.now } = {}) {
   const server = new McpServer({ name: "desk", title: "Desk", version: VERSION, websiteUrl: SITE }, { instructions: INSTRUCTIONS });
 
+  // One line per call: which tool, how it went and how long it took. Never the arguments.
   const tool = (name, config, run, { heavy = false } = {}) => server.registerTool(name, config, async (args, ctx) => {
-    if (heavy && store) {
-      const limit = await rateLimit({ store, tier: "mcp-heavy", ip: caller(ctx), now: now() });
-      if (!limit.allowed) return { isError: true, content: [{ type: "text", text: `Desk is reading a lot of wallets for you right now. Try again in ${limit.retryAfter} seconds.` }] };
+    const started = Date.now();
+    let outcome = "ok";
+    try {
+      if (heavy && store) {
+        const limit = await rateLimit({ store, tier: "mcp-heavy", ip: caller(ctx), now: now() });
+        if (!limit.allowed) {
+          outcome = "limited";
+          return { isError: true, content: [{ type: "text", text: `Desk is reading a lot of wallets for you right now. Try again in ${limit.retryAfter} seconds.` }] };
+        }
+      }
+      try { return await run(args); } catch (error) { outcome = error instanceof DeskDataError ? "refused" : "failed"; return failure(error, name); }
+    } finally {
+      console.log(`mcp ${name} ${outcome} ${Date.now() - started}ms`);
     }
-    try { return await run(args); } catch (error) { return failure(error, name); }
+  });
+  /// A result the card renders: the data with its kind for the card, and the card's URI
+  /// repeated on the result, since some hosts look for it there rather than on the tool.
+  const shown = (kind, data, text, extra = {}) => ({
+    structuredContent: { kind, ...data },
+    content: [{ type: "text", text }],
+    _meta: { ui: { resourceUri: CARD_URI }, ...extra },
   });
 
   server.registerResource("desk-card", CARD_URI, {
     title: "Desk card",
-    description: "Shows a Desk wallet, token, smart-money feed or Perpl leaderboard as a card.",
+    description: "Shows a Desk token with its chart, a wallet, trending tokens, smart-money trades, the Perpl leaderboard or Perpl's markets as a card.",
     mimeType: "text/html;profile=mcp-app",
   }, async (uri) => ({
     contents: [{
@@ -212,16 +229,14 @@ export function serverFor({ get, store = null, now = Date.now } = {}) {
         ui: { prefersBorder: true, csp: { connectDomains: [], resourceDomains: IMAGE_HOSTS } },
         "openai/widgetDomain": SITE,
         "openai/widgetCSP": { redirect_domains: [SITE] },
-        "openai/widgetDescription": "A Desk card with live market data. It already shows the figures, so a short reply is enough.",
+        "openai/widgetDescription": "A Desk card that already shows these figures, with a chart for a token. Keep the reply short and don't repeat every number.",
       },
     }],
   }));
 
-  // Data tools: answers for the model, no card.
-
   tool("search_tokens", {
     title: "Search tokens",
-    description: "Find tokens by name, symbol or contract address across Monad, Ethereum, Base, BNB Chain, Solana and other chains. Returns price, 24h change, market cap, liquidity and the contract to use with get_token. Use when the person names a token and you need its chain and contract.",
+    description: "Find tokens by name, symbol or contract address across Monad, Ethereum, Base, BNB Chain, Solana and other chains. Returns each match's chain and contract, price, 24h change, market cap and liquidity. Use it to find a token's contract before get_token; it shows no card.",
     inputSchema: z.object({ query: z.string().min(1).max(80).describe("A name, symbol or contract address"), chain: chain.optional().describe("Only this chain") }),
     outputSchema: SearchResult, annotations: READ_ONLY, _meta: status("Searching tokens…", "Tokens found"),
   }, async ({ query, chain: on }) => {
@@ -231,27 +246,27 @@ export function serverFor({ get, store = null, now = Date.now } = {}) {
 
   tool("get_trending_tokens", {
     title: "Get trending tokens",
-    description: "The tokens trading most actively right now on one chain (Monad by default) or across all chains, with price, 24h change, market cap and liquidity. Use for questions like \"what's moving on Monad\".",
+    description: "The tokens trading most actively right now on one chain (Monad by default) or across all chains, with price, 24h change, market cap and liquidity, shown to the person as a card they can tap through. Use for questions like \"what's moving on Monad\".",
     inputSchema: z.object({ chain: z.enum(["all", ...CHAIN_SLUGS]).optional().describe("A chain, or all. Defaults to monad.") }),
-    outputSchema: Trending, annotations: READ_ONLY, _meta: status("Reading what's trending…", "Trending tokens ready"),
+    outputSchema: Trending.extend({ kind: z.literal("tokens"), url: s }), annotations: READ_ONLY, _meta: card("Reading what's trending…", "Trending tokens"),
   }, async ({ chain: on }) => {
-    const { data } = await trendingTokens(get, { chain: on ?? "monad", now });
-    return { structuredContent: data, content: [{ type: "text", text: say.list(`Trending on ${data.chain}`, data.tokens) }] };
+    const { data, images } = await trendingTokens(get, { chain: on ?? "monad", now });
+    return shown("tokens", { ...data, url: links.markets() }, say.list(`Trending on ${data.chain}`, data.tokens), { images });
   });
 
   tool("get_token", {
     title: "Get token",
-    description: "Price, short-term changes, market cap, liquidity, volume, holders and Desk's risk assessment (liquidity depth, holder concentration, age, sell pressure) for one token. Needs the chain and contract; use search_tokens first if you only have a name.",
+    description: "One token's price, short-term changes, market cap, liquidity, volume, holders and Desk's risk check (pool depth, holder concentration, age, sell pressure), shown to the person as a card with a price chart they can switch between hourly, four-hour and daily bars. Use for any question about a single token. Needs the chain and contract; call search_tokens first if you only have a name.",
     inputSchema: z.object({ chain, contract: contractArg }),
-    outputSchema: Token, annotations: READ_ONLY, _meta: status("Reading the token…", "Token read"),
+    outputSchema: Token.extend({ kind: z.literal("token") }), annotations: READ_ONLY, _meta: card("Reading the token…", "Token"),
   }, async ({ chain: on, contract }) => {
-    const { data } = await loadToken(get, { chain: on, contract, now });
-    return { structuredContent: data, content: [{ type: "text", text: say.token(data) }] };
+    const { data, images, candles } = await loadToken(get, { chain: on, contract, candles: "1H", now });
+    return shown("token", data, say.token(data), { images, candles, interval: "1H" });
   });
 
   tool("get_token_candles", {
     title: "Get token price history",
-    description: "Price candles for one token: 48 hourly bars (1H), 42 four-hour bars (4H) or 30 daily bars (1D). Use to describe recent price action.",
+    description: "Price candles for one token: 48 hourly bars (1H), 42 four-hour bars (4H) or 30 daily bars (1D). Use to describe price action over days or weeks. The token card also calls it when the person switches its chart.",
     inputSchema: z.object({ chain, contract: contractArg, interval: z.enum(Object.keys(INTERVALS)).optional().describe("1H, 4H or 1D. Defaults to 1H.") }),
     outputSchema: Candles, annotations: READ_ONLY,
     _meta: { ...status("Reading price history…", "Price history read"), "openai/widgetAccessible": true },
@@ -262,40 +277,40 @@ export function serverFor({ get, store = null, now = Date.now } = {}) {
 
   tool("get_wallet", {
     title: "Get wallet",
-    description: "What a wallet holds across chains, its trading record on Monad (realized and unrealized PnL, win rate, recent trades), any open perpetuals positions on Perpl, and who it belongs to (ENS, .nad, Farcaster). Spam tokens with no market are left out of the totals and listed separately. Accepts an address or a name.",
+    description: "What a wallet holds across chains, its trading record on Monad (realized and unrealized PnL, win rate, recent trades), any open perpetuals positions on Perpl, and who it belongs to (ENS, .nad, Farcaster), shown to the person as a card. Spam tokens with no market are left out of the totals and listed separately. Accepts an address or a name.",
     inputSchema: z.object({ wallet: walletArg }),
-    outputSchema: Wallet, annotations: READ_ONLY, _meta: status("Reading the wallet…", "Wallet read"),
+    outputSchema: Wallet.extend({ kind: z.literal("wallet") }), annotations: READ_ONLY, _meta: card("Reading the wallet…", "Wallet"),
   }, async ({ wallet }) => {
-    const { data } = await loadWallet(get, wallet, { now });
-    return { structuredContent: data, content: [{ type: "text", text: say.wallet(data) }] };
+    const { data, images } = await loadWallet(get, wallet, { now });
+    return shown("wallet", data, say.wallet(data), { images });
   }, { heavy: true });
 
   tool("get_smart_money", {
     title: "Get smart-money trades",
-    description: "Recent buys and sells by wallets with a winning 30-day record: on Monad (scored by Desk) and on Base, BNB Chain and Ethereum. Each trade has the token, size, wallet and how many other tracked wallets traded it.",
+    description: "Recent buys and sells by wallets with a winning 30-day record: on Monad (scored by Desk) and on Base, BNB Chain and Ethereum, shown to the person as a card. Each trade has the token, size, wallet and how many other tracked wallets traded it.",
     inputSchema: z.object({
       scope: z.enum(["all", "monad", "other"]).optional().describe("monad, other (Base, BNB Chain, Ethereum) or all. Defaults to all."),
-      limit: z.number().int().min(1).max(20).optional().describe("How many trades. Defaults to 12."),
+      limit: z.number().int().min(1).max(20).optional().describe("How many trades. Defaults to 10."),
     }),
-    outputSchema: SmartMoney, annotations: READ_ONLY, _meta: status("Reading smart money…", "Smart money read"),
+    outputSchema: SmartMoney.extend({ kind: z.literal("smart_money"), url: s }), annotations: READ_ONLY, _meta: card("Reading smart money…", "Smart money"),
   }, async ({ scope, limit }) => {
-    const { data } = await loadSmartMoney(get, { scope: scope ?? "all", limit: limit ?? 12, now });
-    return { structuredContent: data, content: [{ type: "text", text: say.smart(data) }] };
+    const { data, images } = await loadSmartMoney(get, { scope: scope ?? "all", limit: limit ?? 10, now });
+    return shown("smart_money", { ...data, url: links.markets() }, say.smart(data), { images });
   });
 
   tool("get_top_perp_traders", {
     title: "Get top Perpl traders",
-    description: "The traders with the most open profit on Perpl, Monad's perpetuals exchange, with every open position: market, side, size, entry, mark, PnL and leverage. Read live from the exchange contract.",
+    description: "The traders with the most open profit on Perpl, Monad's perpetuals exchange, with every open position (market, side, size, entry, mark, PnL and leverage), shown to the person as a leaderboard card. Read live from the exchange contract.",
     inputSchema: z.object({ limit: z.number().int().min(1).max(25).optional().describe("How many traders. Defaults to 10.") }),
-    outputSchema: Traders, annotations: READ_ONLY, _meta: status("Reading the Perpl leaderboard…", "Leaderboard read"),
+    outputSchema: Traders.extend({ kind: z.literal("traders"), url: s }), annotations: READ_ONLY, _meta: card("Reading the Perpl leaderboard…", "Perpl leaderboard"),
   }, async ({ limit }) => {
-    const { data } = await loadTopTraders(get, { limit: limit ?? 10, now });
-    return { structuredContent: data, content: [{ type: "text", text: say.traders(data) }] };
+    const { data, images } = await loadTopTraders(get, { limit: limit ?? 10, now });
+    return shown("traders", { ...data, url: links.traders() }, say.traders(data), { images });
   });
 
   tool("get_perp_trader_stats", {
     title: "Get a Perpl trader's record",
-    description: "A trader's closed-trade record on Perpl: number of trades, win rate, realized PnL, profit factor, drawdown, average leverage and hold time, trading style, and recent closed trades.",
+    description: "A trader's closed-trade record on Perpl: number of trades, win rate, realized PnL, profit factor, drawdown, average leverage and hold time, trading style, and recent closed trades. Use before calling someone a good trader: the leaderboard only shows open profit.",
     inputSchema: z.object({ address: z.string().regex(/^0x[0-9a-fA-F]{40}$/).describe("The trader's 0x address") }),
     outputSchema: TraderStats, annotations: READ_ONLY, _meta: status("Reading the trader's record…", "Record read"),
   }, async ({ address }) => {
@@ -305,57 +320,12 @@ export function serverFor({ get, store = null, now = Date.now } = {}) {
 
   tool("get_perp_markets", {
     title: "Get Perpl markets",
-    description: "Perpl's perpetuals markets on Monad: mark price, 24h change, volume, open interest, funding rate and maximum leverage. Optionally one market, such as BTC or MON.",
+    description: "Perpl's perpetuals markets on Monad: mark price, 24h change, volume, open interest, funding rate and maximum leverage, shown to the person as a card. Optionally one market, such as BTC or MON.",
     inputSchema: z.object({ market: z.string().min(2).max(12).optional().describe("A market such as BTC, ETH or MON") }),
-    outputSchema: Markets, annotations: READ_ONLY, _meta: status("Reading Perpl markets…", "Markets read"),
+    outputSchema: Markets.extend({ kind: z.literal("markets"), url: s }), annotations: READ_ONLY, _meta: card("Reading Perpl markets…", "Perpl markets"),
   }, async ({ market }) => {
     const { data } = await loadMarkets(get, { market: market ?? null, now });
-    return { structuredContent: data, content: [{ type: "text", text: say.markets(data) }] };
-  });
-
-  // Render tools: the card. Each reads what it shows, so it can be called on its own.
-
-  tool("show_wallet_card", {
-    title: "Show wallet card",
-    description: "Show a wallet as a card: portfolio, holdings, open Perpl positions and Monad trading record. Use when the person wants to see a wallet; use get_wallet to answer questions about one.",
-    inputSchema: z.object({ wallet: walletArg }),
-    outputSchema: Wallet.extend({ kind: z.literal("wallet") }), annotations: READ_ONLY, _meta: card("Opening the wallet…", "Wallet card ready"),
-  }, async ({ wallet }) => {
-    const { data, images } = await loadWallet(get, wallet, { now });
-    return { structuredContent: { kind: "wallet", ...data }, content: [{ type: "text", text: say.wallet(data) }], _meta: { images } };
-  }, { heavy: true });
-
-  tool("show_token_card", {
-    title: "Show token card",
-    description: "Show a token as a card with its price chart (switchable between 1H, 4H and 1D), market stats and Desk's risk assessment. Needs the chain and contract; use search_tokens first if you only have a name.",
-    inputSchema: z.object({ chain, contract: contractArg }),
-    outputSchema: Token.extend({ kind: z.literal("token") }), annotations: READ_ONLY, _meta: card("Opening the token…", "Token card ready"),
-  }, async ({ chain: on, contract }) => {
-    const { data, images, candles } = await loadToken(get, { chain: on, contract, candles: "1H", now });
-    return { structuredContent: { kind: "token", ...data }, content: [{ type: "text", text: say.token(data) }], _meta: { images, candles, interval: "1H" } };
-  });
-
-  tool("show_top_perp_traders_card", {
-    title: "Show Perpl leaderboard card",
-    description: "Show the traders with the most open profit on Perpl as a card, with their open positions. Tapping a trader asks about that wallet.",
-    inputSchema: z.object({ limit: z.number().int().min(1).max(15).optional().describe("How many traders. Defaults to 8.") }),
-    outputSchema: Traders.extend({ kind: z.literal("traders"), url: s }), annotations: READ_ONLY, _meta: card("Opening the leaderboard…", "Leaderboard ready"),
-  }, async ({ limit }) => {
-    const { data, images } = await loadTopTraders(get, { limit: limit ?? 8, now });
-    return { structuredContent: { kind: "traders", ...data, url: links.traders() }, content: [{ type: "text", text: say.traders(data) }], _meta: { images } };
-  });
-
-  tool("show_smart_money_card", {
-    title: "Show smart-money card",
-    description: "Show recent smart-money trades as a card. Tapping a trade asks about that token.",
-    inputSchema: z.object({
-      scope: z.enum(["all", "monad", "other"]).optional().describe("monad, other or all. Defaults to all."),
-      limit: z.number().int().min(1).max(12).optional().describe("How many trades. Defaults to 8."),
-    }),
-    outputSchema: SmartMoney.extend({ kind: z.literal("smart_money"), url: s }), annotations: READ_ONLY, _meta: card("Reading smart money…", "Smart money ready"),
-  }, async ({ scope, limit }) => {
-    const { data, images } = await loadSmartMoney(get, { scope: scope ?? "all", limit: limit ?? 8, now });
-    return { structuredContent: { kind: "smart_money", ...data, url: links.markets() }, content: [{ type: "text", text: say.smart(data) }], _meta: { images } };
+    return shown("markets", { ...data, url: links.markets() }, say.markets(data));
   });
 
   return server;

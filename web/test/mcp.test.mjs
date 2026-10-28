@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CARD_URI, INSTRUCTIONS, mcpHandler, serveMcp } from "../api/_mcp.mjs";
-import { DeskDataError, IMAGE_HOSTS, SITE, image, unsellable } from "../api/_mcp-data.mjs";
+import { DeskDataError, IMAGE_HOSTS, SITE, deskApi, image, unsellable } from "../api/_mcp-data.mjs";
 import { memoryStore } from "../api/_store.mjs";
 import { createHandler as v1Handler } from "../api/v1.mjs";
 
@@ -48,7 +48,10 @@ function fixtureApi() {
       return { traders: [{ accountId: "42", address: WALLET, pnl: "250.5", positions: [{ market: "BTC", side: "long", entry: "80000", mark: "81000", value: "8100", pnl: "100", pnlPercent: 12.5, leverage: 5 }] }] };
     }
     if (path === "/api/token-discovery") {
-      const rows = [{ chainIndex: "143", contract: TOKEN, symbol: "CHOG", name: "Chog", price: 0.0013, change: -1, marketCap: 1_300_000, liquidity: 6_500, volume24H: 300, holders: "0", logoURL: "https://static.oklink.com/chog.png" }];
+      const rows = [
+        { chainIndex: "143", contract: TOKEN, symbol: "CHOG", name: "Chog", price: 0.0013, change: -1, marketCap: 1_300_000, liquidity: 6_500, volume24H: 300, holders: "0", logoURL: "https://static.oklink.com/chog.png" },
+        { chainIndex: "143", contract: SPAM, symbol: "SIDE", name: "SIDE", price: 0.000004, change: -6, marketCap: 4_000, liquidity: 0, volume24H: 10, holders: "12", logoURL: "" },
+      ];
       return { observedAt: 1_800_000_000_000, tokens: query.q === "nothing" ? [] : rows };
     }
     if (path === "/api/token-details" && view === "risk") {
@@ -106,18 +109,36 @@ test("initialize names the server and says up front that it is read-only", async
   assert.equal(result.instructions, INSTRUCTIONS);
 });
 
-test("every tool is annotated read-only with an output schema, and only show_ tools carry the card", async () => {
+const CARDED = ["get_trending_tokens", "get_token", "get_wallet", "get_smart_money", "get_top_perp_traders", "get_perp_markets"];
+
+test("every tool is annotated read-only with an output schema, and the main tools carry the card", async () => {
   const { rpc } = client();
   const { result } = await rpc("tools/list");
-  assert.equal(result.tools.length, 13);
+  assert.deepEqual(result.tools.map((t) => t.name).sort(), [...CARDED, "search_tokens", "get_token_candles", "get_perp_trader_stats"].sort());
   for (const tool of result.tools) {
     assert.deepEqual([tool.annotations.readOnlyHint, tool.annotations.destructiveHint, typeof tool.annotations.openWorldHint], [true, false, "boolean"], tool.name);
     assert.ok(tool.outputSchema, `${tool.name} has an output schema`);
     assert.ok(tool.description.length > 40, `${tool.name} explains itself`);
-    const shows = tool.name.startsWith("show_");
+    const shows = CARDED.includes(tool.name);
     assert.equal(tool._meta?.ui?.resourceUri === CARD_URI, shows, tool.name);
     assert.equal(tool._meta?.["openai/outputTemplate"] === CARD_URI, shows, tool.name);
   }
+});
+
+test("each carded tool names its card kind and repeats the card's URI on the result", async () => {
+  const { call } = client();
+  const kinds = {
+    get_trending_tokens: [{}, "tokens"], get_token: [{ chain: "monad", contract: TOKEN }, "token"], get_wallet: [{ wallet: WALLET }, "wallet"],
+    get_smart_money: [{}, "smart_money"], get_top_perp_traders: [{}, "traders"], get_perp_markets: [{}, "markets"],
+  };
+  for (const [name, [args, kind]] of Object.entries(kinds)) {
+    const result = await call(name, args);
+    assert.equal(result.structuredContent.kind, kind, name);
+    assert.equal(result._meta.ui.resourceUri, CARD_URI, name);
+  }
+  const plain = await call("search_tokens", { query: "chog" });
+  assert.equal(plain.structuredContent.kind, undefined);
+  assert.equal(plain._meta, undefined);
 });
 
 test("the card resource declares exactly the image hosts it loads and leaves Claude's sandbox domain alone", async () => {
@@ -152,18 +173,18 @@ test("get_wallet resolves a name, leaves spam with no market out of the totals a
   assert.match(result.content[0].text, /Left out 1 token/);
 });
 
-test("show_wallet_card adds the kind and passes only allowed images to the card", async () => {
+test("get_wallet passes only allowed images to the card", async () => {
   const { call } = client();
-  const result = await call("show_wallet_card", { wallet: WALLET });
+  const result = await call("get_wallet", { wallet: WALLET });
   assert.equal(result.structuredContent.kind, "wallet");
   assert.equal(result._meta.images.avatar, null, "an avatar on an undeclared host is dropped");
   assert.equal(result._meta.images.tokens[`monad:${REAL}`], "https://static.oklink.com/chog.png");
   assert.equal(result._meta.images.tokens[`ethereum:${SPAM}`], undefined);
 });
 
-test("show_token_card returns the token, its risk and an hour chart for the card", async () => {
+test("get_token returns the token, its risk and an hour chart for the card", async () => {
   const { call } = client();
-  const result = await call("show_token_card", { chain: "monad", contract: TOKEN });
+  const result = await call("get_token", { chain: "monad", contract: TOKEN });
   const c = result.structuredContent;
   assert.equal(c.kind, "token");
   assert.equal(c.token.symbol, "CHOG");
@@ -305,4 +326,38 @@ test("the v1 function routes /mcp to the server and serves OpenAI's domain chall
   } finally {
     if (saved === undefined) delete process.env.OPENAI_APPS_CHALLENGE; else process.env.OPENAI_APPS_CHALLENGE = saved;
   }
+});
+
+test("trending leaves out tokens whose pool holds next to nothing", async () => {
+  const { call } = client();
+  const result = await call("get_trending_tokens", { chain: "monad" });
+  assert.deepEqual(result.structuredContent.tokens.map((t) => t.symbol), ["CHOG"]);
+});
+
+test("a failed risk read is tried once more before the token goes out without it", async () => {
+  const api = fixtureApi();
+  let failures = 1;
+  const flaky = { ...api, get: async (path, query = {}, options) => {
+    if (query.view === "risk" && failures-- > 0) throw new DeskDataError("down");
+    return api.get(path, query, options);
+  } };
+  const { call } = client({ api: flaky });
+  const result = await call("get_token", { chain: "monad", contract: TOKEN });
+  assert.equal(result.structuredContent.risk.level, "high");
+});
+
+test("deskApi asks again once when the answer is a held copy over two minutes old", async () => {
+  const answers = [
+    { refreshing: true, observedAt: 1_000_000, value: "old" },
+    { observedAt: 1_300_000, value: "new" },
+  ];
+  const seen = [];
+  const fetchImpl = async (url) => { seen.push(url); return new Response(JSON.stringify(answers.shift())); };
+  const get = deskApi({ base: "https://desk.test", fetchImpl, pause: async () => {}, now: () => 1_300_000 });
+  assert.equal((await get("/api/x", { a: "1" })).value, "new");
+  assert.equal(seen.length, 2);
+
+  const recent = [{ refreshing: true, observedAt: 1_290_000, value: "recent" }];
+  const once = deskApi({ base: "https://desk.test", fetchImpl: async () => new Response(JSON.stringify(recent.shift())), pause: async () => {}, now: () => 1_300_000 });
+  assert.equal((await once("/api/x")).value, "recent", "a copy under two minutes old is used as it is");
 });
