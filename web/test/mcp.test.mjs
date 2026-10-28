@@ -18,6 +18,7 @@ function fixtureApi() {
     const view = query.view ?? "";
     if (path === "/api/traders" && view === "lookup") {
       if (query.q === "frank.nad") return { address: WALLET, via: "nad" };
+      if (query.q === "@desky" || query.q === "desky") return { address: WALLET, via: "desk", identity: { name: "@desky" } };
       throw new DeskDataError(missing ?? "missing");
     }
     if (path === "/api/activity" && view === "wallet") {
@@ -360,4 +361,27 @@ test("deskApi asks again once when the answer is a held copy over two minutes ol
   const recent = [{ refreshing: true, observedAt: 1_290_000, value: "recent" }];
   const once = deskApi({ base: "https://desk.test", fetchImpl: async () => new Response(JSON.stringify(recent.shift())), pause: async () => {}, now: () => 1_300_000 });
   assert.equal((await once("/api/x")).value, "recent", "a copy under two minutes old is used as it is");
+});
+
+test("a wallet found by name leads with that name and keeps its other name", async () => {
+  const { call } = client();
+  const asked = await call("get_wallet", { wallet: "@desky" });
+  assert.equal(asked.structuredContent.askedAs, "@desky");
+  assert.equal(asked.structuredContent.name, "frank.nad");
+  assert.match(asked.content[0].text, /^@desky \(0x1{40}, also known as frank\.nad\)/);
+  const bare = await call("get_wallet", { wallet: "desky" });
+  assert.equal(bare.structuredContent.askedAs, "@desky", "a bare Desk username reads as @name");
+  const same = await call("get_wallet", { wallet: "frank.nad" });
+  assert.equal(same.structuredContent.askedAs, null, "no second name when the asked name is the wallet's own");
+  const direct = await call("get_wallet", { wallet: WALLET });
+  assert.equal(direct.structuredContent.askedAs, null);
+});
+
+test("the wallet tool tells the model that Desk usernames work", async () => {
+  const { rpc } = client();
+  const { result } = await rpc("tools/list");
+  const wallet = result.tools.find((t) => t.name === "get_wallet");
+  assert.match(wallet.inputSchema.properties.wallet.description, /Desk username such as @frank/);
+  assert.match(wallet.inputSchema.properties.wallet.description, /Don't add \.eth or \.nad/);
+  assert.match(INSTRUCTIONS, /Desk username/);
 });

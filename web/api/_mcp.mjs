@@ -19,7 +19,7 @@ export const INSTRUCTIONS = [
   "Desk reads public crypto market data, Monad first: token prices and risk, wallet portfolios and trading records, smart-money trades, and the traders and markets on Perpl, Monad's perpetuals exchange.",
   "Every tool is read-only. Desk cannot trade, transfer, sign or change anything.",
   "The tools for a token, a wallet, trending tokens, smart money, the Perpl leaderboard and Perpl markets also show the person a card with those figures, and a price chart for a token, so keep the reply short and don't repeat every number.",
-  "Wallets can be a 0x or Solana address or a name such as vitalik.eth or name.nad.",
+  "A wallet can be an address, a Desk username (written @frank, or just frank), or an ENS, .nad, .sol or Farcaster name. Pass a name exactly as the person wrote it.",
   "Figures are market data, not financial advice.",
 ].join(" ");
 
@@ -29,7 +29,7 @@ const n = z.number().nullable();
 const s = z.string();
 const ns = z.string().nullable();
 const chain = z.enum(CHAIN_SLUGS);
-const walletArg = z.string().min(2).max(80).describe("A 0x address, a Solana address, or a name such as vitalik.eth or name.nad");
+const walletArg = z.string().min(2).max(80).describe("The wallet exactly as the person gave it: a 0x or Solana address, a Desk username such as @frank, or a name such as vitalik.eth, name.nad or name.sol. Don't add .eth or .nad to a bare name; Desk tries it as a Desk username first.");
 const contractArg = z.string().min(32).max(44).describe("The token's contract address: 0x… on EVM chains, base58 on Solana");
 
 const Listed = z.object({ chain: s, contract: s, symbol: s, name: s, priceUsd: n, change24hPercent: n, marketCapUsd: n, liquidityUsd: n, volume24hUsd: n, holders: n, url: s });
@@ -37,7 +37,7 @@ const Position = z.object({ market: s, side: z.enum(["long", "short"]), sizeUsd:
 const Window = z.object({ realizedUsd: n, trades: z.number(), winRatePercent: n });
 
 const Wallet = z.object({
-  address: s, name: ns, nameSource: ns, x: ns, portfolioUsd: n,
+  address: s, askedAs: ns, name: ns, nameSource: ns, x: ns, portfolioUsd: n,
   chains: z.array(z.object({ chain: s, valueUsd: n })),
   holdings: z.array(z.object({ chain: s, symbol: s, contract: ns, balance: n, valueUsd: n })),
   leftOut: z.array(z.object({ chain: s, symbol: s, contract: s, reason: s })),
@@ -115,7 +115,10 @@ const fmt = (value) => {
   if (abs >= 1) return `${sign}$${abs.toFixed(2)}`;
   return `${sign}$${Number(abs.toPrecision(4))}`;
 };
-const who = (w) => (w.name ? `${w.name} (${w.address})` : w.address);
+const who = (w) => {
+  if (w.askedAs) return `${w.askedAs} (${w.address}${w.name ? `, also known as ${w.name}` : ""})`;
+  return w.name ? `${w.name} (${w.address})` : w.address;
+};
 /// A price reads in full: $81,415.60 or $0.001366, never $81.4K.
 const cost = (value) => {
   if (value === null || value === undefined) return "unknown";
@@ -277,7 +280,7 @@ export function serverFor({ get, store = null, now = Date.now } = {}) {
 
   tool("get_wallet", {
     title: "Get wallet",
-    description: "What a wallet holds across chains, its trading record on Monad (realized and unrealized PnL, win rate, recent trades), any open perpetuals positions on Perpl, and who it belongs to (ENS, .nad, Farcaster), shown to the person as a card. Spam tokens with no market are left out of the totals and listed separately. Accepts an address or a name.",
+    description: "What a wallet holds across chains, its trading record on Monad (realized and unrealized PnL, win rate, recent trades), any open perpetuals positions on Perpl, and who it belongs to (Desk profile, ENS, .nad, Farcaster), shown to the person as a card. Spam tokens with no market are left out of the totals and listed separately. Use it for a Desk profile too: a Desk username is @name.",
     inputSchema: z.object({ wallet: walletArg }),
     outputSchema: Wallet.extend({ kind: z.literal("wallet") }), annotations: READ_ONLY, _meta: card("Reading the wallet…", "Wallet"),
   }, async ({ wallet }) => {

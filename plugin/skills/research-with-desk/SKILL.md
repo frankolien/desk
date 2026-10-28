@@ -14,7 +14,7 @@ Use Desk's tools to answer questions about tokens, wallets and traders with live
 
 ## Wallets
 
-1. Call `get_wallet` with the address or the name exactly as given (vitalik.eth, name.nad, a Solana address). It also shows the person a card of the wallet.
+1. Call `get_wallet` with the address or the name exactly as given: a Desk username (@frank, or frank), vitalik.eth, name.nad or a Solana address. Don't add .eth or .nad to a bare name. It also shows the person a card of the wallet.
 2. If `leftOut` is not empty, say that those tokens were left out of the total because they have no real market, and name them.
 3. If `monadTrading.status` is `indexing`, say the Monad trading record is still being read and that asking again in a minute gives the full record.
 4. Open positions on Perpl appear under `perps`. For a trader's past record on Perpl, call `get_perp_trader_stats`.

@@ -294,8 +294,10 @@
   function walletCard(c, meta) {
     const images = meta.images ?? {};
     const tokens = images.tokens ?? {};
-    const name = c.name || short(c.address);
-    const subParts = [c.name ? short(c.address) : null, c.nameSource ? ({ ens: "ENS", nad: ".nad", desk: "Desk", farcaster: "Farcaster", nadfun: "nad.fun", sns: ".sol" })[c.nameSource] ?? c.nameSource : null, c.x ? `@${c.x}` : null].filter(Boolean);
+    // Lead with the name the person asked for; the wallet's other name follows it.
+    const name = c.askedAs || c.name || short(c.address);
+    const source = c.nameSource ? ({ ens: "ENS", nad: ".nad", desk: "Desk", farcaster: "Farcaster", nadfun: "nad.fun", sns: ".sol" })[c.nameSource] ?? c.nameSource : null;
+    const subParts = [name !== short(c.address) ? short(c.address) : null, c.askedAs && c.name ? `also ${c.name}` : source, c.x ? `@${c.x}` : null].filter(Boolean);
     const out = [
       h("div", { class: "head" }, picture(images.avatar, name), h("div", { class: "who" }, h("p", { class: "title" }, name), h("div", { class: "sub" }, subParts.join(" · ") || "Wallet"))),
       h("div", {}, h("div", { class: "label" }, "Portfolio"), h("div", { class: "big" }, usd(c.portfolioUsd))),

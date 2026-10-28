@@ -121,19 +121,22 @@ const optional = (get, path, query, { pause = wait } = {}) =>
 
 // MARK: Wallets
 
-/// An address as given, or the wallet a name points to (ENS, .nad, Desk @tag, Farcaster, .sol).
+/// An address as given, or the wallet a name points to. Desk's lookup tries a Desk username
+/// first (@frank, or frank), then .sol, .nad, ENS and Farcaster. `askedAs` is the name the
+/// person used, so the answer leads with it rather than whatever else the wallet is called.
 export async function resolveWallet(get, input) {
   const text = String(input ?? "").trim();
-  if (EVM_ADDRESS.test(text)) return { address: text.toLowerCase(), via: "address" };
-  if (SOLANA_ADDRESS.test(text)) return { address: text, via: "address" };
-  if (!text || text.length > 80) throw new DeskDataError("Give a wallet address, or a name such as vitalik.eth or a .nad name.");
+  if (EVM_ADDRESS.test(text)) return { address: text.toLowerCase(), via: "address", askedAs: null };
+  if (SOLANA_ADDRESS.test(text)) return { address: text, via: "address", askedAs: null };
+  if (!text || text.length > 80) throw new DeskDataError("Give a wallet address, a Desk username such as @frank, or a name such as vitalik.eth.");
   const found = await get("/api/traders", { view: "lookup", q: text }, { missing: `No wallet answers to "${text}".` });
   if (!found?.address) throw new DeskDataError(`No wallet answers to "${text}".`);
-  return { address: EVM_ADDRESS.test(found.address) ? found.address.toLowerCase() : found.address, via: found.via ?? null };
+  const askedAs = found.via === "desk" ? (found.identity?.name || `@${text.replace(/^@/, "")}`) : text;
+  return { address: EVM_ADDRESS.test(found.address) ? found.address.toLowerCase() : found.address, via: found.via ?? null, askedAs };
 }
 
 export async function loadWallet(get, input, { now = Date.now } = {}) {
-  const { address } = await resolveWallet(get, input);
+  const { address, askedAs } = await resolveWallet(get, input);
   const resource = await get("/api/activity", { view: "wallet", address, chainIndex: "143", contract: "" }, { timeout: 25_000 });
   const [perps, leftOut] = await Promise.all([
     resource?.desk?.account && EVM_ADDRESS.test(address)
@@ -141,7 +144,7 @@ export async function loadWallet(get, input, { now = Date.now } = {}) {
       : null,
     unsellable(get, resource?.holdings ?? []),
   ]);
-  return shapeWallet(resource, perps, { now, leftOut });
+  return shapeWallet(resource, perps, { now, leftOut, askedAs });
 }
 
 /// Airdropped spam carries a price but no market: no pool, no volume, nobody to sell to. A
@@ -171,7 +174,7 @@ export async function unsellable(get, holdings) {
   return out;
 }
 
-export function shapeWallet(resource, perps = null, { now = Date.now, leftOut = [] } = {}) {
+export function shapeWallet(resource, perps = null, { now = Date.now, leftOut = [], askedAs = null } = {}) {
   if (!resource?.address) throw new DeskDataError("That wallet could not be read right now.");
   const identity = resource.identity ?? {};
   const ledger = resource.ledger ?? {};
@@ -198,6 +201,7 @@ export function shapeWallet(resource, perps = null, { now = Date.now, leftOut = 
   }));
   const shaped = {
     address: resource.address,
+    askedAs: askedAs && askedAs.toLowerCase() !== String(identity.name ?? "").toLowerCase() ? askedAs : null,
     name: identity.name ?? null,
     nameSource: identity.name ? (identity.source ?? null) : null,
     x: identity.x ?? null,
