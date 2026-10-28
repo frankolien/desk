@@ -13,13 +13,22 @@
       "maxDuration": 60
     },
     "api/v1.mjs": {
-      "maxDuration": 300
+      "maxDuration": 300,
+      "includeFiles": "mcp/**"
     },
     "api/token-details.mjs": {
       "maxDuration": 30
     }
   },
   "rewrites": [
+    {
+      "source": "/.well-known/openai-apps-challenge",
+      "destination": "/api/v1?path=openai-apps-challenge"
+    },
+    {
+      "source": "/mcp",
+      "destination": "/api/v1?path=mcp"
+    },
     {
       "source": "/app",
       "destination": "/app/index.html"

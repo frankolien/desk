@@ -2,6 +2,10 @@ export const TIERS = {
   default: { limit: 60, window: 60 },
   expensive: { limit: 10, window: 60 },
   relay: { limit: 120, window: 60 },
+  // ChatGPT and Claude call from shared addresses, so the endpoint limit is per address and loose;
+  // wallet reads are limited per person (ChatGPT's anonymous subject) where the host sends one.
+  mcp: { limit: 600, window: 60 },
+  "mcp-heavy": { limit: 20, window: 60 },
 };
 
 export function clientIp(headers = {}) {

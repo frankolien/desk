@@ -53,6 +53,7 @@ export const ENDPOINTS = [
   { path: "/api/v1/wallets/{address}", tier: "expensive", description: "What a wallet holds and did on Monad" },
   { path: "/api/v1/tokens/signals", tier: "default", description: "Token signals over a window. ?window=1h|6h|24h" },
   { path: "/api/v1/health", tier: "default", description: "Service health (health+json)" },
+  { path: "/mcp", tier: "mcp", description: "Model Context Protocol server (streamable HTTP): read-only Desk tools and cards for ChatGPT, Claude and other MCP clients" },
   { path: "/api/v1/stats", tier: "default", description: "Usage counters, no addresses" },
   { path: "/api/v1/perpl/{path}", tier: "relay", description: "Forwards a request the browser signed to Perpl's API, headers and body untouched; GET and POST" },
 ];
@@ -112,9 +113,13 @@ export function createHandler({
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-API-Timestamp, X-API-Nonce, X-API-Signature");
     res.setHeader("Access-Control-Max-Age", "86400");
     res.setHeader("Access-Control-Expose-Headers", "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After");
-    if (method === "OPTIONS") return res.status(204).end();
-
     const { segments, query, instance } = routeOf(req);
+    const isMcp = segments.length === 1 && segments[0] === "mcp";
+    if (method === "OPTIONS") {
+      if (!isMcp) return res.status(204).end();
+      const { serveMcp } = await import("./_mcp.mjs");
+      return serveMcp(req, res, { store });
+    }
     const send = (status, body, cacheControl, type = "application/json; charset=utf-8") => {
       res.setHeader("Cache-Control", cacheControl);
       res.setHeader("Content-Type", type);
@@ -135,13 +140,26 @@ export function createHandler({
         { "Retry-After": String(limit.retryAfter) });
     }
     if (!route) return fail(problem("unknown_route", `No route for ${instance}. See ${DOCS}.`, instance));
-    if (method !== "GET" && method !== "HEAD" && !(route.name === "perpl" && method === "POST")) return fail(problem("method_not_allowed", "Only GET, HEAD and OPTIONS are served.", instance));
+    const writable = (route.name === "perpl" && method === "POST") || (route.name === "mcp" && ["POST", "DELETE"].includes(method));
+    if (method !== "GET" && method !== "HEAD" && !writable) return fail(problem("method_not_allowed", "Only GET, HEAD and OPTIONS are served.", instance));
     if (route.address && !ADDRESS.test(route.address)) {
       return fail(problem("invalid_address", "Addresses are 0x followed by 40 hex characters.", instance));
     }
     if (store) count(store, now()).catch(() => {});
 
     switch (route.name) {
+      case "mcp": {
+        // Loaded only here, so the rest of the API never pays for the SDK.
+        const { serveMcp } = await import("./_mcp.mjs");
+        return serveMcp(req, res, { store });
+      }
+      case "challenge": {
+        // OpenAI's plugin portal checks domain ownership by fetching this token.
+        const token = String(process.env.OPENAI_APPS_CHALLENGE ?? "").trim();
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        return res.status(token ? 200 : 404).end(token || "No challenge is set.");
+      }
       case "perpl": {
         // The signature covers the path, the query and the body byte for byte, so all three go
         // upstream exactly as they arrived. The query is rebuilt with URLSearchParams on both
@@ -311,6 +329,8 @@ function match(segments) {
     return PERPL_FORWARDABLE.some((rule) => rule.test(upstream)) ? { name: "perpl", tier: "relay", upstream } : null;
   }
   if (segments.length === 1 && a === "health") return { name: "health", tier: "default" };
+  if (segments.length === 1 && a === "mcp") return { name: "mcp", tier: "mcp" };
+  if (segments.length === 1 && a === "openai-apps-challenge") return { name: "challenge", tier: "default" };
   if (segments.length === 1 && a === "stats") return { name: "stats", tier: "default" };
   if (segments.length === 1 && a === "markets") return { name: "markets", tier: "default" };
   if (segments.length === 2 && a === "markets" && b === "marks") return { name: "marks", tier: "default" };
