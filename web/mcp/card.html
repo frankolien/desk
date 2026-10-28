@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Desk</title>
+<style>
+  /* One scheme at a time, the host's: "light dark" lets the browser follow the device instead,
+     and an iframe whose scheme differs from its host's is painted opaque. */
+  :root {
+    color-scheme: light;
+    --bg-soft: var(--color-background-secondary, #f4f4f4);
+    --text: var(--color-text-primary, #0d0d0d);
+    --muted: var(--color-text-secondary, #5d5d5d);
+    --faint: var(--color-text-tertiary, #767676);
+    --line: var(--color-border-tertiary, rgba(13, 13, 13, 0.1));
+    --up: var(--color-text-success, #0b7a45);
+    --down: var(--color-text-danger, #c4282d);
+    --warn: var(--color-text-warning, #9a5800);
+    --accent: #e8b339;
+    --on-accent: #1d1600;
+    --radius: var(--border-radius-lg, 14px);
+    --radius-sm: var(--border-radius-md, 10px);
+    --font: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg-soft: var(--color-background-secondary, #2a2a2a);
+    --text: var(--color-text-primary, #f3f3f3);
+    --muted: var(--color-text-secondary, #b4b4b4);
+    --faint: var(--color-text-tertiary, #949494);
+    --line: var(--color-border-tertiary, rgba(255, 255, 255, 0.1));
+    --up: var(--color-text-success, #4cc38a);
+    --down: var(--color-text-danger, #ff6b6f);
+    --warn: var(--color-text-warning, #f0b45a);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: transparent; }
+  body { font-family: var(--font); color: var(--text); font-size: 14px; line-height: 1.4; -webkit-font-smoothing: antialiased; }
+  main { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  button { font: inherit; color: inherit; }
+  .head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .head .who { min-width: 0; flex: 1; }
+  .title { font-size: 16px; font-weight: 650; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sub { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pic { width: 40px; height: 40px; border-radius: 50%; flex: none; object-fit: cover; background: var(--bg-soft); }
+  .pic.sm { width: 28px; height: 28px; }
+  .mono { display: grid; place-items: center; font-weight: 650; font-size: 14px; color: var(--muted); }
+  .pic.sm.mono { font-size: 12px; }
+  .big { font-size: 28px; font-weight: 650; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .num { font-variant-numeric: tabular-nums; }
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  .row-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { font-size: 12px; color: var(--muted); background: var(--bg-soft); border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+  .chip.on { background: var(--text); color: var(--color-background-primary, #fff); }
+  :root[data-theme="dark"] .chip.on { color: var(--color-background-primary, #1a1a1a); }
+  .section { display: flex; flex-direction: column; gap: 2px; }
+  .label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 4px; }
+  .list { display: flex; flex-direction: column; }
+  .item { display: flex; align-items: center; gap: 10px; padding: 8px 6px; margin: 0 -6px; border-radius: var(--radius-sm); border: 0; background: none; text-align: left; width: calc(100% + 12px); min-width: 0; }
+  button.item { cursor: pointer; }
+  button.item:hover { background: var(--bg-soft); }
+  button.item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .item .main { flex: 1; min-width: 0; }
+  .item .line1 { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .line2 { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .line2.wrap { white-space: normal; }
+  .item .end { text-align: right; flex: none; }
+  .rank { width: 18px; text-align: right; flex: none; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px 16px; }
+  .stat .k { color: var(--muted); font-size: 12px; }
+  .stat .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .risk { border-radius: var(--radius-sm); background: var(--bg-soft); padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+  .risk .lvl { font-weight: 650; }
+  .risk.high .lvl { color: var(--down); }
+  .risk.medium .lvl { color: var(--warn); }
+  .risk.low .lvl { color: var(--up); }
+  .risk ul { margin: 0; padding-left: 18px; color: var(--text); }
+  .risk .facts { color: var(--muted); font-size: 12px; }
+  .chart { position: relative; }
+  .chart svg { display: block; width: 100%; height: 180px; touch-action: pan-y; }
+  .chart .tip { position: absolute; top: 4px; left: 8px; font-size: 12px; color: var(--muted); pointer-events: none; font-variant-numeric: tabular-nums; }
+  .seg { display: inline-flex; gap: 4px; }
+  .seg button { border: 0; border-radius: 999px; padding: 3px 10px; font-size: 12px; background: var(--bg-soft); color: var(--muted); cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--text); color: var(--color-background-primary, #fff); }
+  :root[data-theme="dark"] .seg button[aria-pressed="true"] { color: var(--color-background-primary, #1a1a1a); }
+  .foot { color: var(--faint); font-size: 12px; }
+  .actions { display: flex; gap: 8px; }
+  .cta { border: 0; border-radius: 999px; padding: 9px 16px; font-weight: 650; cursor: pointer; background: var(--accent); color: var(--on-accent); }
+  .cta:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+  .empty { color: var(--muted); }
+  .skel { height: 14px; border-radius: 7px; background: var(--bg-soft); }
+  .skel.w60 { width: 60%; } .skel.w40 { width: 40%; } .skel.w80 { width: 80%; }
+  .error { color: var(--muted); }
+  @media (max-width: 420px) { main { padding: 12px; } .big { font-size: 24px; } .chart svg { height: 150px; } }
+</style>
+</head>
+<body>
+<main id="root" aria-live="polite" aria-busy="true">
+  <div class="skel w60"></div><div class="skel w80"></div><div class="skel w40"></div>
+</main>
+<script type="module">
+  const root = document.getElementById("root");
+  const state = { content: null, meta: {}, interval: "1H", candles: null, loadingInterval: null };
+
+  // MARK: Host bridge — the open MCP Apps protocol first, ChatGPT's window.openai only as a fallback.
+  const pending = new Map();
+  let nextId = 1;
+  const inFrame = window.parent && window.parent !== window;
+  function request(method, params) {
+    if (!inFrame) return Promise.reject(new Error("no host"));
+    const id = nextId++;
+    window.parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      setTimeout(() => { if (pending.delete(id)) reject(new Error(`${method} timed out`)); }, 15000);
+    });
+  }
+  function notify(method, params) { if (inFrame) window.parent.postMessage({ jsonrpc: "2.0", method, params }, "*"); }
+  function reply(id, result) { if (inFrame) window.parent.postMessage({ jsonrpc: "2.0", id, result }, "*"); }
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window.parent) return;
+    const message = event.data;
+    if (!message || message.jsonrpc !== "2.0") return;
+    if (message.id !== undefined && !message.method) {
+      const waiting = pending.get(message.id);
+      if (!waiting) return;
+      pending.delete(message.id);
+      if (message.error) waiting.reject(message.error); else waiting.resolve(message.result);
+      return;
+    }
+    switch (message.method) {
+      case "ui/notifications/tool-result": accept(message.params); break;
+      case "ui/notifications/host-context-changed": applyContext(message.params); break;
+      case "ui/notifications/tool-cancelled": if (!state.content) showError("The request was cancelled."); break;
+      case "ui/resource-teardown": reply(message.id, {}); break;
+      case "ping": if (message.id !== undefined) reply(message.id, {}); break;
+    }
+  }, { passive: true });
+
+  function applyContext(context = {}) {
+    const theme = context.theme ?? window.openai?.theme;
+    if (theme === "dark" || theme === "light") document.documentElement.dataset.theme = theme;
+    const vars = context.styles?.variables;
+    if (vars) for (const [key, value] of Object.entries(vars)) if (value) document.documentElement.style.setProperty(key, value);
+    if (context.locale) document.documentElement.lang = context.locale;
+  }
+
+  async function connect() {
+    if (!document.documentElement.dataset.theme) {
+      document.documentElement.dataset.theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+    applyContext({ theme: window.openai?.theme });
+    if (window.openai?.toolOutput) acceptOpenAI();
+    window.addEventListener("openai:set_globals", () => { applyContext({ theme: window.openai?.theme }); if (!state.content && window.openai?.toolOutput) acceptOpenAI(); }, { passive: true });
+    try {
+      const init = await request("ui/initialize", {
+        appInfo: { name: "Desk", version: "1.0.0" },
+        appCapabilities: { availableDisplayModes: ["inline"] },
+        protocolVersion: "2026-01-26",
+      });
+      applyContext(init?.hostContext ?? {});
+      notify("ui/notifications/initialized", {});
+    } catch {}
+  }
+
+  function acceptOpenAI() {
+    const holder = window.openai?.toolResponseMetadata ?? {};
+    const meta = holder?.mcp_tool_result?._meta ?? holder?.call_tool_result?._meta ?? holder;
+    accept({ structuredContent: window.openai.toolOutput, _meta: meta });
+  }
+
+  function accept(result) {
+    if (!result) return;
+    if (result.isError || !result.structuredContent?.kind) {
+      const text = (result.content ?? []).map((part) => part?.text).filter(Boolean).join(" ");
+      showError(text || "Desk couldn't show this right now.");
+      return;
+    }
+    state.content = result.structuredContent;
+    state.meta = result._meta ?? {};
+    state.candles = state.meta.candles ?? null;
+    state.interval = state.meta.interval ?? "1H";
+    render();
+  }
+
+  async function callTool(name, args) {
+    try {
+      const result = await request("tools/call", { name, arguments: args });
+      return result;
+    } catch {
+      if (window.openai?.callTool) return window.openai.callTool(name, args);
+      throw new Error("Tools can't be called from this card here.");
+    }
+  }
+
+  async function ask(text) {
+    try { await request("ui/message", { role: "user", content: [{ type: "text", text }] }); return; } catch {}
+    try { await window.openai?.sendFollowUpMessage?.({ prompt: text }); } catch {}
+  }
+
+  async function openLink(url) {
+    try { const out = await request("ui/open-link", { url }); if (!out?.isError) return; } catch {}
+    if (window.openai?.openExternal) { try { window.openai.openExternal({ href: url, redirectUrl: false }); return; } catch {} }
+    window.open(url, "_blank", "noopener");
+  }
+
+  // MARK: Building blocks. Every value is set as text: names and symbols come from anyone.
+  function h(tag, attrs = {}, ...children) {
+    const el = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs)) {
+      if (value === null || value === undefined || value === false) continue;
+      if (key === "class") el.className = value;
+      else if (key.startsWith("on")) el.addEventListener(key.slice(2), value);
+      else el.setAttribute(key, value === true ? "" : String(value));
+    }
+    for (const child of children.flat()) {
+      if (child === null || child === undefined || child === false) continue;
+      el.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+    return el;
+  }
+
+  const locale = () => document.documentElement.lang || undefined;
+  function usd(value, { sign = false } = {}) {
+    if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+    const abs = Math.abs(value);
+    const prefix = value < 0 ? "−$" : sign && value > 0 ? "+$" : "$";
+    if (abs >= 1e9) return `${prefix}${(abs / 1e9).toFixed(2)}B`;
+    if (abs >= 1e6) return `${prefix}${(abs / 1e6).toFixed(2)}M`;
+    if (abs >= 1e4) return `${prefix}${(abs / 1e3).toFixed(1)}K`;
+    return `${prefix}${abs.toLocaleString(locale(), { minimumFractionDigits: abs < 100 ? 2 : 0, maximumFractionDigits: 2 })}`;
+  }
+  function price(value) {
+    if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+    if (value >= 1) return `$${value.toLocaleString(locale(), { maximumFractionDigits: value >= 1000 ? 2 : 4 })}`;
+    if (value === 0) return "$0";
+    return `$${Number(value.toPrecision(4)).toString()}`;
+  }
+  function pct(value, digits = 2) {
+    if (value === null || value === undefined || !Number.isFinite(value)) return h("span", {}, "—");
+    const text = `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(digits)}%`;
+    return h("span", { class: `num ${value > 0 ? "up" : value < 0 ? "down" : ""}` }, text);
+  }
+  function money(value) {
+    return h("span", { class: `num ${value > 0 ? "up" : value < 0 ? "down" : ""}` }, usd(value, { sign: true }));
+  }
+  const short = (address) => (address && address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address ?? "");
+  function ago(iso) {
+    const time = Date.parse(iso ?? "");
+    if (!Number.isFinite(time)) return "";
+    const seconds = Math.max(0, (Date.now() - time) / 1000);
+    if (seconds < 60) return "just now";
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
+  }
+  const chainName = (slug) => ({
+    monad: "Monad", ethereum: "Ethereum", base: "Base", bnb: "BNB Chain", arbitrum: "Arbitrum", optimism: "OP Mainnet",
+    polygon: "Polygon", solana: "Solana", avalanche: "Avalanche", sonic: "Sonic", linea: "Linea", scroll: "Scroll",
+    berachain: "Berachain", mantle: "Mantle", unichain: "Unichain", abstract: "Abstract", ink: "Ink", hyperevm: "HyperEVM",
+    worldchain: "World Chain", plasma: "Plasma", robinhood: "Robinhood Chain", xlayer: "X Layer", tempo: "Tempo", arc: "Arc",
+  })[slug] ?? slug ?? "";
+
+  function picture(url, label, { small = false } = {}) {
+    // An address's monogram is its first two hex digits; "0" would be every address.
+    const text = String(label || "?");
+    const letter = /^0x[0-9a-f]{2}/i.test(text) ? text.slice(2, 4).toUpperCase() : text.replace(/^[^A-Za-z0-9]+/, "").slice(0, 1).toUpperCase() || "?";
+    const fallback = () => h("div", { class: `pic mono${small ? " sm" : ""}`, role: "img", "aria-label": label || "No picture" }, letter);
+    if (!url) return fallback();
+    const img = h("img", { class: `pic${small ? " sm" : ""}`, src: url, alt: label || "", loading: "lazy", referrerpolicy: "no-referrer" });
+    img.addEventListener("error", () => img.replaceWith(fallback()), { once: true });
+    return img;
+  }
+
+  function footer(asOf, extra) {
+    const parts = [extra, asOf ? `Updated ${ago(asOf)}` : null, "Market data, not financial advice."].filter(Boolean);
+    return h("div", { class: "foot" }, parts.join(" · "));
+  }
+  function actions(url, label = "Open in Desk") {
+    return h("div", { class: "actions" }, h("button", { class: "cta", type: "button", onclick: () => openLink(url) }, label));
+  }
+
+  // MARK: Cards
+  function walletCard(c, meta) {
+    const images = meta.images ?? {};
+    const tokens = images.tokens ?? {};
+    const name = c.name || short(c.address);
+    const subParts = [c.name ? short(c.address) : null, c.nameSource ? ({ ens: "ENS", nad: ".nad", desk: "Desk", farcaster: "Farcaster", nadfun: "nad.fun", sns: ".sol" })[c.nameSource] ?? c.nameSource : null, c.x ? `@${c.x}` : null].filter(Boolean);
+    const out = [
+      h("div", { class: "head" }, picture(images.avatar, name), h("div", { class: "who" }, h("p", { class: "title" }, name), h("div", { class: "sub" }, subParts.join(" · ") || "Wallet"))),
+      h("div", {}, h("div", { class: "label" }, "Portfolio"), h("div", { class: "big" }, usd(c.portfolioUsd))),
+    ];
+    if (c.chains?.length) out.push(h("div", { class: "chips" }, c.chains.slice(0, 4).map((row) => h("span", { class: "chip num" }, `${chainName(row.chain)} ${usd(row.valueUsd)}`))));
+    if (c.labels?.length) out.push(h("div", { class: "chips" }, c.labels.slice(0, 3).map((text) => h("span", { class: "chip" }, text))));
+    if (c.perps?.positions?.length) {
+      out.push(h("div", { class: "section" }, h("div", { class: "label" }, "Perps on Perpl"),
+        h("div", { class: "list" }, c.perps.positions.slice(0, 4).map((p) => h("div", { class: "item" },
+          h("div", { class: "main" }, h("div", { class: "line1" }, `${p.market} ${p.side === "short" ? "Short" : "Long"} ${p.leverage ?? "—"}×`),
+            h("div", { class: "line2 num wrap" }, `Size ${usd(p.sizeUsd)} · Entry ${price(p.entryPrice)} · Mark ${price(p.markPrice)}`)),
+          h("div", { class: "end" }, money(p.pnlUsd), h("div", { class: "line2" }, pct(p.pnlPercent))))))));
+    }
+    if (c.holdings?.length) {
+      out.push(h("div", { class: "section" }, h("div", { class: "label" }, "Holdings"),
+        h("div", { class: "list" }, c.holdings.slice(0, 5).map((row) => {
+          const art = tokens[`${row.chain}:${row.contract ?? ""}`];
+          const body = [picture(art, row.symbol, { small: true }),
+            h("div", { class: "main" }, h("div", { class: "line1" }, row.symbol || "Token"), h("div", { class: "line2" }, chainName(row.chain))),
+            h("div", { class: "end num" }, usd(row.valueUsd))];
+          return row.contract
+            ? h("button", { class: "item", type: "button", "aria-label": `Ask about ${row.symbol} on ${chainName(row.chain)}`, onclick: () => ask(`Show the Desk token card for ${row.symbol} on ${row.chain} (${row.contract}).`) }, body)
+            : h("div", { class: "item" }, body);
+        }))));
+    }
+    const m = c.monadTrading;
+    if (m?.status === "ready" && (m.recentTrades?.length || m.last30d?.trades)) {
+      out.push(h("div", { class: "section" }, h("div", { class: "label" }, "Trading on Monad"),
+        h("div", { class: "grid" },
+          h("div", { class: "stat" }, h("div", { class: "k" }, "Realized PnL"), h("div", { class: "v" }, money(m.realizedUsd))),
+          h("div", { class: "stat" }, h("div", { class: "k" }, "Win rate"), h("div", { class: "v" }, m.winRatePercent == null ? "—" : `${m.winRatePercent}%`)),
+          h("div", { class: "stat" }, h("div", { class: "k" }, "Trades, 30 days"), h("div", { class: "v" }, String(m.last30d?.trades ?? 0)))),
+        h("div", { class: "list" }, (m.recentTrades ?? []).slice(0, 3).map((t) => h("div", { class: "item" },
+          picture(tokens[`monad:${t.token}`], t.symbol, { small: true }),
+          h("div", { class: "main" }, h("div", { class: "line1" }, `${t.side === "sell" ? "Sold" : "Bought"} ${t.symbol}`), h("div", { class: "line2" }, ago(t.time))),
+          h("div", { class: "end" }, h("div", { class: "num" }, usd(t.valueUsd)), t.gainUsd != null ? h("div", { class: "line2" }, money(t.gainUsd)) : null))))));
+    } else if (m?.status === "indexing") {
+      out.push(h("div", { class: "foot" }, "Reading this wallet's Monad trades. Ask again in a minute for its record."));
+    }
+    const left = c.leftOut?.length ? `Left out ${c.leftOut.length} token${c.leftOut.length === 1 ? "" : "s"} with no real market` : null;
+    out.push(footer(c.asOf, left), actions(c.url));
+    return out;
+  }
+
+  function tokenCard(c, meta) {
+    const t = c.token;
+    const label = t.name || t.symbol || short(t.contract);
+    const out = [
+      h("div", { class: "head" }, picture(meta.images?.token, t.symbol || label),
+        h("div", { class: "who" }, h("p", { class: "title" }, label), h("div", { class: "sub" }, [t.symbol, t.chainName].filter(Boolean).join(" · ")))),
+      h("div", { class: "row-line" }, h("span", { class: "big" }, price(t.priceUsd)), pct(t.changePercent?.["24h"]), h("span", { class: "sub" }, "24h")),
+      chartBlock(c),
+      h("div", { class: "grid" },
+        stat("Market cap", usd(t.marketCapUsd)), stat("Liquidity", usd(t.liquidityUsd)), stat("Volume, 24h", usd(t.volume24hUsd)),
+        stat("Holders", t.holders == null ? "—" : t.holders.toLocaleString(locale())),
+        stat("Top 10 hold", t.topTenHoldersPercent == null ? "—" : `${t.topTenHoldersPercent}%`),
+        stat("Trades, 24h", t.trades24h == null ? "—" : t.trades24h.toLocaleString(locale()))),
+    ];
+    if (c.risk) {
+      const level = String(c.risk.level).toLowerCase();
+      out.push(h("div", { class: `risk ${level}` },
+        h("div", {}, h("span", { class: "lvl" }, `${level[0].toUpperCase()}${level.slice(1)} risk`)),
+        c.risk.reasons?.length ? h("ul", {}, c.risk.reasons.map((text) => h("li", {}, text))) : null,
+        c.risk.facts?.length ? h("div", { class: "facts" }, c.risk.facts.slice(0, 3).join(" · ")) : null));
+    }
+    out.push(footer(c.asOf), actions(c.url));
+    return out;
+  }
+  const stat = (k, v) => h("div", { class: "stat" }, h("div", { class: "k" }, k), h("div", { class: "v" }, v));
+
+  function chartBlock(c) {
+    const wrap = h("div", { class: "chart" });
+    const seg = h("div", { class: "seg", role: "group", "aria-label": "Chart interval" }, ["1H", "4H", "1D"].map((interval) =>
+      h("button", { type: "button", "aria-pressed": String(state.interval === interval), onclick: () => switchInterval(c, interval) }, interval)));
+    const holder = h("div", {});
+    drawChart(holder, state.candles);
+    wrap.append(holder);
+    return h("div", { class: "section" }, h("div", { class: "row-line" }, h("span", { class: "label" }, "Price"), seg), wrap);
+  }
+
+  async function switchInterval(c, interval) {
+    if (interval === state.interval || state.loadingInterval) return;
+    state.loadingInterval = interval;
+    try {
+      const result = await callTool("get_token_candles", { chain: c.token.chain, contract: c.token.contract, interval });
+      const candles = result?.structuredContent?.candles;
+      if (Array.isArray(candles) && candles.length) { state.candles = candles; state.interval = interval; }
+    } catch {}
+    state.loadingInterval = null;
+    render();
+  }
+
+  function drawChart(holder, candles) {
+    holder.replaceChildren();
+    if (!Array.isArray(candles) || candles.length < 2) { holder.append(h("div", { class: "empty" }, "No price history yet.")); return; }
+    const ns = "http://www.w3.org/2000/svg";
+    const width = Math.max(260, root.clientWidth - 32);
+    const height = width < 400 ? 150 : 180;
+    const pad = { top: 22, bottom: 6, left: 2, right: 2 };
+    const highs = candles.map((b) => b.high), lows = candles.map((b) => b.low);
+    const max = Math.max(...highs), min = Math.min(...lows);
+    const span = max - min || max || 1;
+    const y = (v) => pad.top + (1 - (v - min) / span) * (height - pad.top - pad.bottom);
+    const step = (width - pad.left - pad.right) / candles.length;
+    const body = Math.max(1, Math.min(10, step * 0.62));
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("role", "img");
+    const first = candles[0].open, last = candles.at(-1).close;
+    svg.setAttribute("aria-label", `Price chart, ${candles.length} ${state.interval} bars, from ${price(first)} to ${price(last)}`);
+    const styles = getComputedStyle(document.documentElement);
+    const rise = styles.getPropertyValue("--up").trim() || "#0b7a45";
+    const fall = styles.getPropertyValue("--down").trim() || "#c4282d";
+    const color = (b) => (b.close >= b.open ? rise : fall);
+    candles.forEach((bar, i) => {
+      const x = pad.left + step * i + step / 2;
+      const stroke = color(bar);
+      const wick = document.createElementNS(ns, "line");
+      wick.setAttribute("x1", x); wick.setAttribute("x2", x); wick.setAttribute("y1", y(bar.high)); wick.setAttribute("y2", y(bar.low));
+      wick.setAttribute("stroke", stroke); wick.setAttribute("stroke-width", "1");
+      const top = y(Math.max(bar.open, bar.close)), bottom = y(Math.min(bar.open, bar.close));
+      const rect = document.createElementNS(ns, "rect");
+      rect.setAttribute("x", x - body / 2); rect.setAttribute("width", body);
+      rect.setAttribute("y", top); rect.setAttribute("height", Math.max(1, bottom - top));
+      rect.setAttribute("fill", stroke); rect.setAttribute("rx", "1");
+      svg.append(wick, rect);
+    });
+    const cross = document.createElementNS(ns, "line");
+    cross.setAttribute("y1", pad.top); cross.setAttribute("y2", height - pad.bottom);
+    cross.setAttribute("stroke", "currentColor"); cross.setAttribute("stroke-opacity", "0.35"); cross.setAttribute("stroke-dasharray", "3 3");
+    cross.style.display = "none";
+    svg.append(cross);
+    const tip = h("div", { class: "tip" }, `${state.interval} · High ${price(max)} · Low ${price(min)}`);
+    const resting = tip.textContent;
+    const show = (clientX) => {
+      const box = svg.getBoundingClientRect();
+      const index = Math.min(candles.length - 1, Math.max(0, Math.floor(((clientX - box.left) / box.width) * candles.length)));
+      const bar = candles[index];
+      const x = pad.left + step * index + step / 2;
+      cross.setAttribute("x1", x); cross.setAttribute("x2", x); cross.style.display = "";
+      const when = new Date(bar.time).toLocaleString(locale(), { month: "short", day: "numeric", hour: state.interval === "1D" ? undefined : "2-digit", minute: state.interval === "1D" ? undefined : "2-digit" });
+      tip.textContent = `${when} · O ${price(bar.open)} H ${price(bar.high)} L ${price(bar.low)} C ${price(bar.close)}`;
+    };
+    const hide = () => { cross.style.display = "none"; tip.textContent = resting; };
+    svg.addEventListener("pointermove", (e) => show(e.clientX));
+    svg.addEventListener("pointerdown", (e) => show(e.clientX));
+    svg.addEventListener("pointerleave", hide);
+    holder.append(svg, tip);
+  }
+
+  function tradersCard(c, meta) {
+    const avatars = meta.images?.avatars ?? {};
+    return [
+      h("div", {}, h("p", { class: "title" }, "Top traders on Perpl"), h("div", { class: "sub" }, "Ranked by open profit on Monad's perpetuals exchange")),
+      h("div", { class: "list" }, (c.traders ?? []).map((t) => h("button", {
+        class: "item", type: "button", "aria-label": `Ask about trader ${t.name || t.address}`,
+        onclick: () => ask(`Show the Desk wallet card for ${t.address}.`),
+      },
+        h("span", { class: "num sub rank" }, String(t.rank)),
+        picture(avatars[t.address], t.name || t.address, { small: true }),
+        h("div", { class: "main" }, h("div", { class: "line1" }, t.name || short(t.address)),
+          h("div", { class: "line2" }, (t.positions ?? []).slice(0, 3).map((p) => `${p.market} ${p.side} ${p.leverage ?? "—"}×`).join(" · ") || "No open positions")),
+        h("div", { class: "end" }, money(t.unrealizedPnlUsd), h("div", { class: "line2" }, "open PnL"))))),
+      footer(c.asOf), actions(c.url),
+    ];
+  }
+
+  function smartMoneyCard(c, meta) {
+    const tokens = meta.images?.tokens ?? {};
+    const rows = c.trades ?? [];
+    return [
+      h("div", {}, h("p", { class: "title" }, "Smart money trades"), h("div", { class: "sub" }, "Wallets with a winning 30-day record")),
+      rows.length ? h("div", { class: "list" }, rows.map((t) => h("button", {
+        class: "item", type: "button", "aria-label": `Ask about ${t.symbol} on ${chainName(t.chain)}`,
+        onclick: () => ask(`Show the Desk token card for ${t.symbol} on ${t.chain} (${t.token}).`),
+      },
+        picture(tokens[`${t.chain}:${t.token}`], t.symbol, { small: true }),
+        h("div", { class: "main" },
+          h("div", { class: "line1" }, h("span", { class: t.side === "sell" ? "down" : "up" }, t.side === "sell" ? "Sold" : "Bought"), ` ${usd(t.valueUsd)} ${t.symbol}`),
+          h("div", { class: "line2" }, [chainName(t.chain), `${short(t.wallet)}${t.otherWallets ? ` +${t.otherWallets} more` : ""}`, t.marketCapUsd != null ? `MC ${usd(t.marketCapUsd)}` : null].filter(Boolean).join(" · "))),
+        h("div", { class: "end" }, h("div", { class: "line2" }, ago(t.time)), pct(t.change24hPercent, 0))))) : h("div", { class: "empty" }, "No smart-money trades in this window."),
+      footer(c.asOf), actions(c.url),
+    ];
+  }
+
+  // MARK: Rendering
+  function render() {
+    const c = state.content;
+    if (!c) return;
+    const meta = state.meta ?? {};
+    const parts = c.kind === "wallet" ? walletCard(c, meta)
+      : c.kind === "token" ? tokenCard(c, meta)
+      : c.kind === "traders" ? tradersCard(c, meta)
+      : c.kind === "smart_money" ? smartMoneyCard(c, meta)
+      : [h("div", { class: "error" }, "This card type isn't supported.")];
+    root.replaceChildren(...parts);
+    root.setAttribute("aria-busy", "false");
+    reportSize();
+  }
+
+  function showError(text) {
+    root.replaceChildren(h("div", { class: "error" }, text));
+    root.setAttribute("aria-busy", "false");
+    reportSize();
+  }
+
+  // The body's own height: the document's is never less than the frame, so it could only grow.
+  // Measured at once after each render; an animation frame isn't promised to a hidden frame.
+  let lastHeight = 0;
+  function reportSize() {
+    const height = Math.ceil(document.body.getBoundingClientRect().height);
+    if (!height || Math.abs(height - lastHeight) < 2) return;
+    lastHeight = height;
+    notify("ui/notifications/size-changed", { height });
+    try { window.openai?.notifyIntrinsicHeight?.(height); } catch {}
+  }
+  new ResizeObserver(reportSize).observe(document.body);
+  let lastWidth = root.clientWidth;
+  new ResizeObserver(() => { if (Math.abs(root.clientWidth - lastWidth) > 8 && state.content?.kind === "token") { lastWidth = root.clientWidth; render(); } }).observe(root);
+
+  connect();
+</script>
+</body>
+</html>
